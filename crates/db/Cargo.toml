@@ -1,0 +1,12 @@
+[package]
+name = "cowiki-db"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+pgvector = { version = "0.4", features = ["sqlx"] }
+tracing = "0.1"
