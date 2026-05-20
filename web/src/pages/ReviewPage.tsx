@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Check, X, ChevronLeft, GitPullRequest } from 'lucide-react';
 import { listReviews, getReview, reviewAction, type Submission, type ReviewDetail } from '../api';
 
 export function ReviewPage() {
@@ -33,111 +34,141 @@ export function ReviewPage() {
 
   if (selected) {
     return (
-      <div className="space-y-6">
+      <div>
         <button
           onClick={() => setSelected(null)}
-          className="text-sm text-stone-400 hover:text-stone-600"
+          className="inline-flex items-center gap-1 text-sm text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] mb-6 transition-colors"
         >
-          &larr; Back to reviews
+          <ChevronLeft size={14} /> All reviews
         </button>
 
-        <div className="bg-white rounded-lg border border-stone-200 p-6">
-          <h2 className="text-xl font-bold text-stone-800 mb-2">
-            Submission #{selected.submission.id.slice(0, 8)}
-          </h2>
-          <p className="text-stone-500 text-sm mb-4">{selected.submission.summary}</p>
-          <p className="text-xs text-stone-400 mb-6">
-            Pages: {selected.submission.page_slugs.join(', ')} |
-            Branch: {selected.submission.source_branch} |
-            {new Date(selected.submission.created_at).toLocaleString()}
-          </p>
+        <h1
+          className="text-2xl font-bold mb-1"
+          style={{ fontFamily: 'var(--font-serif)' }}
+        >
+          Review #{selected.submission.id.slice(0, 8)}
+        </h1>
+        <p className="text-sm text-[var(--color-text-secondary)] mb-2">
+          {selected.submission.summary}
+        </p>
+        <p className="text-xs text-[var(--color-text-tertiary)] mb-6">
+          {selected.submission.page_slugs.length} file(s) &middot;{' '}
+          {new Date(selected.submission.created_at).toLocaleString()}
+        </p>
 
-          {/* Diffs */}
-          <div className="space-y-4">
-            {selected.diffs.map((diff) => (
-              <div key={diff.path} className="border border-stone-200 rounded-lg overflow-hidden">
-                <div className="bg-stone-50 px-4 py-2 text-sm font-mono text-stone-600 border-b border-stone-200">
-                  {diff.old_content === null ? '+ ' : '~ '}
-                  {diff.path}
-                </div>
-                <pre className="p-4 text-xs overflow-x-auto bg-white">
-                  {diff.old_content === null ? (
-                    <code className="text-green-700">
-                      {diff.new_content?.split('\n').map((l, i) => (
-                        <div key={i}>+ {l}</div>
-                      ))}
-                    </code>
-                  ) : (
-                    <code>
-                      {diff.new_content?.split('\n').map((l, i) => {
-                        const oldLines = diff.old_content?.split('\n') || [];
-                        const isChanged = i >= oldLines.length || oldLines[i] !== l;
-                        return (
-                          <div key={i} className={isChanged ? 'text-green-700 bg-green-50' : ''}>
-                            {isChanged ? '+ ' : '  '}{l}
-                          </div>
-                        );
-                      })}
-                    </code>
-                  )}
+        {/* Diffs */}
+        <div className="space-y-4 mb-6">
+          {selected.diffs.map((diff) => (
+            <div
+              key={diff.path}
+              className="border border-[var(--color-border)] rounded-lg overflow-hidden"
+            >
+              <div className="bg-[var(--color-bg-secondary)] px-4 py-2 text-xs font-mono text-[var(--color-text-secondary)] border-b border-[var(--color-border)] flex items-center gap-2">
+                <span
+                  className={`inline-block w-4 text-center font-bold ${
+                    diff.old_content === null ? 'text-[var(--color-green)]' : 'text-[var(--color-amber)]'
+                  }`}
+                >
+                  {diff.old_content === null ? '+' : '~'}
+                </span>
+                {diff.path}
+              </div>
+              <div className="overflow-x-auto">
+                <pre className="p-4 text-xs leading-relaxed font-mono">
+                  {diff.new_content?.split('\n').map((line, i) => {
+                    const oldLines = diff.old_content?.split('\n') || [];
+                    const isNew = diff.old_content === null;
+                    const isChanged = !isNew && (i >= oldLines.length || oldLines[i] !== line);
+                    return (
+                      <div
+                        key={i}
+                        className={
+                          isNew
+                            ? 'text-[var(--color-green)] bg-green-50/50'
+                            : isChanged
+                              ? 'text-[var(--color-green)] bg-green-50/50'
+                              : 'text-[var(--color-text-secondary)]'
+                        }
+                      >
+                        <span className="inline-block w-8 text-right pr-3 text-[var(--color-text-tertiary)] select-none">
+                          {i + 1}
+                        </span>
+                        {isNew || isChanged ? '+ ' : '  '}
+                        {line}
+                      </div>
+                    );
+                  })}
                 </pre>
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
+        </div>
 
-          {/* Actions */}
-          <div className="flex gap-3 mt-6 pt-4 border-t border-stone-200">
-            <button
-              onClick={() => handleAction('approve')}
-              disabled={actionLoading}
-              className="rounded-lg bg-green-600 px-5 py-2 text-sm text-white hover:bg-green-700 disabled:opacity-50"
-            >
-              {actionLoading ? 'Processing...' : 'Approve'}
-            </button>
-            <button
-              onClick={() => handleAction('reject')}
-              disabled={actionLoading}
-              className="rounded-lg bg-red-500 px-5 py-2 text-sm text-white hover:bg-red-600 disabled:opacity-50"
-            >
-              Reject
-            </button>
-          </div>
+        {/* Actions */}
+        <div className="flex gap-2 pt-4 border-t border-[var(--color-border)]">
+          <button
+            onClick={() => handleAction('approve')}
+            disabled={actionLoading}
+            className="flex items-center gap-1.5 rounded-md bg-[var(--color-green)] text-white px-4 py-2 text-sm hover:opacity-90 disabled:opacity-40 transition-opacity"
+          >
+            <Check size={14} />
+            {actionLoading ? 'Processing...' : 'Approve'}
+          </button>
+          <button
+            onClick={() => handleAction('reject')}
+            disabled={actionLoading}
+            className="flex items-center gap-1.5 rounded-md border border-[var(--color-red)] text-[var(--color-red)] px-4 py-2 text-sm hover:bg-red-50 disabled:opacity-40 transition-colors"
+          >
+            <X size={14} />
+            Reject
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-stone-800">Pending Reviews</h1>
+    <div>
+      <h1
+        className="text-4xl font-bold text-[var(--color-text)] mb-1"
+        style={{ fontFamily: 'var(--font-serif)' }}
+      >
+        Reviews
+      </h1>
+      <p className="text-[var(--color-text-secondary)] text-sm mb-6">
+        Submissions waiting for review before entering the shared wiki.
+      </p>
+
       {loading ? (
-        <div className="text-center py-12 text-stone-400">Loading...</div>
+        <div className="py-8 text-center text-[var(--color-text-tertiary)] text-sm">Loading...</div>
       ) : reviews.length === 0 ? (
-        <div className="text-center py-16 text-stone-400">
-          <p className="text-lg">No pending reviews</p>
+        <div className="py-16 text-center">
+          <GitPullRequest size={24} className="mx-auto text-[var(--color-text-tertiary)] mb-3" />
+          <p className="text-[var(--color-text-tertiary)] text-sm">No pending reviews</p>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div>
           {reviews.map((r) => (
             <button
               key={r.id}
               onClick={() => handleSelect(r.id)}
-              className="w-full text-left rounded-lg border border-stone-200 bg-white p-4 hover:border-stone-300 hover:shadow-sm transition"
+              className="w-full text-left flex items-start gap-3 px-2 py-3 -mx-2 rounded-md hover:bg-[var(--color-bg-hover)] transition-colors"
             >
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="font-medium text-stone-800">
-                    #{r.id.slice(0, 8)} — {r.page_slugs.length} page(s)
-                  </h3>
-                  <p className="text-sm text-stone-500 mt-1">{r.summary}</p>
+              <GitPullRequest
+                size={16}
+                className="mt-0.5 shrink-0 text-[var(--color-amber)]"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-[var(--color-text)]">
+                  {r.page_slugs.length} page(s) from {r.source_branch}
                 </div>
-                <span className="text-xs px-2 py-1 rounded bg-amber-100 text-amber-700">
-                  {r.status}
-                </span>
+                <div className="text-xs text-[var(--color-text-tertiary)] mt-0.5">
+                  {r.summary}
+                </div>
               </div>
-              <p className="text-xs text-stone-400 mt-2">
-                {new Date(r.created_at).toLocaleString()}
-              </p>
+              <span className="text-xs text-[var(--color-text-tertiary)] shrink-0">
+                {new Date(r.created_at).toLocaleDateString()}
+              </span>
             </button>
           ))}
         </div>

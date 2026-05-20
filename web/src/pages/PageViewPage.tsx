@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ChevronLeft } from 'lucide-react';
 import { getPage, type PageFull } from '../api';
 
 export function PageViewPage() {
@@ -17,10 +18,14 @@ export function PageViewPage() {
     getPage(slug, branch).then(setPage).finally(() => setLoading(false));
   }, [slug, branch]);
 
-  if (loading) return <div className="text-center py-12 text-stone-400">Loading...</div>;
-  if (!page) return <div className="text-center py-12 text-stone-400">Page not found</div>;
+  if (loading) {
+    return <div className="py-12 text-center text-[var(--color-text-tertiary)] text-sm">Loading...</div>;
+  }
+  if (!page) {
+    return <div className="py-12 text-center text-[var(--color-text-tertiary)] text-sm">Page not found</div>;
+  }
 
-  // Strip frontmatter from body for rendering
+  // Strip frontmatter
   let body = page.body;
   if (body.startsWith('---')) {
     const parts = body.split('---');
@@ -31,20 +36,25 @@ export function PageViewPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <Link
-          to={branch === 'main' ? '/' : '/personal'}
-          className="text-sm text-stone-400 hover:text-stone-600"
+      <Link
+        to={branch === 'main' ? '/' : '/personal'}
+        className="inline-flex items-center gap-1 text-sm text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] mb-6 transition-colors"
+      >
+        <ChevronLeft size={14} />
+        {branch === 'main' ? 'Shared Wiki' : 'My Space'}
+      </Link>
+
+      <article>
+        <h1
+          className="text-4xl font-bold mb-2 leading-tight"
+          style={{ fontFamily: 'var(--font-serif)' }}
         >
-          &larr; Back
-        </Link>
-      </div>
-      <article className="bg-white rounded-lg border border-stone-200 p-8">
-        <h1 className="text-3xl font-bold text-stone-800 mb-2">{page.title}</h1>
+          {page.title}
+        </h1>
         {page.summary && (
-          <p className="text-stone-500 mb-6">{page.summary}</p>
+          <p className="text-[var(--color-text-secondary)] mb-8">{page.summary}</p>
         )}
-        <div className="prose prose-stone max-w-none">
+        <div className="prose">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
         </div>
       </article>

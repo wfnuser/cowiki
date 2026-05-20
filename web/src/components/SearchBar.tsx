@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Search } from 'lucide-react';
 
-export function SearchBar() {
+export function SearchBar({ autoFocus = false }: { autoFocus?: boolean }) {
   const [query, setQuery] = useState('');
   const navigate = useNavigate();
 
@@ -14,12 +15,17 @@ export function SearchBar() {
 
   return (
     <form onSubmit={handleSubmit} className="relative">
+      <Search
+        size={15}
+        className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)]"
+      />
       <input
         type="text"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search the wiki..."
-        className="w-full rounded-lg border border-stone-200 bg-white px-4 py-2.5 text-sm placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-300"
+        placeholder="Search..."
+        autoFocus={autoFocus}
+        className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] pl-9 pr-4 py-1.5 text-sm placeholder:text-[var(--color-text-tertiary)] focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)] transition-colors"
       />
     </form>
   );

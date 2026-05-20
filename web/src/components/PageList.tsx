@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { FileText } from 'lucide-react';
 import { listPages, type PageMeta } from '../api';
 
 export function PageList({ branch = 'main' }: { branch?: string }) {
@@ -14,37 +15,51 @@ export function PageList({ branch = 'main' }: { branch?: string }) {
   useEffect(() => { load(); }, [branch]);
 
   if (loading) {
-    return <div className="text-center py-12 text-stone-400">Loading...</div>;
+    return (
+      <div className="py-8 text-center text-[var(--color-text-tertiary)] text-sm">
+        Loading...
+      </div>
+    );
   }
 
   if (pages.length === 0) {
     return (
-      <div className="text-center py-16 text-stone-400">
-        <p className="text-lg">No pages yet</p>
-        <p className="text-sm mt-2">
+      <div className="py-16 text-center">
+        <p className="text-[var(--color-text-tertiary)] text-sm">
           {branch === 'main'
-            ? 'Submit pages from your personal space to see them here.'
-            : 'Ingest a source or write a page to get started.'}
+            ? 'No pages in the shared wiki yet.'
+            : 'Your space is empty. Ingest a source to get started.'}
         </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
+    <div>
       {pages.map((p) => (
         <Link
           key={p.slug}
           to={`/page/${p.slug}?branch=${branch}`}
-          className="block rounded-lg border border-stone-200 bg-white p-4 hover:border-stone-300 hover:shadow-sm transition"
+          className="flex items-start gap-2.5 px-2 py-2 -mx-2 rounded-md hover:bg-[var(--color-bg-hover)] transition-colors group"
         >
-          <h3 className="font-medium text-stone-800">{p.title || p.slug}</h3>
-          {p.summary && (
-            <p className="text-sm text-stone-500 mt-1 line-clamp-2">{p.summary}</p>
-          )}
-          <p className="text-xs text-stone-400 mt-2">
+          <FileText
+            size={16}
+            className="mt-0.5 shrink-0 text-[var(--color-text-tertiary)] group-hover:text-[var(--color-text-secondary)]"
+            strokeWidth={1.5}
+          />
+          <div className="min-w-0">
+            <div className="text-sm text-[var(--color-text)] group-hover:text-[var(--color-text)]">
+              {p.title || p.slug}
+            </div>
+            {p.summary && (
+              <div className="text-xs text-[var(--color-text-tertiary)] mt-0.5 truncate">
+                {p.summary}
+              </div>
+            )}
+          </div>
+          <span className="ml-auto text-xs text-[var(--color-text-tertiary)] shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
             {new Date(p.updated_at).toLocaleDateString()}
-          </p>
+          </span>
         </Link>
       ))}
     </div>

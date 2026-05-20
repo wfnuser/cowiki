@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { Wand2, ArrowUpRight, RefreshCw } from 'lucide-react';
 import { PageList } from '../components/PageList';
 import { IngestForm } from '../components/IngestForm';
 import { compile, submit, listPages } from '../api';
@@ -9,19 +10,20 @@ export function PersonalPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [compiling, setCompiling] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState<{ text: string; type: 'info' | 'success' | 'error' } | null>(null);
+  const [showIngest, setShowIngest] = useState(false);
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   const handleCompile = async () => {
     setCompiling(true);
-    setMessage('');
+    setMessage(null);
     try {
       const res = await compile(BRANCH);
-      setMessage(`Compiled ${res.pages?.length || 0} pages`);
+      setMessage({ text: `Compiled ${res.pages?.length || 0} page(s)`, type: 'success' });
       refresh();
-    } catch (e) {
-      setMessage('Compile failed');
+    } catch {
+      setMessage({ text: 'Compilation failed', type: 'error' });
     } finally {
       setCompiling(false);
     }
@@ -29,61 +31,92 @@ export function PersonalPage() {
 
   const handleSubmit = async () => {
     setSubmitting(true);
-    setMessage('');
+    setMessage(null);
     try {
       const pages = await listPages(BRANCH);
       if (pages.length === 0) {
-        setMessage('No pages to submit');
+        setMessage({ text: 'No pages to submit', type: 'info' });
         return;
       }
       const slugs = pages.map((p) => p.slug);
       const res = await submit(BRANCH, slugs);
       const dupCount = res.duplicates?.length || 0;
-      setMessage(
-        `Submitted! ${dupCount > 0 ? `${dupCount} possible duplicate(s) found.` : ''} Awaiting review.`
-      );
-    } catch (e) {
-      setMessage('Submit failed');
+      setMessage({
+        text: `Submitted for review.${dupCount > 0 ? ` ${dupCount} possible duplicate(s).` : ''}`,
+        type: 'success',
+      });
+    } catch {
+      setMessage({ text: 'Submit failed', type: 'error' });
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-stone-800">My Space</h1>
-        <div className="flex gap-2">
-          <button
-            onClick={handleCompile}
-            disabled={compiling}
-            className="rounded-lg bg-stone-800 px-4 py-2 text-sm text-white hover:bg-stone-700 disabled:opacity-50"
-          >
-            {compiling ? 'Compiling...' : 'Compile'}
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="rounded-lg border border-stone-800 px-4 py-2 text-sm text-stone-800 hover:bg-stone-100 disabled:opacity-50"
-          >
-            {submitting ? 'Submitting...' : 'Submit to Shared'}
-          </button>
-        </div>
+    <div>
+      <h1 className="text-4xl font-bold text-[var(--color-text)] mb-1" style={{ fontFamily: 'var(--font-serif)' }}>
+        My Space
+      </h1>
+      <p className="text-[var(--color-text-secondary)] text-sm mb-6">
+        Draft pages and sources. Only you can see this.
+      </p>
+
+      {/* Actions */}
+      <div className="flex items-center gap-2 mb-6">
+        <button
+          onClick={() => setShowIngest(!showIngest)}
+          className="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+        >
+          + Add source
+        </button>
+        <button
+          onClick={handleCompile}
+          disabled={compiling}
+          className="flex items-center gap-1.5 rounded-md bg-[var(--color-text)] text-white px-3 py-1.5 text-sm hover:opacity-90 disabled:opacity-40 transition-opacity"
+        >
+          {compiling ? <RefreshCw size={14} className="animate-spin" /> : <Wand2 size={14} />}
+          {compiling ? 'Compiling...' : 'Compile'}
+        </button>
+        <button
+          onClick={handleSubmit}
+          disabled={submitting}
+          className="flex items-center gap-1.5 rounded-md border border-[var(--color-text)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-bg-hover)] disabled:opacity-40 transition-colors"
+        >
+          <ArrowUpRight size={14} />
+          {submitting ? 'Submitting...' : 'Submit to shared'}
+        </button>
       </div>
 
+      {/* Message */}
       {message && (
-        <div className="rounded-lg bg-stone-100 px-4 py-3 text-sm text-stone-600">
-          {message}
+        <div
+          className={`mb-4 rounded-md px-3 py-2 text-sm ${
+            message.type === 'success'
+              ? 'bg-green-50 text-[var(--color-green)]'
+              : message.type === 'error'
+                ? 'bg-red-50 text-[var(--color-red)]'
+                : 'bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)]'
+          }`}
+        >
+          {message.text}
         </div>
       )}
 
-      <div className="rounded-lg border border-stone-200 bg-white p-5">
-        <h2 className="text-sm font-medium text-stone-500 mb-3">Ingest Source</h2>
-        <IngestForm branch={BRANCH} onDone={refresh} />
-      </div>
+      {/* Ingest form */}
+      {showIngest && (
+        <div className="mb-6 rounded-md border border-[var(--color-border)] p-4 bg-[var(--color-bg-secondary)]">
+          <div className="text-xs font-medium text-[var(--color-text-tertiary)] uppercase tracking-wider mb-3">
+            Add source
+          </div>
+          <IngestForm branch={BRANCH} onDone={() => { refresh(); setShowIngest(false); }} />
+        </div>
+      )}
 
-      <div>
-        <h2 className="text-sm font-medium text-stone-500 mb-3">My Pages</h2>
+      {/* Pages */}
+      <div className="border-t border-[var(--color-border)] pt-4">
+        <div className="text-xs font-medium text-[var(--color-text-tertiary)] uppercase tracking-wider mb-3">
+          Draft pages
+        </div>
         <PageList key={refreshKey} branch={BRANCH} />
       </div>
     </div>

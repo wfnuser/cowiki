@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Plus, Link2, Type } from 'lucide-react';
 import { ingest } from '../api';
 
 export function IngestForm({ branch, onDone }: { branch: string; onDone: () => void }) {
@@ -20,54 +21,60 @@ export function IngestForm({ branch, onDone }: { branch: string; onDone: () => v
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3">
-      <div className="flex gap-2">
+    <form onSubmit={handleSubmit}>
+      {/* Type toggle */}
+      <div className="flex gap-1 mb-3">
         <button
           type="button"
           onClick={() => setSourceType('text')}
-          className={`px-3 py-1 rounded text-sm ${
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition-colors ${
             sourceType === 'text'
-              ? 'bg-stone-800 text-white'
-              : 'bg-stone-100 text-stone-600'
+              ? 'bg-[var(--color-bg-active)] text-[var(--color-text)]'
+              : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]'
           }`}
         >
-          Text
+          <Type size={12} /> Text
         </button>
         <button
           type="button"
           onClick={() => setSourceType('url')}
-          className={`px-3 py-1 rounded text-sm ${
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition-colors ${
             sourceType === 'url'
-              ? 'bg-stone-800 text-white'
-              : 'bg-stone-100 text-stone-600'
+              ? 'bg-[var(--color-bg-active)] text-[var(--color-text)]'
+              : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]'
           }`}
         >
-          URL
+          <Link2 size={12} /> URL
         </button>
       </div>
+
+      {/* Input */}
       {sourceType === 'url' ? (
         <input
           type="url"
           value={content}
           onChange={(e) => setContent(e.target.value)}
-          placeholder="https://..."
-          className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300"
+          placeholder="Paste a URL..."
+          className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm placeholder:text-[var(--color-text-tertiary)] focus:outline-none focus:border-[var(--color-accent)] transition-colors"
         />
       ) : (
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
-          placeholder="Paste your content here..."
-          rows={6}
-          className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300 resize-none"
+          placeholder="Paste or type your content here..."
+          rows={5}
+          className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm placeholder:text-[var(--color-text-tertiary)] focus:outline-none focus:border-[var(--color-accent)] transition-colors resize-none"
         />
       )}
+
+      {/* Submit */}
       <button
         type="submit"
         disabled={loading || !content.trim()}
-        className="rounded-lg bg-stone-800 px-4 py-2 text-sm text-white hover:bg-stone-700 disabled:opacity-50"
+        className="mt-3 flex items-center gap-1.5 rounded-md bg-[var(--color-text)] text-white px-3 py-1.5 text-sm hover:opacity-90 disabled:opacity-40 transition-opacity"
       >
-        {loading ? 'Ingesting...' : 'Ingest'}
+        <Plus size={14} />
+        {loading ? 'Adding...' : 'Add source'}
       </button>
     </form>
   );
