@@ -62,17 +62,17 @@ export function PersonalPage() {
         Draft pages and sources. Only you can see this.
       </p>
 
-      <div className="flex items-center gap-1.5 mb-8">
+      <div className="flex items-center gap-2 mb-6">
         <button
           onClick={() => setShowIngest(!showIngest)}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[13px] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+          className="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
         >
           + Add source
         </button>
         <button
           onClick={handleCompile}
           disabled={compiling}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[13px] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors disabled:opacity-40"
+          className="flex items-center gap-1.5 rounded-md bg-[var(--color-text)] text-white px-3 py-1.5 text-sm hover:opacity-90 disabled:opacity-40 transition-opacity"
         >
           {compiling ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
           {compiling ? 'Compiling...' : 'Compile'}
@@ -80,7 +80,7 @@ export function PersonalPage() {
         <button
           onClick={handleSubmit}
           disabled={submitting}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[13px] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors disabled:opacity-40"
+          className="flex items-center gap-1.5 rounded-md border border-[var(--color-text)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-bg-hover)] disabled:opacity-40 transition-colors"
         >
           <ArrowUpRight className="h-3.5 w-3.5" />
           {submitting ? 'Submitting...' : 'Submit to shared'}

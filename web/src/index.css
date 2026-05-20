@@ -68,13 +68,17 @@ body {
   --sidebar-primary-foreground: hsl(0 0% 98%);
   --sidebar-accent: hsl(240 4.8% 95.9%);
   --sidebar-accent-foreground: hsl(240 5.9% 10%);
-  --sidebar-border: hsl(0 0% 94%);
+  --sidebar-border: hsl(0 0% 96%);
   --sidebar-ring: hsl(217.2 91.2% 59.8%);
 }
 
 /* Notion-like subtle sidebar border */
 [data-sidebar="sidebar"] {
-  border-right-color: hsl(0 0% 94%) !important;
+  border-right: 1px solid rgba(0, 0, 0, 0.06) !important;
+}
+/* Also catch the inner wrapper that shadcn uses */
+[data-sidebar="sidebar"] > div {
+  border-right: none !important;
 }
 
 
