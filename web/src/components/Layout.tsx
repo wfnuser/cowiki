@@ -18,7 +18,6 @@ import {
   SidebarProvider,
   SidebarInset,
 } from '@/components/ui/sidebar';
-import { Separator } from '@/components/ui/separator';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
 const navItems = [
@@ -41,7 +40,6 @@ function AppSidebar() {
           <span className="font-semibold text-sm">cowiki</span>
         </div>
       </SidebarHeader>
-      <Separator />
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel>Workspace</SidebarGroupLabel>
