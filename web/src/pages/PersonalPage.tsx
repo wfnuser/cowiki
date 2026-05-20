@@ -1,8 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Wand2, ArrowUpRight, RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { PageList } from '../components/PageList';
 import { IngestForm } from '../components/IngestForm';
 import { compile, submit, listPages } from '../api';
@@ -60,29 +58,42 @@ export function PersonalPage() {
       <h1 className="text-4xl font-bold mb-1" style={{ fontFamily: 'var(--font-serif)' }}>
         My Space
       </h1>
-      <p className="text-muted-foreground text-sm mb-6">
+      <p className="text-[var(--color-text-tertiary)] text-sm mb-4">
         Draft pages and sources. Only you can see this.
       </p>
 
-      <div className="flex items-center gap-2 mb-6">
-        <Button variant="outline" size="sm" onClick={() => setShowIngest(!showIngest)}>
+      <div className="flex items-center gap-1.5 mb-8">
+        <button
+          onClick={() => setShowIngest(!showIngest)}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[13px] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+        >
           + Add source
-        </Button>
-        <Button size="sm" onClick={handleCompile} disabled={compiling}>
-          {compiling ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Wand2 className="mr-1.5 h-3.5 w-3.5" />}
+        </button>
+        <button
+          onClick={handleCompile}
+          disabled={compiling}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[13px] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors disabled:opacity-40"
+        >
+          {compiling ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
           {compiling ? 'Compiling...' : 'Compile'}
-        </Button>
-        <Button variant="outline" size="sm" onClick={handleSubmit} disabled={submitting}>
-          <ArrowUpRight className="mr-1.5 h-3.5 w-3.5" />
+        </button>
+        <button
+          onClick={handleSubmit}
+          disabled={submitting}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[13px] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors disabled:opacity-40"
+        >
+          <ArrowUpRight className="h-3.5 w-3.5" />
           {submitting ? 'Submitting...' : 'Submit to shared'}
-        </Button>
+        </button>
       </div>
 
       {message && (
-        <div className="mb-4">
-          <Badge variant={message.type === 'error' ? 'destructive' : message.type === 'success' ? 'default' : 'secondary'}>
-            {message.text}
-          </Badge>
+        <div className={`mb-4 rounded px-3 py-2 text-[13px] ${
+          message.type === 'success' ? 'bg-green-50 text-green-700' :
+          message.type === 'error' ? 'bg-red-50 text-red-700' :
+          'bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)]'
+        }`}>
+          {message.text}
         </div>
       )}
 
@@ -97,8 +108,8 @@ export function PersonalPage() {
         </Card>
       )}
 
-      <div className="border-t pt-4">
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
+      <div className="pt-2">
+        <p className="text-xs text-[var(--color-text-tertiary)] mb-2">
           Draft pages
         </p>
         <PageList key={refreshKey} branch={BRANCH} />
