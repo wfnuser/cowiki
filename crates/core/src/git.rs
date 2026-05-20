@@ -1,6 +1,7 @@
 use git2::{BranchType, Repository, Signature};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 pub struct WikiRepo {
     path: PathBuf,
@@ -19,6 +20,31 @@ impl FileDiff {
     }
 }
 
+fn rename_master_to_main(repo_path: &Path) {
+    // Use git CLI to avoid libgit2 borrow issues
+    let has_master = Command::new("git")
+        .args(["branch", "--list", "master"])
+        .current_dir(repo_path)
+        .output()
+        .map(|o| !o.stdout.is_empty())
+        .unwrap_or(false);
+
+    let has_main = Command::new("git")
+        .args(["branch", "--list", "main"])
+        .current_dir(repo_path)
+        .output()
+        .map(|o| !o.stdout.is_empty())
+        .unwrap_or(false);
+
+    if has_master && !has_main {
+        Command::new("git")
+            .args(["branch", "-m", "master", "main"])
+            .current_dir(repo_path)
+            .output()
+            .ok();
+    }
+}
+
 impl WikiRepo {
     pub fn open_or_init(data_dir: &str) -> Result<Self, git2::Error> {
         let path = PathBuf::from(data_dir).join("repo");
@@ -29,7 +55,6 @@ impl WikiRepo {
             fs::create_dir_all(path.join("wiki")).ok();
             fs::create_dir_all(path.join("sources")).ok();
 
-            // Create .gitkeep files so directories are tracked
             fs::write(path.join("wiki/.gitkeep"), "").ok();
             fs::write(path.join("sources/.gitkeep"), "").ok();
 
@@ -42,6 +67,10 @@ impl WikiRepo {
             let tree = repo.find_tree(tree_id)?;
             repo.commit(Some("HEAD"), &sig, &sig, "init: empty wiki", &tree, &[])?;
         }
+
+        // Ensure main branch exists (rename master → main if needed)
+        rename_master_to_main(&path);
+
         Ok(Self { path })
     }
 
