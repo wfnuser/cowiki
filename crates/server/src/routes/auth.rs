@@ -1,4 +1,5 @@
-use axum::extract::State;
+use axum::extract::{Query, State};
+use axum::response::Redirect;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -23,6 +24,7 @@ pub struct UserInfo {
     pub id: String,
     pub name: String,
     pub email: Option<String>,
+    pub avatar_url: Option<String>,
 }
 
 /// Register a new user, returns user info + API key
@@ -30,19 +32,16 @@ pub async fn register(
     State(state): State<Arc<AppState>>,
     Json(input): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>> {
-    // Check if name is taken
     if cowiki_db::users::find_by_name(&state.db, &input.name).await?.is_some() {
         return Err(AppError::BadRequest("name already taken".into()));
     }
 
     let user = cowiki_db::users::create(&state.db, &input.name, input.email.as_deref(), None).await?;
 
-    // Create user branch in Git
-    let branch_name = state
+    state
         .wiki_repo
         .ensure_user_branch(&user.id.to_string())
         .map_err(|e| AppError::Internal(e.to_string()))?;
-    tracing::info!("created branch {} for user {}", branch_name, user.name);
 
     Ok(Json(AuthResponse {
         api_key: user.api_key.clone(),
@@ -50,6 +49,7 @@ pub async fn register(
             id: user.id.to_string(),
             name: user.name,
             email: user.email,
+            avatar_url: None,
         },
     }))
 }
@@ -64,6 +64,7 @@ pub async fn me(
         id: user.id.to_string(),
         name: user.name,
         email: user.email,
+        avatar_url: None,
     }))
 }
 
@@ -81,9 +82,121 @@ pub async fn regenerate_key(
             id: updated.id.to_string(),
             name: updated.name,
             email: updated.email,
+            avatar_url: None,
         },
     }))
 }
+
+// ── GitHub OAuth ──────────────────────────────────────────────
+
+/// Redirect user to GitHub authorization page
+pub async fn github_login(State(state): State<Arc<AppState>>) -> Redirect {
+    let url = format!(
+        "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&scope=read:user%20user:email",
+        state.config.github_client_id,
+        urlencoding::encode(&state.config.github_redirect_uri),
+    );
+    Redirect::temporary(&url)
+}
+
+#[derive(Deserialize)]
+pub struct GithubCallbackParams {
+    pub code: String,
+}
+
+#[derive(Deserialize)]
+struct GithubTokenResponse {
+    access_token: String,
+}
+
+#[derive(Deserialize)]
+struct GithubUser {
+    login: String,
+    email: Option<String>,
+    avatar_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GithubEmail {
+    email: String,
+    primary: bool,
+}
+
+/// GitHub OAuth callback — exchange code for token, get user info, create/find user
+pub async fn github_callback(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<GithubCallbackParams>,
+) -> Result<Redirect> {
+    let client = reqwest::Client::new();
+
+    // 1. Exchange code for access token
+    let token_resp = client
+        .post("https://github.com/login/oauth/access_token")
+        .header("Accept", "application/json")
+        .json(&serde_json::json!({
+            "client_id": state.config.github_client_id,
+            "client_secret": state.config.github_client_secret,
+            "code": params.code,
+        }))
+        .send()
+        .await
+        .map_err(|e| AppError::Internal(format!("github token exchange failed: {e}")))?
+        .json::<GithubTokenResponse>()
+        .await
+        .map_err(|e| AppError::Internal(format!("github token parse failed: {e}")))?;
+
+    // 2. Get GitHub user info
+    let gh_user = client
+        .get("https://api.github.com/user")
+        .header("Authorization", format!("Bearer {}", token_resp.access_token))
+        .header("User-Agent", "cowiki")
+        .send()
+        .await
+        .map_err(|e| AppError::Internal(format!("github user fetch failed: {e}")))?
+        .json::<GithubUser>()
+        .await
+        .map_err(|e| AppError::Internal(format!("github user parse failed: {e}")))?;
+
+    // 3. Get email if not public
+    let email = if gh_user.email.is_some() {
+        gh_user.email.clone()
+    } else {
+        let emails = client
+            .get("https://api.github.com/user/emails")
+            .header("Authorization", format!("Bearer {}", token_resp.access_token))
+            .header("User-Agent", "cowiki")
+            .send()
+            .await
+            .ok()
+            .and_then(|r| futures::executor::block_on(r.json::<Vec<GithubEmail>>()).ok());
+        emails.and_then(|list| list.into_iter().find(|e| e.primary).map(|e| e.email))
+    };
+
+    // 4. Find or create user
+    let user = if let Some(existing) = cowiki_db::users::find_by_name(&state.db, &gh_user.login).await? {
+        existing
+    } else {
+        let user = cowiki_db::users::create(&state.db, &gh_user.login, email.as_deref(), None).await?;
+        state
+            .wiki_repo
+            .ensure_user_branch(&user.id.to_string())
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        tracing::info!("created user {} via GitHub OAuth", user.name);
+        user
+    };
+
+    // 5. Redirect to frontend with API key
+    let redirect_url = format!(
+        "{}/?api_key={}&user_name={}&user_id={}",
+        state.config.frontend_url,
+        user.api_key,
+        urlencoding::encode(&user.name),
+        user.id,
+    );
+    Ok(Redirect::temporary(&redirect_url))
+}
+
+// ── Helpers ──────────────────────────────────────────────
 
 /// Extract user from Authorization header (Bearer <api_key>)
 pub async fn extract_user(
@@ -97,7 +210,7 @@ pub async fn extract_user(
 
     let api_key = auth_header
         .strip_prefix("Bearer ")
-        .ok_or_else(|| AppError::BadRequest("invalid Authorization format, use: Bearer <api_key>".into()))?;
+        .ok_or_else(|| AppError::BadRequest("invalid Authorization format".into()))?;
 
     cowiki_db::users::find_by_api_key(db, api_key)
         .await?

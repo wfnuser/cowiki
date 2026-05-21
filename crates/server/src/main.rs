@@ -58,6 +58,8 @@ async fn main() {
         .route("/api/auth/register", post(routes::auth::register))
         .route("/api/auth/me", get(routes::auth::me))
         .route("/api/auth/regenerate-key", post(routes::auth::regenerate_key))
+        .route("/api/auth/github", get(routes::auth::github_login))
+        .route("/api/auth/github/callback", get(routes::auth::github_callback))
         // Workspaces
         .route("/api/workspaces", get(routes::workspace::list_workspaces))
         .route("/api/workspaces", post(routes::workspace::create_workspace))
