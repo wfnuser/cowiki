@@ -1,4 +1,10 @@
+import { authHeaders } from './auth';
+
 const BASE = '/api';
+
+function h(extra: Record<string, string> = {}): Record<string, string> {
+  return { ...authHeaders(), ...extra };
+}
 
 export interface PageMeta {
   id: string;
@@ -44,19 +50,19 @@ export interface SearchResult {
 }
 
 export async function listPages(branch = 'main'): Promise<PageMeta[]> {
-  const res = await fetch(`${BASE}/pages?branch=${branch}`);
+  const res = await fetch(`${BASE}/pages?branch=${branch}`, { headers: h() });
   return res.json();
 }
 
 export async function getPage(slug: string, branch = 'main'): Promise<PageFull> {
-  const res = await fetch(`${BASE}/pages/${slug}?branch=${branch}`);
+  const res = await fetch(`${BASE}/pages/${slug}?branch=${branch}`, { headers: h() });
   return res.json();
 }
 
 export async function writePage(slug: string, body: string, branch: string): Promise<void> {
   await fetch(`${BASE}/pages`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ slug, body, branch }),
   });
 }
@@ -64,7 +70,7 @@ export async function writePage(slug: string, body: string, branch: string): Pro
 export async function ingest(sourceType: string, content: string, branch: string, filename?: string) {
   const res = await fetch(`${BASE}/ingest`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ source_type: sourceType, content, branch, filename }),
   });
   return res.json();
@@ -73,7 +79,7 @@ export async function ingest(sourceType: string, content: string, branch: string
 export async function compile(branch: string) {
   const res = await fetch(`${BASE}/compile`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ branch }),
   });
   return res.json();
@@ -82,32 +88,32 @@ export async function compile(branch: string) {
 export async function submit(branch: string, pageSlugs: string[]) {
   const res = await fetch(`${BASE}/submit`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ branch, page_slugs: pageSlugs }),
   });
   return res.json();
 }
 
 export async function listReviews(): Promise<Submission[]> {
-  const res = await fetch(`${BASE}/reviews`);
+  const res = await fetch(`${BASE}/reviews`, { headers: h() });
   return res.json();
 }
 
 export async function getReview(id: string): Promise<ReviewDetail> {
-  const res = await fetch(`${BASE}/reviews/${id}`);
+  const res = await fetch(`${BASE}/reviews/${id}`, { headers: h() });
   return res.json();
 }
 
 export async function reviewAction(id: string, action: string) {
   const res = await fetch(`${BASE}/reviews/${id}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ action }),
   });
   return res.json();
 }
 
 export async function search(q: string, branch = 'main'): Promise<SearchResult[]> {
-  const res = await fetch(`${BASE}/search?q=${encodeURIComponent(q)}&branch=${branch}`);
+  const res = await fetch(`${BASE}/search?q=${encodeURIComponent(q)}&branch=${branch}`, { headers: h() });
   return res.json();
 }
