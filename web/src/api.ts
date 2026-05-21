@@ -6,12 +6,15 @@ function h(extra: Record<string, string> = {}): Record<string, string> {
   return { ...authHeaders(), ...extra };
 }
 
+// ── Types ──
+
 export interface PageMeta {
   id: string;
   slug: string;
   title: string;
   summary: string;
   branch: string;
+  content_hash: string;
   updated_at: string;
 }
 
@@ -49,6 +52,52 @@ export interface SearchResult {
   similarity: number;
 }
 
+export interface Workspace {
+  id: string;
+  name: string;
+  slug: string;
+  role: string;
+}
+
+export interface MemberInfo {
+  id: string;
+  name: string;
+  email: string | null;
+  role: string;
+}
+
+// ── Workspaces ──
+
+export async function listWorkspaces(): Promise<Workspace[]> {
+  const res = await fetch(`${BASE}/workspaces`, { headers: h() });
+  return res.json();
+}
+
+export async function createWorkspace(name: string, slug: string): Promise<Workspace> {
+  const res = await fetch(`${BASE}/workspaces`, {
+    method: 'POST',
+    headers: h({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ name, slug }),
+  });
+  return res.json();
+}
+
+export async function inviteToWorkspace(workspaceSlug: string, email: string) {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/invite`, {
+    method: 'POST',
+    headers: h({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ email }),
+  });
+  return res.json();
+}
+
+export async function listMembers(workspaceSlug: string): Promise<MemberInfo[]> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/members`, { headers: h() });
+  return res.json();
+}
+
+// ── Pages ──
+
 export async function listPages(branch = 'main'): Promise<PageMeta[]> {
   const res = await fetch(`${BASE}/pages?branch=${branch}`, { headers: h() });
   return res.json();
@@ -67,6 +116,8 @@ export async function writePage(slug: string, body: string, branch: string): Pro
   });
 }
 
+// ── Ingest & Compile ──
+
 export async function ingest(sourceType: string, content: string, branch: string, filename?: string) {
   const res = await fetch(`${BASE}/ingest`, {
     method: 'POST',
@@ -84,6 +135,8 @@ export async function compile(branch: string) {
   });
   return res.json();
 }
+
+// ── Submit & Review ──
 
 export async function submit(branch: string, pageSlugs: string[]) {
   const res = await fetch(`${BASE}/submit`, {
@@ -112,6 +165,8 @@ export async function reviewAction(id: string, action: string) {
   });
   return res.json();
 }
+
+// ── Search ──
 
 export async function search(q: string, branch = 'main'): Promise<SearchResult[]> {
   const res = await fetch(`${BASE}/search?q=${encodeURIComponent(q)}&branch=${branch}`, { headers: h() });

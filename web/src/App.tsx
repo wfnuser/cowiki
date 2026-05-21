@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { Layout } from './components/Layout';
+import { HomePage } from './pages/HomePage';
 import { WikiPage } from './pages/WikiPage';
 import { PageViewPage } from './pages/PageViewPage';
 import { ReviewPage } from './pages/ReviewPage';
@@ -8,7 +9,6 @@ import { SearchPage } from './pages/SearchPage';
 import { LoginPage } from './pages/LoginPage';
 import { getStoredAuth, storeAuth } from './auth';
 
-/** Intercept OAuth callback params at any route */
 function OAuthInterceptor({ children }: { children: React.ReactNode }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -20,7 +20,6 @@ function OAuthInterceptor({ children }: { children: React.ReactNode }) {
 
     if (apiKey && userName && userId) {
       storeAuth(apiKey, userName, userId);
-      // Clear URL params
       setSearchParams({}, { replace: true });
       navigate('/', { replace: true });
     }
@@ -41,17 +40,14 @@ export default function App() {
       <OAuthInterceptor>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route
-            element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }
-          >
-            <Route path="/" element={<WikiPage />} />
-            <Route path="/page/:slug" element={<PageViewPage />} />
-            <Route path="/reviews" element={<ReviewPage />} />
-            <Route path="/search" element={<SearchPage />} />
+          {/* Home — workspace list */}
+          <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
+          {/* Inside a workspace */}
+          <Route path="/w/:workspaceSlug" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+            <Route index element={<WikiPage />} />
+            <Route path="page/:slug" element={<PageViewPage />} />
+            <Route path="reviews" element={<ReviewPage />} />
+            <Route path="search" element={<SearchPage />} />
           </Route>
         </Routes>
       </OAuthInterceptor>

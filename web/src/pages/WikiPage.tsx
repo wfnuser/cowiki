@@ -1,9 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
-import { FileText, Folder, RefreshCw, Wand2, ArrowUpRight, Eye } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Link, useParams } from 'react-router-dom';
+import { FileText, RefreshCw, Wand2, ArrowUpRight, Eye } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { SearchBar } from '../components/SearchBar';
 import { IngestForm } from '../components/IngestForm';
 import { listPages, compile, submit, type PageMeta } from '../api';
 import { getStoredAuth } from '../auth';
@@ -72,6 +70,7 @@ function mergeTrees(mainPages: PageMeta[], draftPages: PageMeta[]): { pages: (Pa
 }
 
 export function WikiPage() {
+  const { workspaceSlug } = useParams();
   const [viewMode, setViewMode] = useState<ViewMode>('drafts');
   const [mainPages, setMainPages] = useState<PageMeta[]>([]);
   const [draftPages, setDraftPages] = useState<PageMeta[]>([]);
@@ -239,11 +238,6 @@ export function WikiPage() {
         </div>
       )}
 
-      {/* Search */}
-      <div className="mb-6">
-        <SearchBar />
-      </div>
-
       {/* Page list */}
       {loading ? (
         <div className="py-8 text-center text-[var(--color-text-tertiary)] text-sm">Loading...</div>
@@ -258,7 +252,7 @@ export function WikiPage() {
           {displayPages.map((p: any) => (
             <Link
               key={p.slug}
-              to={`/page/${p.slug}?branch=${p.isDraft || p.isModified ? userBranch : 'main'}`}
+              to={`/w/${workspaceSlug}/page/${p.slug}?branch=${p.isDraft || p.isModified ? userBranch : 'main'}`}
               className="flex items-start gap-2.5 px-2 py-2 -mx-2 rounded-md hover:bg-[var(--color-bg-hover)] transition-colors group"
             >
               <FileText

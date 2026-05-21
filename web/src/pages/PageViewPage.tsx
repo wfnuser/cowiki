@@ -6,7 +6,7 @@ import { ChevronLeft } from 'lucide-react';
 import { getPage, type PageFull } from '../api';
 
 export function PageViewPage() {
-  const { slug } = useParams<{ slug: string }>();
+  const { slug, workspaceSlug } = useParams<{ slug: string; workspaceSlug: string }>();
   const [searchParams] = useSearchParams();
   const branch = searchParams.get('branch') || 'main';
   const [page, setPage] = useState<PageFull | null>(null);
@@ -37,11 +37,11 @@ export function PageViewPage() {
   return (
     <div>
       <Link
-        to={branch === 'main' ? '/' : '/personal'}
+        to={`/w/${workspaceSlug}`}
         className="inline-flex items-center gap-1 text-sm text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] mb-6 transition-colors"
       >
         <ChevronLeft size={14} />
-        {branch === 'main' ? 'Shared Wiki' : 'My Space'}
+        Wiki
       </Link>
 
       <article>
