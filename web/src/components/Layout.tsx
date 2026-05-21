@@ -23,8 +23,7 @@ import {
 import { TooltipProvider } from '@/components/ui/tooltip';
 
 const navItems = [
-  { to: '/', label: 'Shared Wiki', icon: BookOpen },
-  { to: '/personal', label: 'My Space', icon: FolderOpen },
+  { to: '/', label: 'Wiki', icon: BookOpen },
   { to: '/reviews', label: 'Reviews', icon: GitPullRequest },
   { to: '/search', label: 'Search', icon: Search },
 ];

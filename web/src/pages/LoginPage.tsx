@@ -1,29 +1,15 @@
 import { useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { storeAuth, getStoredAuth } from '../auth';
+import { useNavigate } from 'react-router-dom';
+import { getStoredAuth } from '../auth';
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
 
   useEffect(() => {
-    // Check if we're coming back from GitHub OAuth with api_key in URL
-    const apiKey = searchParams.get('api_key');
-    const userName = searchParams.get('user_name');
-    const userId = searchParams.get('user_id');
-
-    if (apiKey && userName && userId) {
-      storeAuth(apiKey, userName, userId);
-      // Clean URL and redirect to wiki
-      navigate('/', { replace: true });
-      return;
-    }
-
-    // Already logged in?
     if (getStoredAuth()) {
       navigate('/', { replace: true });
     }
-  }, [searchParams, navigate]);
+  }, [navigate]);
 
   return (
     <div className="min-h-screen bg-[var(--color-bg)] flex items-center justify-center">
@@ -34,11 +20,8 @@ export function LoginPage() {
           </div>
           <span className="text-2xl font-bold text-[var(--color-text)]">CoWiki</span>
         </div>
-        <p className="text-[var(--color-text-secondary)] text-lg mb-1" style={{ fontFamily: 'var(--font-serif)' }}>
+        <p className="text-[var(--color-text-secondary)] text-lg mb-8" style={{ fontFamily: 'var(--font-serif)' }}>
           A team wiki that builds itself.
-        </p>
-        <p className="text-[var(--color-text-tertiary)] text-sm mb-8">
-          Open-source LLM Wiki for teams.
         </p>
 
         <a
