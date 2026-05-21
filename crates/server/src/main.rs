@@ -35,7 +35,7 @@ async fn main() {
     // Git repo
     let wiki_repo = cowiki_core::git::WikiRepo::open_or_init(&config.data_dir)
         .expect("failed to init wiki repo");
-    // Ensure default user branch
+    // Ensure default user branch (for backward compat)
     wiki_repo
         .ensure_user_branch("default")
         .expect("failed to create default user branch");
@@ -54,6 +54,15 @@ async fn main() {
 
     let app = Router::new()
         .route("/api/health", get(|| async { "ok" }))
+        // Auth
+        .route("/api/auth/register", post(routes::auth::register))
+        .route("/api/auth/me", get(routes::auth::me))
+        .route("/api/auth/regenerate-key", post(routes::auth::regenerate_key))
+        // Workspaces
+        .route("/api/workspaces", get(routes::workspace::list_workspaces))
+        .route("/api/workspaces", post(routes::workspace::create_workspace))
+        .route("/api/workspaces/{slug}/invite", post(routes::workspace::invite))
+        .route("/api/workspaces/{slug}/members", get(routes::workspace::list_members))
         // Pages
         .route("/api/pages", get(routes::pages::list_pages))
         .route("/api/pages", post(routes::pages::write_page))
