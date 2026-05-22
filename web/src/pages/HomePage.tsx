@@ -204,7 +204,7 @@ export function HomePage() {
               {contentView === 'discover' ? (
                 <DiscoverView />
               ) : (
-                <HomeView />
+                <HomeView pages={personalPages} personalWs={personalWs} authId={auth?.id} />
               )}
             </div>
           </SidebarInset>
@@ -273,17 +273,43 @@ export function HomePage() {
   );
 }
 
-function HomeView() {
+function HomeView({ pages, personalWs, authId }: { pages: PageMeta[]; personalWs?: Workspace; authId?: string }) {
   return (
     <>
-      <h1 className="text-4xl font-bold mb-8" style={{ fontFamily: 'var(--font-serif)' }}>Home</h1>
-      <section>
-        <h2 className="text-xs font-medium text-[var(--color-text-tertiary)] uppercase tracking-wider mb-3">Recent</h2>
-        <div className="py-8 text-center">
-          <Clock size={20} className="mx-auto text-[var(--color-text-tertiary)] mb-2" />
-          <p className="text-[var(--color-text-tertiary)] text-xs">Recently opened pages will appear here.</p>
-        </div>
-      </section>
+      <h1 className="text-4xl font-bold mb-6" style={{ fontFamily: 'var(--font-serif)' }}>Home</h1>
+
+      {/* Pages list */}
+      {pages.length > 0 ? (
+        <section>
+          <h2 className="text-xs font-medium text-[var(--color-text-tertiary)] uppercase tracking-wider mb-3">
+            My Pages
+          </h2>
+          <div>
+            {pages.map((p) => (
+              <Link
+                key={p.slug}
+                to={personalWs ? `/w/${personalWs.slug}/page/${p.slug}?branch=user/${authId}` : '#'}
+                className="flex items-center gap-2.5 px-2 py-2 -mx-2 rounded-md hover:bg-[var(--color-bg-hover)] transition-colors group"
+              >
+                <FileText size={16} className="shrink-0 text-[var(--color-text-tertiary)]" strokeWidth={1.5} />
+                <div className="min-w-0">
+                  <div className="text-sm text-[var(--color-text)]">{p.title || p.slug}</div>
+                  {p.summary && (
+                    <div className="text-xs text-[var(--color-text-tertiary)] truncate">{p.summary}</div>
+                  )}
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : (
+        <section>
+          <div className="py-8 text-center">
+            <Clock size={20} className="mx-auto text-[var(--color-text-tertiary)] mb-2" />
+            <p className="text-[var(--color-text-tertiary)] text-xs">Your pages will appear here.</p>
+          </div>
+        </section>
+      )}
     </>
   );
 }

@@ -62,6 +62,28 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: var(--color-border-hover); }
 
 :root {
+  /* shadcn required variables */
+  --background: 0 0% 100%;
+  --foreground: 30 6% 20%;
+  --card: 0 0% 100%;
+  --card-foreground: 30 6% 20%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 30 6% 20%;
+  --primary: 30 6% 20%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 30 2% 94%;
+  --secondary-foreground: 30 6% 20%;
+  --muted: 30 2% 94%;
+  --muted-foreground: 30 2% 47%;
+  --accent: 30 2% 94%;
+  --accent-foreground: 30 6% 20%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 30 2% 91%;
+  --input: 30 2% 91%;
+  --ring: 30 6% 20%;
+  --radius: 0.5rem;
+
   --sidebar: hsl(0 0% 98%);
   --sidebar-foreground: hsl(240 5.3% 26.1%);
   --sidebar-primary: hsl(240 5.9% 10%);
@@ -94,6 +116,28 @@ body {
 }
 
 @theme inline {
+  /* shadcn color tokens */
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent-ui: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --radius: var(--radius);
+
+  /* sidebar tokens */
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
