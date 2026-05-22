@@ -34,6 +34,8 @@ export function HomePage() {
   const [loading, setLoading] = useState(true);
   const [contentView, setContentView] = useState<ContentView>('home');
   const [showCreate, setShowCreate] = useState(false);
+  const [showNewPage, setShowNewPage] = useState(false);
+  const [newPageTitle, setNewPageTitle] = useState('');
   const [newName, setNewName] = useState('');
   const [newSlug, setNewSlug] = useState('');
   const [creating, setCreating] = useState(false);
@@ -81,6 +83,20 @@ export function HomePage() {
     }
   };
 
+  const handleNewPage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPageTitle.trim() || !personalWs) return;
+    const slug = newPageTitle.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim();
+    const body = `---\ntitle: "${newPageTitle.trim()}"\nsummary: ""\nkind: concept\n---\n\n`;
+    const { writePage } = await import('../api');
+    await writePage(slug, body, `user/${auth?.id}`);
+    setShowNewPage(false);
+    setNewPageTitle('');
+    load();
+    // Navigate to the new page
+    navigate(`/w/${personalWs.slug}/page/${slug}?branch=user/${auth?.id}`);
+  };
+
   const handleLogout = () => {
     clearAuth();
     navigate('/login');
@@ -115,7 +131,10 @@ export function HomePage() {
                     </SidebarMenuItem>
                   ))}
                   <SidebarMenuItem>
-                    <SidebarMenuButton tooltip="Add new page">
+                    <SidebarMenuButton
+                      onClick={() => setShowNewPage(true)}
+                      tooltip="Add new page"
+                    >
                       <Plus size={16} />
                       <span className="text-sidebar-foreground/50">Add new page</span>
                     </SidebarMenuButton>
@@ -222,6 +241,30 @@ export function HomePage() {
               <Button type="submit" disabled={creating || !newName.trim() || !newSlug.trim()}>
                 {creating ? 'Creating...' : 'Create'}
               </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* New page modal */}
+      <Dialog open={showNewPage} onOpenChange={setShowNewPage}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>New Page</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleNewPage} className="space-y-4 mt-2">
+            <div>
+              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Title</label>
+              <Input
+                value={newPageTitle}
+                onChange={(e) => setNewPageTitle(e.target.value)}
+                placeholder="e.g. Meeting Notes, Research Ideas"
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" type="button" onClick={() => setShowNewPage(false)}>Cancel</Button>
+              <Button type="submit" disabled={!newPageTitle.trim()}>Create</Button>
             </div>
           </form>
         </DialogContent>
