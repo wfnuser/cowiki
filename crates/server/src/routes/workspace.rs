@@ -72,7 +72,7 @@ pub async fn list_workspaces(
     let workspaces = cowiki_db::workspaces::list_for_user(&state.db, user.id).await?;
 
     let result = workspaces.iter().map(|ws| {
-        let role = if ws.created_by == user.id { "owner" } else { "member" };
+        let role = if ws.created_by == user.id { "owner" } else { "writer" };
         ws_response(ws, role)
     }).collect();
     Ok(Json(result))
@@ -106,14 +106,14 @@ pub async fn join_workspace(
         return Err(AppError::BadRequest("workspace is private, you need an invitation".into()));
     }
 
-    cowiki_db::workspaces::add_member(&state.db, ws.id, user.id, "member", user.id).await?;
+    cowiki_db::workspaces::add_member(&state.db, ws.id, user.id, "writer", user.id).await?;
 
     // Create user branch
     state.wiki_repo
         .ensure_user_branch(&user.id.to_string())
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    Ok(Json(ws_response(&ws, "member")))
+    Ok(Json(ws_response(&ws, "writer")))
 }
 
 #[derive(Deserialize)]
@@ -148,7 +148,7 @@ pub async fn invite(
     let invitation = cowiki_db::workspaces::create_invitation(&state.db, ws.id, &input.email, user.id).await?;
 
     if let Some(invited_user) = cowiki_db::users::find_by_email(&state.db, &input.email).await? {
-        cowiki_db::workspaces::add_member(&state.db, ws.id, invited_user.id, "member", user.id).await?;
+        cowiki_db::workspaces::add_member(&state.db, ws.id, invited_user.id, "writer", user.id).await?;
         cowiki_db::workspaces::accept_invitation(&state.db, invitation.id).await?;
 
         state.wiki_repo
