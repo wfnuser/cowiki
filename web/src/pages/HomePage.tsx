@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Clock, LogOut, Globe, Lock, FileText, Compass, Users } from 'lucide-react';
+import { Plus, Clock, LogOut, Compass, Users, FileText } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -23,19 +23,19 @@ import {
   SidebarInset,
 } from '@/components/ui/sidebar';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { listWorkspaces, createWorkspace, type Workspace } from '../api';
+import { listWorkspaces, listPages, createWorkspace, type Workspace, type PageMeta } from '../api';
 import { getStoredAuth, clearAuth } from '../auth';
 
 type ContentView = 'home' | 'discover';
 
 export function HomePage() {
   const [mySpaces, setMySpaces] = useState<Workspace[]>([]);
+  const [personalPages, setPersonalPages] = useState<PageMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [contentView, setContentView] = useState<ContentView>('home');
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
   const [newSlug, setNewSlug] = useState('');
-  const [newVisibility, setNewVisibility] = useState<'private' | 'public'>('private');
   const [creating, setCreating] = useState(false);
   const navigate = useNavigate();
   const auth = getStoredAuth();
@@ -45,6 +45,12 @@ export function HomePage() {
     try {
       const mine = await listWorkspaces();
       setMySpaces(mine);
+      // Load personal space pages (first private space, or user branch)
+      const personalWs = mine.find((w) => w.visibility === 'private' && w.role === 'owner');
+      if (personalWs) {
+        const pages = await listPages(`user/${auth?.id || 'default'}`);
+        setPersonalPages(pages);
+      }
     } finally {
       setLoading(false);
     }
@@ -52,9 +58,8 @@ export function HomePage() {
 
   useEffect(() => { load(); }, []);
 
-  // Split into personal (private, only me) and teamspaces (shared)
-  const personalSpaces = mySpaces.filter((w) => w.visibility === 'private' && w.role === 'owner');
   const teamspaces = mySpaces.filter((w) => !(w.visibility === 'private' && w.role === 'owner'));
+  const personalWs = mySpaces.find((w) => w.visibility === 'private' && w.role === 'owner');
 
   const handleNameChange = (name: string) => {
     setNewName(name);
@@ -66,11 +71,10 @@ export function HomePage() {
     if (!newName.trim() || !newSlug.trim()) return;
     setCreating(true);
     try {
-      const ws = await createWorkspace(newName.trim(), newSlug.trim(), newVisibility);
+      const ws = await createWorkspace(newName.trim(), newSlug.trim(), 'public');
       setShowCreate(false);
       setNewName('');
       setNewSlug('');
-      setNewVisibility('private');
       navigate(`/w/${ws.slug}`);
     } finally {
       setCreating(false);
@@ -96,45 +100,32 @@ export function HomePage() {
               </div>
             </SidebarHeader>
             <SidebarContent>
-              {/* Personal Space */}
+              {/* Personal Space — show pages directly */}
               <SidebarGroup>
                 <SidebarGroupLabel>Personal Space</SidebarGroupLabel>
                 <SidebarMenu>
-                  {personalSpaces.map((ws) => (
-                    <SidebarMenuItem key={ws.id}>
-                      <SidebarMenuButton asChild tooltip={ws.name}>
-                        <Link to={`/w/${ws.slug}`}>
+                  {personalWs && personalPages.map((p) => (
+                    <SidebarMenuItem key={p.slug}>
+                      <SidebarMenuButton asChild tooltip={p.title}>
+                        <Link to={`/w/${personalWs.slug}/page/${p.slug}?branch=user/${auth?.id}`}>
                           <FileText size={16} />
-                          <span>{ws.name}</span>
+                          <span>{p.title || p.slug}</span>
                         </Link>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   ))}
-                  {!loading && personalSpaces.length === 0 && (
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        onClick={() => { setNewVisibility('private'); setShowCreate(true); }}
-                        tooltip="Create personal space"
-                      >
-                        <Plus size={16} />
-                        <span className="text-sidebar-foreground/50">New personal space</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )}
+                  <SidebarMenuItem>
+                    <SidebarMenuButton tooltip="Add new page">
+                      <Plus size={16} />
+                      <span className="text-sidebar-foreground/50">Add new page</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
                 </SidebarMenu>
               </SidebarGroup>
 
-              {/* Teamspaces */}
+              {/* Teamspaces — show space list */}
               <SidebarGroup>
-                <SidebarGroupLabel>
-                  <span>Teamspaces</span>
-                  <button
-                    onClick={() => { setNewVisibility('public'); setShowCreate(true); }}
-                    className="ml-auto text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors"
-                  >
-                    <Plus size={14} />
-                  </button>
-                </SidebarGroupLabel>
+                <SidebarGroupLabel>Teamspaces</SidebarGroupLabel>
                 <SidebarMenu>
                   {teamspaces.map((ws) => (
                     <SidebarMenuItem key={ws.id}>
@@ -146,11 +137,15 @@ export function HomePage() {
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   ))}
-                  {!loading && teamspaces.length === 0 && (
-                    <div className="px-2 py-3 text-xs text-sidebar-foreground/40 text-center">
-                      No teamspaces yet
-                    </div>
-                  )}
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      onClick={() => setShowCreate(true)}
+                      tooltip="Create a new teamspace"
+                    >
+                      <Plus size={16} />
+                      <span className="text-sidebar-foreground/50">Add new teamspace</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
                 </SidebarMenu>
               </SidebarGroup>
 
@@ -190,26 +185,18 @@ export function HomePage() {
               {contentView === 'discover' ? (
                 <DiscoverView />
               ) : (
-                <HomeView
-                  personalSpaces={personalSpaces}
-                  teamspaces={teamspaces}
-                  loading={loading}
-                  onCreatePersonal={() => { setNewVisibility('private'); setShowCreate(true); }}
-                  onCreateTeam={() => { setNewVisibility('public'); setShowCreate(true); }}
-                />
+                <HomeView />
               )}
             </div>
           </SidebarInset>
         </SidebarProvider>
       </TooltipProvider>
 
-      {/* Create modal */}
+      {/* Create teamspace modal */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>
-              {newVisibility === 'private' ? 'Create Personal Space' : 'Create Teamspace'}
-            </DialogTitle>
+            <DialogTitle>Create Teamspace</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4 mt-2">
             <div>
@@ -217,7 +204,7 @@ export function HomePage() {
               <Input
                 value={newName}
                 onChange={(e) => handleNameChange(e.target.value)}
-                placeholder={newVisibility === 'private' ? 'e.g. My Notes, Research' : 'e.g. Engineering Wiki'}
+                placeholder="e.g. Engineering Wiki, Product Knowledge"
                 autoFocus
               />
             </div>
@@ -226,35 +213,10 @@ export function HomePage() {
               <Input
                 value={newSlug}
                 onChange={(e) => setNewSlug(e.target.value)}
-                placeholder="my-notes"
+                placeholder="engineering-wiki"
                 className="font-mono"
               />
             </div>
-            {newVisibility !== 'private' && (
-              <div>
-                <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Visibility</label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setNewVisibility('private')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-sm transition-colors ${
-                      newVisibility === 'private' ? 'border-[var(--color-text)] bg-[var(--color-bg-active)]' : 'border-[var(--color-border)] hover:bg-[var(--color-bg-hover)]'
-                    }`}
-                  >
-                    <Lock size={14} /> Private
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewVisibility('public')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-sm transition-colors ${
-                      newVisibility === 'public' ? 'border-[var(--color-text)] bg-[var(--color-bg-active)]' : 'border-[var(--color-border)] hover:bg-[var(--color-bg-hover)]'
-                    }`}
-                  >
-                    <Globe size={14} /> Public
-                  </button>
-                </div>
-              </div>
-            )}
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" type="button" onClick={() => setShowCreate(false)}>Cancel</Button>
               <Button type="submit" disabled={creating || !newName.trim() || !newSlug.trim()}>
@@ -268,32 +230,10 @@ export function HomePage() {
   );
 }
 
-function HomeView({
-  personalSpaces, teamspaces, loading, onCreatePersonal, onCreateTeam,
-}: {
-  personalSpaces: Workspace[]; teamspaces: Workspace[]; loading: boolean;
-  onCreatePersonal: () => void; onCreateTeam: () => void;
-}) {
+function HomeView() {
   return (
     <>
       <h1 className="text-4xl font-bold mb-8" style={{ fontFamily: 'var(--font-serif)' }}>Home</h1>
-
-      {/* Quick actions */}
-      {!loading && personalSpaces.length === 0 && teamspaces.length === 0 && (
-        <div className="py-12 text-center mb-8">
-          <p className="text-[var(--color-text-secondary)] text-sm mb-4">Get started by creating a space.</p>
-          <div className="flex justify-center gap-3">
-            <button onClick={onCreatePersonal} className="rounded-md bg-[var(--color-text)] text-white px-4 py-1.5 text-sm hover:opacity-90">
-              Personal Space
-            </button>
-            <button onClick={onCreateTeam} className="rounded-md border border-[var(--color-text)] px-4 py-1.5 text-sm hover:bg-[var(--color-bg-hover)]">
-              Teamspace
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Recent */}
       <section>
         <h2 className="text-xs font-medium text-[var(--color-text-tertiary)] uppercase tracking-wider mb-3">Recent</h2>
         <div className="py-8 text-center">
@@ -306,7 +246,7 @@ function HomeView({
 }
 
 function DiscoverView() {
-  const [spaces, setSpaces] = useState<Workspace[]>([]);
+  const [spaces, setSpaces] = useState<{ id: string; name: string; slug: string; visibility: string; role: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState<string | null>(null);
 
@@ -321,7 +261,6 @@ function DiscoverView() {
     try {
       const { joinWorkspace } = await import('../api');
       await joinWorkspace(slug);
-      // Remove from list after joining
       setSpaces((prev) => prev.filter((w) => w.slug !== slug));
     } finally {
       setJoining(null);

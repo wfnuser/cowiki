@@ -38,10 +38,8 @@ pub async fn register(
 
     let user = cowiki_db::users::create(&state.db, &input.name, input.email.as_deref(), None).await?;
 
-    state
-        .wiki_repo
-        .ensure_user_branch(&user.id.to_string())
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    // Create user branch + personal space
+    init_user_space(&state, &user).await?;
 
     Ok(Json(AuthResponse {
         api_key: user.api_key.clone(),
@@ -177,10 +175,9 @@ pub async fn github_callback(
         existing
     } else {
         let user = cowiki_db::users::create(&state.db, &gh_user.login, email.as_deref(), None).await?;
-        state
-            .wiki_repo
-            .ensure_user_branch(&user.id.to_string())
-            .map_err(|e| AppError::Internal(e.to_string()))?;
+        if let Err(e) = init_user_space(&state, &user).await {
+            tracing::error!("failed to init user space: {:?}", e);
+        }
         tracing::info!("created user {} via GitHub OAuth", user.name);
         user
     };
@@ -220,4 +217,56 @@ pub async fn extract_user(
 /// Helper: get the user's personal branch name
 pub fn user_branch(user: &cowiki_db::users::User) -> String {
     format!("user/{}", user.id)
+}
+
+/// Initialize a new user's space: git branch + personal workspace + welcome page
+async fn init_user_space(state: &crate::AppState, user: &cowiki_db::users::User) -> Result<()> {
+    let branch = user_branch(user);
+
+    // 1. Create Git branch
+    state.wiki_repo
+        .ensure_user_branch(&user.id.to_string())
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    // 2. Create personal workspace in DB
+    let slug = format!("personal-{}", &user.id.to_string()[..8]);
+    cowiki_db::workspaces::create(&state.db, &format!("{}'s Space", user.name), &slug, "private", user.id)
+        .await
+        .ok(); // Ignore if already exists
+
+    // 3. Write a welcome page
+    let welcome = r#"---
+title: "Welcome to CoWiki"
+summary: "Getting started with your personal knowledge space."
+kind: concept
+---
+
+# Welcome to CoWiki
+
+This is your personal knowledge space. Here are a few things you can do:
+
+## Ingest Sources
+
+Add URLs, text, or files as sources. CoWiki will compile them into structured wiki pages.
+
+## Compile
+
+Click **Compile** to transform your sources into interlinked wiki pages using AI.
+
+## Submit to Teamspace
+
+When you're ready, submit your pages to a shared teamspace for team review.
+
+## Search
+
+Use semantic search to find knowledge across your spaces.
+
+Happy building!
+"#;
+
+    state.wiki_repo
+        .write_file(&branch, "wiki/welcome.md", welcome.as_bytes(), "init: welcome page", &user.name)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    Ok(())
 }
