@@ -19,7 +19,6 @@ cargo run --release help
 
 | Command | Description |
 |---------|-------------|
-| `cowiki login` | Register/login and save credentials |
 | `cowiki ingest` | Add a source (URL, text, or file) |
 | `cowiki compile` | Compile sources into wiki pages with LLM |
 | `cowiki write` | Create or edit a page |

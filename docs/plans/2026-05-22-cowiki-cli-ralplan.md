@@ -51,7 +51,6 @@ cli/
     │   ├── read.rs
     │   ├── write.rs
     │   ├── list.rs
-    │   └── login.rs
     ├── client.rs        # HTTP client (reqwest)
     ├── auth.rs          # Credential store
     └── output.rs        # Formatters (table, colored, json)
@@ -59,7 +58,7 @@ cli/
 
 **Commands:**
 ```
-cowiki login                   # Interactive: enter server URL + API key
+cowiki ingest <file|url>       # POST /api/ingest
 cowiki ingest <file|url>       # POST /api/ingest
 cowiki compile                 # POST /api/compile
 cowiki submit <slug...>       # POST /api/submit
@@ -76,7 +75,6 @@ cowiki list                    # GET /api/pages
 #### Option A2: Noun-first subcommands (`cowiki <resource> <action>`)
 
 ```
-cowiki auth login
 cowiki pages list
 cowiki pages read <slug>
 cowiki pages write <slug>
@@ -225,9 +223,9 @@ fn main() {
 
 ## 5. Implementation Phases
 
-### Phase 1: Skeleton + Auth (`cli/` scaffolding, login, API key store)
+### Phase 1: Skeleton + Config (cli/ scaffolding, .env, config.toml)
 
-**Goal:** `cowiki login` works. Credentials are persisted. `cowiki --help` shows all commands.
+**Goal:** Config loads from .env / config.toml. `cowiki --help` shows all commands.
 
 **Files to create:**
 - `cli/Cargo.toml` — dependencies: `clap`, `reqwest`, `serde`, `serde_json`, `tokio`, `dirs`, `colored`, `comfy-table`, `indicatif`
@@ -239,8 +237,8 @@ fn main() {
 
 **Acceptance criteria:**
 - [ ] `cargo build -p cowiki-cli` succeeds
-- [ ] `cowiki login` prompts for server URL + API key, saves to `~/.config/cowiki/credentials.json`
-- [ ] `COWIKI_API_KEY=xxx cowiki search "test"` works without prior login
+- [ ] `cowiki --help` shows all commands with descriptions
+- [ ] `COWIKI_API_KEY=xxx cowiki search "test"` works via .env
 - [ ] `cowiki --help` lists all 9 commands with descriptions
 
 **Workspace change:**
@@ -332,7 +330,7 @@ members = ["crates/server", "crates/core", "crates/db", "cli"]
 **Tasks:**
 - [ ] Write integration test script (`test/cli-integration.sh`) that:
   1. Starts the server (Docker Compose)
-  2. Registers a user via `cowiki login`-equivalent API call
+  2. Creates a test user via direct API call
   3. Runs ingest → compile → submit → review approve pipeline
   4. Verifies search returns the new page
 - [ ] Add `cowiki --version` (read from `Cargo.toml` via `env!("CARGO_PKG_VERSION")`)
@@ -346,7 +344,6 @@ members = ["crates/server", "crates/core", "crates/db", "cli"]
 
 | CLI Command | HTTP Method | Endpoint | Auth | Request Body / Params | Response |
 |-------------|-------------|----------|------|-----------------------|----------|
-| `cowiki login` | POST | `/api/auth/register` | No | `{name, email?}` | `{user, api_key}` |
 | `cowiki ingest` | POST | `/api/ingest` | No | `{source_type, content, filename?, branch}` | `{filename, content_hash}` |
 | `cowiki compile` | POST | `/api/compile` | No | `{branch}` | `{pages: [{slug, title, summary}], skipped}` |
 | `cowiki submit` | POST | `/api/submit` | No | `{branch, page_slugs}` | `{submission_id, summary, duplicates}` |
@@ -368,7 +365,7 @@ members = ["crates/server", "crates/core", "crates/db", "cli"]
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
 | **Server API changes silently** — route shapes or response fields change, CLI breaks | Medium | High | Pin CLI version to server version in CI. Add `cowiki --check-compat` that calls `/api/health` and verifies expected response shape. Integration test in CI. |
-| **Auth model mismatch** — Server adds required auth to currently-open endpoints | Medium | Medium | CLI always sends `Authorization` header when credentials exist. Graceful fallback if 401 received: print message suggesting `cowiki login`. |
+| **Auth model mismatch** — Server adds required auth to currently-open endpoints | Medium | Medium | CLI always sends `Authorization` header when credentials exist. Graceful fallback if 401 received: print message suggesting to check API key. |
 | **Large page bodies** — `cowiki read` on a 50KB wiki page floods the terminal | High | Low | Pipe to `$PAGER` by default (respect `$PAGER`/`less`). `--no-pager` flag to disable. |
 | **Compile timeout** — LLM compilation takes >60s, CLI appears hung | Medium | Medium | `indicatif` spinner with elapsed time. Configurable timeout via `--timeout` flag (default 120s). `reqwest::ClientBuilder::timeout()`. |
 | **Binary size bloat** — tokio + reqwest + clap produce a 15MB+ binary | Low | Low | Acceptable for a developer tool. Use `opt-level = "s"` and LTO in release profile. |
@@ -418,7 +415,7 @@ Total: **8 direct dependencies**. All are well-maintained, widely-used crates.
 
 **Follow-ups:**
 - If API grows beyond ~30 endpoints, extract `crates/api-types/` shared crate.
-- If auth becomes mandatory on all endpoints post-MVP, add `cowiki login` as prerequisite gate.
+- If auth becomes mandatory on all endpoints post-MVP, require API key configuration.
 - Shell completion generation via clap's built-in support.
 
 ---
