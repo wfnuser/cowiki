@@ -1,13 +1,18 @@
 use axum::routing::{get, post};
 use axum::Router;
+use clap::Parser;
 use cowiki_core::compiler::Compiler;
-use cowiki_core::openai::OpenAIClient;
+use cowiki_core::ai::embedder::{create_embedder, EmbedderConfig};
+use cowiki_core::ai::llm::{create_llm, LlmConfig};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
 mod config;
 mod error;
 mod routes;
+
+use config::CliArgs;
 
 pub struct AppState {
     pub db: sqlx::PgPool,
@@ -16,34 +21,72 @@ pub struct AppState {
     pub compiler: Compiler,
 }
 
+// ── Usage endpoint response ──
+
+#[derive(serde::Serialize)]
+struct UsageResponse {
+    llm: HashMap<String, cowiki_core::ai::token_usage::TokenUsage>,
+    vlm: HashMap<String, cowiki_core::ai::token_usage::TokenUsage>,
+    embedder: HashMap<String, cowiki_core::ai::token_usage::TokenUsage>,
+}
+
+async fn get_usage(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> axum::Json<UsageResponse> {
+    axum::Json(UsageResponse {
+        llm: state.compiler.llm_usage(),
+        vlm: state.compiler.vlm_usage(),
+        embedder: state.compiler.embedder_usage(),
+    })
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
     dotenvy::dotenv().ok();
 
-    let config = config::Config::from_env();
+    let cli_args = CliArgs::parse();
+    let config = config::Config::load(Some(cli_args));
 
     // Database
-    let db = cowiki_db::create_pool(&config.database_url)
+    let db = cowiki_db::create_pool(&config.database.url)
         .await
         .expect("failed to connect to database");
-    cowiki_db::run_migrations(&db)
+    cowiki_db::run_migrations(&db, config.database.embedding_dimension)
         .await
         .expect("failed to run migrations");
     tracing::info!("database connected and migrations applied");
 
     // Git repo
-    let wiki_repo = cowiki_core::git::WikiRepo::open_or_init(&config.data_dir)
+    let wiki_repo = cowiki_core::git::WikiRepo::open_or_init(&config.server.data_dir)
         .expect("failed to init wiki repo");
     // Ensure default user branch (for backward compat)
     wiki_repo
         .ensure_user_branch("default")
         .expect("failed to create default user branch");
-    tracing::info!("wiki repo initialized at {}/repo", config.data_dir);
+    tracing::info!("wiki repo initialized at {}/repo", config.server.data_dir);
+
+    let llm = create_llm(LlmConfig {
+        provider: config.llm.provider.clone(),
+        model: config.llm.model.clone(),
+        api_key: config.llm.api_key.clone(),
+        api_base: config.llm.api_base.clone(),
+        temperature: config.llm.temperature,
+        max_tokens: config.llm.max_tokens,
+    });
+
+    let embedder = create_embedder(EmbedderConfig {
+        provider: config.embedder.provider.clone(),
+        model: config.embedder.model.clone(),
+        api_key: config.embedder.api_key.clone(),
+        api_base: config.embedder.api_base.clone(),
+        dimension: config.embedder.dimension,
+    });
 
     // Compiler
-    let openai = OpenAIClient::new(&config.openai_api_key, &config.openai_base_url);
-    let compiler = Compiler::new(openai);
+    let compiler = Compiler::new(llm, None, embedder);
+
+    let port = config.server.port.to_string();
 
     let state = Arc::new(AppState {
         db,
@@ -54,6 +97,8 @@ async fn main() {
 
     let app = Router::new()
         .route("/api/health", get(|| async { "ok" }))
+        // Usage
+        .route("/api/usage", get(get_usage))
         // Auth
         .route("/api/auth/register", post(routes::auth::register))
         .route("/api/auth/me", get(routes::auth::me))
@@ -86,7 +131,6 @@ async fn main() {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    let port = std::env::var("COWIKI_PORT").unwrap_or_else(|_| "3000".into());
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
         .unwrap();

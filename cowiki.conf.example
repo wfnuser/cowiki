@@ -1,0 +1,56 @@
+# cowiki configuration file
+# Copy this file to cowiki.conf and modify as needed.
+# All fields can also be set via environment variables (env vars override file values).
+
+[database]
+# PostgreSQL connection URL
+url = "postgres://cowiki:cowiki@localhost:5432/cowiki"
+# Embedding vector dimension for pgvector (defaults to embedder.dimension)
+embedding_dimension = 1536
+
+[server]
+# Server port
+port = 3000
+# Data directory (git repo, wiki files)
+data_dir = "./data"
+
+[llm]
+# LLM (Language Model) provider: currently only "openai" is supported
+provider = "openai"
+# Model name
+model = "gpt-4o-mini"
+# API key
+api_key = "sk-..."
+# API base URL (change for proxies like LiteLLM, OpenRouter, etc.)
+api_base = "https://api.openai.com/v1"
+# Temperature for generation (0.0 - 2.0)
+temperature = 0.3
+# Max tokens per completion, Optionally set
+# max_tokens = 4096
+
+# Future: Vision Language Model (not yet implemented)
+# [vlm]
+# provider = "openai"
+# model = "gpt-4o"
+
+[embedder]
+# Embedding provider: currently only "openai" is supported
+provider = "openai"
+# Embedding model name
+model = "text-embedding-3-small"
+# API key (defaults to vlm.api_key if empty)
+api_key = ""
+# API base URL (defaults to vlm.api_base if empty)
+api_base = ""
+# Output vector dimension (0 = model default)
+dimension = 1536
+
+[github]
+# GitHub OAuth app credentials
+client_id = "your_github_client_id"
+client_secret = "your_github_client_secret"
+redirect_uri = "http://localhost:3000/api/auth/github/callback"
+
+[frontend]
+# Frontend URL (for CORS and redirects)
+url = "http://localhost:5173"

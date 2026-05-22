@@ -1,13 +1,24 @@
+use std::collections::HashMap;
+
+use crate::ai::embedder::Embedder;
+use crate::ai::llm::Llm;
+use crate::ai::token_usage::TokenUsage;
+use crate::ai::vlm::Vlm;
 use crate::models::Page;
-use crate::openai::OpenAIClient;
 
 pub struct Compiler {
-    openai: OpenAIClient,
+    llm: Box<dyn Llm>,
+    vlm: Option<Box<dyn Vlm>>,
+    embedder: Box<dyn Embedder>,
 }
 
 impl Compiler {
-    pub fn new(openai: OpenAIClient) -> Self {
-        Self { openai }
+    pub fn new(
+        llm: Box<dyn Llm>,
+        vlm: Option<Box<dyn Vlm>>,
+        embedder: Box<dyn Embedder>,
+    ) -> Self {
+        Self { llm, vlm, embedder }
     }
 
     pub async fn compile(&self, sources: &[(String, String)]) -> Result<Vec<Page>, String> {
@@ -37,28 +48,50 @@ Separate multiple pages with `===PAGE_BREAK===`.
 Be concise. One concept per page. Use clear headings. Attribute claims to sources with `^[filename.md]`."#;
 
         let user = format!("Compile the following sources into wiki pages:\n\n{combined}");
-        let result = self.openai.chat(system, &user).await?;
+        let result = self.llm.chat(system, &user).await?;
 
         let pages = result
+            .content
             .split("===PAGE_BREAK===")
-            .filter(|s| !s.trim().is_empty())
-            .map(|raw| parse_compiled_page(raw.trim()))
+            .filter(|s: &&str| !s.trim().is_empty())
+            .map(|raw: &str| parse_compiled_page(raw.trim()))
             .collect();
 
         Ok(pages)
     }
 
     pub async fn generate_summary(&self, content: &str) -> Result<String, String> {
-        self.openai
+        let resp = self
+            .llm
             .chat(
                 "Generate a one-line summary (max 100 chars) of this content. Return only the summary, nothing else.",
                 content,
             )
-            .await
+            .await?;
+        Ok(resp.content)
     }
 
     pub async fn embed(&self, text: &str) -> Result<Vec<f32>, String> {
-        self.openai.embed(text).await
+        let result: crate::ai::embedder::EmbedResult = self.embedder.embed(text, false).await?;
+        Ok(result.vector)
+    }
+
+    /// Get LLM token usage snapshot.
+    pub fn llm_usage(&self) -> HashMap<String, TokenUsage> {
+        self.llm.usage_snapshot()
+    }
+
+    /// Get VLM token usage snapshot (if configured).
+    pub fn vlm_usage(&self) -> HashMap<String, TokenUsage> {
+        self.vlm
+            .as_ref()
+            .map(|v| v.usage_snapshot())
+            .unwrap_or_default()
+    }
+
+    /// Get embedder token usage snapshot.
+    pub fn embedder_usage(&self) -> HashMap<String, TokenUsage> {
+        self.embedder.usage_snapshot()
     }
 }
 

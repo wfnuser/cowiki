@@ -46,6 +46,7 @@ pub async fn upsert(
     .bind(user_id)
     .fetch_one(pool)
     .await
+    .map_err(|e| { tracing::error!("DB upsert page {slug}: {e}"); e })
 }
 
 pub async fn list_by_branch(pool: &PgPool, branch: &str) -> sqlx::Result<Vec<PageMeta>> {
@@ -55,6 +56,7 @@ pub async fn list_by_branch(pool: &PgPool, branch: &str) -> sqlx::Result<Vec<Pag
     .bind(branch)
     .fetch_all(pool)
     .await
+    .map_err(|e| { tracing::error!("DB list pages by branch {branch}: {e}"); e })
 }
 
 pub async fn find_similar(
@@ -81,7 +83,7 @@ pub async fn find_similar(
     .bind(threshold)
     .bind(limit)
     .fetch_all(pool)
-    .await?;
+    .await.map_err(|e| { tracing::error!("DB error: {e}"); e })?;
 
     Ok(rows
         .into_iter()

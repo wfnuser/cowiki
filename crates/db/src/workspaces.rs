@@ -36,7 +36,7 @@ pub async fn create(pool: &PgPool, name: &str, slug: &str, visibility: &str, cre
     )
     .bind(name).bind(slug).bind(visibility).bind(created_by)
     .fetch_one(pool)
-    .await?;
+    .await.map_err(|e| { tracing::error!("DB error: {e}"); e })?;
 
     // Add creator as owner
     sqlx::query(
@@ -44,7 +44,7 @@ pub async fn create(pool: &PgPool, name: &str, slug: &str, visibility: &str, cre
     )
     .bind(ws.id).bind(created_by)
     .execute(pool)
-    .await?;
+    .await.map_err(|e| { tracing::error!("DB error: {e}"); e })?;
 
     Ok(ws)
 }
@@ -54,6 +54,7 @@ pub async fn find_by_slug(pool: &PgPool, slug: &str) -> sqlx::Result<Option<Work
         .bind(slug)
         .fetch_optional(pool)
         .await
+        .map_err(|e| { tracing::error!("DB find workspace by slug failed: {e}"); e })
 }
 
 pub async fn list_public(pool: &PgPool) -> sqlx::Result<Vec<Workspace>> {
@@ -71,6 +72,7 @@ pub async fn list_for_user(pool: &PgPool, user_id: Uuid) -> sqlx::Result<Vec<Wor
     .bind(user_id)
     .fetch_all(pool)
     .await
+    .map_err(|e| { tracing::error!("DB list workspaces for user failed: {e}"); e })
 }
 
 pub async fn is_member(pool: &PgPool, workspace_id: Uuid, user_id: Uuid) -> sqlx::Result<bool> {
@@ -79,7 +81,7 @@ pub async fn is_member(pool: &PgPool, workspace_id: Uuid, user_id: Uuid) -> sqlx
     )
     .bind(workspace_id).bind(user_id)
     .fetch_one(pool)
-    .await?;
+    .await.map_err(|e| { tracing::error!("DB error: {e}"); e })?;
     Ok(row > 0)
 }
 
@@ -89,7 +91,7 @@ pub async fn add_member(pool: &PgPool, workspace_id: Uuid, user_id: Uuid, role: 
     )
     .bind(workspace_id).bind(user_id).bind(role).bind(invited_by)
     .execute(pool)
-    .await?;
+    .await.map_err(|e| { tracing::error!("DB error: {e}"); e })?;
     Ok(())
 }
 
@@ -100,6 +102,7 @@ pub async fn list_members(pool: &PgPool, workspace_id: Uuid) -> sqlx::Result<Vec
     .bind(workspace_id)
     .fetch_all(pool)
     .await
+    .map_err(|e| { tracing::error!("DB list members failed: {e}"); e })
 }
 
 pub async fn create_invitation(pool: &PgPool, workspace_id: Uuid, email: &str, invited_by: Uuid) -> sqlx::Result<Invitation> {
@@ -109,6 +112,7 @@ pub async fn create_invitation(pool: &PgPool, workspace_id: Uuid, email: &str, i
     .bind(workspace_id).bind(email).bind(invited_by)
     .fetch_one(pool)
     .await
+    .map_err(|e| { tracing::error!("DB create invitation failed: {e}"); e })
 }
 
 pub async fn find_pending_invitations(pool: &PgPool, email: &str) -> sqlx::Result<Vec<Invitation>> {

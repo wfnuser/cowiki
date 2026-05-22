@@ -91,8 +91,8 @@ pub async fn regenerate_key(
 pub async fn github_login(State(state): State<Arc<AppState>>) -> Redirect {
     let url = format!(
         "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&scope=read:user%20user:email",
-        state.config.github_client_id,
-        urlencoding::encode(&state.config.github_redirect_uri),
+        state.config.auth.github_client_id,
+        urlencoding::encode(&state.config.auth.github_redirect_uri),
     );
     Redirect::temporary(&url)
 }
@@ -132,8 +132,8 @@ pub async fn github_callback(
         .post("https://github.com/login/oauth/access_token")
         .header("Accept", "application/json")
         .json(&serde_json::json!({
-            "client_id": state.config.github_client_id,
-            "client_secret": state.config.github_client_secret,
+            "client_id": state.config.auth.github_client_id,
+            "client_secret": state.config.auth.github_client_secret,
             "code": params.code,
         }))
         .send()

@@ -60,6 +60,7 @@ pub async fn regenerate_api_key(pool: &PgPool, user_id: Uuid) -> sqlx::Result<Us
     .bind(&api_key)
     .fetch_one(pool)
     .await
+    .map_err(|e| { tracing::error!("DB regenerate API key failed: {e}"); e })
 }
 
 pub async fn get_default(pool: &PgPool) -> sqlx::Result<User> {

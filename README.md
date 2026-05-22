@@ -52,8 +52,16 @@ CoWiki makes LLM Wiki multiplayer:
 git clone https://github.com/wfnuser/cowiki.git
 cd cowiki
 
-# Start PostgreSQL
+# Start PostgreSQL using default volume for data persistence 
+# (in /var/lib/docker/volumes/pgdata/cowiki_pgdata)
 docker compose up -d
+
+# Or you can specify your own Postgres config, below will store data in /path/to/data on host
+# PGDATA_TYPE=bind PGDATA_SOURCE=/path/to/data docker compose up -d
+
+# start from copy
+cp cowiki.conf.example cowiki.conf
+# edit cowiki.conf to set cowiki
 
 # Start the server
 cargo run

@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS pages (
     title TEXT NOT NULL,
     summary TEXT NOT NULL DEFAULT '',
     branch TEXT NOT NULL DEFAULT 'main',
-    embedding vector(1536),
+    embedding vector(__EMBEDDING_DIM__),
     content_hash TEXT NOT NULL DEFAULT '',
     created_by UUID REFERENCES users(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

@@ -39,6 +39,7 @@ pub async fn list_pending(pool: &PgPool) -> sqlx::Result<Vec<Submission>> {
     )
     .fetch_all(pool)
     .await
+    .map_err(|e| { tracing::error!("DB list submissions failed: {e}"); e })
 }
 
 pub async fn find_by_id(pool: &PgPool, id: Uuid) -> sqlx::Result<Option<Submission>> {
@@ -46,6 +47,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> sqlx::Result<Option<Submissi
         .bind(id)
         .fetch_optional(pool)
         .await
+        .map_err(|e| { tracing::error!("DB find submission by id failed: {e}"); e })
 }
 
 pub async fn update_status(

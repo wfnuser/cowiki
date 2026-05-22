@@ -8,7 +8,9 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - type: ${PGDATA_TYPE:-volume}
+        source: ${PGDATA_SOURCE:-pgdata}
+        target: /var/lib/postgresql/data
 
 volumes:
   pgdata:
