@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, FolderOpen, Clock, LogOut, BookOpen } from 'lucide-react';
+import { Plus, FolderOpen, Clock, LogOut, BookOpen, Globe, Lock, UserPlus } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -23,22 +23,32 @@ import {
   SidebarInset,
 } from '@/components/ui/sidebar';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { listWorkspaces, createWorkspace, type Workspace } from '../api';
+import { listWorkspaces, listPublicWorkspaces, createWorkspace, joinWorkspace, type Workspace } from '../api';
 import { getStoredAuth, clearAuth } from '../auth';
 
 export function HomePage() {
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [mySpaces, setMySpaces] = useState<Workspace[]>([]);
+  const [publicSpaces, setPublicSpaces] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
   const [newSlug, setNewSlug] = useState('');
+  const [newVisibility, setNewVisibility] = useState<'private' | 'public'>('private');
   const [creating, setCreating] = useState(false);
   const navigate = useNavigate();
   const auth = getStoredAuth();
 
-  const load = () => {
+  const load = async () => {
     setLoading(true);
-    listWorkspaces().then(setWorkspaces).finally(() => setLoading(false));
+    try {
+      const [mine, pub] = await Promise.all([listWorkspaces(), listPublicWorkspaces()]);
+      setMySpaces(mine);
+      // Filter out spaces I'm already in
+      const myIds = new Set(mine.map((w) => w.id));
+      setPublicSpaces(pub.filter((w) => !myIds.has(w.id)));
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { load(); }, []);
@@ -55,14 +65,20 @@ export function HomePage() {
     if (!newName.trim() || !newSlug.trim()) return;
     setCreating(true);
     try {
-      const ws = await createWorkspace(newName.trim(), newSlug.trim());
+      const ws = await createWorkspace(newName.trim(), newSlug.trim(), newVisibility);
       setShowCreate(false);
       setNewName('');
       setNewSlug('');
+      setNewVisibility('private');
       navigate(`/w/${ws.slug}`);
     } finally {
       setCreating(false);
     }
+  };
+
+  const handleJoin = async (slug: string) => {
+    await joinWorkspace(slug);
+    load();
   };
 
   const handleLogout = () => {
@@ -83,9 +99,10 @@ export function HomePage() {
             </div>
           </SidebarHeader>
           <SidebarContent>
+            {/* My Space */}
             <SidebarGroup>
               <SidebarGroupLabel>
-                <span>Knowledge Spaces</span>
+                <span>My Space</span>
                 <button
                   onClick={() => setShowCreate(true)}
                   className="ml-auto text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors"
@@ -94,23 +111,42 @@ export function HomePage() {
                 </button>
               </SidebarGroupLabel>
               <SidebarMenu>
-                {workspaces.map((ws) => (
+                {mySpaces.map((ws) => (
                   <SidebarMenuItem key={ws.id}>
                     <SidebarMenuButton asChild tooltip={ws.name}>
                       <Link to={`/w/${ws.slug}`}>
-                        <BookOpen />
+                        {ws.visibility === 'public' ? <Globe size={16} /> : <Lock size={16} />}
                         <span>{ws.name}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
-                {!loading && workspaces.length === 0 && (
-                  <div className="px-2 py-6 text-xs text-sidebar-foreground/40 text-center">
+                {!loading && mySpaces.length === 0 && (
+                  <div className="px-2 py-4 text-xs text-sidebar-foreground/40 text-center">
                     No spaces yet
                   </div>
                 )}
               </SidebarMenu>
             </SidebarGroup>
+
+            {/* Shared Spaces */}
+            {publicSpaces.length > 0 && (
+              <SidebarGroup>
+                <SidebarGroupLabel>Shared Spaces</SidebarGroupLabel>
+                <SidebarMenu>
+                  {publicSpaces.map((ws) => (
+                    <SidebarMenuItem key={ws.id}>
+                      <SidebarMenuButton asChild tooltip={`${ws.name} (click to preview)`}>
+                        <Link to={`/w/${ws.slug}`}>
+                          <Globe size={16} />
+                          <span>{ws.name}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroup>
+            )}
           </SidebarContent>
           <SidebarFooter>
             <div className="flex items-center justify-between px-2 py-1">
@@ -136,14 +172,14 @@ export function HomePage() {
               Welcome back, {auth?.name}.
             </p>
 
-            {/* Spaces grid */}
-            {!loading && workspaces.length > 0 && (
+            {/* My Spaces */}
+            {mySpaces.length > 0 && (
               <section className="mb-10">
                 <h2 className="text-xs font-medium text-[var(--color-text-tertiary)] uppercase tracking-wider mb-3">
-                  Knowledge Spaces
+                  My Space
                 </h2>
                 <div className="grid grid-cols-2 gap-3">
-                  {workspaces.map((ws) => (
+                  {mySpaces.map((ws) => (
                     <Link
                       key={ws.id}
                       to={`/w/${ws.slug}`}
@@ -153,27 +189,66 @@ export function HomePage() {
                         <div className="w-10 h-10 rounded-lg bg-[var(--color-bg-hover)] flex items-center justify-center text-lg font-medium text-[var(--color-text-secondary)]">
                           {ws.name[0]?.toUpperCase()}
                         </div>
-                        <div>
-                          <div className="text-sm font-medium text-[var(--color-text)]">{ws.name}</div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm font-medium text-[var(--color-text)] truncate">{ws.name}</span>
+                            {ws.visibility === 'public' ? (
+                              <Globe size={12} className="shrink-0 text-[var(--color-text-tertiary)]" />
+                            ) : (
+                              <Lock size={12} className="shrink-0 text-[var(--color-text-tertiary)]" />
+                            )}
+                          </div>
                           <div className="text-xs text-[var(--color-text-tertiary)]">{ws.role}</div>
                         </div>
                       </div>
                     </Link>
                   ))}
-                  {/* Create new card */}
                   <button
                     onClick={() => setShowCreate(true)}
                     className="rounded-lg border border-dashed border-[var(--color-border)] p-5 hover:border-[var(--color-border-hover)] hover:bg-[var(--color-bg-secondary)] transition-all flex items-center justify-center gap-2 text-sm text-[var(--color-text-tertiary)]"
                   >
                     <Plus size={16} />
-                    New Knowledge Space
+                    New Space
                   </button>
                 </div>
               </section>
             )}
 
+            {/* Shared Spaces (public, not joined) */}
+            {publicSpaces.length > 0 && (
+              <section className="mb-10">
+                <h2 className="text-xs font-medium text-[var(--color-text-tertiary)] uppercase tracking-wider mb-3">
+                  Shared Spaces
+                </h2>
+                <div className="grid grid-cols-2 gap-3">
+                  {publicSpaces.map((ws) => (
+                    <div
+                      key={ws.id}
+                      className="rounded-lg border border-[var(--color-border)] bg-white p-5 flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-[var(--color-bg-hover)] flex items-center justify-center text-lg font-medium text-[var(--color-text-secondary)]">
+                          {ws.name[0]?.toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="text-sm font-medium text-[var(--color-text)]">{ws.name}</div>
+                          <div className="text-xs text-[var(--color-text-tertiary)]">public</div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleJoin(ws.slug)}
+                        className="flex items-center gap-1 text-xs text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] transition-colors"
+                      >
+                        <UserPlus size={14} /> Join
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             {/* Empty state */}
-            {!loading && workspaces.length === 0 && (
+            {!loading && mySpaces.length === 0 && publicSpaces.length === 0 && (
               <div className="py-16 text-center">
                 <FolderOpen size={32} className="mx-auto text-[var(--color-text-tertiary)] mb-3" />
                 <p className="text-[var(--color-text-secondary)] text-sm mb-1">No knowledge spaces yet</p>
@@ -187,7 +262,7 @@ export function HomePage() {
               </div>
             )}
 
-            {/* Recent activity */}
+            {/* Recent */}
             <section>
               <h2 className="text-xs font-medium text-[var(--color-text-tertiary)] uppercase tracking-wider mb-3">
                 Recent
@@ -211,20 +286,16 @@ export function HomePage() {
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4 mt-2">
             <div>
-              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">
-                Space name
-              </label>
+              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Name</label>
               <Input
                 value={newName}
                 onChange={(e) => handleNameChange(e.target.value)}
-                placeholder="e.g. Engineering Wiki, Product Knowledge Base"
+                placeholder="e.g. Engineering Wiki, Product Knowledge"
                 autoFocus
               />
             </div>
             <div>
-              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">
-                URL slug
-              </label>
+              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">URL slug</label>
               <Input
                 value={newSlug}
                 onChange={(e) => setNewSlug(e.target.value)}
@@ -233,6 +304,38 @@ export function HomePage() {
               />
               <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
                 cowiki.app/w/{newSlug || 'your-slug'}
+              </p>
+            </div>
+            <div>
+              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Visibility</label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNewVisibility('private')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-sm transition-colors ${
+                    newVisibility === 'private'
+                      ? 'border-[var(--color-text)] bg-[var(--color-bg-active)]'
+                      : 'border-[var(--color-border)] hover:bg-[var(--color-bg-hover)]'
+                  }`}
+                >
+                  <Lock size={14} /> Private
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewVisibility('public')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-sm transition-colors ${
+                    newVisibility === 'public'
+                      ? 'border-[var(--color-text)] bg-[var(--color-bg-active)]'
+                      : 'border-[var(--color-border)] hover:bg-[var(--color-bg-hover)]'
+                  }`}
+                >
+                  <Globe size={14} /> Public
+                </button>
+              </div>
+              <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+                {newVisibility === 'private'
+                  ? 'Only invited members can see this space.'
+                  : 'Anyone can browse. Members can contribute.'}
               </p>
             </div>
             <div className="flex justify-end gap-2 pt-2">

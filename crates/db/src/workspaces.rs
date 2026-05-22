@@ -7,6 +7,7 @@ pub struct Workspace {
     pub id: Uuid,
     pub name: String,
     pub slug: String,
+    pub visibility: String,
     pub created_by: Uuid,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
@@ -29,11 +30,11 @@ pub struct Invitation {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-pub async fn create(pool: &PgPool, name: &str, slug: &str, created_by: Uuid) -> sqlx::Result<Workspace> {
+pub async fn create(pool: &PgPool, name: &str, slug: &str, visibility: &str, created_by: Uuid) -> sqlx::Result<Workspace> {
     let ws = sqlx::query_as::<_, Workspace>(
-        "INSERT INTO workspaces (name, slug, created_by) VALUES ($1, $2, $3) RETURNING *"
+        "INSERT INTO workspaces (name, slug, visibility, created_by) VALUES ($1, $2, $3, $4) RETURNING *"
     )
-    .bind(name).bind(slug).bind(created_by)
+    .bind(name).bind(slug).bind(visibility).bind(created_by)
     .fetch_one(pool)
     .await?;
 
@@ -53,6 +54,14 @@ pub async fn find_by_slug(pool: &PgPool, slug: &str) -> sqlx::Result<Option<Work
         .bind(slug)
         .fetch_optional(pool)
         .await
+}
+
+pub async fn list_public(pool: &PgPool) -> sqlx::Result<Vec<Workspace>> {
+    sqlx::query_as::<_, Workspace>(
+        "SELECT * FROM workspaces WHERE visibility = 'public' ORDER BY created_at DESC"
+    )
+    .fetch_all(pool)
+    .await
 }
 
 pub async fn list_for_user(pool: &PgPool, user_id: Uuid) -> sqlx::Result<Vec<Workspace>> {

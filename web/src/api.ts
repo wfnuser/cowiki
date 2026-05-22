@@ -73,11 +73,24 @@ export async function listWorkspaces(): Promise<Workspace[]> {
   return res.json();
 }
 
-export async function createWorkspace(name: string, slug: string): Promise<Workspace> {
+export async function createWorkspace(name: string, slug: string, visibility = 'private'): Promise<Workspace> {
   const res = await fetch(`${BASE}/workspaces`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ name, slug }),
+    body: JSON.stringify({ name, slug, visibility }),
+  });
+  return res.json();
+}
+
+export async function listPublicWorkspaces(): Promise<Workspace[]> {
+  const res = await fetch(`${BASE}/workspaces/public`, { headers: h() });
+  return res.json();
+}
+
+export async function joinWorkspace(slug: string): Promise<Workspace> {
+  const res = await fetch(`${BASE}/workspaces/${slug}/join`, {
+    method: 'POST',
+    headers: h(),
   });
   return res.json();
 }

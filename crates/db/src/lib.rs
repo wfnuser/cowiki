@@ -14,5 +14,7 @@ pub async fn run_migrations(pool: &PgPool) -> sqlx::Result<()> {
     sqlx::raw_sql(sql).execute(pool).await?;
     let sql2 = include_str!("migrations/002_workspaces.sql");
     sqlx::raw_sql(sql2).execute(pool).await?;
+    let sql3 = include_str!("migrations/003_workspace_visibility.sql");
+    sqlx::raw_sql(sql3).execute(pool).await?;
     Ok(())
 }
