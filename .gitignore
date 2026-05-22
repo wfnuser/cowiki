@@ -4,3 +4,12 @@ node_modules/
 data/
 web/dist/
 cowiki.conf
+
+# OMG related
+mcp-server
+.github/agents
+.github/hooks
+.github/prompts
+.github/skills
+.github/*.md
+.omg
