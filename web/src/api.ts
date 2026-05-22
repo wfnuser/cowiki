@@ -9,13 +9,10 @@ function h(extra: Record<string, string> = {}): Record<string, string> {
 // ── Types ──
 
 export interface PageMeta {
-  id: string;
   slug: string;
   title: string;
   summary: string;
   branch: string;
-  content_hash: string;
-  updated_at: string;
 }
 
 export interface PageFull extends PageMeta {

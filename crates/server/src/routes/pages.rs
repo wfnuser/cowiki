@@ -12,6 +12,14 @@ pub struct ListParams {
 }
 
 #[derive(Serialize)]
+pub struct PageListItem {
+    pub slug: String,
+    pub title: String,
+    pub summary: String,
+    pub branch: String,
+}
+
+#[derive(Serialize)]
 pub struct PageResponse {
     pub slug: String,
     pub title: String,
@@ -20,12 +28,49 @@ pub struct PageResponse {
     pub branch: String,
 }
 
+/// List pages by reading from Git (source of truth), parsing frontmatter for title/summary
 pub async fn list_pages(
     State(state): State<Arc<AppState>>,
     Query(params): Query<ListParams>,
-) -> Result<Json<Vec<cowiki_db::pages::PageMeta>>> {
+) -> Result<Json<Vec<PageListItem>>> {
     let branch = params.branch.unwrap_or_else(|| "main".into());
-    let pages = cowiki_db::pages::list_by_branch(&state.db, &branch).await?;
+
+    let files = state
+        .wiki_repo
+        .list_files(&branch, "wiki")
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let mut pages = Vec::new();
+    for file_path in files {
+        let slug = file_path
+            .strip_prefix("wiki/")
+            .unwrap_or(&file_path)
+            .strip_suffix(".md")
+            .unwrap_or(&file_path)
+            .to_string();
+
+        // Skip hidden files
+        if slug.starts_with('.') {
+            continue;
+        }
+
+        // Read just the frontmatter (first ~20 lines)
+        let (title, summary) = match state.wiki_repo.read_file(&branch, &file_path) {
+            Ok(Some(content)) => {
+                let text = String::from_utf8_lossy(&content);
+                parse_frontmatter(&text)
+            }
+            _ => ("Untitled".into(), String::new()),
+        };
+
+        pages.push(PageListItem {
+            slug,
+            title,
+            summary,
+            branch: branch.clone(),
+        });
+    }
+
     Ok(Json(pages))
 }
 

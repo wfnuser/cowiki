@@ -43,26 +43,19 @@ function buildTree(pages: PageMeta[], draftSlugs: Set<string>): TreeNode {
   return root;
 }
 
-function mergeTrees(mainPages: PageMeta[], draftPages: PageMeta[]): { pages: (PageMeta & { isDraft?: boolean; isModified?: boolean })[]; } {
-  const mainMap = new Map(mainPages.map((p) => [p.slug, p]));
-  const merged: (PageMeta & { isDraft?: boolean; isModified?: boolean })[] = [];
+function mergeTrees(mainPages: PageMeta[], draftPages: PageMeta[]): { pages: (PageMeta & { isDraft?: boolean })[]; } {
+  const mainSlugs = new Set(mainPages.map((p) => p.slug));
+  const merged: (PageMeta & { isDraft?: boolean })[] = [];
 
   // Add all main pages
   for (const p of mainPages) {
     merged.push(p);
   }
 
-  // Add draft-only pages, mark modified ones
+  // Add draft-only pages (not yet on main)
   for (const p of draftPages) {
-    const existing = mainMap.get(p.slug);
-    if (!existing) {
+    if (!mainSlugs.has(p.slug)) {
       merged.push({ ...p, isDraft: true });
-    } else if (existing.content_hash !== p.content_hash) {
-      // Replace with draft version, mark as modified
-      const idx = merged.findIndex((m) => m.slug === p.slug);
-      if (idx >= 0) {
-        merged[idx] = { ...p, isModified: true };
-      }
     }
   }
 
@@ -147,7 +140,7 @@ export function WikiPage() {
     : mergeTrees(mainPages, draftPages).pages;
 
   const draftCount = draftPages.filter(
-    (d) => !mainPages.find((m) => m.slug === d.slug && m.content_hash === d.content_hash)
+    (d) => !mainPages.find((m) => m.slug === d.slug)
   ).length;
 
   return (
@@ -252,7 +245,7 @@ export function WikiPage() {
           {displayPages.map((p: any) => (
             <Link
               key={p.slug}
-              to={`/w/${workspaceSlug}/page/${p.slug}?branch=${p.isDraft || p.isModified ? userBranch : 'main'}`}
+              to={`/w/${workspaceSlug}/page/${p.slug}?branch=${p.isDraft ? userBranch : 'main'}`}
               className="flex items-start gap-2.5 px-2 py-2 -mx-2 rounded-md hover:bg-[var(--color-bg-hover)] transition-colors group"
             >
               <FileText
@@ -268,19 +261,11 @@ export function WikiPage() {
                       Draft
                     </Badge>
                   )}
-                  {p.isModified && (
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-[var(--color-accent)] border-[var(--color-accent)]">
-                      Modified
-                    </Badge>
-                  )}
                 </div>
                 {p.summary && (
                   <div className="text-xs text-[var(--color-text-tertiary)] mt-0.5 truncate">{p.summary}</div>
                 )}
               </div>
-              <span className="ml-auto text-xs text-[var(--color-text-tertiary)] shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                {new Date(p.updated_at).toLocaleDateString()}
-              </span>
             </Link>
           ))}
         </div>

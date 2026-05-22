@@ -57,9 +57,6 @@ export function PageList({ branch = 'main' }: { branch?: string }) {
               </div>
             )}
           </div>
-          <span className="ml-auto text-xs text-[var(--color-text-tertiary)] shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-            {new Date(p.updated_at).toLocaleDateString()}
-          </span>
         </Link>
       ))}
     </div>
