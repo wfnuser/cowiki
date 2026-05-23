@@ -1,0 +1,486 @@
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import {
+  Plus, LogOut, Compass, Users, FileText, Folder,
+  ChevronRight, FolderPlus, Upload, Wand2, ArrowUpRight, MoreHorizontal,
+} from 'lucide-react';
+import {
+  Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel,
+  SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
+  SidebarProvider, SidebarInset,
+} from '@/components/ui/sidebar';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import {
+  listWorkspaces, listPages, getPage, createWorkspace, writePage, createFolder,
+  type Workspace, type PageMeta, type PageFull,
+} from '../api';
+import { getStoredAuth, clearAuth } from '../auth';
+
+interface ActivePage {
+  workspace: Workspace;
+  slug: string;
+}
+
+export function MainLayout() {
+  const auth = getStoredAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Data
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [expandedSpaces, setExpandedSpaces] = useState<Set<string>>(new Set());
+  const [spacePages, setSpacePages] = useState<Record<string, PageMeta[]>>({});
+  const [activePage, setActivePage] = useState<ActivePage | null>(null);
+  const [pageContent, setPageContent] = useState<PageFull | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Modals
+  const [showCreate, setShowCreate] = useState(false);
+  const [showNewPage, setShowNewPage] = useState<Workspace | null>(null);
+  const [showNewFolder, setShowNewFolder] = useState<Workspace | null>(null);
+  const [newName, setNewName] = useState('');
+  const [newSlug, setNewSlug] = useState('');
+  const [creating, setCreating] = useState(false);
+
+  const userBranch = `user/${auth?.id}`;
+
+  // Load workspaces
+  const loadWorkspaces = useCallback(async () => {
+    setLoading(true);
+    const ws = await listWorkspaces();
+    setWorkspaces(ws);
+    // Auto-expand personal space
+    const personal = ws.find((w) => w.visibility === 'private' && w.role === 'owner');
+    if (personal) {
+      setExpandedSpaces((prev) => new Set([...prev, personal.id]));
+      loadSpacePages(personal);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { loadWorkspaces(); }, [loadWorkspaces]);
+
+  // Load pages for a space
+  const loadSpacePages = async (ws: Workspace) => {
+    const branch = ws.visibility === 'private' ? userBranch : 'main';
+    const pages = await listPages(branch);
+    setSpacePages((prev) => ({ ...prev, [ws.id]: pages }));
+  };
+
+  // Toggle space expansion
+  const toggleSpace = (ws: Workspace) => {
+    setExpandedSpaces((prev) => {
+      const next = new Set(prev);
+      if (next.has(ws.id)) {
+        next.delete(ws.id);
+      } else {
+        next.add(ws.id);
+        if (!spacePages[ws.id]) loadSpacePages(ws);
+      }
+      return next;
+    });
+  };
+
+  // Select a page
+  const selectPage = async (ws: Workspace, slug: string) => {
+    setActivePage({ workspace: ws, slug });
+    const branch = ws.visibility === 'private' ? userBranch : 'main';
+    const page = await getPage(slug, branch);
+    setPageContent(page);
+    // Update URL
+    const owner = auth?.name || 'user';
+    navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
+  };
+
+  // Create workspace
+  const handleCreateWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newName.trim() || !newSlug.trim()) return;
+    setCreating(true);
+    try {
+      await createWorkspace(newName.trim(), newSlug.trim(), 'public');
+      setShowCreate(false);
+      setNewName('');
+      setNewSlug('');
+      loadWorkspaces();
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  // Create page in a workspace
+  const handleCreatePage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newName.trim() || !showNewPage) return;
+    const slug = newName.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim();
+    const body = `---\ntitle: "${newName.trim()}"\nsummary: ""\nkind: concept\n---\n\n`;
+    await writePage(slug, body, userBranch);
+    setShowNewPage(null);
+    setNewName('');
+    loadSpacePages(showNewPage);
+    selectPage(showNewPage, slug);
+  };
+
+  // Create folder in a workspace
+  const handleCreateFolder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newName.trim() || !showNewFolder) return;
+    await createFolder(newName.trim(), userBranch);
+    setShowNewFolder(null);
+    setNewName('');
+    loadSpacePages(showNewFolder);
+  };
+
+  const handleLogout = () => {
+    clearAuth();
+    navigate('/login');
+  };
+
+  const handleNameChange = (name: string) => {
+    setNewName(name);
+    setNewSlug(name.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim());
+  };
+
+  const personalSpaces = workspaces.filter((w) => w.visibility === 'private' && w.role === 'owner');
+  const teamSpaces = workspaces.filter((w) => !(w.visibility === 'private' && w.role === 'owner'));
+
+  // Strip frontmatter from page body
+  const renderBody = (body: string) => {
+    if (body.startsWith('---')) {
+      const parts = body.split('---');
+      if (parts.length >= 3) return parts.slice(2).join('---').trim();
+    }
+    return body;
+  };
+
+  return (
+    <>
+      <TooltipProvider>
+        <SidebarProvider>
+          <Sidebar>
+            <SidebarHeader>
+              <div className="flex items-center gap-2 px-2 py-1">
+                <div className="flex h-6 w-6 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
+                  <span className="text-xs font-bold">c</span>
+                </div>
+                <span className="font-semibold text-sm">CoWiki</span>
+              </div>
+            </SidebarHeader>
+            <SidebarContent>
+              {/* Personal Space */}
+              {personalSpaces.map((ws) => (
+                <SpaceSection
+                  key={ws.id}
+                  workspace={ws}
+                  label="Personal Space"
+                  pages={spacePages[ws.id] || []}
+                  expanded={expandedSpaces.has(ws.id)}
+                  activePage={activePage}
+                  onToggle={() => toggleSpace(ws)}
+                  onSelectPage={(slug) => selectPage(ws, slug)}
+                  onNewPage={() => { setShowNewPage(ws); setNewName(''); }}
+                  onNewFolder={() => { setShowNewFolder(ws); setNewName(''); }}
+                />
+              ))}
+
+              {/* Team Spaces */}
+              <SidebarGroup>
+                <SidebarGroupLabel>Team Spaces</SidebarGroupLabel>
+                <SidebarMenu>
+                  {teamSpaces.map((ws) => (
+                    <SpaceTreeItem
+                      key={ws.id}
+                      workspace={ws}
+                      pages={spacePages[ws.id] || []}
+                      expanded={expandedSpaces.has(ws.id)}
+                      activePage={activePage}
+                      onToggle={() => toggleSpace(ws)}
+                      onSelectPage={(slug) => selectPage(ws, slug)}
+                      onNewPage={() => { setShowNewPage(ws); setNewName(''); }}
+                      onNewFolder={() => { setShowNewFolder(ws); setNewName(''); }}
+                    />
+                  ))}
+                  <SidebarMenuItem>
+                    <SidebarMenuButton onClick={() => { setShowCreate(true); setNewName(''); setNewSlug(''); }}>
+                      <Plus size={16} />
+                      <span className="text-sidebar-foreground/50">Add new team space</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroup>
+
+              {/* Discover */}
+              <SidebarGroup>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton tooltip="Discover public wikis">
+                      <Compass size={16} />
+                      <span>Discover</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroup>
+            </SidebarContent>
+            <SidebarFooter>
+              <div className="flex items-center justify-between px-2 py-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-sidebar-accent text-sidebar-accent-foreground text-xs font-medium">
+                    {auth?.name?.[0]?.toUpperCase() || 'U'}
+                  </div>
+                  <span className="text-xs text-sidebar-foreground/70">{auth?.name}</span>
+                </div>
+                <button onClick={handleLogout} className="text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors" title="Sign out">
+                  <LogOut size={14} />
+                </button>
+              </div>
+            </SidebarFooter>
+          </Sidebar>
+
+          <SidebarInset>
+            {/* Top bar with breadcrumb + actions */}
+            {activePage && pageContent && (
+              <div className="sticky top-0 z-10 bg-[var(--color-bg)] border-b border-[var(--color-border)] px-6 py-2 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)]">
+                  <span>{auth?.name}</span>
+                  <span className="text-[var(--color-text-tertiary)]">/</span>
+                  <span>{activePage.workspace.name}</span>
+                  <span className="text-[var(--color-text-tertiary)]">/</span>
+                  <span className="text-[var(--color-text)]">{pageContent.title}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors">
+                    <Upload size={13} /> Add Source
+                  </button>
+                  <button className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors">
+                    <Wand2 size={13} /> Compile
+                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="p-1 rounded text-[var(--color-text-tertiary)] hover:bg-[var(--color-bg-hover)] transition-colors outline-none">
+                        <MoreHorizontal size={16} />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-40">
+                      <DropdownMenuItem>
+                        <ArrowUpRight size={14} className="mr-2" /> Submit
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            )}
+
+            {/* Content */}
+            <div className="max-w-3xl px-16 py-10">
+              {pageContent ? (
+                <article>
+                  <h1 className="text-4xl font-bold mb-2 leading-tight" style={{ fontFamily: 'var(--font-serif)' }}>
+                    {pageContent.title}
+                  </h1>
+                  {pageContent.summary && (
+                    <p className="text-[var(--color-text-secondary)] mb-8">{pageContent.summary}</p>
+                  )}
+                  <div className="prose">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{renderBody(pageContent.body)}</ReactMarkdown>
+                  </div>
+                </article>
+              ) : (
+                <div>
+                  <h1 className="text-4xl font-bold mb-6" style={{ fontFamily: 'var(--font-serif)' }}>Home</h1>
+                  <p className="text-[var(--color-text-tertiary)] text-sm">
+                    Select a page from the sidebar to get started.
+                  </p>
+                </div>
+              )}
+            </div>
+          </SidebarInset>
+        </SidebarProvider>
+      </TooltipProvider>
+
+      {/* Create team space modal */}
+      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Create Team Space</DialogTitle></DialogHeader>
+          <form onSubmit={handleCreateWorkspace} className="space-y-4 mt-2">
+            <div>
+              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Name</label>
+              <Input value={newName} onChange={(e) => handleNameChange(e.target.value)} placeholder="e.g. Engineering Wiki" autoFocus />
+            </div>
+            <div>
+              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">URL slug</label>
+              <Input value={newSlug} onChange={(e) => setNewSlug(e.target.value)} placeholder="engineering-wiki" className="font-mono" />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" type="button" onClick={() => setShowCreate(false)}>Cancel</Button>
+              <Button type="submit" disabled={creating || !newName.trim() || !newSlug.trim()}>{creating ? 'Creating...' : 'Create'}</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* New page modal */}
+      <Dialog open={!!showNewPage} onOpenChange={(open) => !open && setShowNewPage(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>New Page</DialogTitle></DialogHeader>
+          <form onSubmit={handleCreatePage} className="space-y-4 mt-2">
+            <div>
+              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Title</label>
+              <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Meeting Notes" autoFocus />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" type="button" onClick={() => setShowNewPage(null)}>Cancel</Button>
+              <Button type="submit" disabled={!newName.trim()}>Create</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* New folder modal */}
+      <Dialog open={!!showNewFolder} onOpenChange={(open) => !open && setShowNewFolder(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>New Folder</DialogTitle></DialogHeader>
+          <form onSubmit={handleCreateFolder} className="space-y-4 mt-2">
+            <div>
+              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Name</label>
+              <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Research, Projects" autoFocus />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" type="button" onClick={() => setShowNewFolder(null)}>Cancel</Button>
+              <Button type="submit" disabled={!newName.trim()}>Create</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ── Sidebar Components ──
+
+function SpaceSection({
+  workspace, label, pages, expanded, activePage, onToggle, onSelectPage, onNewPage, onNewFolder,
+}: {
+  workspace: Workspace; label: string; pages: PageMeta[];
+  expanded: boolean; activePage: ActivePage | null;
+  onToggle: () => void; onSelectPage: (slug: string) => void;
+  onNewPage: () => void; onNewFolder: () => void;
+}) {
+  return (
+    <SidebarGroup>
+      <SidebarGroupLabel className="group/label">
+        <span className="cursor-pointer" onClick={onToggle}>{label}</span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="ml-auto opacity-0 group-hover/label:opacity-100 text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-all outline-none focus:outline-none ring-0 focus:ring-0">
+              <Plus size={14} />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-40">
+            <DropdownMenuItem onClick={onNewPage}><FileText size={14} className="mr-2" /> New Page</DropdownMenuItem>
+            <DropdownMenuItem onClick={onNewFolder}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarGroupLabel>
+      {expanded && (
+        <SidebarMenu>
+          {pages.map((p) => (
+            <PageItem
+              key={p.slug}
+              page={p}
+              isActive={activePage?.workspace.id === workspace.id && activePage?.slug === p.slug}
+              onSelect={() => onSelectPage(p.slug)}
+            />
+          ))}
+        </SidebarMenu>
+      )}
+    </SidebarGroup>
+  );
+}
+
+function SpaceTreeItem({
+  workspace, pages, expanded, activePage, onToggle, onSelectPage, onNewPage, onNewFolder,
+}: {
+  workspace: Workspace; pages: PageMeta[];
+  expanded: boolean; activePage: ActivePage | null;
+  onToggle: () => void; onSelectPage: (slug: string) => void;
+  onNewPage: () => void; onNewFolder: () => void;
+}) {
+  return (
+    <>
+      <SidebarMenuItem className="group/space">
+        <SidebarMenuButton onClick={onToggle} tooltip={workspace.name}>
+          <ChevronRight size={14} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
+          <Users size={16} />
+          <span>{workspace.name}</span>
+        </SidebarMenuButton>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/space:opacity-100 text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-all outline-none focus:outline-none ring-0 focus:ring-0">
+              <Plus size={14} />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-40">
+            <DropdownMenuItem onClick={onNewPage}><FileText size={14} className="mr-2" /> New Page</DropdownMenuItem>
+            <DropdownMenuItem onClick={onNewFolder}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarMenuItem>
+      {expanded && pages.map((p) => (
+        <PageItem
+          key={p.slug}
+          page={p}
+          isActive={activePage?.workspace.id === workspace.id && activePage?.slug === p.slug}
+          onSelect={() => onSelectPage(p.slug)}
+          indent
+        />
+      ))}
+    </>
+  );
+}
+
+function PageItem({ page, isActive, onSelect, indent }: {
+  page: PageMeta; isActive: boolean; onSelect: () => void; indent?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+
+  if (page.kind === 'folder') {
+    return (
+      <>
+        <SidebarMenuItem className={indent ? 'pl-4' : ''}>
+          <SidebarMenuButton onClick={() => setOpen(!open)} isActive={isActive}>
+            <ChevronRight size={12} className={`transition-transform ${open ? 'rotate-90' : ''}`} />
+            <Folder size={16} />
+            <span>{page.title || page.slug}</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+        {open && page.children?.map((child) => (
+          <SidebarMenuItem key={child.slug} className={indent ? 'pl-8' : 'pl-4'}>
+            <SidebarMenuButton onClick={onSelect} isActive={false}>
+              <FileText size={16} />
+              <span>{child.title || child.slug}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ))}
+      </>
+    );
+  }
+
+  return (
+    <SidebarMenuItem className={indent ? 'pl-4' : ''}>
+      <SidebarMenuButton onClick={onSelect} isActive={isActive}>
+        <FileText size={16} />
+        <span>{page.title || page.slug}</span>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}

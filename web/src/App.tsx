@@ -1,11 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
-import { Layout } from './components/Layout';
-import { HomePage } from './pages/HomePage';
-import { WikiPage } from './pages/WikiPage';
-import { PageViewPage } from './pages/PageViewPage';
-import { ReviewPage } from './pages/ReviewPage';
-import { SearchPage } from './pages/SearchPage';
+import { MainLayout } from './pages/MainLayout';
 import { LoginPage } from './pages/LoginPage';
 import { getStoredAuth, storeAuth } from './auth';
 
@@ -40,15 +35,8 @@ export default function App() {
       <OAuthInterceptor>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          {/* Home — workspace list */}
-          <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
-          {/* Inside a workspace */}
-          <Route path="/w/:workspaceSlug" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-            <Route index element={<WikiPage />} />
-            <Route path="page/:slug" element={<PageViewPage />} />
-            <Route path="reviews" element={<ReviewPage />} />
-            <Route path="search" element={<SearchPage />} />
-          </Route>
+          {/* All content in one layout — no page transitions */}
+          <Route path="/*" element={<ProtectedRoute><MainLayout /></ProtectedRoute>} />
         </Routes>
       </OAuthInterceptor>
     </BrowserRouter>
