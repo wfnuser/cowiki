@@ -83,7 +83,7 @@ export function PersonalPage() {
           className="flex items-center gap-1.5 rounded-md border border-[var(--color-text)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-bg-hover)] disabled:opacity-40 transition-colors"
         >
           <ArrowUpRight className="h-3.5 w-3.5" />
-          {submitting ? 'Submitting...' : 'Submit to shared'}
+          {submitting ? 'Submitting...' : 'Submit'}
         </button>
       </div>
 

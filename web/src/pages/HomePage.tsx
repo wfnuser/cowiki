@@ -142,9 +142,9 @@ export function HomePage() {
                 </SidebarMenu>
               </SidebarGroup>
 
-              {/* Teamspaces — show space list */}
+              {/* Team Spaces — show space list */}
               <SidebarGroup>
-                <SidebarGroupLabel>Teamspaces</SidebarGroupLabel>
+                <SidebarGroupLabel>Team Spaces</SidebarGroupLabel>
                 <SidebarMenu>
                   {teamspaces.map((ws) => (
                     <SidebarMenuItem key={ws.id}>
@@ -159,10 +159,10 @@ export function HomePage() {
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       onClick={() => setShowCreate(true)}
-                      tooltip="Create a new teamspace"
+                      tooltip="Create a new team space"
                     >
                       <Plus size={16} />
-                      <span className="text-sidebar-foreground/50">Add new teamspace</span>
+                      <span className="text-sidebar-foreground/50">Add new team space</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 </SidebarMenu>
@@ -211,11 +211,11 @@ export function HomePage() {
         </SidebarProvider>
       </TooltipProvider>
 
-      {/* Create teamspace modal */}
+      {/* Create team space modal */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Create Teamspace</DialogTitle>
+            <DialogTitle>Create Team Space</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4 mt-2">
             <div>
