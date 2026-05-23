@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  Plus, LogOut, Compass, Users, FileText, Folder,
-  ChevronRight, FolderPlus, Upload, Wand2, ArrowUpRight, MoreHorizontal,
+  Plus, LogOut, Compass, BookOpen, FileText, Folder,
+  ChevronRight, FolderPlus, Upload, Wand2, ArrowUpRight, MoreHorizontal, RefreshCw, Pencil,
 } from 'lucide-react';
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel,
@@ -22,8 +22,10 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   listWorkspaces, listPages, getPage, createWorkspace, writePage, createFolder,
+  ingest, compile, submit,
   type Workspace, type PageMeta, type PageFull,
 } from '../api';
+import { IngestForm } from '../components/IngestForm';
 import { getStoredAuth, clearAuth } from '../auth';
 
 interface ActivePage {
@@ -51,6 +53,11 @@ export function MainLayout() {
   const [newName, setNewName] = useState('');
   const [newSlug, setNewSlug] = useState('');
   const [creating, setCreating] = useState(false);
+  const [showIngest, setShowIngest] = useState(false);
+  const [compiling, setCompiling] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [showRename, setShowRename] = useState<Workspace | null>(null);
+  const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   const userBranch = `user/${auth?.id}`;
 
@@ -139,6 +146,52 @@ export function MainLayout() {
     setShowNewFolder(null);
     setNewName('');
     loadSpacePages(showNewFolder);
+  };
+
+  // Compile pages in the active workspace
+  const handleCompile = async () => {
+    if (!activePage) return;
+    setCompiling(true);
+    setMessage(null);
+    try {
+      const res = await compile(userBranch);
+      const count = res.pages?.length || 0;
+      const skipped = res.skipped || 0;
+      setMessage({ text: `Compiled ${count} page(s)${skipped > 0 ? `, ${skipped} skipped` : ''}`, type: 'success' });
+      loadSpacePages(activePage.workspace);
+    } catch {
+      setMessage({ text: 'Compilation failed', type: 'error' });
+    } finally {
+      setCompiling(false);
+    }
+  };
+
+  // Submit pages for review (or direct commit for personal)
+  const handleSubmit = async () => {
+    if (!activePage) return;
+    setSubmitting(true);
+    setMessage(null);
+    try {
+      const pages = spacePages[activePage.workspace.id] || [];
+      if (pages.length === 0) {
+        setMessage({ text: 'No pages to submit', type: 'error' });
+        return;
+      }
+      const slugs = pages.map((p) => p.slug);
+      const isPersonal = activePage.workspace.visibility === 'private';
+      await submit(userBranch, slugs, isPersonal);
+      setMessage({ text: isPersonal ? 'Committed.' : 'Submitted for review.', type: 'success' });
+    } catch {
+      setMessage({ text: 'Submit failed', type: 'error' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Handle ingest completion
+  const handleIngestDone = () => {
+    setShowIngest(false);
+    if (activePage) loadSpacePages(activePage.workspace);
   };
 
   const handleLogout = () => {
@@ -258,11 +311,19 @@ export function MainLayout() {
                   <span className="text-[var(--color-text)]">{pageContent.title}</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors">
+                  <button
+                    onClick={() => setShowIngest(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  >
                     <Upload size={13} /> Add Source
                   </button>
-                  <button className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors">
-                    <Wand2 size={13} /> Compile
+                  <button
+                    onClick={handleCompile}
+                    disabled={compiling}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors disabled:opacity-40"
+                  >
+                    {compiling ? <RefreshCw size={13} className="animate-spin" /> : <Wand2 size={13} />}
+                    {compiling ? 'Compiling...' : 'Compile'}
                   </button>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -271,12 +332,32 @@ export function MainLayout() {
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-40">
-                      <DropdownMenuItem>
-                        <ArrowUpRight size={14} className="mr-2" /> Submit
+                      <DropdownMenuItem onClick={handleSubmit} disabled={submitting}>
+                        <ArrowUpRight size={14} className="mr-2" />
+                        {submitting ? 'Submitting...' : 'Submit'}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
+              </div>
+            )}
+
+            {/* Message */}
+            {message && (
+              <div className={`mx-6 mt-2 rounded px-3 py-2 text-xs ${
+                message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+              }`}>
+                {message.text}
+              </div>
+            )}
+
+            {/* Ingest panel */}
+            {showIngest && activePage && (
+              <div className="mx-6 mt-2 rounded-lg border border-[var(--color-border)] p-4 bg-[var(--color-bg-secondary)]">
+                <div className="text-xs text-[var(--color-text-tertiary)] mb-2">
+                  Add source to {activePage.workspace.name}
+                </div>
+                <IngestForm branch={userBranch} onDone={handleIngestDone} />
               </div>
             )}
 
@@ -417,23 +498,36 @@ function SpaceTreeItem({
 }) {
   return (
     <>
-      <SidebarMenuItem className="group/space">
+      <SidebarMenuItem className="group/space relative">
         <SidebarMenuButton onClick={onToggle} tooltip={workspace.name}>
           <ChevronRight size={14} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
-          <Users size={16} />
+          <BookOpen size={16} />
           <span>{workspace.name}</span>
         </SidebarMenuButton>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/space:opacity-100 text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-all outline-none focus:outline-none ring-0 focus:ring-0">
-              <Plus size={14} />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-40">
-            <DropdownMenuItem onClick={onNewPage}><FileText size={14} className="mr-2" /> New Page</DropdownMenuItem>
-            <DropdownMenuItem onClick={onNewFolder}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* Hover actions: "+" and "..." */}
+        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover/space:opacity-100 transition-all">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="p-0.5 rounded text-sidebar-foreground/40 hover:text-sidebar-foreground/70 outline-none focus:outline-none ring-0 focus:ring-0">
+                <MoreHorizontal size={14} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-36">
+              <DropdownMenuItem><Pencil size={14} className="mr-2" /> Rename</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="p-0.5 rounded text-sidebar-foreground/40 hover:text-sidebar-foreground/70 outline-none focus:outline-none ring-0 focus:ring-0">
+                <Plus size={14} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-40">
+              <DropdownMenuItem onClick={onNewPage}><FileText size={14} className="mr-2" /> New Page</DropdownMenuItem>
+              <DropdownMenuItem onClick={onNewFolder}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </SidebarMenuItem>
       {expanded && pages.map((p) => (
         <PageItem
