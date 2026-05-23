@@ -229,44 +229,62 @@ async fn init_user_space(state: &crate::AppState, user: &cowiki_db::users::User)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // 2. Create personal workspace in DB
-    let slug = format!("personal-{}", &user.id.to_string()[..8]);
-    cowiki_db::workspaces::create(&state.db, &format!("{}'s Space", user.name), &slug, "private", user.id)
+    let personal_slug = format!("personal-{}", &user.id.to_string()[..8]);
+    cowiki_db::workspaces::create(&state.db, &format!("{}'s Space", user.name), &personal_slug, "private", user.id)
         .await
-        .ok(); // Ignore if already exists
+        .ok();
 
-    // 3. Write a welcome page
+    // 3. Write personal welcome page
     let welcome = r#"---
-title: "Welcome to CoWiki"
-summary: "Getting started with your personal knowledge space."
+title: "Getting Started"
+summary: "Welcome to your personal knowledge space."
 kind: concept
 ---
 
-# Welcome to CoWiki
+# Getting Started
 
-This is your personal knowledge space. Here are a few things you can do:
+Welcome to **CoWiki** — your personal knowledge space.
 
-## Ingest Sources
+## What you can do here
 
-Add URLs, text, or files as sources. CoWiki will compile them into structured wiki pages.
-
-## Compile
-
-Click **Compile** to transform your sources into interlinked wiki pages using AI.
-
-## Submit to Teamspace
-
-When you're ready, submit your pages to a shared teamspace for team review.
-
-## Search
-
-Use semantic search to find knowledge across your spaces.
-
-Happy building!
+- **Add sources** — paste text or URLs, CoWiki will compile them into wiki pages
+- **Organize** — create folders to keep your knowledge structured
+- **Search** — find anything with semantic search
+- **Collaborate** — join or create a Team Space to share knowledge with others
 "#;
 
     state.wiki_repo
-        .write_file(&branch, "wiki/welcome.md", welcome.as_bytes(), "init: welcome page", &user.name)
+        .write_file(&branch, "wiki/getting-started.md", welcome.as_bytes(), "init: getting started", &user.name)
         .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    // 4. Create a default Team Space ("General") with welcome page
+    let team_slug = format!("general-{}", &user.id.to_string()[..8]);
+    if let Ok(team_ws) = cowiki_db::workspaces::create(&state.db, "General", &team_slug, "public", user.id).await {
+        let team_welcome = r#"---
+title: "Team Space Home"
+summary: "Welcome to the team's shared knowledge base."
+kind: overview
+---
+
+# Team Space Home
+
+Welcome to the team! This is your shared knowledge base.
+
+Use the **+** button in the sidebar to add pages and folders. Invite teammates to collaborate.
+
+## Getting started
+
+1. **Add sources** — paste articles, docs, or notes
+2. **Compile** — AI turns your sources into structured wiki pages
+3. **Submit** — submit your drafts for team review
+4. **Review** — approve or request changes on teammates' submissions
+"#;
+        // Write to main branch so it's visible to everyone
+        state.wiki_repo
+            .write_file("main", "wiki/team-space-home.md", team_welcome.as_bytes(), "init: team space home", "cowiki")
+            .ok();
+        tracing::info!("created default team space '{}' for user {}", team_ws.slug, user.name);
+    }
 
     Ok(())
 }

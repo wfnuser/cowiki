@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Clock, LogOut, Compass, Users, FileText, Folder, ChevronRight } from 'lucide-react';
+import { Plus, Clock, LogOut, Compass, Users, FileText, Folder, ChevronRight, FolderPlus } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
@@ -168,9 +174,26 @@ export function HomePage() {
               </div>
             </SidebarHeader>
             <SidebarContent>
-              {/* Personal Space — show pages/folders as tree */}
+              {/* Personal Space */}
               <SidebarGroup>
-                <SidebarGroupLabel>Personal Space</SidebarGroupLabel>
+                <SidebarGroupLabel className="group/label">
+                  <span>Personal Space</span>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="ml-auto opacity-0 group-hover/label:opacity-100 text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-all">
+                        <Plus size={14} />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-40">
+                      <DropdownMenuItem onClick={() => setShowNewPage(true)}>
+                        <FileText size={14} className="mr-2" /> New Page
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setShowNewFolder(true)}>
+                        <FolderPlus size={14} className="mr-2" /> New Folder
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </SidebarGroupLabel>
                 <SidebarMenu>
                   {personalWs && personalPages.map((p) => (
                     <PageTreeItem
@@ -180,18 +203,6 @@ export function HomePage() {
                       authId={auth?.id}
                     />
                   ))}
-                  <SidebarMenuItem>
-                    <SidebarMenuButton onClick={() => setShowNewPage(true)} tooltip="Add new page">
-                      <Plus size={16} />
-                      <span className="text-sidebar-foreground/50">New page</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton onClick={() => setShowNewFolder(true)} tooltip="Add new folder">
-                      <Plus size={16} />
-                      <span className="text-sidebar-foreground/50">New folder</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
                 </SidebarMenu>
               </SidebarGroup>
 
@@ -215,7 +226,7 @@ export function HomePage() {
                       tooltip="Create a new team space"
                     >
                       <Plus size={16} />
-                      <span className="text-sidebar-foreground/50">Add new team space</span>
+                      <span className="text-sidebar-foreground/50">Add new</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 </SidebarMenu>
