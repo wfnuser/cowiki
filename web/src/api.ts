@@ -94,6 +94,15 @@ export async function joinWorkspace(slug: string): Promise<Workspace> {
   return res.json();
 }
 
+export async function renameWorkspace(slug: string, name: string): Promise<Workspace> {
+  const res = await fetch(`${BASE}/workspaces/${slug}/rename`, {
+    method: 'POST',
+    headers: h({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ name }),
+  });
+  return res.json();
+}
+
 export async function inviteToWorkspace(workspaceSlug: string, email: string) {
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/invite`, {
     method: 'POST',

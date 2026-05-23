@@ -202,3 +202,25 @@ pub struct MemberResponse {
     pub email: Option<String>,
     pub role: String,
 }
+
+#[derive(Deserialize)]
+pub struct RenameRequest {
+    pub name: String,
+}
+
+pub async fn rename_workspace(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Path(workspace_slug): Path<String>,
+    Json(input): Json<RenameRequest>,
+) -> Result<Json<WorkspaceResponse>> {
+    let user = extract_user(&state.db, &headers).await?;
+    let ws = cowiki_db::workspaces::find_by_slug(&state.db, &workspace_slug)
+        .await?
+        .ok_or_else(|| AppError::NotFound("workspace not found".into()))?;
+    if ws.created_by != user.id {
+        return Err(AppError::BadRequest("only the owner can rename".into()));
+    }
+    let updated = cowiki_db::workspaces::rename(&state.db, ws.id, &input.name).await?;
+    Ok(Json(ws_response(&updated, "owner")))
+}

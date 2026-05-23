@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  Plus, LogOut, Compass, BookOpen, FileText, Folder,
+  Plus, LogOut, Compass, Library, FileText, Folder,
   ChevronRight, FolderPlus, Upload, Wand2, ArrowUpRight, MoreHorizontal, RefreshCw, Pencil,
 } from 'lucide-react';
 import {
@@ -276,7 +276,7 @@ export function MainLayout() {
               <SidebarGroup>
                 <SidebarMenu>
                   <SidebarMenuItem>
-                    <SidebarMenuButton tooltip="Discover public wikis">
+                    <SidebarMenuButton onClick={() => { setActivePage(null); setPageContent(null); navigate('/discover'); }} tooltip="Discover public wikis">
                       <Compass size={16} />
                       <span>Discover</span>
                     </SidebarMenuButton>
@@ -375,6 +375,8 @@ export function MainLayout() {
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{renderBody(pageContent.body)}</ReactMarkdown>
                   </div>
                 </article>
+              ) : location.pathname === '/discover' ? (
+                <DiscoverView />
               ) : (
                 <div>
                   <h1 className="text-4xl font-bold mb-6" style={{ fontFamily: 'var(--font-serif)' }}>Home</h1>
@@ -479,7 +481,7 @@ function SpaceSection({
               key={p.slug}
               page={p}
               isActive={activePage?.workspace.id === workspace.id && activePage?.slug === p.slug}
-              onSelect={() => onSelectPage(p.slug)}
+              onSelect={() => onSelectPage(p.slug)} onSelectChild={(slug) => onSelectPage(slug)}
             />
           ))}
         </SidebarMenu>
@@ -501,7 +503,7 @@ function SpaceTreeItem({
       <SidebarMenuItem className="group/space relative">
         <SidebarMenuButton onClick={onToggle} tooltip={workspace.name}>
           <ChevronRight size={14} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
-          <BookOpen size={16} />
+          <Library size={16} />
           <span>{workspace.name}</span>
         </SidebarMenuButton>
         {/* Hover actions: "+" and "..." */}
@@ -534,7 +536,7 @@ function SpaceTreeItem({
           key={p.slug}
           page={p}
           isActive={activePage?.workspace.id === workspace.id && activePage?.slug === p.slug}
-          onSelect={() => onSelectPage(p.slug)}
+          onSelect={() => onSelectPage(p.slug)} onSelectChild={(slug) => onSelectPage(slug)}
           indent
         />
       ))}
@@ -542,8 +544,9 @@ function SpaceTreeItem({
   );
 }
 
-function PageItem({ page, isActive, onSelect, indent }: {
-  page: PageMeta; isActive: boolean; onSelect: () => void; indent?: boolean;
+function PageItem({ page, isActive, onSelect, onSelectChild, indent }: {
+  page: PageMeta; isActive: boolean; onSelect: () => void;
+  onSelectChild?: (slug: string) => void; indent?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -559,7 +562,7 @@ function PageItem({ page, isActive, onSelect, indent }: {
         </SidebarMenuItem>
         {open && page.children?.map((child) => (
           <SidebarMenuItem key={child.slug} className={indent ? 'pl-8' : 'pl-4'}>
-            <SidebarMenuButton onClick={onSelect} isActive={false}>
+            <SidebarMenuButton onClick={() => onSelectChild?.(child.slug)} isActive={false}>
               <FileText size={16} />
               <span>{child.title || child.slug}</span>
             </SidebarMenuButton>
@@ -576,5 +579,66 @@ function PageItem({ page, isActive, onSelect, indent }: {
         <span>{page.title || page.slug}</span>
       </SidebarMenuButton>
     </SidebarMenuItem>
+  );
+}
+
+function DiscoverView() {
+  const [spaces, setSpaces] = useState<Workspace[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [joining, setJoining] = useState<string | null>(null);
+
+  useEffect(() => {
+    import('../api').then(({ listPublicWorkspaces }) =>
+      listPublicWorkspaces().then(setSpaces).finally(() => setLoading(false))
+    );
+  }, []);
+
+  const handleJoin = async (slug: string) => {
+    setJoining(slug);
+    try {
+      const { joinWorkspace } = await import('../api');
+      await joinWorkspace(slug);
+      setSpaces((prev) => prev.filter((w) => w.slug !== slug));
+    } finally {
+      setJoining(null);
+    }
+  };
+
+  return (
+    <>
+      <h1 className="text-4xl font-bold mb-1" style={{ fontFamily: 'var(--font-serif)' }}>Discover</h1>
+      <p className="text-[var(--color-text-tertiary)] text-sm mb-8">Public knowledge spaces you can browse and join.</p>
+      {loading ? (
+        <div className="py-8 text-center text-[var(--color-text-tertiary)] text-sm">Loading...</div>
+      ) : spaces.length === 0 ? (
+        <div className="py-12 text-center">
+          <Compass size={24} className="mx-auto text-[var(--color-text-tertiary)] mb-3" />
+          <p className="text-[var(--color-text-tertiary)] text-sm">No public spaces yet.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {spaces.map((ws) => (
+            <div key={ws.id} className="rounded-lg border border-[var(--color-border)] bg-white p-5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-[var(--color-bg-hover)] flex items-center justify-center text-lg font-medium text-[var(--color-text-secondary)]">
+                  {ws.name[0]?.toUpperCase()}
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-[var(--color-text)]">{ws.name}</div>
+                  <div className="text-xs text-[var(--color-text-tertiary)]">/{ws.slug}</div>
+                </div>
+              </div>
+              <button
+                onClick={() => handleJoin(ws.slug)}
+                disabled={joining === ws.slug}
+                className="text-xs text-white bg-[var(--color-text)] px-3 py-1.5 rounded-md hover:opacity-90 disabled:opacity-40 transition-opacity"
+              >
+                {joining === ws.slug ? 'Joining...' : 'Join'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }

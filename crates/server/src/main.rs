@@ -113,6 +113,7 @@ async fn main() {
         .route("/api/workspaces", post(routes::workspace::create_workspace))
         .route("/api/workspaces/public", get(routes::workspace::list_public_workspaces))
         .route("/api/workspaces/{slug}/join", post(routes::workspace::join_workspace))
+        .route("/api/workspaces/{slug}/rename", post(routes::workspace::rename_workspace))
         .route("/api/workspaces/{slug}/invite", post(routes::workspace::invite))
         .route("/api/workspaces/{slug}/members", get(routes::workspace::list_members))
         // Pages (legacy — uses default repo)

@@ -132,3 +132,12 @@ pub async fn accept_invitation(pool: &PgPool, invitation_id: Uuid) -> sqlx::Resu
     .fetch_one(pool)
     .await
 }
+
+pub async fn rename(pool: &PgPool, id: Uuid, new_name: &str) -> sqlx::Result<Workspace> {
+    sqlx::query_as::<_, Workspace>(
+        "UPDATE workspaces SET name = $2 WHERE id = $1 RETURNING *"
+    )
+    .bind(id).bind(new_name)
+    .fetch_one(pool)
+    .await
+}
