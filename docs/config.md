@@ -46,18 +46,33 @@ url = "postgres://cowiki:cowiki@localhost:5432/cowiki"
 
 ### `[server]`
 
-Server runtime settings.
+Server runtime settings (shared between cowiki-server and cowiki-rmcp-server via `cowiki-utils` crate).
 
 | Field | Type | Default | Env Var | Description |
 |-------|------|---------|---------|-------------|
-| `port` | integer | `3000` | `COWIKI_PORT` | HTTP server port |
+| `port` | integer | `3000` | `COWIKI_PORT` | HTTP server port (cowiki-server) |
 | `data_dir` | string | `"./data"` | `COWIKI_DATA_DIR` | Data directory for git repo and wiki files |
+
+For the MCP server (`cowiki-rmcp-server`), the port is resolved as follows:
+
+| Priority | Source | Default |
+|----------|--------|---------|
+| 1 | `COWIKI_MCP_PORT` env var | — |
+| 2 | `COWIKI_PORT` env var | — |
+| 3 | `[server].port` in cowiki.conf | — |
+| 4 | Hardcoded default | `8080` |
 
 Example:
 ```toml
 [server]
 port = 3000
 data_dir = "./data"
+```
+
+```bash
+# Start REST API on port 3000, MCP on port 8080
+cowiki-server &
+COWIKI_MCP_PORT=9090 cowiki-rmcp-server &
 ```
 
 ---
@@ -140,6 +155,25 @@ dimension = 1024
 
 ---
 
+### `[mcp-server]`
+
+MCP server settings (used by `cowiki-rmcp-server`).
+
+| Field | Type | Default | Env Var | Description |
+|-------|------|---------|---------|-------------|
+| `port` | integer | `8080` | `COWIKI_MCP_PORT` | MCP server port |
+| `api_url` | string | `"http://localhost:3000/"` | `COWIKI_API_URL` | cowiki-server REST API base URL. **不要带尾部斜杠**（代码会自动去除，但建议配置文件中也保持一致） |
+
+```toml
+[mcp-server]
+port = 8080
+api_url = "http://localhost:3000"
+```
+
+> MCP server 是独立进程，通过 HTTP 代理到 `api_url` 指定的 cowiki-server REST API。确保 cowiki-server 已在该地址运行。
+
+---
+
 ### `[github]`
 
 GitHub OAuth app credentials for social login.
@@ -197,6 +231,8 @@ Every field in `cowiki.conf` can be overridden by an environment variable. The e
 | `embedder.api_key` | `COWIKI_EMBEDDER_API_KEY` |
 | `embedder.api_base` | `COWIKI_EMBEDDER_BASE_URL` |
 | `embedder.dimension` | `COWIKI_EMBEDDER_DIMENSION` |
+| `mcp-server.port` | `COWIKI_MCP_PORT` |
+| `mcp-server.api_url` | `COWIKI_API_URL` |
 | `github.client_id` | `GITHUB_CLIENT_ID` |
 | `github.client_secret` | `GITHUB_CLIENT_SECRET` |
 | `github.redirect_uri` | `GITHUB_REDIRECT_URI` |

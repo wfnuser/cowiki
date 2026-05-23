@@ -27,13 +27,10 @@ pub struct UserInfo {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct PageMeta {
-    pub id: String,
     pub slug: String,
     pub title: String,
     pub summary: String,
     pub branch: String,
-    pub content_hash: String,
-    pub updated_at: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

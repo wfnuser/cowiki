@@ -203,15 +203,15 @@ pub async fn extract_user(
     let auth_header = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| AppError::BadRequest("missing Authorization header".into()))?;
+        .ok_or_else(|| AppError::Unauthorized("missing Authorization header".into()))?;
 
     let api_key = auth_header
         .strip_prefix("Bearer ")
-        .ok_or_else(|| AppError::BadRequest("invalid Authorization format".into()))?;
+        .ok_or_else(|| AppError::Unauthorized("invalid Authorization format".into()))?;
 
     cowiki_db::users::find_by_api_key(db, api_key)
         .await?
-        .ok_or_else(|| AppError::BadRequest("invalid API key".into()))
+        .ok_or_else(|| AppError::Unauthorized("invalid API key".into()))
 }
 
 /// Helper: get the user's personal branch name

@@ -24,9 +24,9 @@ pub async fn run(
     }
 
     let mut table = comfy_table::Table::new();
-    table.set_header(vec!["SLUG", "TITLE", "UPDATED"]);
+    table.set_header(vec!["SLUG", "TITLE", "BRANCH"]);
     for p in &pages {
-        table.add_row(vec![&p.slug, &p.title, &p.updated_at]);
+        table.add_row(vec![&p.slug, &p.title, &p.branch]);
     }
     output::print_table(table);
 

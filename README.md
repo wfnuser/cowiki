@@ -66,6 +66,9 @@ cp cowiki.conf.example cowiki.conf
 # Start the server
 cargo run
 
+# Start the MCP server (in another terminal)
+cargo mcp # or cargo run -p cowiki-rmcp-server
+
 # Start the frontend (in another terminal)
 cd web && npm install && npm run dev
 ```

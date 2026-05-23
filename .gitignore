@@ -5,6 +5,8 @@ data/
 web/dist/
 cowiki.conf
 
+.vscode
+
 # OMG related
 mcp-server
 .github/agents

@@ -1,10 +1,13 @@
 use git2::{BranchType, Repository, Signature};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, RwLock};
 
 pub struct WikiRepo {
     path: PathBuf,
+    write_locks: RwLock<HashMap<String, Arc<RwLock<()>>>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -71,11 +74,27 @@ impl WikiRepo {
         // Ensure main branch exists (rename master → main if needed)
         rename_master_to_main(&path);
 
-        Ok(Self { path })
+        Ok(Self {
+            path,
+            write_locks: RwLock::new(HashMap::new()),
+        })
     }
 
     fn repo(&self) -> Result<Repository, git2::Error> {
         Repository::open(&self.path)
+    }
+
+    /// Get or create a per-branch write lock to serialize git read-modify-write operations.
+    fn branch_lock(&self, branch: &str) -> Arc<RwLock<()>> {
+        let map = self.write_locks.read().unwrap();
+        if let Some(lock) = map.get(branch) {
+            return Arc::clone(lock);
+        }
+        drop(map);
+        let mut map = self.write_locks.write().unwrap();
+        map.entry(branch.to_string())
+            .or_insert_with(|| Arc::new(RwLock::new(())))
+            .clone()
     }
 
     pub fn ensure_user_branch(&self, user_id: &str) -> Result<String, git2::Error> {
@@ -103,6 +122,8 @@ impl WikiRepo {
         message: &str,
         author: &str,
     ) -> Result<(), git2::Error> {
+        let lock = self.branch_lock(branch);
+        let _guard = lock.write().unwrap();
         let repo = self.repo()?;
 
         // Write file to working directory
@@ -309,6 +330,8 @@ impl WikiRepo {
         author: &str,
         message: &str,
     ) -> Result<(), git2::Error> {
+        let lock = self.branch_lock("main");
+        let _guard = lock.write().unwrap();
         for path in file_paths {
             if let Some(content) = self.read_file(branch, path)? {
                 self.write_file("main", path, &content, message, author)?;

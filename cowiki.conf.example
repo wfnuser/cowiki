@@ -14,6 +14,12 @@ port = 3000
 # Data directory (git repo, wiki files)
 data_dir = "./data"
 
+[mcp-server]
+# MCP server port (env: COWIKI_MCP_PORT, default 8080)
+port = 8080
+# Base URL of cowiki-server REST API for MCP tools to call (env: COWIKI_API_URL, default http://localhost:3000/)
+api_url = "http://localhost:3000/"
+
 [llm]
 # LLM (Language Model) provider: currently only "openai" is supported
 provider = "openai"
