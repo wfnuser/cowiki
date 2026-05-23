@@ -180,7 +180,7 @@ export function HomePage() {
                   <span>Personal Space</span>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <button className="ml-auto opacity-0 group-hover/label:opacity-100 text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-all">
+                      <button className="ml-auto opacity-0 group-hover/label:opacity-100 text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-all outline-none focus:outline-none focus-visible:outline-none ring-0 focus:ring-0">
                         <Plus size={14} />
                       </button>
                     </DropdownMenuTrigger>
