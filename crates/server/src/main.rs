@@ -128,8 +128,10 @@ async fn main() {
         .route("/api/workspaces/{ws_slug}/pages/{slug}", get(routes::pages::get_page_ws))
         // Ingest
         .route("/api/ingest", post(routes::ingest::ingest))
+        .route("/api/workspaces/{ws_slug}/ingest", post(routes::ingest::ingest_ws))
         // Compile
         .route("/api/compile", post(routes::compile::compile))
+        .route("/api/workspaces/{ws_slug}/compile", post(routes::compile::compile_ws))
         // Submit
         .route("/api/submit", post(routes::submit::submit))
         // Reviews

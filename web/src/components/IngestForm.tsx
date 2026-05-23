@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ingest } from '../api';
 
-export function IngestForm({ branch, onDone }: { branch: string; onDone: () => void }) {
+export function IngestForm({ branch, onDone, workspaceSlug }: { branch: string; onDone: () => void; workspaceSlug?: string }) {
   const [sourceType, setSourceType] = useState<'text' | 'url'>('text');
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
@@ -15,7 +15,7 @@ export function IngestForm({ branch, onDone }: { branch: string; onDone: () => v
     if (!content.trim()) return;
     setLoading(true);
     try {
-      await ingest(sourceType, content, branch);
+      await ingest(sourceType, content, branch, undefined, workspaceSlug);
       setContent('');
       onDone();
     } finally {

@@ -154,7 +154,7 @@ export function MainLayout() {
     setCompiling(true);
     setMessage(null);
     try {
-      const res = await compile(userBranch);
+      const res = await compile(userBranch, activePage.workspace.slug);
       const count = res.pages?.length || 0;
       const skipped = res.skipped || 0;
       setMessage({ text: `Compiled ${count} page(s)${skipped > 0 ? `, ${skipped} skipped` : ''}`, type: 'success' });
@@ -357,7 +357,7 @@ export function MainLayout() {
                 <div className="text-xs text-[var(--color-text-tertiary)] mb-2">
                   Add source to {activePage.workspace.name}
                 </div>
-                <IngestForm branch={userBranch} onDone={handleIngestDone} />
+                <IngestForm branch={userBranch} onDone={handleIngestDone} workspaceSlug={activePage.workspace.slug} />
               </div>
             )}
 

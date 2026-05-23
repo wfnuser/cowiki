@@ -148,8 +148,11 @@ export async function writePage(slug: string, body: string, branch: string, work
 
 // ── Ingest & Compile ──
 
-export async function ingest(sourceType: string, content: string, branch: string, filename?: string) {
-  const res = await fetch(`${BASE}/ingest`, {
+export async function ingest(sourceType: string, content: string, branch: string, filename?: string, workspaceSlug?: string) {
+  const url = workspaceSlug
+    ? `${BASE}/workspaces/${workspaceSlug}/ingest`
+    : `${BASE}/ingest`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ source_type: sourceType, content, branch, filename }),
@@ -157,8 +160,11 @@ export async function ingest(sourceType: string, content: string, branch: string
   return res.json();
 }
 
-export async function compile(branch: string) {
-  const res = await fetch(`${BASE}/compile`, {
+export async function compile(branch: string, workspaceSlug?: string) {
+  const url = workspaceSlug
+    ? `${BASE}/workspaces/${workspaceSlug}/compile`
+    : `${BASE}/compile`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ branch }),

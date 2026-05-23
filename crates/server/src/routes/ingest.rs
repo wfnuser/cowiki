@@ -1,4 +1,4 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -21,10 +21,26 @@ pub struct IngestResponse {
     pub content_hash: String,
 }
 
+/// Legacy ingest (uses default repo)
 pub async fn ingest(
     State(state): State<Arc<AppState>>,
     Json(input): Json<IngestRequest>,
 ) -> Result<Json<IngestResponse>> {
+    do_ingest(&state.wiki_repo, input).await
+}
+
+/// Workspace-scoped ingest
+pub async fn ingest_ws(
+    State(state): State<Arc<AppState>>,
+    Path(ws_slug): Path<String>,
+    Json(input): Json<IngestRequest>,
+) -> Result<Json<IngestResponse>> {
+    let repo = state.repo_manager.get(&ws_slug)
+        .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
+    do_ingest(&repo, input).await
+}
+
+async fn do_ingest(repo: &cowiki_core::git::WikiRepo, input: IngestRequest) -> Result<Json<IngestResponse>> {
     let content = match input.source_type.as_str() {
         "url" => fetch_url(&input.content).await?,
         "text" | "file" => input.content.clone(),
@@ -38,21 +54,12 @@ pub async fn ingest(
     });
 
     let path = format!("sources/{filename}");
-    state
-        .wiki_repo
-        .write_file(
-            &input.branch,
-            &path,
-            content.as_bytes(),
-            &format!("ingest: {filename}"),
-            &input.branch,
-        )
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    repo.write_file(
+        &input.branch, &path, content.as_bytes(),
+        &format!("ingest: {filename}"), &input.branch,
+    ).map_err(|e| AppError::Internal(e.to_string()))?;
 
-    Ok(Json(IngestResponse {
-        filename,
-        content_hash: hash,
-    }))
+    Ok(Json(IngestResponse { filename, content_hash: hash }))
 }
 
 async fn fetch_url(url: &str) -> Result<String> {
