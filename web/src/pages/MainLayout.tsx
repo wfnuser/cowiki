@@ -73,7 +73,7 @@ export function MainLayout() {
   // Load pages for a space
   const loadSpacePages = async (ws: Workspace) => {
     const branch = ws.visibility === 'private' ? userBranch : 'main';
-    const pages = await listPages(branch);
+    const pages = await listPages(branch, ws.slug);
     setSpacePages((prev) => ({ ...prev, [ws.id]: pages }));
   };
 
@@ -95,7 +95,7 @@ export function MainLayout() {
   const selectPage = async (ws: Workspace, slug: string) => {
     setActivePage({ workspace: ws, slug });
     const branch = ws.visibility === 'private' ? userBranch : 'main';
-    const page = await getPage(slug, branch);
+    const page = await getPage(slug, branch, ws.slug);
     setPageContent(page);
     // Update URL
     const owner = auth?.name || 'user';
@@ -124,7 +124,7 @@ export function MainLayout() {
     if (!newName.trim() || !showNewPage) return;
     const slug = newName.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim();
     const body = `---\ntitle: "${newName.trim()}"\nsummary: ""\nkind: concept\n---\n\n`;
-    await writePage(slug, body, userBranch);
+    await writePage(slug, body, userBranch, showNewPage.slug);
     setShowNewPage(null);
     setNewName('');
     loadSpacePages(showNewPage);
@@ -135,7 +135,7 @@ export function MainLayout() {
   const handleCreateFolder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !showNewFolder) return;
-    await createFolder(newName.trim(), userBranch);
+    await createFolder(newName.trim(), userBranch, undefined, showNewFolder.slug);
     setShowNewFolder(null);
     setNewName('');
     loadSpacePages(showNewFolder);

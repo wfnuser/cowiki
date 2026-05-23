@@ -110,18 +110,27 @@ export async function listMembers(workspaceSlug: string): Promise<MemberInfo[]> 
 
 // ── Pages ──
 
-export async function listPages(branch = 'main'): Promise<PageMeta[]> {
-  const res = await fetch(`${BASE}/pages?branch=${branch}`, { headers: h() });
+export async function listPages(branch = 'main', workspaceSlug?: string): Promise<PageMeta[]> {
+  const url = workspaceSlug
+    ? `${BASE}/workspaces/${workspaceSlug}/pages?branch=${branch}`
+    : `${BASE}/pages?branch=${branch}`;
+  const res = await fetch(url, { headers: h() });
   return res.json();
 }
 
-export async function getPage(slug: string, branch = 'main'): Promise<PageFull> {
-  const res = await fetch(`${BASE}/pages/${slug}?branch=${branch}`, { headers: h() });
+export async function getPage(slug: string, branch = 'main', workspaceSlug?: string): Promise<PageFull> {
+  const url = workspaceSlug
+    ? `${BASE}/workspaces/${workspaceSlug}/pages/${slug}?branch=${branch}`
+    : `${BASE}/pages/${slug}?branch=${branch}`;
+  const res = await fetch(url, { headers: h() });
   return res.json();
 }
 
-export async function writePage(slug: string, body: string, branch: string): Promise<void> {
-  await fetch(`${BASE}/pages`, {
+export async function writePage(slug: string, body: string, branch: string, workspaceSlug?: string): Promise<void> {
+  const url = workspaceSlug
+    ? `${BASE}/workspaces/${workspaceSlug}/pages`
+    : `${BASE}/pages`;
+  await fetch(url, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ slug, body, branch }),
@@ -178,8 +187,11 @@ export async function reviewAction(id: string, action: string) {
   return res.json();
 }
 
-export async function createFolder(name: string, branch: string, parent?: string) {
-  const res = await fetch(`${BASE}/folders`, {
+export async function createFolder(name: string, branch: string, parent?: string, workspaceSlug?: string) {
+  const url = workspaceSlug
+    ? `${BASE}/workspaces/${workspaceSlug}/folders`
+    : `${BASE}/folders`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, branch, parent }),

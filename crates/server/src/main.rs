@@ -17,7 +17,8 @@ use config::CliArgs;
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub config: config::Config,
-    pub wiki_repo: cowiki_core::git::WikiRepo,
+    pub wiki_repo: cowiki_core::git::WikiRepo,       // default repo (backward compat)
+    pub repo_manager: cowiki_core::git::WikiRepoManager, // per-workspace repos
     pub compiler: Compiler,
 }
 
@@ -57,14 +58,15 @@ async fn main() {
         .expect("failed to run migrations");
     tracing::info!("database connected and migrations applied");
 
-    // Git repo
+    // Git repos
+    let repo_manager = cowiki_core::git::WikiRepoManager::new(&config.server.data_dir);
+    // Default repo for backward compat
     let wiki_repo = cowiki_core::git::WikiRepo::open_or_init(&config.server.data_dir)
-        .expect("failed to init wiki repo");
-    // Ensure default user branch (for backward compat)
+        .expect("failed to init default wiki repo");
     wiki_repo
         .ensure_user_branch("default")
         .expect("failed to create default user branch");
-    tracing::info!("wiki repo initialized at {}/repo", config.server.data_dir);
+    tracing::info!("wiki repos dir: {}", config.server.data_dir);
 
     let llm = create_llm(LlmConfig {
         provider: config.llm.provider.clone(),
@@ -92,6 +94,7 @@ async fn main() {
         db,
         config,
         wiki_repo,
+        repo_manager,
         compiler,
     });
 
@@ -112,11 +115,16 @@ async fn main() {
         .route("/api/workspaces/{slug}/join", post(routes::workspace::join_workspace))
         .route("/api/workspaces/{slug}/invite", post(routes::workspace::invite))
         .route("/api/workspaces/{slug}/members", get(routes::workspace::list_members))
-        // Pages
+        // Pages (legacy — uses default repo)
         .route("/api/pages", get(routes::pages::list_pages))
         .route("/api/pages", post(routes::pages::write_page))
         .route("/api/folders", post(routes::pages::create_folder))
         .route("/api/pages/{slug}", get(routes::pages::get_page))
+        // Pages (workspace-scoped — uses per-workspace repo)
+        .route("/api/workspaces/{ws_slug}/pages", get(routes::pages::list_pages_ws))
+        .route("/api/workspaces/{ws_slug}/pages", post(routes::pages::write_page_ws))
+        .route("/api/workspaces/{ws_slug}/folders", post(routes::pages::create_folder_ws))
+        .route("/api/workspaces/{ws_slug}/pages/{slug}", get(routes::pages::get_page_ws))
         // Ingest
         .route("/api/ingest", post(routes::ingest::ingest))
         // Compile

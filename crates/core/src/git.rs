@@ -48,6 +48,47 @@ fn rename_master_to_main(repo_path: &Path) {
     }
 }
 
+/// Manages multiple WikiRepo instances, one per workspace.
+pub struct WikiRepoManager {
+    data_dir: PathBuf,
+    repos: RwLock<HashMap<String, Arc<WikiRepo>>>,
+}
+
+impl WikiRepoManager {
+    pub fn new(data_dir: &str) -> Self {
+        Self {
+            data_dir: PathBuf::from(data_dir),
+            repos: RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Get or create a WikiRepo for a workspace.
+    pub fn get(&self, workspace_slug: &str) -> Result<Arc<WikiRepo>, git2::Error> {
+        // Check cache
+        {
+            let repos = self.repos.read().unwrap();
+            if let Some(repo) = repos.get(workspace_slug) {
+                return Ok(Arc::clone(repo));
+            }
+        }
+
+        // Create new repo
+        let repo = Arc::new(WikiRepo::open_or_init(
+            &self.data_dir.join(workspace_slug).to_string_lossy(),
+        )?);
+
+        let mut repos = self.repos.write().unwrap();
+        repos.insert(workspace_slug.to_string(), Arc::clone(&repo));
+        Ok(repo)
+    }
+
+    /// Get the "default" repo for backward compatibility.
+    /// TODO: Remove once all routes use workspace-scoped repos.
+    pub fn default_repo(&self) -> Result<Arc<WikiRepo>, git2::Error> {
+        self.get("_default")
+    }
+}
+
 impl WikiRepo {
     pub fn open_or_init(data_dir: &str) -> Result<Self, git2::Error> {
         let path = PathBuf::from(data_dir).join("repo");

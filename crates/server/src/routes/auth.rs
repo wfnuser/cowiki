@@ -37,8 +37,6 @@ pub async fn register(
     }
 
     let user = cowiki_db::users::create(&state.db, &input.name, input.email.as_deref(), None).await?;
-
-    // Create user branch + personal space
     init_user_space(&state, &user).await?;
 
     Ok(Json(AuthResponse {
@@ -85,9 +83,8 @@ pub async fn regenerate_key(
     }))
 }
 
-// ── GitHub OAuth ──────────────────────────────────────────────
+// ── GitHub OAuth ──
 
-/// Redirect user to GitHub authorization page
 pub async fn github_login(State(state): State<Arc<AppState>>) -> Redirect {
     let url = format!(
         "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&scope=read:user%20user:email",
@@ -111,6 +108,7 @@ struct GithubTokenResponse {
 struct GithubUser {
     login: String,
     email: Option<String>,
+    #[allow(dead_code)]
     avatar_url: Option<String>,
 }
 
@@ -120,14 +118,12 @@ struct GithubEmail {
     primary: bool,
 }
 
-/// GitHub OAuth callback — exchange code for token, get user info, create/find user
 pub async fn github_callback(
     State(state): State<Arc<AppState>>,
     Query(params): Query<GithubCallbackParams>,
 ) -> Result<Redirect> {
     let client = reqwest::Client::new();
 
-    // 1. Exchange code for access token
     let token_resp = client
         .post("https://github.com/login/oauth/access_token")
         .header("Accept", "application/json")
@@ -136,26 +132,20 @@ pub async fn github_callback(
             "client_secret": state.config.auth.github_client_secret,
             "code": params.code,
         }))
-        .send()
-        .await
+        .send().await
         .map_err(|e| AppError::Internal(format!("github token exchange failed: {e}")))?
-        .json::<GithubTokenResponse>()
-        .await
+        .json::<GithubTokenResponse>().await
         .map_err(|e| AppError::Internal(format!("github token parse failed: {e}")))?;
 
-    // 2. Get GitHub user info
     let gh_user = client
         .get("https://api.github.com/user")
         .header("Authorization", format!("Bearer {}", token_resp.access_token))
         .header("User-Agent", "cowiki")
-        .send()
-        .await
+        .send().await
         .map_err(|e| AppError::Internal(format!("github user fetch failed: {e}")))?
-        .json::<GithubUser>()
-        .await
+        .json::<GithubUser>().await
         .map_err(|e| AppError::Internal(format!("github user parse failed: {e}")))?;
 
-    // 3. Get email if not public
     let email = if gh_user.email.is_some() {
         gh_user.email.clone()
     } else {
@@ -163,14 +153,11 @@ pub async fn github_callback(
             .get("https://api.github.com/user/emails")
             .header("Authorization", format!("Bearer {}", token_resp.access_token))
             .header("User-Agent", "cowiki")
-            .send()
-            .await
-            .ok()
+            .send().await.ok()
             .and_then(|r| futures::executor::block_on(r.json::<Vec<GithubEmail>>()).ok());
         emails.and_then(|list| list.into_iter().find(|e| e.primary).map(|e| e.email))
     };
 
-    // 4. Find or create user
     let user = if let Some(existing) = cowiki_db::users::find_by_name(&state.db, &gh_user.login).await? {
         existing
     } else {
@@ -182,7 +169,6 @@ pub async fn github_callback(
         user
     };
 
-    // 5. Redirect to frontend with API key
     let redirect_url = format!(
         "{}/?api_key={}&user_name={}&user_id={}",
         state.config.frontend_url,
@@ -193,9 +179,8 @@ pub async fn github_callback(
     Ok(Redirect::temporary(&redirect_url))
 }
 
-// ── Helpers ──────────────────────────────────────────────
+// ── Helpers ──
 
-/// Extract user from Authorization header (Bearer <api_key>)
 pub async fn extract_user(
     db: &sqlx::PgPool,
     headers: &axum::http::HeaderMap,
@@ -214,76 +199,47 @@ pub async fn extract_user(
         .ok_or_else(|| AppError::Unauthorized("invalid API key".into()))
 }
 
-/// Helper: get the user's personal branch name
 pub fn user_branch(user: &cowiki_db::users::User) -> String {
     format!("user/{}", user.id)
 }
 
-/// Initialize a new user's space: git branch + personal workspace + welcome page
+/// Initialize a new user's space: per-workspace repos + welcome pages
 async fn init_user_space(state: &crate::AppState, user: &cowiki_db::users::User) -> Result<()> {
     let branch = user_branch(user);
 
-    // 1. Create Git branch
-    state.wiki_repo
-        .ensure_user_branch(&user.id.to_string())
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-
-    // 2. Create personal workspace in DB
+    // 1. Create personal workspace in DB
     let personal_slug = format!("personal-{}", &user.id.to_string()[..8]);
     cowiki_db::workspaces::create(&state.db, &format!("{}'s Space", user.name), &personal_slug, "private", user.id)
-        .await
-        .ok();
+        .await.ok();
 
-    // 3. Write personal welcome page
-    let welcome = r#"---
-title: "Getting Started"
-summary: "Welcome to your personal knowledge space."
-kind: concept
----
-
-# Getting Started
-
-Welcome to **CoWiki** — your personal knowledge space.
-
-## What you can do here
-
-- **Add sources** — paste text or URLs, CoWiki will compile them into wiki pages
-- **Organize** — create folders to keep your knowledge structured
-- **Search** — find anything with semantic search
-- **Collaborate** — join or create a Team Space to share knowledge with others
-"#;
-
-    state.wiki_repo
-        .write_file(&branch, "wiki/getting-started.md", welcome.as_bytes(), "init: getting started", &user.name)
+    // 2. Init personal repo + user branch + welcome page
+    let personal_repo = state.repo_manager.get(&personal_slug)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    personal_repo.ensure_user_branch(&user.id.to_string())
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    // 4. Create a default Team Space ("General") with welcome page
+    let welcome = "---\ntitle: \"Getting Started\"\nsummary: \"Welcome to your personal knowledge space.\"\nkind: concept\n---\n\n# Getting Started\n\nWelcome to **CoWiki** — your personal knowledge space.\n\n## What you can do here\n\n- **Add sources** — paste text or URLs, CoWiki will compile them into wiki pages\n- **Organize** — create folders to keep your knowledge structured\n- **Search** — find anything with semantic search\n- **Collaborate** — join or create a Team Space to share knowledge with others\n";
+
+    personal_repo.write_file(&branch, "wiki/getting-started.md", welcome.as_bytes(), "init: getting started", &user.name)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    // 3. Create default Team Space ("General") in DB
     let team_slug = format!("general-{}", &user.id.to_string()[..8]);
-    if let Ok(team_ws) = cowiki_db::workspaces::create(&state.db, "General", &team_slug, "public", user.id).await {
-        let team_welcome = r#"---
-title: "Team Space Home"
-summary: "Welcome to the team's shared knowledge base."
-kind: overview
----
+    if cowiki_db::workspaces::create(&state.db, "General", &team_slug, "public", user.id).await.is_ok() {
+        // 4. Init team repo + welcome page on main
+        let team_repo = state.repo_manager.get(&team_slug)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
 
-# Team Space Home
+        let team_welcome = "---\ntitle: \"Team Space Home\"\nsummary: \"Welcome to the team's shared knowledge base.\"\nkind: overview\n---\n\n# Team Space Home\n\nWelcome to the team! This is your shared knowledge base.\n\nUse the **+** button in the sidebar to add pages and folders.\n\n## Getting started\n\n1. **Add sources** — paste articles, docs, or notes\n2. **Compile** — AI turns your sources into structured wiki pages\n3. **Submit** — submit your drafts for team review\n4. **Review** — approve or request changes on teammates' submissions\n";
 
-Welcome to the team! This is your shared knowledge base.
+        team_repo.write_file("main", "wiki/team-space-home.md", team_welcome.as_bytes(), "init: team space home", "cowiki")
+            .map_err(|e| AppError::Internal(e.to_string()))?;
 
-Use the **+** button in the sidebar to add pages and folders. Invite teammates to collaborate.
+        // Create user branch in team repo too
+        team_repo.ensure_user_branch(&user.id.to_string())
+            .map_err(|e| AppError::Internal(e.to_string()))?;
 
-## Getting started
-
-1. **Add sources** — paste articles, docs, or notes
-2. **Compile** — AI turns your sources into structured wiki pages
-3. **Submit** — submit your drafts for team review
-4. **Review** — approve or request changes on teammates' submissions
-"#;
-        // Write to main branch so it's visible to everyone
-        state.wiki_repo
-            .write_file("main", "wiki/team-space-home.md", team_welcome.as_bytes(), "init: team space home", "cowiki")
-            .ok();
-        tracing::info!("created default team space '{}' for user {}", team_ws.slug, user.name);
+        tracing::info!("created team space '{}' for user {}", team_slug, user.name);
     }
 
     Ok(())
