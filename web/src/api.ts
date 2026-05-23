@@ -13,6 +13,8 @@ export interface PageMeta {
   title: string;
   summary: string;
   branch: string;
+  kind: 'page' | 'folder';
+  children: PageMeta[];
 }
 
 export interface PageFull extends PageMeta {
@@ -172,6 +174,15 @@ export async function reviewAction(id: string, action: string) {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ action }),
+  });
+  return res.json();
+}
+
+export async function createFolder(name: string, branch: string, parent?: string) {
+  const res = await fetch(`${BASE}/folders`, {
+    method: 'POST',
+    headers: h({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ name, branch, parent }),
   });
   return res.json();
 }

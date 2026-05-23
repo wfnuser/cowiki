@@ -225,6 +225,64 @@ impl WikiRepo {
         Ok(files)
     }
 
+    /// List all files recursively under a directory, returning full paths.
+    pub fn list_files_recursive(&self, branch: &str, dir: &str) -> Result<Vec<String>, git2::Error> {
+        let repo = self.repo()?;
+        let branch_ref = repo.find_branch(branch, BranchType::Local)?;
+        let commit = branch_ref.get().peel_to_commit()?;
+        let tree = commit.tree()?;
+
+        let subtree = if dir.is_empty() {
+            tree
+        } else {
+            match tree.get_path(Path::new(dir)) {
+                Ok(entry) => repo.find_tree(entry.id())?,
+                Err(_) => return Ok(Vec::new()),
+            }
+        };
+
+        let mut files = Vec::new();
+        self.walk_tree(&repo, &subtree, dir, &mut files)?;
+        Ok(files)
+    }
+
+    fn walk_tree(
+        &self,
+        repo: &Repository,
+        tree: &git2::Tree,
+        prefix: &str,
+        files: &mut Vec<String>,
+    ) -> Result<(), git2::Error> {
+        for entry in tree.iter() {
+            let name = match entry.name() {
+                Some(n) => n,
+                None => continue,
+            };
+            // Skip hidden files
+            if name.starts_with('.') {
+                continue;
+            }
+
+            let full_path = if prefix.is_empty() {
+                name.to_string()
+            } else {
+                format!("{prefix}/{name}")
+            };
+
+            match entry.kind() {
+                Some(git2::ObjectType::Tree) => {
+                    let subtree = repo.find_tree(entry.id())?;
+                    self.walk_tree(repo, &subtree, &full_path, files)?;
+                }
+                Some(git2::ObjectType::Blob) if name.ends_with(".md") => {
+                    files.push(full_path);
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     pub fn diff_files(
         &self,
         branch: &str,

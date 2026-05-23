@@ -115,6 +115,7 @@ async fn main() {
         // Pages
         .route("/api/pages", get(routes::pages::list_pages))
         .route("/api/pages", post(routes::pages::write_page))
+        .route("/api/folders", post(routes::pages::create_folder))
         .route("/api/pages/{slug}", get(routes::pages::get_page))
         // Ingest
         .route("/api/ingest", post(routes::ingest::ingest))

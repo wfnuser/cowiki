@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Clock, LogOut, Compass, Users, FileText } from 'lucide-react';
+import { Plus, Clock, LogOut, Compass, Users, FileText, Folder, ChevronRight } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -28,6 +28,46 @@ import { getStoredAuth, clearAuth } from '../auth';
 
 type ContentView = 'home' | 'discover';
 
+/** Renders a page or folder in the sidebar tree */
+function PageTreeItem({ page, wsSlug, authId }: { page: PageMeta; wsSlug: string; authId?: string }) {
+  const [open, setOpen] = useState(false);
+
+  if (page.kind === 'folder') {
+    return (
+      <>
+        <SidebarMenuItem>
+          <SidebarMenuButton onClick={() => setOpen(!open)} tooltip={page.title}>
+            <ChevronRight size={14} className={`transition-transform ${open ? 'rotate-90' : ''}`} />
+            <Folder size={16} />
+            <span>{page.title || page.slug}</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+        {open && page.children?.map((child) => (
+          <SidebarMenuItem key={child.slug} className="pl-4">
+            <SidebarMenuButton asChild tooltip={child.title}>
+              <Link to={`/w/${wsSlug}/page/${child.slug}?branch=user/${authId}`}>
+                <FileText size={16} />
+                <span>{child.title || child.slug}</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ))}
+      </>
+    );
+  }
+
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild tooltip={page.title}>
+        <Link to={`/w/${wsSlug}/page/${page.slug}?branch=user/${authId}`}>
+          <FileText size={16} />
+          <span>{page.title || page.slug}</span>
+        </Link>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
 export function HomePage() {
   const [mySpaces, setMySpaces] = useState<Workspace[]>([]);
   const [personalPages, setPersonalPages] = useState<PageMeta[]>([]);
@@ -35,7 +75,9 @@ export function HomePage() {
   const [contentView, setContentView] = useState<ContentView>('home');
   const [showCreate, setShowCreate] = useState(false);
   const [showNewPage, setShowNewPage] = useState(false);
+  const [showNewFolder, setShowNewFolder] = useState(false);
   const [newPageTitle, setNewPageTitle] = useState('');
+  const [newFolderName, setNewFolderName] = useState('');
   const [newName, setNewName] = useState('');
   const [newSlug, setNewSlug] = useState('');
   const [creating, setCreating] = useState(false);
@@ -97,6 +139,16 @@ export function HomePage() {
     navigate(`/w/${personalWs.slug}/page/${slug}?branch=user/${auth?.id}`);
   };
 
+  const handleNewFolder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newFolderName.trim()) return;
+    const { createFolder } = await import('../api');
+    await createFolder(newFolderName.trim(), `user/${auth?.id}`);
+    setShowNewFolder(false);
+    setNewFolderName('');
+    load();
+  };
+
   const handleLogout = () => {
     clearAuth();
     navigate('/login');
@@ -116,27 +168,28 @@ export function HomePage() {
               </div>
             </SidebarHeader>
             <SidebarContent>
-              {/* Personal Space — show pages directly */}
+              {/* Personal Space — show pages/folders as tree */}
               <SidebarGroup>
                 <SidebarGroupLabel>Personal Space</SidebarGroupLabel>
                 <SidebarMenu>
                   {personalWs && personalPages.map((p) => (
-                    <SidebarMenuItem key={p.slug}>
-                      <SidebarMenuButton asChild tooltip={p.title}>
-                        <Link to={`/w/${personalWs.slug}/page/${p.slug}?branch=user/${auth?.id}`}>
-                          <FileText size={16} />
-                          <span>{p.title || p.slug}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
+                    <PageTreeItem
+                      key={p.slug}
+                      page={p}
+                      wsSlug={personalWs.slug}
+                      authId={auth?.id}
+                    />
                   ))}
                   <SidebarMenuItem>
-                    <SidebarMenuButton
-                      onClick={() => setShowNewPage(true)}
-                      tooltip="Add new page"
-                    >
+                    <SidebarMenuButton onClick={() => setShowNewPage(true)} tooltip="Add new page">
                       <Plus size={16} />
-                      <span className="text-sidebar-foreground/50">Add new page</span>
+                      <span className="text-sidebar-foreground/50">New page</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton onClick={() => setShowNewFolder(true)} tooltip="Add new folder">
+                      <Plus size={16} />
+                      <span className="text-sidebar-foreground/50">New folder</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 </SidebarMenu>
@@ -241,6 +294,30 @@ export function HomePage() {
               <Button type="submit" disabled={creating || !newName.trim() || !newSlug.trim()}>
                 {creating ? 'Creating...' : 'Create'}
               </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* New folder modal */}
+      <Dialog open={showNewFolder} onOpenChange={setShowNewFolder}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>New Folder</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleNewFolder} className="space-y-4 mt-2">
+            <div>
+              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Name</label>
+              <Input
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                placeholder="e.g. Research, Projects, Notes"
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" type="button" onClick={() => setShowNewFolder(false)}>Cancel</Button>
+              <Button type="submit" disabled={!newFolderName.trim()}>Create</Button>
             </div>
           </form>
         </DialogContent>
