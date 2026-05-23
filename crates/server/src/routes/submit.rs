@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::error::{AppError, Result};
+use crate::routes::auth::extract_user;
 use crate::AppState;
 use cowiki_core::models::DuplicateWarning;
 
@@ -11,6 +12,9 @@ use cowiki_core::models::DuplicateWarning;
 pub struct SubmitRequest {
     pub branch: String,
     pub page_slugs: Vec<String>,
+    /// If true, skip review and merge directly to main (for Personal Space)
+    #[serde(default)]
+    pub skip_review: bool,
 }
 
 #[derive(Serialize)]
@@ -22,8 +26,11 @@ pub struct SubmitResponse {
 
 pub async fn submit(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(input): Json<SubmitRequest>,
 ) -> Result<Json<SubmitResponse>> {
+    let user = extract_user(&state.db, &headers).await?;
+
     let diffs = state
         .wiki_repo
         .diff_files(&input.branch, &input.page_slugs)
@@ -81,11 +88,26 @@ pub async fn submit(
         .await
         .unwrap_or(diff_desc);
 
-    let default_user = cowiki_db::users::get_default(&state.db).await?;
+    if input.skip_review {
+        // Personal Space: merge directly to main, no review needed
+        let file_paths: Vec<String> = input.page_slugs.iter()
+            .map(|s| format!("wiki/{s}.md"))
+            .collect();
+        state.wiki_repo
+            .merge_to_main(&input.branch, &file_paths, &user.name, &format!("commit: {summary}"))
+            .map_err(|e| AppError::Internal(e.to_string()))?;
 
+        return Ok(Json(SubmitResponse {
+            submission_id: uuid::Uuid::nil(),
+            summary,
+            duplicates,
+        }));
+    }
+
+    // Team Space: create a review submission
     let submission = cowiki_db::submissions::create(
         &state.db,
-        default_user.id,
+        user.id,
         &summary,
         &input.page_slugs,
         &input.branch,

@@ -148,11 +148,11 @@ export async function compile(branch: string) {
 
 // ── Submit & Review ──
 
-export async function submit(branch: string, pageSlugs: string[]) {
+export async function submit(branch: string, pageSlugs: string[], skipReview = false) {
   const res = await fetch(`${BASE}/submit`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ branch, page_slugs: pageSlugs }),
+    body: JSON.stringify({ branch, page_slugs: pageSlugs, skip_review: skipReview }),
   });
   return res.json();
 }
