@@ -226,7 +226,7 @@ export function HomePage() {
                       tooltip="Create a new team space"
                     >
                       <Plus size={16} />
-                      <span className="text-sidebar-foreground/50">Add new</span>
+                      <span className="text-sidebar-foreground/50">Add new team space</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 </SidebarMenu>

@@ -120,19 +120,6 @@ Git tracks every change under the hood. Full history, per-page diffs, and the ab
 | LLM | OpenAI API |
 | Agent Protocol | MCP (coming soon) |
 
-## Comparison
-
-|  | llm-wiki-agent | Notion AI | CoWiki |
-|--|----------------|-----------|--------|
-| LLM compiles knowledge | Yes | No | Yes |
-| Multiplayer | No | Yes | Yes |
-| Agent-native (MCP) | No | No | Yes |
-| Version control | No | No | Git |
-| Review workflow | No | No | Yes |
-| Semantic search | No | Yes | Yes |
-| Self-hosted | Yes | No | Yes |
-| Open source | Yes | No | Apache 2.0 |
-
 ## Roadmap
 
 - [ ] MCP Server — agents connect directly
