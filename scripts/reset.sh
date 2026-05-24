@@ -150,15 +150,8 @@ if [ "$RESET_DATA" = true ]; then
     echo "[data] Clearing data directory: $DATA_DIR"
 
     if [ -d "$DATA_DIR" ]; then
-        # Remove repo content (sources/ and wiki/) but keep the data dir itself
-        if [ -d "$DATA_DIR/repo" ]; then
-            rm -rf "$DATA_DIR/repo"
-            echo "[data] Removed $DATA_DIR/repo"
-        fi
-        # Remove any other generated content
-        if [ -d "$DATA_DIR/repo" ]; then
-            :
-        fi
+        rm -rf -- "${DATA_DIR:?}"/*
+        echo "[data] Removed $DATA_DIR"
         echo "[data] Done."
     else
         echo "[data] Directory does not exist, nothing to clear."
