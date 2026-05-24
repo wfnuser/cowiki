@@ -34,9 +34,18 @@ interface ActivePage {
 }
 
 export function MainLayout() {
-  const auth = getStoredAuth();
+  const [auth, setAuth] = useState(getStoredAuth);
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Re-read auth when localStorage might have changed (e.g. after OAuth redirect)
+  useEffect(() => {
+    const checkAuth = () => setAuth(getStoredAuth());
+    checkAuth();
+    // Poll briefly in case OAuthInterceptor writes after mount
+    const timer = setTimeout(checkAuth, 100);
+    return () => clearTimeout(timer);
+  }, [location.pathname]);
 
   // Data
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -108,9 +117,11 @@ export function MainLayout() {
     }
 
     setLoading(false);
-  }, []);
+  }, [auth?.id]);
 
-  useEffect(() => { loadWorkspaces(); }, [loadWorkspaces]);
+  useEffect(() => {
+    if (auth) loadWorkspaces();
+  }, [auth?.id, loadWorkspaces]);
 
   // Load pages for a space
   const loadSpacePages = async (ws: Workspace) => {
