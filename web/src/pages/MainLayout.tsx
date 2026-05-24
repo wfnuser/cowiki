@@ -125,9 +125,23 @@ export function MainLayout() {
 
   // Load pages for a space
   const loadSpacePages = async (ws: Workspace) => {
-    const branch = ws.visibility === 'private' ? userBranch : 'main';
-    const pages = await listPages(branch, ws.slug);
-    setSpacePages((prev) => ({ ...prev, [ws.id]: pages }));
+    if (ws.visibility === 'private') {
+      // Personal: just user branch
+      const pages = await listPages(userBranch, ws.slug);
+      setSpacePages((prev) => ({ ...prev, [ws.id]: pages }));
+    } else {
+      // Team: merge main + user draft pages
+      const [mainPages, draftPages] = await Promise.all([
+        listPages('main', ws.slug),
+        listPages(userBranch, ws.slug).catch(() => [] as PageMeta[]),
+      ]);
+      const mainSlugs = new Set(mainPages.map((p) => p.slug));
+      const merged = [
+        ...mainPages,
+        ...draftPages.filter((p) => !mainSlugs.has(p.slug)),
+      ];
+      setSpacePages((prev) => ({ ...prev, [ws.id]: merged }));
+    }
   };
 
   // Toggle space expansion
@@ -144,15 +158,25 @@ export function MainLayout() {
     });
   };
 
-  // Select a page
+  // Select a page — try user branch first (for drafts), fall back to main
   const selectPage = async (ws: Workspace, slug: string) => {
     setActivePage({ workspace: ws, slug });
-    const branch = ws.visibility === 'private' ? userBranch : 'main';
-    const page = await getPage(slug, branch, ws.slug);
-    setPageContent(page);
-    // Update URL
     const owner = auth?.name || 'user';
     navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
+
+    if (ws.visibility === 'private') {
+      const page = await getPage(slug, userBranch, ws.slug);
+      setPageContent(page);
+    } else {
+      // Team space: try user branch first (draft), then main
+      try {
+        const page = await getPage(slug, userBranch, ws.slug);
+        setPageContent(page);
+      } catch {
+        const page = await getPage(slug, 'main', ws.slug);
+        setPageContent(page);
+      }
+    }
   };
 
   // Create workspace
