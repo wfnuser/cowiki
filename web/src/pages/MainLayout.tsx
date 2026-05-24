@@ -163,23 +163,25 @@ export function MainLayout() {
   const handleCreatePage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !showNewPage) return;
+    const ws = showNewPage; // save ref before closing modal
     const slug = newName.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim();
     const body = `---\ntitle: "${newName.trim()}"\nsummary: ""\nkind: concept\n---\n\n`;
-    await writePage(slug, body, userBranch, showNewPage.slug);
+    await writePage(slug, body, userBranch, ws.slug);
     setShowNewPage(null);
     setNewName('');
-    loadSpacePages(showNewPage);
-    selectPage(showNewPage, slug);
+    await loadSpacePages(ws);
+    selectPage(ws, slug);
   };
 
   // Create folder in a workspace
   const handleCreateFolder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !showNewFolder) return;
-    await createFolder(newName.trim(), userBranch, undefined, showNewFolder.slug);
+    const ws = showNewFolder; // save ref before closing modal
+    await createFolder(newName.trim(), userBranch, undefined, ws.slug);
     setShowNewFolder(null);
     setNewName('');
-    loadSpacePages(showNewFolder);
+    await loadSpacePages(ws);
   };
 
   // Compile pages in the active workspace
