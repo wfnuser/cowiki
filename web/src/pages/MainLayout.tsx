@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  Plus, LogOut, Compass, Library, FileText, Folder,
+  Plus, LogOut, Compass, Library, FileText, Folder, Search,
   ChevronRight, FolderPlus, Upload, Wand2, ArrowUpRight, MoreHorizontal, RefreshCw, Pencil,
 } from 'lucide-react';
 import {
@@ -59,6 +59,7 @@ export function MainLayout() {
   const [showRename, setShowRename] = useState<Workspace | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const userBranch = `user/${auth?.id}`;
 
@@ -253,6 +254,29 @@ export function MainLayout() {
   const personalSpaces = workspaces.filter((w) => w.visibility === 'private' && w.role === 'owner');
   const teamSpaces = workspaces.filter((w) => !(w.visibility === 'private' && w.role === 'owner'));
 
+  // Client-side search: filter pages across all loaded spaces
+  const searchResults = searchQuery.trim() ? (() => {
+    const q = searchQuery.toLowerCase();
+    const results: { workspace: Workspace; page: PageMeta }[] = [];
+    for (const ws of workspaces) {
+      const pages = spacePages[ws.id] || [];
+      for (const p of pages) {
+        if (p.title.toLowerCase().includes(q) || p.summary.toLowerCase().includes(q) || p.slug.toLowerCase().includes(q)) {
+          results.push({ workspace: ws, page: p });
+        }
+        // Also search folder children
+        if (p.children) {
+          for (const child of p.children) {
+            if (child.title.toLowerCase().includes(q) || child.summary.toLowerCase().includes(q) || child.slug.toLowerCase().includes(q)) {
+              results.push({ workspace: ws, page: child });
+            }
+          }
+        }
+      }
+    }
+    return results;
+  })() : null;
+
   // Strip frontmatter from page body
   const renderBody = (body: string) => {
     if (body.startsWith('---')) {
@@ -274,6 +298,20 @@ export function MainLayout() {
                 </div>
                 <span className="font-semibold text-sm">CoWiki</span>
               </div>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <div className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground/70">
+                    <Search size={16} className="shrink-0" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search..."
+                      className="bg-transparent outline-none w-full text-sm placeholder:text-sidebar-foreground/40"
+                    />
+                  </div>
+                </SidebarMenuItem>
+              </SidebarMenu>
             </SidebarHeader>
             <SidebarContent>
               {/* Personal Space */}
@@ -410,7 +448,35 @@ export function MainLayout() {
 
             {/* Content */}
             <div className="max-w-3xl px-16 py-10">
-              {pageContent ? (
+              {searchResults ? (
+                <div>
+                  <h1 className="text-2xl font-bold mb-4" style={{ fontFamily: 'var(--font-serif)' }}>
+                    Search: "{searchQuery}"
+                  </h1>
+                  {searchResults.length === 0 ? (
+                    <p className="text-[var(--color-text-tertiary)] text-sm">No results found.</p>
+                  ) : (
+                    <div>
+                      {searchResults.map((r) => (
+                        <button
+                          key={`${r.workspace.id}-${r.page.slug}`}
+                          onClick={() => { setSearchQuery(''); selectPage(r.workspace, r.page.slug); }}
+                          className="w-full text-left flex items-center gap-2.5 px-2 py-2 -mx-2 rounded-md hover:bg-[var(--color-bg-hover)] transition-colors"
+                        >
+                          <FileText size={16} className="shrink-0 text-[var(--color-text-tertiary)]" />
+                          <div className="min-w-0">
+                            <div className="text-sm text-[var(--color-text)]">{r.page.title || r.page.slug}</div>
+                            <div className="text-xs text-[var(--color-text-tertiary)]">
+                              {r.workspace.name}
+                              {r.page.summary && ` · ${r.page.summary}`}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : pageContent ? (
                 <article>
                   <h1 className="text-4xl font-bold mb-2 leading-tight" style={{ fontFamily: 'var(--font-serif)' }}>
                     {pageContent.title}
