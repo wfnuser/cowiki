@@ -57,6 +57,7 @@ export function MainLayout() {
   const [compiling, setCompiling] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showRename, setShowRename] = useState<Workspace | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   const userBranch = `user/${auth?.id}`;
@@ -220,6 +221,16 @@ export function MainLayout() {
     if (activePage) loadSpacePages(activePage.workspace);
   };
 
+  const handleRename = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!renameValue.trim() || !showRename) return;
+    const { renameWorkspace } = await import('../api');
+    await renameWorkspace(showRename.slug, renameValue.trim());
+    setShowRename(null);
+    setRenameValue('');
+    loadWorkspaces();
+  };
+
   const handleLogout = () => {
     clearAuth();
     navigate('/login');
@@ -287,6 +298,7 @@ export function MainLayout() {
                       onSelectPage={(slug) => selectPage(ws, slug)}
                       onNewPage={() => { setShowNewPage(ws); setNewName(''); }}
                       onNewFolder={() => { setShowNewFolder(ws); setNewName(''); }}
+                      onRename={() => { setShowRename(ws); setRenameValue(ws.name); }}
                     />
                   ))}
                   <SidebarMenuItem>
@@ -454,6 +466,23 @@ export function MainLayout() {
         </DialogContent>
       </Dialog>
 
+      {/* Rename workspace modal */}
+      <Dialog open={!!showRename} onOpenChange={(open) => !open && setShowRename(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Rename Space</DialogTitle></DialogHeader>
+          <form onSubmit={handleRename} className="space-y-4 mt-2">
+            <div>
+              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Name</label>
+              <Input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} autoFocus />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" type="button" onClick={() => setShowRename(null)}>Cancel</Button>
+              <Button type="submit" disabled={!renameValue.trim()}>Rename</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       {/* New folder modal */}
       <Dialog open={!!showNewFolder} onOpenChange={(open) => !open && setShowNewFolder(null)}>
         <DialogContent className="sm:max-w-md">
@@ -517,12 +546,12 @@ function SpaceSection({
 }
 
 function SpaceTreeItem({
-  workspace, pages, expanded, activePage, onToggle, onSelectPage, onNewPage, onNewFolder,
+  workspace, pages, expanded, activePage, onToggle, onSelectPage, onNewPage, onNewFolder, onRename,
 }: {
   workspace: Workspace; pages: PageMeta[];
   expanded: boolean; activePage: ActivePage | null;
   onToggle: () => void; onSelectPage: (slug: string) => void;
-  onNewPage: () => void; onNewFolder: () => void;
+  onNewPage: () => void; onNewFolder: () => void; onRename: () => void;
 }) {
   return (
     <>
@@ -541,7 +570,7 @@ function SpaceTreeItem({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-36">
-              <DropdownMenuItem><Pencil size={14} className="mr-2" /> Rename</DropdownMenuItem>
+              <DropdownMenuItem onClick={onRename}><Pencil size={14} className="mr-2" /> Rename</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <DropdownMenu>
