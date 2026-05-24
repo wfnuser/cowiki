@@ -298,7 +298,7 @@ export function MainLayout() {
                 </div>
                 <span className="font-semibold text-sm">CoWiki</span>
               </div>
-              <SidebarMenu className="mt-1 mb-2">
+              <SidebarMenu className="mt-1 mb-0.5">
                 <SidebarMenuItem>
                   <div className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground/70 bg-white/80 border border-sidebar-border/60">
                     <Search size={16} className="shrink-0 text-sidebar-foreground/40" />
