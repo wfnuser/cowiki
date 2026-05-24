@@ -59,6 +59,7 @@ export function MainLayout() {
   const [showCreate, setShowCreate] = useState(false);
   const [showNewPage, setShowNewPage] = useState<Workspace | null>(null);
   const [showNewFolder, setShowNewFolder] = useState<Workspace | null>(null);
+  const [newPageFolder, setNewPageFolder] = useState<string | null>(null); // folder path for "add page in folder"
   const [newName, setNewName] = useState('');
   const [newSlug, setNewSlug] = useState('');
   const [creating, setCreating] = useState(false);
@@ -199,12 +200,17 @@ export function MainLayout() {
   const handleCreatePage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !showNewPage) return;
-    const ws = showNewPage; // save ref before closing modal
-    const slug = newName.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim();
+    const ws = showNewPage;
+    const baseSlug = newName.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim();
+    // If creating inside a folder, prefix the slug
+    const slug = newPageFolder
+      ? `${newPageFolder.replace('wiki/', '')}/${baseSlug}`
+      : baseSlug;
     const body = `---\ntitle: "${newName.trim()}"\nsummary: ""\nkind: concept\n---\n\n`;
     await writePage(slug, body, userBranch, ws.slug);
     setShowNewPage(null);
     setNewName('');
+    setNewPageFolder(null);
     await loadSpacePages(ws);
     selectPage(ws, slug);
   };
@@ -360,8 +366,9 @@ export function MainLayout() {
                   activePage={activePage}
                   onToggle={() => toggleSpace(ws)}
                   onSelectPage={(slug) => selectPage(ws, slug)}
-                  onNewPage={() => { setShowNewPage(ws); setNewName(''); }}
+                  onNewPage={() => { setShowNewPage(ws); setNewName(''); setNewPageFolder(null); }}
                   onNewFolder={() => { setShowNewFolder(ws); setNewName(''); }}
+                  onAddPageInFolder={(folderPath) => { setShowNewPage(ws); setNewName(''); setNewPageFolder(folderPath); }}
                 />
               ))}
 
@@ -378,8 +385,9 @@ export function MainLayout() {
                       activePage={activePage}
                       onToggle={() => toggleSpace(ws)}
                       onSelectPage={(slug) => selectPage(ws, slug)}
-                      onNewPage={() => { setShowNewPage(ws); setNewName(''); }}
+                      onNewPage={() => { setShowNewPage(ws); setNewName(''); setNewPageFolder(null); }}
                       onNewFolder={() => { setShowNewFolder(ws); setNewName(''); }}
+                      onAddPageInFolder={(folderPath) => { setShowNewPage(ws); setNewName(''); setNewPageFolder(folderPath); }}
                       onRename={() => { setShowRename(ws); setRenameValue(ws.name); }}
                     />
                   ))}
@@ -616,12 +624,12 @@ export function MainLayout() {
 // ── Sidebar Components ──
 
 function SpaceSection({
-  workspace, label, pages, expanded, activePage, onToggle, onSelectPage, onNewPage, onNewFolder,
+  workspace, label, pages, expanded, activePage, onToggle, onSelectPage, onNewPage, onNewFolder, onAddPageInFolder,
 }: {
   workspace: Workspace; label: string; pages: PageMeta[];
   expanded: boolean; activePage: ActivePage | null;
   onToggle: () => void; onSelectPage: (slug: string) => void;
-  onNewPage: () => void; onNewFolder: () => void;
+  onNewPage: () => void; onNewFolder: () => void; onAddPageInFolder: (folderPath: string) => void;
 }) {
   return (
     <SidebarGroup>
@@ -647,6 +655,7 @@ function SpaceSection({
               page={p}
               isActive={activePage?.workspace.id === workspace.id && activePage?.slug === p.slug}
               onSelect={() => onSelectPage(p.slug)} onSelectChild={(slug) => onSelectPage(slug)}
+              onAddPage={(folderPath) => onAddPageInFolder(folderPath)}
             />
           ))}
         </SidebarMenu>
@@ -656,12 +665,12 @@ function SpaceSection({
 }
 
 function SpaceTreeItem({
-  workspace, pages, expanded, activePage, onToggle, onSelectPage, onNewPage, onNewFolder, onRename,
+  workspace, pages, expanded, activePage, onToggle, onSelectPage, onNewPage, onNewFolder, onAddPageInFolder, onRename,
 }: {
   workspace: Workspace; pages: PageMeta[];
   expanded: boolean; activePage: ActivePage | null;
   onToggle: () => void; onSelectPage: (slug: string) => void;
-  onNewPage: () => void; onNewFolder: () => void; onRename: () => void;
+  onNewPage: () => void; onNewFolder: () => void; onAddPageInFolder: (folderPath: string) => void; onRename: () => void;
 }) {
   return (
     <>
@@ -702,6 +711,7 @@ function SpaceTreeItem({
           page={p}
           isActive={activePage?.workspace.id === workspace.id && activePage?.slug === p.slug}
           onSelect={() => onSelectPage(p.slug)} onSelectChild={(slug) => onSelectPage(slug)}
+          onAddPage={(folderPath) => onAddPageInFolder(folderPath)}
           indent
         />
       ))}
@@ -709,21 +719,31 @@ function SpaceTreeItem({
   );
 }
 
-function PageItem({ page, isActive, onSelect, onSelectChild, indent }: {
+function PageItem({ page, isActive, onSelect, onSelectChild, onAddPage, indent }: {
   page: PageMeta; isActive: boolean; onSelect: () => void;
-  onSelectChild?: (slug: string) => void; indent?: boolean;
+  onSelectChild?: (slug: string) => void; onAddPage?: (folderSlug: string) => void; indent?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
   if (page.kind === 'folder') {
+    // Extract folder path from slug (e.g. "research/_index" → "wiki/research")
+    const folderPath = 'wiki/' + page.slug.replace('/_index', '');
     return (
       <>
-        <SidebarMenuItem className={indent ? 'pl-4' : ''}>
+        <SidebarMenuItem className={`${indent ? 'pl-4' : ''} group/folder relative`}>
           <SidebarMenuButton onClick={() => setOpen(!open)} isActive={isActive}>
             <ChevronRight size={12} className={`transition-transform ${open ? 'rotate-90' : ''}`} />
             <Folder size={16} />
             <span>{page.title || page.slug}</span>
           </SidebarMenuButton>
+          {onAddPage && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onAddPage(folderPath); }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/folder:opacity-100 p-0.5 rounded text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-all outline-none"
+            >
+              <Plus size={14} />
+            </button>
+          )}
         </SidebarMenuItem>
         {open && page.children?.map((child) => (
           <SidebarMenuItem key={child.slug} className={indent ? 'pl-8' : 'pl-4'}>
