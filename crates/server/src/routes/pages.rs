@@ -312,9 +312,16 @@ fn list_pages_from_repo(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Resu
     let files = repo.list_files_recursive(branch, "wiki")
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    let mut root_items: Vec<PageListItem> = Vec::new();
-    let mut folders: std::collections::HashMap<String, Vec<PageListItem>> = std::collections::HashMap::new();
-    let mut folder_index: std::collections::HashMap<String, (String, String)> = std::collections::HashMap::new();
+    // Collect all items: pages and folder _index metadata
+    struct RawItem {
+        slug: String,
+        title: String,
+        summary: String,
+        is_index: bool, // true if this is a folder's _index.md
+        dir: String,    // parent directory path (e.g. "test-folder" or "test-folder/sub")
+    }
+
+    let mut items: Vec<RawItem> = Vec::new();
 
     for file_path in &files {
         let rel = file_path.strip_prefix("wiki/").unwrap_or(file_path);
@@ -325,28 +332,85 @@ fn list_pages_from_repo(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Resu
         };
         let parts: Vec<&str> = slug.split('/').collect();
         if parts.len() == 1 {
-            root_items.push(PageListItem { slug, title, summary, branch: branch.into(), kind: "page".into(), children: Vec::new() });
+            items.push(RawItem { slug: slug.clone(), title, summary, is_index: false, dir: String::new() });
         } else {
             let dir = parts[..parts.len() - 1].join("/");
             let filename = *parts.last().unwrap();
-            if filename == "_index" {
-                folder_index.insert(dir, (title, summary));
-            } else {
-                folders.entry(dir).or_default().push(PageListItem { slug, title, summary, branch: branch.into(), kind: "page".into(), children: Vec::new() });
-            }
+            items.push(RawItem { slug: slug.clone(), title, summary, is_index: filename == "_index", dir });
         }
     }
-    let mut folder_names: Vec<String> = folders.keys().chain(folder_index.keys()).cloned().collect();
-    folder_names.sort();
-    folder_names.dedup();
-    for dir in folder_names {
-        let (title, summary) = folder_index.remove(&dir).unwrap_or_else(|| {
-            let name = dir.rsplit('/').next().unwrap_or(&dir);
-            (name.to_string(), String::new())
-        });
-        let children = folders.remove(&dir).unwrap_or_default();
-        root_items.push(PageListItem { slug: format!("{dir}/_index"), title, summary, branch: branch.into(), kind: "folder".into(), children });
+
+    // Build tree recursively
+    fn build_level(items: &[RawItem], parent_dir: &str, branch: &str) -> Vec<PageListItem> {
+        let mut result: Vec<PageListItem> = Vec::new();
+
+        // Find pages directly in this directory (not _index)
+        for item in items {
+            if item.dir == parent_dir && !item.is_index {
+                result.push(PageListItem {
+                    slug: item.slug.clone(), title: item.title.clone(), summary: item.summary.clone(),
+                    branch: branch.into(), kind: "page".into(), children: Vec::new(),
+                });
+            }
+        }
+
+        // Find subdirectories (folders that have _index or have children at this level)
+        let mut subdirs: Vec<String> = Vec::new();
+        for item in items {
+            if !item.dir.is_empty() {
+                // Check if this item's immediate parent is our current directory
+                let expected_parent = if parent_dir.is_empty() {
+                    // Top level: subdirs are single-segment dirs
+                    if !item.dir.contains('/') {
+                        item.dir.clone()
+                    } else {
+                        item.dir.split('/').next().unwrap_or("").to_string()
+                    }
+                } else {
+                    // Nested: subdirs start with parent_dir + "/"
+                    if item.dir.starts_with(&format!("{parent_dir}/")) || item.dir == parent_dir {
+                        let rest = item.dir.strip_prefix(&format!("{parent_dir}/")).unwrap_or("");
+                        if rest.is_empty() {
+                            continue; // same dir
+                        }
+                        let next_segment = rest.split('/').next().unwrap_or("");
+                        format!("{parent_dir}/{next_segment}")
+                    } else if parent_dir.is_empty() && !item.dir.contains('/') {
+                        item.dir.clone()
+                    } else {
+                        continue;
+                    }
+                };
+                if !expected_parent.is_empty() && !subdirs.contains(&expected_parent) {
+                    subdirs.push(expected_parent);
+                }
+            }
+        }
+        subdirs.sort();
+        subdirs.dedup();
+
+        for subdir in subdirs {
+            // Find _index for this subdir
+            let (title, summary) = items.iter()
+                .find(|i| i.dir == subdir && i.is_index)
+                .map(|i| (i.title.clone(), i.summary.clone()))
+                .unwrap_or_else(|| {
+                    let name = subdir.rsplit('/').next().unwrap_or(&subdir);
+                    (name.to_string(), String::new())
+                });
+
+            let children = build_level(items, &subdir, branch);
+            result.push(PageListItem {
+                slug: format!("{subdir}/_index"), title, summary,
+                branch: branch.into(), kind: "folder".into(), children,
+            });
+        }
+
+        // Sort: folders first, then alphabetically
+        result.sort_by(|a, b| (b.kind == "folder").cmp(&(a.kind == "folder")).then(a.title.cmp(&b.title)));
+        result
     }
-    root_items.sort_by(|a, b| (b.kind == "folder").cmp(&(a.kind == "folder")).then(a.title.cmp(&b.title)));
-    Ok(Json(root_items))
+
+    let tree = build_level(&items, "", branch);
+    Ok(Json(tree))
 }
