@@ -61,17 +61,43 @@ export function MainLayout() {
 
   const userBranch = `user/${auth?.id}`;
 
-  // Load workspaces
+  // Load workspaces + restore state from URL
   const loadWorkspaces = useCallback(async () => {
     setLoading(true);
     const ws = await listWorkspaces();
     setWorkspaces(ws);
+
     // Auto-expand personal space
     const personal = ws.find((w) => w.visibility === 'private' && w.role === 'owner');
     if (personal) {
       setExpandedSpaces((prev) => new Set([...prev, personal.id]));
       loadSpacePages(personal);
     }
+
+    // Restore page from URL: /:owner/:wsSlug/:pageSlug
+    const pathParts = location.pathname.split('/').filter(Boolean);
+    if (pathParts.length >= 3) {
+      const [, wsSlug, ...pageParts] = pathParts;
+      const pageSlug = pageParts.join('/');
+      const targetWs = ws.find((w) => w.slug === wsSlug);
+      if (targetWs) {
+        // Expand the target workspace
+        setExpandedSpaces((prev) => new Set([...prev, targetWs.id]));
+        if (!spacePages[targetWs.id]) {
+          await loadSpacePages(targetWs);
+        }
+        // Load the page
+        const branch = targetWs.visibility === 'private' ? userBranch : 'main';
+        try {
+          const page = await getPage(pageSlug, branch, targetWs.slug);
+          setActivePage({ workspace: targetWs, slug: pageSlug });
+          setPageContent(page);
+        } catch {
+          // Page not found, just show home
+        }
+      }
+    }
+
     setLoading(false);
   }, []);
 
