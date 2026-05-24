@@ -68,11 +68,11 @@ export function MainLayout() {
     const ws = await listWorkspaces();
     setWorkspaces(ws);
 
-    // Auto-expand personal space
+    // Auto-expand personal space and load its pages
     const personal = ws.find((w) => w.visibility === 'private' && w.role === 'owner');
     if (personal) {
       setExpandedSpaces((prev) => new Set([...prev, personal.id]));
-      loadSpacePages(personal);
+      await loadSpacePages(personal);
     }
 
     // Restore page from URL: /:owner/:wsSlug/:pageSlug
@@ -96,6 +96,13 @@ export function MainLayout() {
         } catch {
           // Page not found, just show home
         }
+      }
+    } else if (personal) {
+      // No page in URL — default to first page in personal space
+      const personalPages = spacePages[personal.id] || await listPages(userBranch, personal.slug);
+      const firstPage = personalPages.find((p) => p.kind === 'page');
+      if (firstPage) {
+        selectPage(personal, firstPage.slug);
       }
     }
 
