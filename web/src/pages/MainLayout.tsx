@@ -38,14 +38,12 @@ export function MainLayout() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Re-read auth when localStorage might have changed (e.g. after OAuth redirect)
+  // Listen for auth changes (e.g. after OAuth redirect)
   useEffect(() => {
-    const checkAuth = () => setAuth(getStoredAuth());
-    checkAuth();
-    // Poll briefly in case OAuthInterceptor writes after mount
-    const timer = setTimeout(checkAuth, 100);
-    return () => clearTimeout(timer);
-  }, [location.pathname]);
+    const onAuthChanged = () => setAuth(getStoredAuth());
+    window.addEventListener('cowiki-auth-changed', onAuthChanged);
+    return () => window.removeEventListener('cowiki-auth-changed', onAuthChanged);
+  }, []);
 
   // Data
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -76,6 +74,7 @@ export function MainLayout() {
 
   // Load workspaces + restore state from URL
   const loadWorkspaces = useCallback(async () => {
+    if (!auth) return;
     setLoading(true);
     const ws = await listWorkspaces();
     setWorkspaces(ws);

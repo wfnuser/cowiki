@@ -16,6 +16,8 @@ function OAuthInterceptor({ children }: { children: React.ReactNode }) {
     if (apiKey && userName && userId) {
       storeAuth(apiKey, userName, userId);
       setSearchParams({}, { replace: true });
+      // Notify MainLayout that auth is ready
+      window.dispatchEvent(new Event('cowiki-auth-changed'));
       navigate('/', { replace: true });
     }
   }, [searchParams, setSearchParams, navigate]);
