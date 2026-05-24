@@ -16,8 +16,6 @@ function OAuthInterceptor({ children }: { children: React.ReactNode }) {
     if (apiKey && userName && userId) {
       storeAuth(apiKey, userName, userId);
       setSearchParams({}, { replace: true });
-      // Notify MainLayout that auth is ready
-      window.dispatchEvent(new Event('cowiki-auth-changed'));
       navigate('/', { replace: true });
     }
   }, [searchParams, setSearchParams, navigate]);
@@ -26,8 +24,11 @@ function OAuthInterceptor({ children }: { children: React.ReactNode }) {
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const [searchParams] = useSearchParams();
   const auth = getStoredAuth();
-  if (!auth) return <Navigate to="/login" replace />;
+  // Don't redirect if we're in the middle of OAuth callback (api_key in URL)
+  const hasOAuthParams = searchParams.has('api_key');
+  if (!auth && !hasOAuthParams) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
 

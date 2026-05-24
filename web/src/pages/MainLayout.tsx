@@ -34,15 +34,16 @@ interface ActivePage {
 }
 
 export function MainLayout() {
-  const [auth, setAuth] = useState(getStoredAuth);
+  const [auth, setAuth] = useState(() => getStoredAuth());
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Listen for auth changes (e.g. after OAuth redirect)
+  // Re-check auth on mount (handles OAuth redirect timing)
   useEffect(() => {
-    const onAuthChanged = () => setAuth(getStoredAuth());
-    window.addEventListener('cowiki-auth-changed', onAuthChanged);
-    return () => window.removeEventListener('cowiki-auth-changed', onAuthChanged);
+    if (!auth) {
+      const stored = getStoredAuth();
+      if (stored) setAuth(stored);
+    }
   }, []);
 
   // Data
