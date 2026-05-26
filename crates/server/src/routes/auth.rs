@@ -185,6 +185,8 @@ pub async fn extract_user(
     db: &sqlx::PgPool,
     headers: &axum::http::HeaderMap,
 ) -> Result<cowiki_db::users::User> {
+    use sha2::{Sha256, Digest};
+
     let auth_header = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -194,9 +196,32 @@ pub async fn extract_user(
         .strip_prefix("Bearer ")
         .ok_or_else(|| AppError::Unauthorized("invalid Authorization format".into()))?;
 
-    cowiki_db::users::find_by_api_key(db, api_key)
-        .await?
-        .ok_or_else(|| AppError::Unauthorized("invalid API key".into()))
+    // Fast path: primary key (plaintext in users.api_key)
+    if let Some(user) = cowiki_db::users::find_by_api_key(db, api_key).await? {
+        return Ok(user);
+    }
+
+    // Fallback: secondary keys (SHA-256 hashed in api_keys.key_hash)
+    let key_hash: String = {
+        let mut hasher = Sha256::new();
+        hasher.update(api_key.as_bytes());
+        format!("{:x}", hasher.finalize())
+    };
+
+    if let Some((_key, user_id)) = cowiki_db::api_keys::find_by_key_hash(db, &key_hash).await? {
+        // Touch last_used_at (fire-and-forget)
+        let db_clone = db.clone();
+        let hash_clone = key_hash.clone();
+        tokio::spawn(async move {
+            let _ = cowiki_db::api_keys::touch_last_used(&db_clone, &hash_clone).await;
+        });
+
+        return cowiki_db::users::find_by_id(db, user_id)
+            .await?
+            .ok_or_else(|| AppError::Unauthorized("invalid API key".into()));
+    }
+
+    Err(AppError::Unauthorized("invalid API key".into()))
 }
 
 pub fn user_branch(user: &cowiki_db::users::User) -> String {

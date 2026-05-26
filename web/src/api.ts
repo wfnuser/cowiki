@@ -220,3 +220,45 @@ export async function search(q: string, branch = 'main'): Promise<SearchResult[]
   const res = await fetch(`${BASE}/search?q=${encodeURIComponent(q)}&branch=${branch}`, { headers: h() });
   return res.json();
 }
+
+// ── API Keys ──
+
+export interface ApiKeyInfo {
+  id: string;
+  name: string;
+  key_prefix: string;   // masked: "cw_****xxxx"
+  last_used_at: string | null;
+  created_at: string;
+}
+
+export interface ApiKeyCreated {
+  id: string;
+  name: string;
+  key_prefix: string;
+  raw_key: string;       // ONLY returned on creation — store now!
+  created_at: string;
+}
+
+export async function listApiKeys(): Promise<ApiKeyInfo[]> {
+  const res = await fetch(`${BASE}/keys`, { headers: h() });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function createApiKey(name: string): Promise<ApiKeyCreated> {
+  const res = await fetch(`${BASE}/keys`, {
+    method: 'POST',
+    headers: h({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function revokeApiKey(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/keys/${id}`, {
+    method: 'DELETE',
+    headers: h(),
+  });
+  if (!res.ok) throw new Error(await res.text());
+}

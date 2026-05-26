@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Plus, LogOut, Compass, Library, FileText, Folder, Search,
-  ChevronRight, FolderPlus, Upload, Wand2, ArrowUpRight, MoreHorizontal, RefreshCw, Pencil,
+  ChevronRight, FolderPlus, Upload, Wand2, ArrowUpRight, MoreHorizontal, RefreshCw, Pencil, Settings,
 } from 'lucide-react';
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel,
@@ -26,6 +26,7 @@ import {
   type Workspace, type PageMeta, type PageFull,
 } from '../api';
 import { IngestForm } from '../components/IngestForm';
+import { SettingsDialog } from '../components/SettingsDialog';
 import { getStoredAuth, clearAuth } from '../auth';
 
 interface ActivePage {
@@ -70,6 +71,7 @@ export function MainLayout() {
   const [renameValue, setRenameValue] = useState('');
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const userBranch = `user/${auth?.id}`;
 
@@ -424,9 +426,14 @@ export function MainLayout() {
                   </div>
                   <span className="text-xs text-sidebar-foreground/70">{auth?.name}</span>
                 </div>
-                <button onClick={handleLogout} className="text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors" title="Sign out">
-                  <LogOut size={14} />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setSettingsOpen(true)} className="text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors" title="Settings">
+                    <Settings size={14} />
+                  </button>
+                  <button onClick={handleLogout} className="text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors" title="Sign out">
+                    <LogOut size={14} />
+                  </button>
+                </div>
               </div>
             </SidebarFooter>
           </Sidebar>
@@ -621,6 +628,9 @@ export function MainLayout() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Settings dialog */}
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </>
   );
 }

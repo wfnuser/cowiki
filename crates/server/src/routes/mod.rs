@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod compile;
 pub mod ingest;
+pub mod keys;
 pub mod pages;
 pub mod review;
 pub mod search;

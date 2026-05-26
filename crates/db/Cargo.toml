@@ -10,3 +10,4 @@ chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 pgvector = { version = "0.4", features = ["sqlx"] }
 tracing = "0.1"
+sha2 = "0.10"

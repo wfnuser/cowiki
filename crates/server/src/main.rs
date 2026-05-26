@@ -1,4 +1,4 @@
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 use clap::Parser;
 use cowiki_core::compiler::Compiler;
@@ -140,6 +140,10 @@ async fn main() {
         .route("/api/reviews/{id}", post(routes::review::review_action))
         // Search
         .route("/api/search", get(routes::search::search))
+        // API Keys — multi-key management
+        .route("/api/keys", get(routes::keys::list_keys))
+        .route("/api/keys", post(routes::keys::create_key))
+        .route("/api/keys/{id}", delete(routes::keys::revoke_key))
         .layer(CorsLayer::permissive())
         .with_state(state);
 

@@ -417,6 +417,7 @@ dependencies = [
  "chrono",
  "pgvector",
  "serde",
+ "sha2",
  "sqlx",
  "tracing",
  "uuid",
