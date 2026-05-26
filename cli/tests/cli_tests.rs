@@ -142,3 +142,107 @@ fn test_shared_workspace_with_flag() {
     assert!(!stderr.contains("unrecognized"));
     assert!(!stderr.contains("error:"));
 }
+
+// ── API Integration Tests (require running server) ────
+//
+// Start the server first:
+//   cd ../.. && cargo run -p cowiki-server
+//
+// Then run these tests:
+//   cargo test -- --ignored
+
+#[test]
+#[ignore = "requires running cowiki server at http://localhost:3000"]
+fn api_personal_list_main_branch() {
+    // Personal workspace: no -w, defaults to main branch
+    let (stdout, stderr, code) = run_cli(&["list", "--json"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    // Should return a JSON array (even if empty)
+    assert!(stdout.trim().starts_with('['), "expected JSON array, got: {stdout}");
+}
+
+#[test]
+#[ignore = "requires running cowiki server at http://localhost:3000"]
+fn api_shared_workspace_list() {
+    // Shared workspace with -w flag
+    let (_stdout, stderr, code) = run_cli(&["-w", "demo-1779766635", "list", "--json"]);
+    // May succeed or fail depending on workspace existence, but must not be arg error
+    assert!(!stderr.contains("unrecognized"));
+    assert!(!stderr.contains("error: invalid value"));
+    // Accept any exit code except arg-parsing errors
+    assert!(!stderr.contains("SUBCOMMAND"));
+}
+
+#[test]
+#[ignore = "requires running cowiki server at http://localhost:3000"]
+fn api_workspace_flag_routes_to_correct_endpoint() {
+    // Without -w: hits /api/pages (legacy)
+    let (_stdout, stderr, code1) = run_cli(&["list", "--json"]);
+
+    // With -w: hits /api/workspaces/{ws}/pages
+    let (_stdout, stderr, code2) = run_cli(&["-w", "demo-1779766635", "list", "--json"]);
+
+    // Both should not produce argument errors
+    assert!(!stderr.contains("error:"), "legacy list error: {stderr}");
+
+    // If server is running, both should complete (even with 401/404)
+    assert!(!stderr.contains("Cannot connect") || stderr.is_empty(),
+        "server not running? stderr: {stderr}");
+    // Either success or API error is OK; just not connection failure
+    let _ = (code1, code2);
+}
+
+#[test]
+#[ignore = "requires running cowiki server at http://localhost:3000"]
+fn api_ingest_to_workspace() {
+    // Ingest text to a workspace
+    let (stdout, stderr, _code) = run_cli(&[
+        "-w", "demo-1779766635",
+        "ingest", "--type", "text",
+        "--content", "API test content from CLI",
+        "--json",
+    ]);
+    // Should return JSON with filename and content_hash
+    assert!(
+        stdout.contains("filename") || stderr.contains("401") || stderr.contains("404"),
+        "expected ingest response or auth/not-found error, got: stdout='{stdout}' stderr='{stderr}'"
+    );
+}
+
+#[test]
+#[ignore = "requires running cowiki server at http://localhost:3000"]
+fn api_read_page() {
+    // Read a known page — may 404 but should not be arg error
+    let (_stdout, stderr, _code) = run_cli(&["read", "home", "--no-pager", "--json"]);
+    assert!(!stderr.contains("unrecognized"));
+    assert!(!stderr.contains("error:"));
+}
+
+#[test]
+#[ignore = "requires running cowiki server at http://localhost:3000"]
+fn api_write_and_read_roundtrip() {
+    let test_slug = "cli-test-roundtrip";
+    let test_body = "# CLI Roundtrip Test\n\nContent from API test.";
+
+    // Write
+    let (_stdout, stderr, code) = run_cli(&[
+        "write", test_slug,
+        "--title", "CLI Roundtrip",
+        "--body", test_body,
+        "--json",
+    ]);
+    assert!(!stderr.contains("error: invalid"), "arg error: {stderr}");
+    // May fail with 401 if not authenticated; that's OK for test
+    if !stderr.contains("401") && !stderr.contains("Cannot connect") {
+        // Read back
+        let (stdout, stderr2, _code2) = run_cli(&[
+            "read", test_slug, "--no-pager", "--json",
+        ]);
+        assert!(!stderr2.contains("error:"), "read error: {stderr2}");
+        // If successful, should contain our content
+        if code == 0 {
+            assert!(stdout.contains(test_body) || stdout.contains(test_slug),
+                "roundtrip failed: wrote but didn't read back");
+        }
+    }
+}

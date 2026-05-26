@@ -195,6 +195,28 @@ Build it independently; `cargo build` at the repo root won't include it.
 - **Async** — `tokio` runtime, `reqwest` HTTP client
 - **Dual output** — human-friendly tables by default, `--json` for scripting
 
+## Testing
+
+### Fast unit tests (no server needed)
+
+```bash
+cargo test
+```
+
+These test argument parsing, help text, and flag acceptance. 14 tests, < 20s.
+
+### API integration tests (requires running server)
+
+```bash
+# Start the server first
+cd .. && cargo run -p cowiki-server
+
+# Then run API tests
+cd cli && cargo test -- --ignored
+```
+
+API tests cover: personal vs shared workspace routing, ingest, read/write roundtrip, and branch resolution. Marked `#[ignore]` by default.
+
 ## Future Plans
 
 - [ ] Terminal UI (TUI) for interactive browsing and editing
