@@ -436,11 +436,10 @@ export function MainLayout() {
         <SidebarProvider>
           <Sidebar>
             <SidebarHeader>
-              <div className="flex items-center gap-2 px-2 py-1">
-                <div className="flex h-6 w-6 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
-                  <span className="text-xs font-bold">c</span>
-                </div>
-                <span className="font-semibold text-sm">CoWiki</span>
+              <div className="flex items-center gap-1.5 px-2 py-1">
+                <span className="font-bold text-base" style={{ fontFamily: 'var(--font-serif)' }}>
+                  CoWiki<span className="text-[var(--color-accent)]">.</span>
+                </span>
               </div>
               <SidebarMenu className="mt-1 mb-0.5">
                 <SidebarMenuItem>
