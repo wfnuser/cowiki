@@ -31,10 +31,18 @@ pub async fn submit(
 ) -> Result<Json<SubmitResponse>> {
     let user = extract_user(&state.db, &headers).await?;
 
-    let diffs = state
-        .wiki_repo
-        .diff_files(&input.branch, &input.page_slugs)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let diffs = match state.wiki_repo.diff_files(&input.branch, &input.page_slugs) {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::error!(
+                "failed to diff files for branch={} slugs={:?}: {}",
+                &input.branch,
+                &input.page_slugs,
+                e
+            );
+            return Err(AppError::Internal(e.to_string()));
+        }
+    };
 
     // Generate embeddings for dedup
     let mut embeddings = Vec::new();
@@ -55,9 +63,7 @@ pub async fn submit(
     // Check for duplicates
     let mut duplicates = Vec::new();
     for (slug, emb) in &embeddings {
-        if let Ok(similar) =
-            cowiki_db::pages::find_similar(&state.db, emb, "main", 3, 0.85).await
-        {
+        if let Ok(similar) = cowiki_db::pages::find_similar(&state.db, emb, "main", 3, 0.85).await {
             for (page, score) in similar {
                 if page.slug != *slug {
                     duplicates.push(cowiki_core::models::DuplicateWarning {
@@ -90,11 +96,19 @@ pub async fn submit(
 
     if input.skip_review {
         // Personal Space: merge directly to main, no review needed
-        let file_paths: Vec<String> = input.page_slugs.iter()
+        let file_paths: Vec<String> = input
+            .page_slugs
+            .iter()
             .map(|s| format!("wiki/{s}.md"))
             .collect();
-        state.wiki_repo
-            .merge_to_main(&input.branch, &file_paths, &user.name, &format!("commit: {summary}"))
+        state
+            .wiki_repo
+            .merge_to_main(
+                &input.branch,
+                &file_paths,
+                &user.name,
+                &format!("commit: {summary}"),
+            )
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
         return Ok(Json(SubmitResponse {
