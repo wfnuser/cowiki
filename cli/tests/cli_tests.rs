@@ -27,6 +27,7 @@ fn test_help() {
     assert!(stdout.contains("write"));
     assert!(stdout.contains("list"));
     assert!(stdout.contains("review"));
+    assert!(stdout.contains("workspaces"));
 }
 
 #[test]
@@ -38,7 +39,7 @@ fn test_version() {
 
 #[test]
 fn test_subcommand_help() {
-    for cmd in &["search", "read", "list", "ingest", "compile", "submit", "write", "review"] {
+    for cmd in &["search", "read", "list", "ingest", "compile", "submit", "write", "review", "workspaces"] {
         let (stdout, _stderr, code) = run_cli(&[cmd, "--help"]);
         assert_eq!(code, 0, "{} --help failed", cmd);
         assert!(!stdout.is_empty(), "{} --help produced no output", cmd);

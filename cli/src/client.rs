@@ -80,6 +80,13 @@ impl CowikiClient {
             .await
     }
 
+    // ── Workspaces ────────────────────────────────────
+
+    pub async fn list_workspaces(&self) -> Result<Vec<WorkspaceInfo>, CliError> {
+        self.get_json(&format!("{}/api/workspaces", self.server_url))
+            .await
+    }
+
     // ── Pages ─────────────────────────────────────────
 
     pub async fn list_pages(&self, branch: &str) -> Result<Vec<PageMeta>, CliError> {

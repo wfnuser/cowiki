@@ -128,6 +128,8 @@ enum Commands {
         #[arg(long)]
         branch: Option<String>,
     },
+    /// List available workspaces
+    Workspaces,
     /// Generate shell completions
     #[command(hide = true)]
     Completions {
@@ -178,6 +180,9 @@ async fn main() {
         Commands::List { branch } => {
             let branch = branch.unwrap_or(default_branch);
             commands::list::run(&client, &branch, cli.workspace.as_deref(), cli.json).await
+        }
+        Commands::Workspaces => {
+            commands::workspace::run(&client, cli.json).await
         }
 
         Commands::Ingest {

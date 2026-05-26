@@ -25,6 +25,7 @@ cargo run --release help
 | `cowiki search` | Semantic search across the wiki |
 | `cowiki read` | Read a page (with pager) |
 | `cowiki list` | List pages on a branch |
+| `cowiki workspaces` | List available workspaces |
 | `cowiki submit` | Submit pages for review |
 | `cowiki review` | Review submissions (approve/reject) |
 
@@ -76,6 +77,13 @@ cowiki compile -w engineering-wiki
 | Shared workspace (`-w <slug>`) | `user/<your-id>` | `--branch <name>` |
 
 ### Finding Your Workspace Slug
+
+```bash
+# List all workspaces you have access to
+cowiki workspaces
+
+# Shows: NAME, SLUG, ROLE (owner/writer/reader), VISIBILITY (private/public)
+```
 
 Your personal workspace slug matches your user ID. Team workspace slugs are the URL-friendly names shown in the web UI sidebar (e.g., `engineering-wiki`).
 
@@ -220,5 +228,5 @@ API tests cover: personal vs shared workspace routing, ingest, read/write roundt
 ## Future Plans
 
 - [ ] Terminal UI (TUI) for interactive browsing and editing
-- [ ] `list workspaces` command to discover available workspaces
-- [ ] Workspace-scoped search and submit/review endpoints
+- [ ] Workspace-scoped search, submit, and review endpoints
+- [ ] `workspace create` / `workspace invite` management commands
