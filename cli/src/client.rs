@@ -106,6 +106,49 @@ impl CowikiClient {
             .await
     }
 
+    // ── Workspace-scoped Pages ────────────────────────
+
+    pub async fn list_pages_ws(&self, ws: &str, branch: &str) -> Result<Vec<PageMeta>, CliError> {
+        self.get_json(&format!(
+            "{}/api/workspaces/{}/pages?branch={}",
+            self.server_url,
+            urlencoding(ws),
+            urlencoding(branch)
+        ))
+        .await
+    }
+
+    pub async fn get_page_ws(&self, ws: &str, slug: &str, branch: &str) -> Result<PageFull, CliError> {
+        self.get_json(&format!(
+            "{}/api/workspaces/{}/pages/{}?branch={}",
+            self.server_url,
+            urlencoding(ws),
+            urlencoding(slug),
+            urlencoding(branch)
+        ))
+        .await
+    }
+
+    pub async fn write_page_ws(&self, ws: &str, req: WritePageRequest) -> Result<WriteResponse, CliError> {
+        self.post_json(&format!("{}/api/workspaces/{}/pages", self.server_url, urlencoding(ws)), &req)
+            .await
+    }
+
+    pub async fn create_folder_ws(
+        &self,
+        ws: &str,
+        name: &str,
+        parent: Option<&str>,
+        branch: &str,
+    ) -> Result<serde_json::Value, CliError> {
+        let mut body = serde_json::json!({ "name": name, "branch": branch });
+        if let Some(p) = parent {
+            body["parent"] = serde_json::Value::String(p.to_string());
+        }
+        self.post_json(&format!("{}/api/workspaces/{}/folders", self.server_url, urlencoding(ws)), &body)
+            .await
+    }
+
     // ── Ingest ────────────────────────────────────────
 
     pub async fn ingest(&self, req: IngestRequest) -> Result<IngestResponse, CliError> {
@@ -113,10 +156,20 @@ impl CowikiClient {
             .await
     }
 
+    pub async fn ingest_ws(&self, ws: &str, req: IngestRequest) -> Result<IngestResponse, CliError> {
+        self.post_json(&format!("{}/api/workspaces/{}/ingest", self.server_url, urlencoding(ws)), &req)
+            .await
+    }
+
     // ── Compile ───────────────────────────────────────
 
     pub async fn compile(&self, req: CompileRequest) -> Result<CompileResponse, CliError> {
         self.post_json(&format!("{}/api/compile", self.server_url), &req)
+            .await
+    }
+
+    pub async fn compile_ws(&self, ws: &str, req: CompileRequest) -> Result<CompileResponse, CliError> {
+        self.post_json(&format!("{}/api/workspaces/{}/compile", self.server_url, urlencoding(ws)), &req)
             .await
     }
 

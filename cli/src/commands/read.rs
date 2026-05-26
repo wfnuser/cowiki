@@ -8,10 +8,16 @@ pub async fn run(
     client: &CowikiClient,
     slug: &str,
     branch: &str,
+    workspace: Option<&str>,
     no_pager: bool,
     json: bool,
 ) -> Result<(), CliError> {
-    let page = client.get_page(slug, branch).await.map_err(|e| match &e {
+    let page = if let Some(ws) = workspace {
+        client.get_page_ws(ws, slug, branch).await
+    } else {
+        client.get_page(slug, branch).await
+    }
+    .map_err(|e| match &e {
         CliError::Api { status: 404, .. } => {
             CliError::Unexpected(format!("page not found: \"{slug}\" on branch \"{branch}\""))
         }

@@ -8,6 +8,7 @@ use crate::types::WritePageRequest;
 pub async fn run(
     client: &CowikiClient,
     branch: &str,
+    workspace: Option<&str>,
     slug: String,
     title: Option<String>,
     body_arg: Option<String>,
@@ -22,7 +23,11 @@ pub async fn run(
         branch: branch.to_string(),
     };
 
-    let resp = client.write_page(req).await?;
+    let resp = if let Some(ws) = workspace {
+        client.write_page_ws(ws, req).await?
+    } else {
+        client.write_page(req).await?
+    };
 
     if json {
         let j = serde_json::to_string_pretty(&resp)

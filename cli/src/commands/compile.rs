@@ -1,14 +1,17 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
 use crate::client::CowikiClient;
 use crate::error::CliError;
 use crate::output;
-use crate::types::CompileRequest;
+use crate::types::{CompileRequest, CompileResponse};
 use indicatif::ProgressBar;
 
 pub async fn run(
     client: &CowikiClient,
     branch: String,
+    workspace: Option<&str>,
     timeout_secs: u64,
     json: bool,
 ) -> Result<(), CliError> {
@@ -20,8 +23,14 @@ pub async fn run(
         branch: branch.clone(),
     };
 
+    let compile_fut: Pin<Box<dyn Future<Output = Result<CompileResponse, CliError>>>> = if let Some(ws) = workspace {
+        Box::pin(client.compile_ws(ws, req))
+    } else {
+        Box::pin(client.compile(req))
+    };
+
     let result = tokio::select! {
-        r = tokio::time::timeout(Duration::from_secs(timeout_secs), client.compile(req)) => {
+        r = tokio::time::timeout(Duration::from_secs(timeout_secs), compile_fut) => {
             match r {
                 Ok(Ok(resp)) => Some(resp),
                 Ok(Err(e)) => return Err(e),

@@ -14,6 +14,10 @@ struct Cli {
     #[arg(long, global = true)]
     server: Option<String>,
 
+    /// Target workspace slug for workspace-scoped operations
+    #[arg(short = 'w', long, global = true)]
+    workspace: Option<String>,
+
     /// Machine-readable JSON output
     #[arg(long, global = true)]
     json: bool,
@@ -163,11 +167,11 @@ async fn main() {
             no_pager,
         } => {
             let branch = branch.unwrap_or(default_branch);
-            commands::read::run(&client, &slug, &branch, no_pager, cli.json).await
+            commands::read::run(&client, &slug, &branch, cli.workspace.as_deref(), no_pager, cli.json).await
         }
         Commands::List { branch } => {
             let branch = branch.unwrap_or(default_branch);
-            commands::list::run(&client, &branch, cli.json).await
+            commands::list::run(&client, &branch, cli.workspace.as_deref(), cli.json).await
         }
 
         Commands::Ingest {
@@ -176,11 +180,11 @@ async fn main() {
             branch,
         } => {
             let branch = branch.unwrap_or(default_branch);
-            commands::ingest::run(&client, &branch, r#type, content, cli.json).await
+            commands::ingest::run(&client, &branch, cli.workspace.as_deref(), r#type, content, cli.json).await
         }
         Commands::Compile { branch, timeout } => {
             let branch = branch.unwrap_or(default_branch);
-            commands::compile::run(&client, branch, timeout, cli.json).await
+            commands::compile::run(&client, branch, cli.workspace.as_deref(), timeout, cli.json).await
         }
         Commands::Submit {
             slugs,
@@ -202,7 +206,7 @@ async fn main() {
             summary,
         } => {
             let branch = branch.unwrap_or(default_branch);
-            commands::write::run(&client, &branch, slug, title, body, summary, cli.json).await
+            commands::write::run(&client, &branch, cli.workspace.as_deref(), slug, title, body, summary, cli.json).await
         }
         Commands::Completions { shell } => {
             completions::generate(&shell);
