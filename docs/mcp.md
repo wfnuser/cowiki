@@ -31,12 +31,12 @@ MCP Client ──→ rmcp-server (:8080) ──→ cowiki-server REST API (:3000
 cargo run -p cowiki-server
 
 # 终端 2: 启动 MCP 代理
-cargo run -p cowiki-rmcp-server
+cd cowiki-mcp-server && cargo run
 ```
 
-MCP server 通过 `[mcp-server]` 配置段的 `api_url` 连接到后端 REST API（默认 `http://localhost:3000/`）。
+MCP server 通过 `COWIKI_BASE_URL` 环境变量连接到后端 REST API（默认 `http://localhost:3000`）。
 
-> **注意**：如果没有 `cowiki.conf` 配置文件，两个服务均会使用环境变量作为默认值。MCP server 端口默认为 `8080`，后端 API 地址默认为 `http://localhost:3000/`。
+> **注意**：MCP server 使用独立的 `.env` 文件配置（见 `cowiki-mcp-server/.env.example`），不再读取根目录的 `cowiki.conf`。端口默认为 `8080`，后端 API 地址默认为 `http://localhost:3000`。
 
 ### 获取 API Key
 
@@ -122,7 +122,7 @@ curl -X POST http://localhost:8080/mcp \
 
 ## 工具列表（10 个）
 
-所有工具的 Rust 实现位于 `crates/rmcp-server/src/server.rs`，通过 `#[tool_router]` 宏注册。
+所有工具的 Rust 实现位于 `cowiki-mcp-server/src/server.rs`，通过 `#[tool_router]` 宏注册。
 工具调用后端 `crates/server/src/routes/` 下的对应 REST 端点。
 
 ### 知识操作
@@ -152,8 +152,8 @@ curl -X POST http://localhost:8080/mcp \
 ## 典型工作流
 
 ```
-贡献知识:  ingest → compile → read → write → submit
-查询知识:  search → read → list
+个人空间:  ingest → compile → read → write → submit
+知识查询:  search → read → list
 参与审核:  review_list → review_get → review_decide
 ```
 
@@ -249,10 +249,10 @@ Error sending message to http://localhost:8080/: TypeError: fetch failed
 **解决**：
 ```bash
 # 检查进程
-pgrep -f cowiki-rmcp-server
+pgrep -f cowiki-mcp
 
 # 重启
-cargo run -p cowiki-rmcp-server
+cd cowiki-mcp-server && cargo run
 ```
 
 ### 认证失败 (401)
@@ -278,18 +278,19 @@ curl http://localhost:3000/api/health
 ## 代码结构
 
 ```
+cowiki-mcp-server/      # 独立 MCP→REST 代理（顶层，不在 workspace 中）
+├── Cargo.toml          # rmcp + reqwest (零 cowiki-core/db 依赖)
+└── src/
+    ├── main.rs         # hyper 启动 + 独立 .env 配置
+    └── server.rs       # MCP→REST proxy (10 工具 → HTTP API)
+
 crates/
-├── utils/              # 共享配置
+├── utils/              # 共享配置（仅 cowiki-server 使用）
 │   └── src/lib.rs
-├── rmcp-server/
-│   ├── Cargo.toml      # rmcp + reqwest (无 cowiki-core/db)
-│   └── src/
-│       ├── main.rs     # hyper 启动 + 端口配置
-│       └── server.rs   # MCP→REST proxy (10 工具 → HTTP API)
 └── server/             # axum REST API (唯一业务逻辑源)
 ```
 
-rmcp-server 不依赖 cowiki-core/db，每个 MCP 工具直接调用 `POST/GET http://localhost:3000/api/*`。
+cowiki-mcp-server 不依赖 cowiki-core/db，每个 MCP 工具直接调用 `POST/GET http://localhost:3000/api/*`。
 
 MCP 协议处理由 rmcp SDK 负责（JSON-RPC、SSE、session），工具通过 `#[tool_router(server_handler)]` 宏声明式绑定。
 
@@ -304,19 +305,19 @@ MCP 服务器与主服务共用 `cowiki.conf` 配置文件（通过 `cowiki-util
 | 配置方式 | 优先级 |
 |----------|--------|
 | `COWIKI_MCP_PORT` 环境变量 | 最高 |
-| `COWIKI_PORT` 环境变量 | 高 |
-| `[server] port` in `cowiki.conf` | 中 |
+| `COWIKI_MCP_PORT` 环境变量 | 高 |
+| `--port` CLI 参数 | 中 |
 | 默认值 | 8080 |
 
 ```bash
 # 方式 1: 环境变量指定端口
-COWIKI_MCP_PORT=9090 cargo run -p cowiki-rmcp-server
+COWIKI_MCP_PORT=9090 cd cowiki-mcp-server && cargo run
 
-# 方式 2: 使用 cowiki.conf 中的 [server] port
-cargo run -p cowiki-rmcp-server -- --config cowiki.conf
+# 方式 2: CLI 参数指定端口
+cd cowiki-mcp-server && cargo run -- --port 9090
 
 # 方式 3: 使用默认端口 8080
-cargo run -p cowiki-rmcp-server
+cd cowiki-mcp-server && cargo run
 
 # 启动主服务器 (端口 3000)
 cargo run -p cowiki-server
@@ -328,6 +329,6 @@ cargo run -p cowiki-server
 # 共享配置 crate 测试
 cargo test -p cowiki-utils
 
-# MCP 服务器测试 (需要网络下载 rmcp)
-cargo test -p cowiki-rmcp-server --test unit_tests
+# MCP 服务器测试（独立 crate）
+cd cowiki-mcp-server && cargo test
 ```

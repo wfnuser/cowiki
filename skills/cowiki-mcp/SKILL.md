@@ -153,7 +153,7 @@ After successful setup, these 10 cowiki tools become available:
 
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| Tools not appearing | MCP server not running | Start `cowiki-rmcp-server` |
+| Tools not appearing | MCP server not running | Start `cowiki-mcp` (see cowiki-mcp-server/README.md) |
 | 401 Unauthorized | Invalid/missing API key | Re-run setup with new key |
 | Connection refused | Wrong URL or server down | Verify `--url` and server status |
 | Tool returns error | Backend REST API down | Ensure cowiki-server is running on :3000 |

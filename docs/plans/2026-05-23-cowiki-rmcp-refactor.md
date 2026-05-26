@@ -1,5 +1,7 @@
 # RALPLAN-DR: cowiki MCP Server — Consensus Implementation Plan
 
+> **Historical note (2026-05-26)**: The paths in this plan refer to `crates/rmcp-server/` which has since been moved to `cowiki-mcp-server/` as an independent top-level crate. See `.omg/plans/cowiki-mcp-server-independence.md` for the current architecture.
+
 **Date:** 2026-05-23 (revised from 2026-05-22)
 **Mode:** DELIBERATE (完全重写：从手写协议迁移到官方 rmcp SDK)
 **Status:** v2 — rmcp-powered architecture

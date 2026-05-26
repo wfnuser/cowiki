@@ -1,5 +1,3 @@
 # Cargo configuration for cowiki workspace
 # Default binary: cowiki-server (via workspace default-members in Cargo.toml)
 
-[alias]
-mcp = "run -p cowiki-rmcp-server"
