@@ -28,16 +28,70 @@ cargo run --release help
 | `cowiki submit` | Submit pages for review |
 | `cowiki review` | Review submissions (approve/reject) |
 
+## Workspaces
+
+cowiki supports two types of workspaces. Use the `--workspace`/`-w` flag to target a specific one.
+
+### Personal Workspace
+
+Every user has a private workspace (created automatically on sign-up). Operations use your personal branch (`user/<your-id>`) by default.
+
+```bash
+# Read a page from your personal workspace
+cowiki read my-notes
+
+# List all pages in your personal workspace
+cowiki list
+
+# Write a new page to your personal workspace
+cowiki write getting-started --title "Getting Started" --body "# Welcome"
+```
+
+### Shared (Team) Workspace
+
+Team workspaces are shared spaces with members and roles. Use `-w <slug>` to operate on them.
+
+```bash
+# List pages in a team workspace
+cowiki list -w engineering-wiki
+
+# Read a page from a team workspace
+cowiki read architecture -w engineering-wiki
+
+# Write to a team workspace (uses your personal branch for drafts)
+cowiki write design-doc -w engineering-wiki --title "Design Doc" --body "# Overview"
+
+# Ingest a source into a team workspace
+cowiki ingest --type url --content https://example.com/article -w engineering-wiki
+
+# Compile sources in a team workspace
+cowiki compile -w engineering-wiki
+```
+
+### Branch Resolution
+
+| Scenario | Branch used |
+|----------|-------------|
+| Personal workspace (no `-w`) | `user/<your-id>` (auto-detected from auth) |
+| Team workspace with `-w` | `user/<your-id>` for writes/ingest, `main` for reads |
+| Legacy mode (no `-w`, old API) | specified `--branch` or `user/<id>` |
+
+### Finding Your Workspace Slug
+
+Your personal workspace slug matches your user ID. Team workspace slugs are the URL-friendly names shown in the web UI sidebar (e.g., `engineering-wiki`).
+
 ## Usage Examples
 
 ### Ingest → Compile → Submit (the core workflow)
 
 ```bash
-# Ingest a URL
+# Personal workspace
 cowiki ingest --type url --content https://example.com/article
-
-# Compile ingested sources into wiki pages
 cowiki compile
+
+# Team workspace
+cowiki ingest --type url --content https://example.com/article -w team-wiki
+cowiki compile -w team-wiki
 
 # Submit all compiled pages
 cowiki submit --all
@@ -137,6 +191,7 @@ Build it independently; `cargo build` at the repo root won't include it.
 ## Architecture
 
 - **Pure HTTP client** — zero dependency on `cowiki_core` or `cowiki_db`
+- **Workspace-aware** — `--workspace`/`-w` routes to per-workspace API endpoints
 - **Stateless except auth** — only `~/.config/cowiki/config.toml` persisted
 - **Async** — `tokio` runtime, `reqwest` HTTP client
 - **Dual output** — human-friendly tables by default, `--json` for scripting
@@ -144,3 +199,5 @@ Build it independently; `cargo build` at the repo root won't include it.
 ## Future Plans
 
 - [ ] Terminal UI (TUI) for interactive browsing and editing
+- [ ] `list workspaces` command to discover available workspaces
+- [ ] Workspace-scoped search and submit/review endpoints
