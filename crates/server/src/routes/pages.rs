@@ -253,6 +253,7 @@ pub async fn list_pages_ws(
     let repo = state.repo_manager.get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     let branch = params.branch.unwrap_or_else(|| "main".into());
+    ensure_user_branch_if_needed(&repo, &branch)?;
     list_pages_from_repo(&repo, &branch)
 }
 
@@ -264,6 +265,7 @@ pub async fn get_page_ws(
     let repo = state.repo_manager.get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     let branch = params.branch.unwrap_or_else(|| "main".into());
+    ensure_user_branch_if_needed(&repo, &branch)?;
     let path = format!("wiki/{slug}.md");
     let content = repo.read_file(&branch, &path)
         .map_err(|e| AppError::Internal(e.to_string()))?
@@ -280,6 +282,7 @@ pub async fn write_page_ws(
 ) -> Result<Json<serde_json::Value>> {
     let repo = state.repo_manager.get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
+    ensure_user_branch_if_needed(&repo, &input.branch)?;
     let path = format!("wiki/{}.md", input.slug);
     repo.write_file(&input.branch, &path, input.body.as_bytes(), &format!("edit: {}", input.slug), &input.branch)
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -293,6 +296,7 @@ pub async fn create_folder_ws(
 ) -> Result<Json<serde_json::Value>> {
     let repo = state.repo_manager.get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
+    ensure_user_branch_if_needed(&repo, &input.branch)?;
     let slug = input.name.to_lowercase()
         .replace(|c: char| !c.is_alphanumeric() && c != ' ', "")
         .split_whitespace().collect::<Vec<_>>().join("-");
@@ -305,6 +309,15 @@ pub async fn create_folder_ws(
     repo.write_file(&input.branch, &index_path, body.as_bytes(), &format!("create folder: {}", input.name), &input.branch)
         .map_err(|e| AppError::Internal(e.to_string()))?;
     Ok(Json(serde_json::json!({"ok": true, "slug": format!("{slug}/_index"), "path": dir})))
+}
+
+/// Internal: ensure user branch exists lazily (for workspace repos)
+fn ensure_user_branch_if_needed(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Result<()> {
+    if let Some(user_id) = branch.strip_prefix("user/") {
+        repo.ensure_user_branch(user_id)
+            .map_err(|e| AppError::Internal(format!("failed to ensure user branch '{branch}': {e}")))?;
+    }
+    Ok(())
 }
 
 /// Internal: list pages from a specific repo instance
