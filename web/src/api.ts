@@ -56,6 +56,7 @@ export interface Workspace {
   name: string;
   slug: string;
   role: string;
+  visibility: string;
 }
 
 export interface MemberInfo {
@@ -63,6 +64,16 @@ export interface MemberInfo {
   name: string;
   email: string | null;
   role: string;
+}
+
+export interface PendingInvitation {
+  id: string;
+  workspace_id: string;
+  workspace_name: string;
+  workspace_slug: string;
+  role: string;
+  invited_by_name: string;
+  created_at: string;
 }
 
 // ── Workspaces ──
@@ -103,11 +114,58 @@ export async function renameWorkspace(slug: string, name: string): Promise<Works
   return res.json();
 }
 
-export async function inviteToWorkspace(workspaceSlug: string, email: string) {
+export async function inviteToWorkspace(workspaceSlug: string, email: string, role = 'writer') {
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/invite`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, role }),
+  });
+  return res.json();
+}
+
+export async function listPendingInvitations(): Promise<PendingInvitation[]> {
+  const res = await fetch(`${BASE}/invitations/pending`, { headers: h() });
+  return res.json();
+}
+
+export async function acceptInvitation(invitationId: string): Promise<Workspace> {
+  const res = await fetch(`${BASE}/invitations/${invitationId}/accept`, {
+    method: 'POST',
+    headers: h(),
+  });
+  return res.json();
+}
+
+export async function rejectInvitation(invitationId: string) {
+  const res = await fetch(`${BASE}/invitations/${invitationId}/reject`, {
+    method: 'POST',
+    headers: h(),
+  });
+  return res.json();
+}
+
+export async function removeMember(workspaceSlug: string, userId: string) {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/members/remove`, {
+    method: 'POST',
+    headers: h({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ user_id: userId }),
+  });
+  return res.json();
+}
+
+export async function changeMemberRole(workspaceSlug: string, userId: string, role: string) {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/members/role`, {
+    method: 'POST',
+    headers: h({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ user_id: userId, role }),
+  });
+  return res.json();
+}
+
+export async function deleteWorkspace(workspaceSlug: string) {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}`, {
+    method: 'DELETE',
+    headers: h(),
   });
   return res.json();
 }
