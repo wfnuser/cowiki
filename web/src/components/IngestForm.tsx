@@ -9,15 +9,19 @@ export function IngestForm({ branch, onDone, workspaceSlug }: { branch: string; 
   const [sourceType, setSourceType] = useState<'text' | 'url'>('text');
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim()) return;
     setLoading(true);
+    setError('');
     try {
       await ingest(sourceType, content, branch, undefined, workspaceSlug);
       setContent('');
       onDone();
+    } catch (err) {
+      setError(`Failed to add source: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -64,6 +68,9 @@ export function IngestForm({ branch, onDone, workspaceSlug }: { branch: string; 
         <Plus className="mr-1.5 h-3.5 w-3.5" />
         {loading ? 'Adding...' : 'Add source'}
       </Button>
+      {error && (
+        <p className="text-xs text-red-600">{error}</p>
+      )}
     </form>
   );
 }

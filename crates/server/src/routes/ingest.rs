@@ -53,6 +53,12 @@ async fn do_ingest(repo: &cowiki_core::git::WikiRepo, input: IngestRequest) -> R
         format!("source-{short_hash}.md")
     });
 
+    // Ensure user branch exists before writing (needed for first ingest on a workspace)
+    if input.branch != "main" {
+        repo.ensure_branch_exists(&input.branch)
+            .map_err(|e| AppError::Internal(format!("failed to create branch {}: {e}", input.branch)))?;
+    }
+
     let path = format!("sources/{filename}");
     repo.write_file(
         &input.branch, &path, content.as_bytes(),

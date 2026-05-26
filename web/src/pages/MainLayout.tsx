@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Plus, LogOut, Compass, Library, FileText, Folder, Search,
-  ChevronRight, FolderPlus, Upload, Wand2, ArrowUpRight, MoreHorizontal, RefreshCw, Pencil, Settings, Bell, Trash2, UserPlus, Users,
+  ChevronRight, FolderPlus, Upload, Wand2, ArrowUpRight, MoreHorizontal, RefreshCw, Pencil, Settings, Bell, Trash2, UserPlus, Users, FileCode, CheckCircle2, Clock,
 } from 'lucide-react';
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel,
@@ -26,7 +26,8 @@ import {
   listPendingInvitations, acceptInvitation, rejectInvitation,
   inviteToWorkspace, listMembers, removeMember, changeMemberRole, deleteWorkspace,
   listPublicWorkspaces, joinWorkspace,
-  type Workspace, type PageMeta, type PageFull, type PendingInvitation, type MemberInfo,
+  listSources, getSource,
+  type Workspace, type PageMeta, type PageFull, type PendingInvitation, type MemberInfo, type SourceItem, type SourceContent,
 } from '../api';
 import { IngestForm } from '../components/IngestForm';
 import { SettingsDialog } from '../components/SettingsDialog';
@@ -54,8 +55,12 @@ export function MainLayout() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [expandedSpaces, setExpandedSpaces] = useState<Set<string>>(new Set());
   const [spacePages, setSpacePages] = useState<Record<string, PageMeta[]>>({});
+  const [spaceSources, setSpaceSources] = useState<Record<string, SourceItem[]>>({});
   const [activePage, setActivePage] = useState<ActivePage | null>(null);
   const [pageContent, setPageContent] = useState<PageFull | null>(null);
+  const [activeSource, setActiveSource] = useState<{ workspace: Workspace; filename: string } | null>(null);
+  const [sourceContent, setSourceContent] = useState<SourceContent | null>(null);
+  const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Modals
@@ -98,7 +103,9 @@ export function MainLayout() {
     const personal = ws.find((w) => w.visibility === 'private' && w.role === 'owner');
     if (personal) {
       setExpandedSpaces((prev) => new Set([...prev, personal.id]));
+      setCurrentWorkspace(personal);
       await loadSpacePages(personal);
+      await loadSpaceSources(personal);
     }
 
     // Restore page from URL: /:owner/:wsSlug/:pageSlug
@@ -112,6 +119,9 @@ export function MainLayout() {
         setExpandedSpaces((prev) => new Set([...prev, targetWs.id]));
         if (!spacePages[targetWs.id]) {
           await loadSpacePages(targetWs);
+        }
+        if (!spaceSources[targetWs.id]) {
+          await loadSpaceSources(targetWs);
         }
         // Load the page
         const branch = targetWs.visibility === 'private' ? userBranch : 'main';
@@ -160,8 +170,58 @@ export function MainLayout() {
     }
   };
 
-  // Toggle space expansion
+  // Load sources for a space
+  const loadSpaceSources = async (ws: Workspace) => {
+    try {
+      if (ws.visibility === 'private') {
+        // Personal: try user branch first, then merge with main
+        const [userSources, mainSources] = await Promise.all([
+          listSources(ws.slug, userBranch).catch(() => [] as SourceItem[]),
+          listSources(ws.slug, 'main').catch(() => [] as SourceItem[]),
+        ]);
+        const userNames = new Set(userSources.map((s) => s.filename));
+        const merged = [
+          ...userSources,
+          ...mainSources.filter((s) => !userNames.has(s.filename)),
+        ];
+        setSpaceSources((prev) => ({ ...prev, [ws.id]: merged }));
+      } else {
+        const [mainSources, draftSources] = await Promise.all([
+          listSources(ws.slug, 'main'),
+          listSources(ws.slug, userBranch).catch(() => [] as SourceItem[]),
+        ]);
+        const mainNames = new Set(mainSources.map((s) => s.filename));
+        const merged = [
+          ...mainSources,
+          ...draftSources.filter((s) => !mainNames.has(s.filename)),
+        ];
+        setSpaceSources((prev) => ({ ...prev, [ws.id]: merged }));
+      }
+    } catch {
+      setSpaceSources((prev) => ({ ...prev, [ws.id]: [] }));
+    }
+  };
+
+  // Select a source file
+  const selectSource = async (ws: Workspace, filename: string) => {
+    setActivePage(null);
+    setPageContent(null);
+    setActiveSource({ workspace: ws, filename });
+    try {
+      // Try user branch first (where newly ingested sources live), fall back to main
+      let content = await getSource(ws.slug, filename, userBranch).catch(() => null);
+      if (!content) {
+        content = await getSource(ws.slug, filename, 'main');
+      }
+      setSourceContent(content);
+    } catch {
+      setSourceContent(null);
+    }
+  };
+
+  // Toggle space expansion — always reload sources
   const toggleSpace = (ws: Workspace) => {
+    setCurrentWorkspace(ws);
     setExpandedSpaces((prev) => {
       const next = new Set(prev);
       if (next.has(ws.id)) {
@@ -169,6 +229,7 @@ export function MainLayout() {
       } else {
         next.add(ws.id);
         if (!spacePages[ws.id]) loadSpacePages(ws);
+        loadSpaceSources(ws);
       }
       return next;
     });
@@ -176,6 +237,8 @@ export function MainLayout() {
 
   // Select a page — try user branch first (for drafts), fall back to main
   const selectPage = async (ws: Workspace, slug: string) => {
+    setActiveSource(null);
+    setSourceContent(null);
     setActivePage({ workspace: ws, slug });
     const owner = auth?.name || 'user';
     navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
@@ -242,17 +305,37 @@ export function MainLayout() {
     await loadSpacePages(ws);
   };
 
-  // Compile pages in the active workspace
-  const handleCompile = async () => {
-    if (!activePage) return;
+  // Compile with explicit workspace (for sidebar Sources buttons)
+  const handleCompileForWs = async (ws: Workspace) => {
     setCompiling(true);
     setMessage(null);
     try {
-      const res = await compile(userBranch, activePage.workspace.slug);
+      const res = await compile(userBranch, ws.slug);
       const count = res.pages?.length || 0;
       const skipped = res.skipped || 0;
       setMessage({ text: `Compiled ${count} page(s)${skipped > 0 ? `, ${skipped} skipped` : ''}`, type: 'success' });
-      loadSpacePages(activePage.workspace);
+      loadSpacePages(ws);
+      loadSpaceSources(ws);
+    } catch {
+      setMessage({ text: 'Compilation failed', type: 'error' });
+    } finally {
+      setCompiling(false);
+    }
+  };
+
+  // Compile pages in the active workspace (top bar, uses currentWorkspace)
+  const handleCompile = async () => {
+    const ws = activePage?.workspace || activeSource?.workspace || currentWorkspace;
+    if (!ws) return;
+    setCompiling(true);
+    setMessage(null);
+    try {
+      const res = await compile(userBranch, ws.slug);
+      const count = res.pages?.length || 0;
+      const skipped = res.skipped || 0;
+      setMessage({ text: `Compiled ${count} page(s)${skipped > 0 ? `, ${skipped} skipped` : ''}`, type: 'success' });
+      if (activePage) loadSpacePages(ws);
+      loadSpaceSources(ws);
     } catch {
       setMessage({ text: 'Compilation failed', type: 'error' });
     } finally {
@@ -262,17 +345,18 @@ export function MainLayout() {
 
   // Submit pages for review (or direct commit for personal)
   const handleSubmit = async () => {
-    if (!activePage) return;
+    const ws = activePage?.workspace || activeSource?.workspace || currentWorkspace;
+    if (!ws) return;
     setSubmitting(true);
     setMessage(null);
     try {
-      const pages = spacePages[activePage.workspace.id] || [];
+      const pages = spacePages[ws.id] || [];
       if (pages.length === 0) {
         setMessage({ text: 'No pages to submit', type: 'error' });
         return;
       }
       const slugs = pages.map((p) => p.slug);
-      const isPersonal = activePage.workspace.visibility === 'private';
+      const isPersonal = ws.visibility === 'private';
       await submit(userBranch, slugs, isPersonal);
       setMessage({ text: isPersonal ? 'Committed.' : 'Submitted for review.', type: 'success' });
     } catch {
@@ -285,7 +369,11 @@ export function MainLayout() {
   // Handle ingest completion
   const handleIngestDone = () => {
     setShowIngest(false);
-    if (activePage) loadSpacePages(activePage.workspace);
+    const ws = activePage?.workspace || activeSource?.workspace || currentWorkspace;
+    if (ws) {
+      loadSpacePages(ws);
+      loadSpaceSources(ws);
+    }
   };
 
   const handleRename = async (e: React.FormEvent) => {
@@ -490,10 +578,14 @@ export function MainLayout() {
                   workspace={ws}
                   label="Personal Space"
                   pages={spacePages[ws.id] || []}
+                  sources={spaceSources[ws.id] || []}
                   expanded={expandedSpaces.has(ws.id)}
                   activePage={activePage}
                   onToggle={() => toggleSpace(ws)}
                   onSelectPage={(slug) => selectPage(ws, slug)}
+                  onSelectSource={(filename) => selectSource(ws, filename)}
+                  onShowIngest={() => { setCurrentWorkspace(ws); setShowIngest(true); }}
+                  onCompile={() => handleCompileForWs(ws)}
                   onNewPage={() => { setShowNewPage(ws); setNewName(''); setNewPageFolder(null); }}
                   onNewFolder={() => { setShowNewFolder(ws); setNewName(''); setNewFolderParent(null); }}
                   onAddPageInFolder={(folderPath) => { setShowNewPage(ws); setNewName(''); setNewPageFolder(folderPath); }}
@@ -510,10 +602,14 @@ export function MainLayout() {
                       key={ws.id}
                       workspace={ws}
                       pages={spacePages[ws.id] || []}
+                      sources={spaceSources[ws.id] || []}
                       expanded={expandedSpaces.has(ws.id)}
                       activePage={activePage}
                       onToggle={() => toggleSpace(ws)}
                       onSelectPage={(slug) => selectPage(ws, slug)}
+                      onSelectSource={(filename) => selectSource(ws, filename)}
+                      onShowIngest={() => { setCurrentWorkspace(ws); setShowIngest(true); }}
+                      onCompile={() => handleCompileForWs(ws)}
                       onNewPage={() => { setShowNewPage(ws); setNewName(''); setNewPageFolder(null); }}
                       onNewFolder={() => { setShowNewFolder(ws); setNewName(''); setNewFolderParent(null); }}
                       onAddPageInFolder={(folderPath) => { setShowNewPage(ws); setNewName(''); setNewPageFolder(folderPath); }}
@@ -537,7 +633,7 @@ export function MainLayout() {
               <SidebarGroup>
                 <SidebarMenu>
                   <SidebarMenuItem>
-                    <SidebarMenuButton onClick={() => { setActivePage(null); setPageContent(null); navigate('/discover'); }} tooltip="Discover public wikis">
+                    <SidebarMenuButton onClick={() => { setActivePage(null); setActiveSource(null); setPageContent(null); setSourceContent(null); navigate('/discover'); }} tooltip="Discover public wikis">
                       <Compass size={16} />
                       <span>Discover</span>
                     </SidebarMenuButton>
@@ -567,21 +663,36 @@ export function MainLayout() {
 
           <SidebarInset>
             {/* Top bar with breadcrumb + actions */}
-            {activePage && pageContent && (
+            {(activePage && pageContent) || (activeSource && sourceContent) ? (
               <div className="sticky top-0 z-10 bg-[var(--color-bg)] border-b border-[var(--color-border)] px-6 py-2 flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)]">
                   <span>{auth?.name}</span>
-                  <span className="text-[var(--color-text-tertiary)]">/</span>
-                  <span>{activePage.workspace.name}</span>
-                  <span className="text-[var(--color-text-tertiary)]">/</span>
-                  <span className="text-[var(--color-text)]">{pageContent.title}</span>
+                  {activePage && pageContent && (
+                    <>
+                      <span className="text-[var(--color-text-tertiary)]">/</span>
+                      <span>{activePage.workspace.name}</span>
+                      <span className="text-[var(--color-text-tertiary)]">/</span>
+                      <span className="text-[var(--color-text)]">{pageContent.title}</span>
+                    </>
+                  )}
+                  {activeSource && (
+                    <>
+                      <span className="text-[var(--color-text-tertiary)]">/</span>
+                      <span>{activeSource.workspace.name}</span>
+                      <span className="text-[var(--color-text-tertiary)]">/</span>
+                      <span className="text-[var(--color-text-tertiary)]">sources</span>
+                      <span className="text-[var(--color-text-tertiary)]">/</span>
+                      <span className="text-[var(--color-text)]">{activeSource.filename}</span>
+                    </>
+                  )}
                 </div>
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => setShowIngest(true)}
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                    title={currentWorkspace ? `Add source to ${currentWorkspace.name}` : 'Add Source'}
                   >
-                    <Upload size={13} /> Add Source
+                    <Upload size={13} /> Add Source{currentWorkspace ? ` to ${currentWorkspace.name}` : ''}
                   </button>
                   <button
                     onClick={handleCompile}
@@ -606,7 +717,7 @@ export function MainLayout() {
                   </DropdownMenu>
                 </div>
               </div>
-            )}
+            ) : null}
 
             {/* Message */}
             {message && (
@@ -618,12 +729,12 @@ export function MainLayout() {
             )}
 
             {/* Ingest panel */}
-            {showIngest && activePage && (
+            {showIngest && (activePage || activeSource || currentWorkspace) && (
               <div className="mx-6 mt-2 rounded-lg border border-[var(--color-border)] p-4 bg-[var(--color-bg-secondary)]">
                 <div className="text-xs text-[var(--color-text-tertiary)] mb-2">
-                  Add source to {activePage.workspace.name}
+                  Add source to <span className="font-medium text-[var(--color-text)]">{currentWorkspace?.name || activePage?.workspace?.name || activeSource?.workspace?.name}</span>
                 </div>
-                <IngestForm branch={userBranch} onDone={handleIngestDone} workspaceSlug={activePage.workspace.slug} />
+                <IngestForm branch={userBranch} onDone={handleIngestDone} workspaceSlug={currentWorkspace?.slug || activePage?.workspace?.slug || activeSource?.workspace?.slug || ''} />
               </div>
             )}
 
@@ -656,6 +767,47 @@ export function MainLayout() {
                       ))}
                     </div>
                   )}
+                </div>
+              ) : sourceContent ? (
+                <div>
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
+                      Source File
+                    </span>
+                    {sourceContent.compiled ? (
+                      <span className="flex items-center gap-1 text-xs text-green-600">
+                        <CheckCircle2 size={12} /> Compiled
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-xs text-amber-600">
+                        <Clock size={12} /> Pending Compile
+                      </span>
+                    )}
+                  </div>
+                  {sourceContent.compiled && sourceContent.compiled_pages.length > 0 && (
+                    <div className="mb-4 p-3 rounded-lg bg-[var(--color-bg-secondary)] border border-[var(--color-border)]">
+                      <span className="text-xs text-[var(--color-text-tertiary)]">Compiled to: </span>
+                      {sourceContent.compiled_pages.map((slug, i) => (
+                        <span key={slug}>
+                          {i > 0 && ', '}
+                          <button
+                            onClick={() => selectPage(activeSource!.workspace, slug)}
+                            className="text-xs text-blue-500 hover:underline"
+                          >
+                            {slug}
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <article>
+                    <h1 className="text-2xl font-bold mb-4" style={{ fontFamily: 'var(--font-serif)' }}>
+                      {sourceContent.filename}
+                    </h1>
+                    <div className="prose">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{sourceContent.content}</ReactMarkdown>
+                    </div>
+                  </article>
                 </div>
               ) : pageContent ? (
                 <article>
@@ -852,14 +1004,17 @@ export function MainLayout() {
 // ── Sidebar Components ──
 
 function SpaceSection({
-  workspace, label, pages, expanded, activePage, onToggle, onSelectPage, onNewPage, onNewFolder, onAddPageInFolder, onAddFolderInFolder,
+  workspace, label, pages, sources, expanded, activePage, onToggle, onSelectPage, onSelectSource, onShowIngest, onCompile, onNewPage, onNewFolder, onAddPageInFolder, onAddFolderInFolder,
 }: {
-  workspace: Workspace; label: string; pages: PageMeta[];
+  workspace: Workspace; label: string; pages: PageMeta[]; sources: SourceItem[];
   expanded: boolean; activePage: ActivePage | null;
   onToggle: () => void; onSelectPage: (slug: string) => void;
+  onSelectSource: (filename: string) => void;
+  onShowIngest: () => void; onCompile: () => void;
   onNewPage: () => void; onNewFolder: () => void;
   onAddPageInFolder: (folderPath: string) => void; onAddFolderInFolder: (parentPath: string) => void;
 }) {
+  const [sourcesExpanded, setSourcesExpanded] = useState(false);
   return (
     <SidebarGroup>
       <SidebarGroupLabel className="group/label">
@@ -877,34 +1032,79 @@ function SpaceSection({
         </DropdownMenu>
       </SidebarGroupLabel>
       {expanded && (
-        <SidebarMenu>
-          {pages.map((p) => (
-            <PageItem
-              key={p.slug}
-              page={p}
-              isActive={activePage?.workspace.id === workspace.id && activePage?.slug === p.slug}
-              onSelect={() => onSelectPage(p.slug)} onSelectChild={(slug) => onSelectPage(slug)}
-              onAddPage={(folderPath) => onAddPageInFolder(folderPath)}
-              onAddFolder={(parentPath) => onAddFolderInFolder(parentPath)}
-            />
-          ))}
-        </SidebarMenu>
+        <>
+          {/* Sources Section — pinned at top */}
+          <SidebarMenuItem className="group/source-folder relative">
+            <SidebarMenuButton onClick={() => setSourcesExpanded(!sourcesExpanded)}>
+              <ChevronRight size={12} className={`transition-transform ${sourcesExpanded ? 'rotate-90' : ''}`} />
+              <Folder size={16} />
+              <span>Sources</span>
+            </SidebarMenuButton>
+            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover/source-folder:opacity-100 transition-all">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="p-0.5 rounded text-sidebar-foreground/40 hover:text-sidebar-foreground/70 outline-none focus:outline-none ring-0 focus:ring-0">
+                    <MoreHorizontal size={12} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-36">
+                  <DropdownMenuItem onClick={onShowIngest}><Upload size={14} className="mr-2" /> Add Source</DropdownMenuItem>
+                  <DropdownMenuItem onClick={onCompile}><Wand2 size={14} className="mr-2" /> Compile</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </SidebarMenuItem>
+          {sourcesExpanded && (
+            <>
+              {sources.length === 0 ? (
+                <SidebarMenuItem className="pl-8">
+                  <span className="text-xs text-sidebar-foreground/40 italic">No sources yet</span>
+                </SidebarMenuItem>
+              ) : (
+                sources.map((s) => (
+                  <SourceTreeItem
+                    key={s.filename}
+                    source={s}
+                    workspace={workspace}
+                    onSelect={() => onSelectSource(s.filename)}
+                    onSelectPage={onSelectPage}
+                  />
+                ))
+              )}
+            </>
+          )}
+          <SidebarMenu>
+            {pages.map((p) => (
+              <PageItem
+                key={p.slug}
+                page={p}
+                isActive={activePage?.workspace.id === workspace.id && activePage?.slug === p.slug}
+                onSelect={() => onSelectPage(p.slug)} onSelectChild={(slug) => onSelectPage(slug)}
+                onAddPage={(folderPath) => onAddPageInFolder(folderPath)}
+                onAddFolder={(parentPath) => onAddFolderInFolder(parentPath)}
+              />
+            ))}
+          </SidebarMenu>
+        </>
       )}
     </SidebarGroup>
   );
 }
 
 function SpaceTreeItem({
-  workspace, pages, expanded, activePage, onToggle, onSelectPage, onNewPage, onNewFolder, onAddPageInFolder, onAddFolderInFolder, onRename, onInvite, onManageMembers, onDelete,
+  workspace, pages, sources, expanded, activePage, onToggle, onSelectPage, onSelectSource, onShowIngest, onCompile, onNewPage, onNewFolder, onAddPageInFolder, onAddFolderInFolder, onRename, onInvite, onManageMembers, onDelete,
 }: {
-  workspace: Workspace; pages: PageMeta[];
+  workspace: Workspace; pages: PageMeta[]; sources: SourceItem[];
   expanded: boolean; activePage: ActivePage | null;
   onToggle: () => void; onSelectPage: (slug: string) => void;
+  onSelectSource: (filename: string) => void;
+  onShowIngest: () => void; onCompile: () => void;
   onNewPage: () => void; onNewFolder: () => void;
   onAddPageInFolder: (folderPath: string) => void; onAddFolderInFolder: (parentPath: string) => void; onRename: () => void;
   onInvite: () => void; onManageMembers: () => void; onDelete: () => void;
 }) {
   const isOwner = workspace.role === 'owner';
+  const [sourcesExpanded, setSourcesExpanded] = useState(false);
   return (
     <>
       <SidebarMenuItem className="group/space relative">
@@ -949,6 +1149,50 @@ function SpaceTreeItem({
           </DropdownMenu>
         </div>
       </SidebarMenuItem>
+      {expanded && (
+        <>
+          {/* Sources Section — pinned at top, indented like pages */}
+          <SidebarMenuItem className="group/source-folder relative pl-4">
+            <SidebarMenuButton onClick={() => setSourcesExpanded(!sourcesExpanded)}>
+              <ChevronRight size={12} className={`transition-transform ${sourcesExpanded ? 'rotate-90' : ''}`} />
+              <Folder size={16} />
+              <span>Sources</span>
+            </SidebarMenuButton>
+            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover/source-folder:opacity-100 transition-all">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="p-0.5 rounded text-sidebar-foreground/40 hover:text-sidebar-foreground/70 outline-none focus:outline-none ring-0 focus:ring-0">
+                    <MoreHorizontal size={12} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-36">
+                  <DropdownMenuItem onClick={onShowIngest}><Upload size={14} className="mr-2" /> Add Source</DropdownMenuItem>
+                  <DropdownMenuItem onClick={onCompile}><Wand2 size={14} className="mr-2" /> Compile</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </SidebarMenuItem>
+          {sourcesExpanded && (
+            <>
+              {sources.length === 0 ? (
+                <SidebarMenuItem className="pl-12">
+                  <span className="text-xs text-sidebar-foreground/40 italic">No sources yet</span>
+                </SidebarMenuItem>
+              ) : (
+                sources.map((s) => (
+                  <SourceTreeItem
+                    key={s.filename}
+                    source={s}
+                    workspace={workspace}
+                    onSelect={() => onSelectSource(s.filename)}
+                    onSelectPage={onSelectPage}
+                  />
+                ))
+              )}
+            </>
+          )}
+        </>
+      )}
       {expanded && pages.map((p) => (
         <PageItem
           key={p.slug}
@@ -961,6 +1205,43 @@ function SpaceTreeItem({
         />
       ))}
     </>
+  );
+}
+
+function SourceTreeItem({ source, workspace, onSelect, onSelectPage }: {
+  source: SourceItem;
+  workspace: Workspace;
+  onSelect: () => void;
+  onSelectPage: (slug: string) => void;
+}) {
+  return (
+    <SidebarMenuItem className="pl-8 group/source relative">
+      <SidebarMenuButton onClick={onSelect}>
+        {source.compiled ? (
+          <CheckCircle2 size={14} className="text-green-500 shrink-0" />
+        ) : (
+          <Clock size={14} className="text-amber-500 shrink-0" />
+        )}
+        <FileCode size={14} className="shrink-0" />
+        <span className="truncate">{source.filename}</span>
+        <span className={`text-[10px] ml-auto shrink-0 ${source.compiled ? 'text-green-600' : 'text-amber-600'}`}>
+          {source.compiled ? 'Compiled' : 'Pending'}
+        </span>
+      </SidebarMenuButton>
+      {source.compiled && source.compiled_pages.length > 0 && (
+        <div className="pl-10 text-[10px] text-sidebar-foreground/50 flex flex-wrap gap-1 pb-1">
+          {source.compiled_pages.map((slug) => (
+            <button
+              key={slug}
+              onClick={(e) => { e.stopPropagation(); onSelectPage(slug); }}
+              className="hover:text-blue-500 hover:underline transition-colors"
+            >
+              {slug}
+            </button>
+          ))}
+        </div>
+      )}
+    </SidebarMenuItem>
   );
 }
 
