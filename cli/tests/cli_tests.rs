@@ -103,3 +103,42 @@ fn test_completions_fish() {
     assert_eq!(code, 0);
     assert!(stdout.contains("complete"));
 }
+
+// ── Workspace flag ──────────────────────────────────
+
+#[test]
+fn test_workspace_flag_accepted() {
+    // -w short form
+    let (_stdout, stderr, _code) = run_cli(&["-w", "my-wiki", "list"]);
+    assert!(!stderr.contains("unrecognized"));
+    assert!(!stderr.contains("error:"));
+
+    // --workspace long form
+    let (_stdout, stderr, _code) = run_cli(&["--workspace", "team-wiki", "list"]);
+    assert!(!stderr.contains("unrecognized"));
+    assert!(!stderr.contains("error:"));
+}
+
+#[test]
+fn test_workspace_flag_shows_in_help() {
+    let (stdout, _stderr, code) = run_cli(&["--help"]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("--workspace") || stdout.contains("-w"),
+        "help should show --workspace/-w flag");
+}
+
+#[test]
+fn test_personal_space_no_workspace_flag() {
+    // Personal space: no -w flag, should not require workspace
+    let (_stdout, stderr, _code) = run_cli(&["list"]);
+    // Should NOT complain about missing workspace
+    assert!(!stderr.contains("workspace is required"));
+}
+
+#[test]
+fn test_shared_workspace_with_flag() {
+    // Shared workspace: with -w flag, should accept it
+    let (_stdout, stderr, _code) = run_cli(&["-w", "team-wiki", "list"]);
+    assert!(!stderr.contains("unrecognized"));
+    assert!(!stderr.contains("error:"));
+}

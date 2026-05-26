@@ -70,11 +70,10 @@ cowiki compile -w engineering-wiki
 
 ### Branch Resolution
 
-| Scenario | Branch used |
-|----------|-------------|
-| Personal workspace (no `-w`) | `user/<your-id>` (auto-detected from auth) |
-| Team workspace with `-w` | `user/<your-id>` for writes/ingest, `main` for reads |
-| Legacy mode (no `-w`, old API) | specified `--branch` or `user/<id>` |
+| Scenario | Default Branch | Override |
+|----------|---------------|----------|
+| Personal workspace (no `-w`) | `main` | `--branch <name>` |
+| Shared workspace (`-w <slug>`) | `user/<your-id>` | `--branch <name>` |
 
 ### Finding Your Workspace Slug
 

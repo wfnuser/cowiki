@@ -149,8 +149,14 @@ async fn main() {
 
     let client = client::CowikiClient::new(server_url, config.api_key);
 
-    // Resolve default branch: user/{user_id} if authenticated, else "main"
-    let default_branch = resolve_default_branch(&client).await;
+    // Resolve default branch based on workspace context:
+    // - Personal space (no -w): main branch
+    // - Shared workspace (-w): user/<id> branch for draft isolation
+    let default_branch = if cli.workspace.is_some() {
+        resolve_user_branch(&client).await
+    } else {
+        "main".to_string()
+    };
 
     let result = match cli.command {
         Commands::Search {
@@ -220,8 +226,9 @@ async fn main() {
     }
 }
 
-/// Resolve default branch: `user/{user_id}` if authenticated, else `"main"`.
-async fn resolve_default_branch(client: &client::CowikiClient) -> String {
+/// Resolve user branch for shared workspace draft isolation.
+/// Returns `user/{user_id}` if authenticated, else `"main"`.
+async fn resolve_user_branch(client: &client::CowikiClient) -> String {
     match client.get_me().await {
         Ok(user) => format!("user/{}", user.id),
         Err(_) => "main".to_string(),
