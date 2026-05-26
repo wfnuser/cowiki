@@ -142,13 +142,14 @@ function CreateKeyDialog({
   // Reset state when dialog opens/closes
   useEffect(() => {
     if (!open) {
-      setTimeout(() => {
+      const t = setTimeout(() => {
         setStep('name');
         setName('');
         setError(null);
         setRevealedKey(null);
         setCopied(false);
       }, 200);
+      return () => clearTimeout(t);
     }
   }, [open]);
 

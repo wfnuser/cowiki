@@ -63,6 +63,16 @@ pub async fn regenerate_api_key(pool: &PgPool, user_id: Uuid) -> sqlx::Result<Us
     .map_err(|e| { tracing::error!("DB regenerate API key failed: {e}"); e })
 }
 
+pub async fn update_email(pool: &PgPool, user_id: Uuid, email: &str) -> sqlx::Result<()> {
+    sqlx::query("UPDATE users SET email = $2 WHERE id = $1")
+        .bind(user_id)
+        .bind(email)
+        .execute(pool)
+        .await
+        .map(|_| ())
+        .map_err(|e| { tracing::error!("DB update_email failed: {e}"); e })
+}
+
 pub async fn get_default(pool: &PgPool) -> sqlx::Result<User> {
     sqlx::query_as::<_, User>("SELECT id, name, email, api_key FROM users WHERE name = 'default'")
         .fetch_one(pool)

@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "WebSearch"
+      "WebSearch",
+      "Bash(npm install:*)",
+      "Bash(npx vite:*)",
+      "Bash(node:*)"
     ]
   }
 }

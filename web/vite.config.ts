@@ -10,6 +10,9 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  optimizeDeps: {
+    include: ['framer-motion'],
+  },
   server: {
     proxy: {
       '/api': 'http://localhost:3000'

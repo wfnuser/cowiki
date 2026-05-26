@@ -73,6 +73,11 @@ export function MainLayout() {
   const [showRename, setShowRename] = useState<Workspace | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  useEffect(() => {
+    if (!message) return;
+    const t = setTimeout(() => setMessage(null), 4000);
+    return () => clearTimeout(t);
+  }, [message]);
   const [searchQuery, setSearchQuery] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -84,6 +89,8 @@ export function MainLayout() {
   const [showMembersPanel, setShowMembersPanel] = useState<Workspace | null>(null);
   const [membersList, setMembersList] = useState<MemberInfo[]>([]);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<Workspace | null>(null);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState(false);
 
   const userBranch = `user/${auth?.id}`;
 
@@ -108,11 +115,9 @@ export function MainLayout() {
       const pageSlug = pageParts.join('/');
       const targetWs = ws.find((w) => w.slug === wsSlug);
       if (targetWs) {
-        // Expand the target workspace
+        // Expand the target workspace and always load its pages
         setExpandedSpaces((prev) => new Set([...prev, targetWs.id]));
-        if (!spacePages[targetWs.id]) {
-          await loadSpacePages(targetWs);
-        }
+        await loadSpacePages(targetWs);
         // Load the page
         const branch = targetWs.visibility === 'private' ? userBranch : 'main';
         try {
@@ -125,10 +130,18 @@ export function MainLayout() {
       }
     } else if (personal) {
       // No page in URL — default to first page in personal space
-      const personalPages = spacePages[personal.id] || await listPages(userBranch, personal.slug);
+      const personalPages = await listPages(userBranch, personal.slug);
       const firstPage = personalPages.find((p) => p.kind === 'page');
       if (firstPage) {
-        selectPage(personal, firstPage.slug);
+        setActivePage({ workspace: personal, slug: firstPage.slug });
+        const owner = auth?.name || 'user';
+        navigate(`/${owner}/${personal.slug}/${firstPage.slug}`, { replace: true });
+        try {
+          const page = await getPage(firstPage.slug, userBranch, personal.slug);
+          setPageContent(page);
+        } catch {
+          // Page not found
+        }
       }
     }
 
@@ -181,8 +194,12 @@ export function MainLayout() {
     navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
 
     if (ws.visibility === 'private') {
-      const page = await getPage(slug, userBranch, ws.slug);
-      setPageContent(page);
+      try {
+        const page = await getPage(slug, userBranch, ws.slug);
+        setPageContent(page);
+      } catch {
+        setMessage({ text: 'Failed to load page', type: 'error' });
+      }
     } else {
       // Team space: try user branch first (draft), then main
       try {
@@ -222,12 +239,21 @@ export function MainLayout() {
       ? `${newPageFolder.replace('wiki/', '')}/${baseSlug}`
       : baseSlug;
     const body = `---\ntitle: "${newName.trim()}"\nsummary: ""\nkind: concept\n---\n\n`;
-    await writePage(slug, body, userBranch, ws.slug);
-    setShowNewPage(null);
-    setNewName('');
-    setNewPageFolder(null);
-    await loadSpacePages(ws);
-    selectPage(ws, slug);
+    try {
+      await writePage(slug, body, userBranch, ws.slug);
+      const title = newName.trim();
+      setShowNewPage(null);
+      setNewName('');
+      setNewPageFolder(null);
+      await loadSpacePages(ws);
+      // Set page content directly from what we just wrote — avoids a re-fetch that may fail
+      setActivePage({ workspace: ws, slug });
+      setPageContent({ slug, title, summary: '', body, branch: userBranch });
+      const owner = auth?.name || 'user';
+      navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
+    } catch {
+      setMessage({ text: 'Failed to create page', type: 'error' });
+    }
   };
 
   // Create folder in a workspace
@@ -235,11 +261,15 @@ export function MainLayout() {
     e.preventDefault();
     if (!newName.trim() || !showNewFolder) return;
     const ws = showNewFolder;
-    await createFolder(newName.trim(), userBranch, newFolderParent || undefined, ws.slug);
-    setShowNewFolder(null);
-    setNewName('');
-    setNewFolderParent(null);
-    await loadSpacePages(ws);
+    try {
+      await createFolder(newName.trim(), userBranch, newFolderParent || undefined, ws.slug);
+      setShowNewFolder(null);
+      setNewName('');
+      setNewFolderParent(null);
+      await loadSpacePages(ws);
+    } catch {
+      setMessage({ text: 'Failed to create folder', type: 'error' });
+    }
   };
 
   // Compile pages in the active workspace
@@ -291,10 +321,14 @@ export function MainLayout() {
   const handleRename = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!renameValue.trim() || !showRename) return;
-    await renameWorkspace(showRename.slug, renameValue.trim());
-    setShowRename(null);
-    setRenameValue('');
-    loadWorkspaces();
+    try {
+      await renameWorkspace(showRename.slug, renameValue.trim());
+      setShowRename(null);
+      setRenameValue('');
+      loadWorkspaces();
+    } catch {
+      setMessage({ text: 'Failed to rename workspace', type: 'error' });
+    }
   };
 
   // Load pending invitations
@@ -343,11 +377,16 @@ export function MainLayout() {
   // Load and show members panel
   const openMembersPanel = async (ws: Workspace) => {
     setShowMembersPanel(ws);
+    setMembersList([]);
+    setMembersLoading(true);
+    setMembersError(false);
     try {
       const members = await listMembers(ws.slug);
       setMembersList(members);
     } catch {
-      setMembersList([]);
+      setMembersError(true);
+    } finally {
+      setMembersLoading(false);
     }
   };
 
@@ -553,10 +592,10 @@ export function MainLayout() {
                   <span className="text-xs text-sidebar-foreground/70">{auth?.name}</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button onClick={() => setSettingsOpen(true)} className="text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors" title="Settings">
+                  <button onClick={() => setSettingsOpen(true)} className="text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors" title="Settings" aria-label="Settings">
                     <Settings size={14} />
                   </button>
-                  <button onClick={handleLogout} className="text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors" title="Sign out">
+                  <button onClick={handleLogout} className="text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors" title="Sign out" aria-label="Sign out">
                     <LogOut size={14} />
                   </button>
                 </div>
@@ -592,7 +631,7 @@ export function MainLayout() {
                   </button>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <button className="p-1 rounded text-[var(--color-text-tertiary)] hover:bg-[var(--color-bg-hover)] transition-colors outline-none">
+                      <button className="p-1 rounded text-[var(--color-text-tertiary)] hover:bg-[var(--color-bg-hover)] transition-colors outline-none" aria-label="More actions">
                         <MoreHorizontal size={16} />
                       </button>
                     </DropdownMenuTrigger>
@@ -789,8 +828,12 @@ export function MainLayout() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle>Members — {showMembersPanel?.name}</DialogTitle></DialogHeader>
           <div className="space-y-2 mt-2 max-h-80 overflow-y-auto">
-            {membersList.length === 0 ? (
+            {membersLoading ? (
               <p className="text-sm text-gray-400">Loading...</p>
+            ) : membersError ? (
+              <p className="text-sm text-red-500">Failed to load members.</p>
+            ) : membersList.length === 0 ? (
+              <p className="text-sm text-gray-400">No members found.</p>
             ) : (
               membersList.map((m) => (
                 <div key={m.id} className="flex items-center justify-between py-2 border-b last:border-0">
@@ -882,6 +925,7 @@ function SpaceSection({
               key={p.slug}
               page={p}
               isActive={activePage?.workspace.id === workspace.id && activePage?.slug === p.slug}
+              activeSlug={activePage?.workspace.id === workspace.id ? activePage?.slug : null}
               onSelect={() => onSelectPage(p.slug)} onSelectChild={(slug) => onSelectPage(slug)}
               onAddPage={(folderPath) => onAddPageInFolder(folderPath)}
               onAddFolder={(parentPath) => onAddFolderInFolder(parentPath)}
@@ -953,6 +997,7 @@ function SpaceTreeItem({
           key={p.slug}
           page={p}
           isActive={activePage?.workspace.id === workspace.id && activePage?.slug === p.slug}
+          activeSlug={activePage?.workspace.id === workspace.id ? activePage?.slug : null}
           onSelect={() => onSelectPage(p.slug)} onSelectChild={(slug) => onSelectPage(slug)}
           onAddPage={(folderPath) => onAddPageInFolder(folderPath)}
           onAddFolder={(parentPath) => onAddFolderInFolder(parentPath)}
@@ -963,8 +1008,8 @@ function SpaceTreeItem({
   );
 }
 
-function PageItem({ page, isActive, onSelect, onSelectChild, onAddPage, onAddFolder, indent }: {
-  page: PageMeta; isActive: boolean; onSelect: () => void;
+function PageItem({ page, isActive, activeSlug, onSelect, onSelectChild, onAddPage, onAddFolder, indent }: {
+  page: PageMeta; isActive: boolean; activeSlug?: string | null; onSelect: () => void;
   onSelectChild?: (slug: string) => void; onAddPage?: (folderPath: string) => void;
   onAddFolder?: (parentPath: string) => void; indent?: boolean;
 }) {
@@ -1007,12 +1052,17 @@ function PageItem({ page, isActive, onSelect, onSelectChild, onAddPage, onAddFol
           )}
         </SidebarMenuItem>
         {open && page.children?.map((child) => (
-          <SidebarMenuItem key={child.slug} className={indent ? 'pl-8' : 'pl-4'}>
-            <SidebarMenuButton onClick={() => onSelectChild?.(child.slug)} isActive={false}>
-              <FileText size={16} />
-              <span>{child.title || child.slug}</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
+          <PageItem
+            key={child.slug}
+            page={child}
+            isActive={activeSlug === child.slug}
+            activeSlug={activeSlug}
+            onSelect={() => onSelectChild?.(child.slug)}
+            onSelectChild={onSelectChild}
+            onAddPage={onAddPage}
+            onAddFolder={onAddFolder}
+            indent
+          />
         ))}
       </>
     );

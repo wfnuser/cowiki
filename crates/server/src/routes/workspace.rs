@@ -42,8 +42,14 @@ pub async fn create_workspace(
 ) -> Result<Json<WorkspaceResponse>> {
     let user = extract_user(&state.db, &headers).await?;
 
-    if !input.slug.chars().all(|c| c.is_alphanumeric() || c == '-') {
-        return Err(AppError::BadRequest("slug must be alphanumeric with hyphens".into()));
+    if input.name.is_empty() || input.name.len() > 100 {
+        return Err(AppError::BadRequest("name must be between 1 and 100 characters".into()));
+    }
+    if input.slug.is_empty() || input.slug.len() > 50 {
+        return Err(AppError::BadRequest("slug must be between 1 and 50 characters".into()));
+    }
+    if !input.slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+        return Err(AppError::BadRequest("slug must match [a-z0-9-]+".into()));
     }
 
     let visibility = input.visibility.as_deref().unwrap_or("private");
@@ -76,7 +82,7 @@ pub async fn list_workspaces(
     for ws in workspaces {
         let role = cowiki_db::workspaces::get_member_role(&state.db, ws.id, user.id)
             .await?
-            .unwrap_or_else(|| if ws.created_by == user.id { "owner".into() } else { "writer".into() });
+            .unwrap_or_else(|| if ws.created_by == user.id { "owner".into() } else { "reader".into() });
         result.push(ws_response(&ws, &role));
     }
     Ok(Json(result))
@@ -294,6 +300,11 @@ pub async fn accept_invitation(
         .await?
         .ok_or_else(|| AppError::Unauthorized("user not found".into()))?;
 
+    if current_user.email.is_none() {
+        return Err(AppError::BadRequest(
+            "Please set your email in settings to accept invitations".into(),
+        ));
+    }
     if current_user.email.as_deref() != Some(&invitation.email) {
         return Err(AppError::Forbidden("this invitation is for a different email address".into()));
     }

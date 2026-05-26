@@ -80,6 +80,10 @@ export interface PendingInvitation {
 
 export async function listWorkspaces(): Promise<Workspace[]> {
   const res = await fetch(`${BASE}/workspaces`, { headers: h() });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -89,11 +93,19 @@ export async function createWorkspace(name: string, slug: string, visibility = '
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, slug, visibility }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
 export async function listPublicWorkspaces(): Promise<Workspace[]> {
   const res = await fetch(`${BASE}/workspaces/public`, { headers: h() });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -102,6 +114,10 @@ export async function joinWorkspace(slug: string): Promise<Workspace> {
     method: 'POST',
     headers: h(),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -111,6 +127,10 @@ export async function renameWorkspace(slug: string, name: string): Promise<Works
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -120,11 +140,19 @@ export async function inviteToWorkspace(workspaceSlug: string, email: string, ro
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ email, role }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
 export async function listPendingInvitations(): Promise<PendingInvitation[]> {
   const res = await fetch(`${BASE}/invitations/pending`, { headers: h() });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -133,6 +161,10 @@ export async function acceptInvitation(invitationId: string): Promise<Workspace>
     method: 'POST',
     headers: h(),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -141,6 +173,10 @@ export async function rejectInvitation(invitationId: string) {
     method: 'POST',
     headers: h(),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -150,6 +186,10 @@ export async function removeMember(workspaceSlug: string, userId: string) {
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ user_id: userId }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -159,6 +199,10 @@ export async function changeMemberRole(workspaceSlug: string, userId: string, ro
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ user_id: userId, role }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -167,11 +211,19 @@ export async function deleteWorkspace(workspaceSlug: string) {
     method: 'DELETE',
     headers: h(),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
 export async function listMembers(workspaceSlug: string): Promise<MemberInfo[]> {
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/members`, { headers: h() });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -182,6 +234,10 @@ export async function listPages(branch = 'main', workspaceSlug?: string): Promis
     ? `${BASE}/workspaces/${workspaceSlug}/pages?branch=${branch}`
     : `${BASE}/pages?branch=${branch}`;
   const res = await fetch(url, { headers: h() });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -190,6 +246,10 @@ export async function getPage(slug: string, branch = 'main', workspaceSlug?: str
     ? `${BASE}/workspaces/${workspaceSlug}/pages/${slug}?branch=${branch}`
     : `${BASE}/pages/${slug}?branch=${branch}`;
   const res = await fetch(url, { headers: h() });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -197,11 +257,15 @@ export async function writePage(slug: string, body: string, branch: string, work
   const url = workspaceSlug
     ? `${BASE}/workspaces/${workspaceSlug}/pages`
     : `${BASE}/pages`;
-  await fetch(url, {
+  const res = await fetch(url, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ slug, body, branch }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
 }
 
 // ── Ingest & Compile ──
@@ -215,6 +279,10 @@ export async function ingest(sourceType: string, content: string, branch: string
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ source_type: sourceType, content, branch, filename }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -227,6 +295,10 @@ export async function compile(branch: string, workspaceSlug?: string) {
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ branch }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -238,16 +310,28 @@ export async function submit(branch: string, pageSlugs: string[], skipReview = f
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ branch, page_slugs: pageSlugs, skip_review: skipReview }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
 export async function listReviews(): Promise<Submission[]> {
   const res = await fetch(`${BASE}/reviews`, { headers: h() });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
 export async function getReview(id: string): Promise<ReviewDetail> {
   const res = await fetch(`${BASE}/reviews/${id}`, { headers: h() });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -257,6 +341,10 @@ export async function reviewAction(id: string, action: string) {
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ action }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -269,6 +357,10 @@ export async function createFolder(name: string, branch: string, parent?: string
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, branch, parent }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -276,6 +368,10 @@ export async function createFolder(name: string, branch: string, parent?: string
 
 export async function search(q: string, branch = 'main'): Promise<SearchResult[]> {
   const res = await fetch(`${BASE}/search?q=${encodeURIComponent(q)}&branch=${branch}`, { headers: h() });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 

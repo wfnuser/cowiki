@@ -15,6 +15,8 @@ pub struct SubmitRequest {
     /// If true, skip review and merge directly to main (for Personal Space)
     #[serde(default)]
     pub skip_review: bool,
+    /// Required when skip_review is true — identifies the workspace to verify authorization.
+    pub workspace_slug: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -88,13 +90,40 @@ pub async fn submit(
         .collect::<Vec<_>>()
         .join("\n");
 
-    let summary = state
+    let summary = match state
         .compiler
         .generate_summary(&format!("Submission changes:\n{diff_desc}"))
         .await
-        .unwrap_or(diff_desc);
+    {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("summary generation failed, falling back to diff description: {e}");
+            diff_desc
+        }
+    };
 
     if input.skip_review {
+        // Authorization: skip_review only allowed for personal workspaces (private + owner)
+        let ws_slug = input.workspace_slug.as_deref().ok_or_else(|| {
+            AppError::BadRequest("workspace_slug is required when skip_review is true".into())
+        })?;
+        let ws = cowiki_db::workspaces::find_by_slug(&state.db, ws_slug)
+            .await?
+            .ok_or_else(|| AppError::NotFound("workspace not found".into()))?;
+        if ws.visibility != "private" {
+            return Err(AppError::Forbidden(
+                "skip_review is only allowed for personal (private) workspaces".into(),
+            ));
+        }
+        let role = cowiki_db::workspaces::get_member_role(&state.db, ws.id, user.id)
+            .await?
+            .unwrap_or_default();
+        if role != "owner" {
+            return Err(AppError::Forbidden(
+                "skip_review is only allowed for the workspace owner".into(),
+            ));
+        }
+
         // Personal Space: merge directly to main, no review needed
         let file_paths: Vec<String> = input
             .page_slugs

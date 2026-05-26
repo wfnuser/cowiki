@@ -5,7 +5,7 @@ import { LoginPage } from './pages/LoginPage';
 import { getStoredAuth, storeAuth } from './auth';
 
 function OAuthInterceptor({ children }: { children: React.ReactNode }) {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -15,10 +15,9 @@ function OAuthInterceptor({ children }: { children: React.ReactNode }) {
 
     if (apiKey && userName && userId) {
       storeAuth(apiKey, userName, userId);
-      setSearchParams({}, { replace: true });
       navigate('/', { replace: true });
     }
-  }, [searchParams, setSearchParams, navigate]);
+  }, [searchParams, navigate]);
 
   return <>{children}</>;
 }

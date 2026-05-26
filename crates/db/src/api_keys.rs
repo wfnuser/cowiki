@@ -93,7 +93,7 @@ pub async fn find_by_key_hash(pool: &PgPool, key_hash: &str) -> sqlx::Result<Opt
 
 /// Update last_used_at when a key successfully authenticates.
 pub async fn touch_last_used(pool: &PgPool, key_hash: &str) -> sqlx::Result<()> {
-    sqlx::query("UPDATE api_keys SET last_used_at = now() WHERE key_hash = $1")
+    sqlx::query("UPDATE api_keys SET last_used_at = now() WHERE key_hash = $1 AND revoked_at IS NULL")
         .bind(key_hash)
         .execute(pool)
         .await
