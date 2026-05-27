@@ -32,6 +32,7 @@ pub async fn submit(
     Json(input): Json<SubmitRequest>,
 ) -> Result<Json<SubmitResponse>> {
     let user = extract_user(&state.db, &headers).await?;
+    super::pages::ensure_user_branch_if_needed(&state.wiki_repo, &input.branch)?;
 
     let diffs = match state.wiki_repo.diff_files(&input.branch, &input.page_slugs) {
         Ok(d) => d,

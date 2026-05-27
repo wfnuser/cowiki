@@ -36,6 +36,7 @@ pub async fn compile(
     State(state): State<Arc<AppState>>,
     Json(input): Json<CompileRequest>,
 ) -> Result<Json<CompileResponse>> {
+    super::pages::ensure_user_branch_if_needed(&state.wiki_repo, &input.branch)?;
     do_compile(&state, &state.wiki_repo, &input.branch).await
 }
 
@@ -47,6 +48,7 @@ pub async fn compile_ws(
 ) -> Result<Json<CompileResponse>> {
     let repo = state.repo_manager.get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
+    super::pages::ensure_user_branch_if_needed(&repo, &input.branch)?;
     do_compile(&state, &repo, &input.branch).await
 }
 

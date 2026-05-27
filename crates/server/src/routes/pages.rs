@@ -313,8 +313,8 @@ pub async fn create_folder_ws(
     Ok(Json(serde_json::json!({"ok": true, "slug": format!("{slug}/_index"), "path": dir})))
 }
 
-/// Internal: ensure user branch exists lazily (for workspace repos)
-fn ensure_user_branch_if_needed(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Result<()> {
+/// Ensure user branch exists lazily (for workspace repos and legacy routes)
+pub(crate) fn ensure_user_branch_if_needed(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Result<()> {
     if let Some(user_id) = branch.strip_prefix("user/") {
         repo.ensure_user_branch(user_id)
             .map_err(|e| AppError::Internal(format!("failed to ensure user branch '{branch}': {e}")))?;

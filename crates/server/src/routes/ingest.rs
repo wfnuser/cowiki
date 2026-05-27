@@ -26,6 +26,7 @@ pub async fn ingest(
     State(state): State<Arc<AppState>>,
     Json(input): Json<IngestRequest>,
 ) -> Result<Json<IngestResponse>> {
+    super::pages::ensure_user_branch_if_needed(&state.wiki_repo, &input.branch)?;
     do_ingest(&state.wiki_repo, input).await
 }
 
@@ -37,6 +38,7 @@ pub async fn ingest_ws(
 ) -> Result<Json<IngestResponse>> {
     let repo = state.repo_manager.get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
+    super::pages::ensure_user_branch_if_needed(&repo, &input.branch)?;
     do_ingest(&repo, input).await
 }
 
