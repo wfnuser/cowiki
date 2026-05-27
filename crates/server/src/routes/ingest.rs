@@ -53,6 +53,17 @@ async fn do_ingest(repo: &cowiki_core::git::WikiRepo, input: IngestRequest) -> R
         format!("source-{short_hash}.md")
     });
 
+    // Validate filename to prevent path traversal
+    if filename.is_empty()
+        || filename.contains("..")
+        || filename.contains('/')
+        || filename.contains('\\')
+        || filename.starts_with('.')
+        || filename.len() > 255
+    {
+        return Err(AppError::BadRequest("invalid filename".into()));
+    }
+
     // Ensure user branch exists before writing (needed for first ingest on a workspace)
     if input.branch != "main" {
         repo.ensure_branch_exists(&input.branch)

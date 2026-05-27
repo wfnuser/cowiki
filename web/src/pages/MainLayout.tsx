@@ -116,6 +116,7 @@ export function MainLayout() {
       const targetWs = ws.find((w) => w.slug === wsSlug);
       if (targetWs) {
         // Expand the target workspace
+        setCurrentWorkspace(targetWs);
         setExpandedSpaces((prev) => new Set([...prev, targetWs.id]));
         if (!spacePages[targetWs.id]) {
           await loadSpacePages(targetWs);
@@ -204,6 +205,7 @@ export function MainLayout() {
 
   // Select a source file
   const selectSource = async (ws: Workspace, filename: string) => {
+    setCurrentWorkspace(ws);
     setActivePage(null);
     setPageContent(null);
     setActiveSource({ workspace: ws, filename });
@@ -237,6 +239,7 @@ export function MainLayout() {
 
   // Select a page — try user branch first (for drafts), fall back to main
   const selectPage = async (ws: Workspace, slug: string) => {
+    setCurrentWorkspace(ws);
     setActiveSource(null);
     setSourceContent(null);
     setActivePage({ workspace: ws, slug });
@@ -334,7 +337,7 @@ export function MainLayout() {
       const count = res.pages?.length || 0;
       const skipped = res.skipped || 0;
       setMessage({ text: `Compiled ${count} page(s)${skipped > 0 ? `, ${skipped} skipped` : ''}`, type: 'success' });
-      if (activePage) loadSpacePages(ws);
+      loadSpacePages(ws);
       loadSpaceSources(ws);
     } catch {
       setMessage({ text: 'Compilation failed', type: 'error' });

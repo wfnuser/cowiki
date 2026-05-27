@@ -56,7 +56,7 @@ fn find_referencing_pages(
     branch: &str,
     source_filename: &str,
 ) -> Vec<String> {
-    let wiki_files = repo.list_files(branch, "wiki").unwrap_or_default();
+    let wiki_files = repo.list_files_recursive(branch, "wiki").unwrap_or_default();
     let mut pages = Vec::new();
     for file in &wiki_files {
         if let Ok(Some(content)) = repo.read_file(branch, file) {
@@ -77,6 +77,41 @@ fn find_referencing_pages(
     pages
 }
 
+/// Pre-load all wiki file contents for a branch once, then find referencing pages.
+fn find_referencing_pages_batched(
+    wiki_contents: &[(String, String)],
+    source_filename: &str,
+) -> Vec<String> {
+    let mut pages = Vec::new();
+    for (file_path, text) in wiki_contents {
+        if text.contains(&format!("  - {source_filename}"))
+            || text.contains(&format!("- {source_filename}"))
+        {
+            let slug = file_path
+                .strip_prefix("wiki/")
+                .unwrap_or(file_path)
+                .strip_suffix(".md")
+                .unwrap_or(file_path)
+                .to_string();
+            pages.push(slug);
+        }
+    }
+    pages
+}
+
+fn load_all_wiki(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Vec<(String, String)> {
+    let wiki_files = repo.list_files_recursive(branch, "wiki").unwrap_or_default();
+    wiki_files
+        .iter()
+        .filter_map(|file| {
+            repo.read_file(branch, file)
+                .ok()
+                .flatten()
+                .map(|content| (file.clone(), String::from_utf8_lossy(&content).into_owned()))
+        })
+        .collect()
+}
+
 pub async fn list_sources(
     State(state): State<Arc<AppState>>,
     Path(ws_slug): Path<String>,
@@ -89,9 +124,14 @@ pub async fn list_sources(
 
     let branch = &params.branch;
     let compile_state = load_compile_state(&repo, branch);
+    // Use non-recursive list to match get_source's filename validation
+    // (compiler only considers top-level sources/*.md)
     let source_files = repo
-        .list_files_recursive(branch, "sources")
+        .list_files(branch, "sources")
         .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    // Pre-load all wiki files once to avoid O(n*m) per-source scans
+    let wiki_contents = load_all_wiki(&repo, branch);
 
     let mut items = Vec::new();
     for file in &source_files {
@@ -101,7 +141,7 @@ pub async fn list_sources(
             .to_string();
         let compiled = compile_state.contains_key(&filename);
         let compiled_pages = if compiled {
-            find_referencing_pages(&repo, branch, &filename)
+            find_referencing_pages_batched(&wiki_contents, &filename)
         } else {
             Vec::new()
         };
@@ -132,6 +172,11 @@ pub async fn get_source(
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
 
     let branch = &params.branch;
+    // Ensure branch exists (lazy-create for user branches)
+    if branch != "main" {
+        repo.ensure_branch_exists(branch)
+            .map_err(|e| AppError::Internal(format!("failed to create branch {}: {e}", branch)))?;
+    }
     let file_path = format!("sources/{filename}");
     let content_bytes = repo
         .read_file(branch, &file_path)
