@@ -193,22 +193,23 @@ export function MainLayout() {
     const owner = auth?.name || 'user';
     navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
 
-    if (ws.visibility === 'private') {
-      try {
+    try {
+      if (ws.visibility === 'private') {
         const page = await getPage(slug, userBranch, ws.slug);
         setPageContent(page);
-      } catch {
-        setMessage({ text: 'Failed to load page', type: 'error' });
+      } else {
+        // Team space: try user branch first (draft), then main
+        try {
+          const page = await getPage(slug, userBranch, ws.slug);
+          setPageContent(page);
+        } catch {
+          const page = await getPage(slug, 'main', ws.slug);
+          setPageContent(page);
+        }
       }
-    } else {
-      // Team space: try user branch first (draft), then main
-      try {
-        const page = await getPage(slug, userBranch, ws.slug);
-        setPageContent(page);
-      } catch {
-        const page = await getPage(slug, 'main', ws.slug);
-        setPageContent(page);
-      }
+    } catch {
+      // Page not found — clear content, don't show error for navigation
+      setPageContent(null);
     }
   };
 
@@ -1001,26 +1002,26 @@ function SpaceTreeItem({
           onSelect={() => onSelectPage(p.slug)} onSelectChild={(slug) => onSelectPage(slug)}
           onAddPage={(folderPath) => onAddPageInFolder(folderPath)}
           onAddFolder={(parentPath) => onAddFolderInFolder(parentPath)}
-          indent
+          depth={1}
         />
       ))}
     </>
   );
 }
 
-function PageItem({ page, isActive, activeSlug, onSelect, onSelectChild, onAddPage, onAddFolder, indent }: {
+function PageItem({ page, isActive, activeSlug, onSelect, onSelectChild, onAddPage, onAddFolder, depth = 0 }: {
   page: PageMeta; isActive: boolean; activeSlug?: string | null; onSelect: () => void;
   onSelectChild?: (slug: string) => void; onAddPage?: (folderPath: string) => void;
-  onAddFolder?: (parentPath: string) => void; indent?: boolean;
+  onAddFolder?: (parentPath: string) => void; depth?: number;
 }) {
   const [open, setOpen] = useState(false);
+  const paddingLeft = depth * 16; // 16px per level
 
   if (page.kind === 'folder') {
-    // Extract folder path from slug (e.g. "research/_index" → "wiki/research")
     const folderPath = 'wiki/' + page.slug.replace('/_index', '');
     return (
       <>
-        <SidebarMenuItem className={`${indent ? 'pl-4' : ''} group/folder relative`}>
+        <SidebarMenuItem className="group/folder relative" style={{ paddingLeft }}>
           <SidebarMenuButton onClick={() => setOpen(!open)} isActive={isActive}>
             <ChevronRight size={12} className={`transition-transform ${open ? 'rotate-90' : ''}`} />
             <Folder size={16} />
@@ -1061,7 +1062,7 @@ function PageItem({ page, isActive, activeSlug, onSelect, onSelectChild, onAddPa
             onSelectChild={onSelectChild}
             onAddPage={onAddPage}
             onAddFolder={onAddFolder}
-            indent
+            depth={depth + 1}
           />
         ))}
       </>
@@ -1069,7 +1070,7 @@ function PageItem({ page, isActive, activeSlug, onSelect, onSelectChild, onAddPa
   }
 
   return (
-    <SidebarMenuItem className={indent ? 'pl-4' : ''}>
+    <SidebarMenuItem style={{ paddingLeft }}>
       <SidebarMenuButton onClick={onSelect} isActive={isActive}>
         <FileText size={16} />
         <span>{page.title || page.slug}</span>
