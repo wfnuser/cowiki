@@ -131,9 +131,10 @@ pub async fn list_pages(
 
 pub async fn get_page(
     State(state): State<Arc<AppState>>,
-    Path(slug): Path<String>,
+    Path(raw_slug): Path<String>,
     Query(params): Query<ListParams>,
 ) -> Result<Json<PageResponse>> {
+    let slug = raw_slug.strip_prefix('/').unwrap_or(&raw_slug).to_string();
     let branch = params.branch.unwrap_or_else(|| "main".into());
     let path = format!("wiki/{slug}.md");
     let content = state
@@ -259,9 +260,10 @@ pub async fn list_pages_ws(
 
 pub async fn get_page_ws(
     State(state): State<Arc<AppState>>,
-    Path((ws_slug, slug)): Path<(String, String)>,
+    Path((ws_slug, raw_slug)): Path<(String, String)>,
     Query(params): Query<ListParams>,
 ) -> Result<Json<PageResponse>> {
+    let slug = raw_slug.strip_prefix('/').unwrap_or(&raw_slug).to_string();
     let repo = state.repo_manager.get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     let branch = params.branch.unwrap_or_else(|| "main".into());

@@ -193,23 +193,28 @@ export function MainLayout() {
     const owner = auth?.name || 'user';
     navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
 
-    try {
-      if (ws.visibility === 'private') {
+    if (ws.visibility === 'private') {
+      try {
         const page = await getPage(slug, userBranch, ws.slug);
         setPageContent(page);
-      } else {
-        // Team space: try user branch first (draft), then main
+      } catch {
+        setPageContent(null);
+        setMessage({ text: `Page "${slug}" not found`, type: 'error' });
+      }
+    } else {
+      // Team space: try user branch first (draft), then main
+      try {
+        const page = await getPage(slug, userBranch, ws.slug);
+        setPageContent(page);
+      } catch {
         try {
-          const page = await getPage(slug, userBranch, ws.slug);
-          setPageContent(page);
-        } catch {
           const page = await getPage(slug, 'main', ws.slug);
           setPageContent(page);
+        } catch {
+          setPageContent(null);
+          setMessage({ text: `Page "${slug}" not found`, type: 'error' });
         }
       }
-    } catch {
-      // Page not found — clear content, don't show error for navigation
-      setPageContent(null);
     }
   };
 
