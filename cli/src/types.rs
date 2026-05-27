@@ -55,6 +55,17 @@ pub struct WriteResponse {
     pub slug: String,
 }
 
+// ── Workspaces ────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct WorkspaceInfo {
+    pub id: String,
+    pub name: String,
+    pub slug: String,
+    pub role: String,
+    pub visibility: String,
+}
+
 // ── Ingest ────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]

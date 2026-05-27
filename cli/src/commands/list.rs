@@ -5,9 +5,14 @@ use crate::output;
 pub async fn run(
     client: &CowikiClient,
     branch: &str,
+    workspace: Option<&str>,
     json: bool,
 ) -> Result<(), CliError> {
-    let pages = client.list_pages(branch).await?;
+    let pages = if let Some(ws) = workspace {
+        client.list_pages_ws(ws, branch).await?
+    } else {
+        client.list_pages(branch).await?
+    };
 
     if pages.is_empty() {
         output::print_info(&format!("no pages on branch \"{branch}\""));
