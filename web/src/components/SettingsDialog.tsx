@@ -346,7 +346,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-lg" style={{ minHeight: 420 }}>
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Settings</DialogTitle>
           </DialogHeader>
@@ -357,7 +357,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               <TabsTrigger value="keys" className="flex-1">API Keys</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="profile" className="mt-4 space-y-4">
+            <TabsContent value="profile" className="mt-4 space-y-4 data-[state=inactive]:hidden" forceMount style={{ minHeight: 320 }}>
               <div className="space-y-3">
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Name</label>
@@ -370,7 +370,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               </div>
             </TabsContent>
 
-            <TabsContent value="keys" className="mt-4 space-y-4">
+            <TabsContent value="keys" className="mt-4 space-y-4 data-[state=inactive]:hidden" forceMount style={{ minHeight: 320 }}>
               <div className="flex items-center justify-between">
                 <div className="flex items-start gap-2 text-xs text-muted-foreground">
                   <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0" />
