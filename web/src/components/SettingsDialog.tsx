@@ -370,13 +370,15 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               </div>
             </TabsContent>
 
-            <TabsContent value="keys" className="mt-4 space-y-4 data-[state=inactive]:hidden" forceMount style={{ minHeight: 320 }}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-start gap-2 text-xs text-muted-foreground">
-                  <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span>Keys are only shown once upon creation.</span>
-                </div>
-                <Button size="sm" className="gap-1.5 shrink-0" onClick={() => setShowCreate(true)}>
+            <TabsContent value="keys" className="mt-4 flex flex-col data-[state=inactive]:hidden" forceMount style={{ minHeight: 320 }}>
+              <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-sm text-amber-800 mb-4">
+                <Shield className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>API keys are only shown once upon creation. Copy and store them securely.</span>
+              </div>
+
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-sm font-medium">Your API Keys</h4>
+                <Button size="sm" className="gap-1.5" onClick={() => setShowCreate(true)}>
                   <Plus className="h-3.5 w-3.5" />
                   New Key
                 </Button>
@@ -397,7 +399,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               )}
 
               {!loading && !error && keys.length === 0 && (
-                <div className="flex flex-col items-center justify-center py-8 text-center">
+                <div className="flex flex-1 flex-col items-center justify-center text-center">
                   <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
                     <Key className="h-5 w-5 text-muted-foreground" />
                   </div>
