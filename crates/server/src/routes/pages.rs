@@ -131,9 +131,10 @@ pub async fn list_pages(
 
 pub async fn get_page(
     State(state): State<Arc<AppState>>,
-    Path(slug): Path<String>,
+    Path(raw_slug): Path<String>,
     Query(params): Query<ListParams>,
 ) -> Result<Json<PageResponse>> {
+    let slug = raw_slug.strip_prefix('/').unwrap_or(&raw_slug).to_string();
     let branch = params.branch.unwrap_or_else(|| "main".into());
     let path = format!("wiki/{slug}.md");
     let content = state
@@ -259,9 +260,10 @@ pub async fn list_pages_ws(
 
 pub async fn get_page_ws(
     State(state): State<Arc<AppState>>,
-    Path((ws_slug, slug)): Path<(String, String)>,
+    Path((ws_slug, raw_slug)): Path<(String, String)>,
     Query(params): Query<ListParams>,
 ) -> Result<Json<PageResponse>> {
+    let slug = raw_slug.strip_prefix('/').unwrap_or(&raw_slug).to_string();
     let repo = state.repo_manager.get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     let branch = params.branch.unwrap_or_else(|| "main".into());
@@ -311,8 +313,8 @@ pub async fn create_folder_ws(
     Ok(Json(serde_json::json!({"ok": true, "slug": format!("{slug}/_index"), "path": dir})))
 }
 
-/// Internal: ensure user branch exists lazily (for workspace repos)
-fn ensure_user_branch_if_needed(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Result<()> {
+/// Ensure user branch exists lazily (for workspace repos and legacy routes)
+pub(crate) fn ensure_user_branch_if_needed(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Result<()> {
     if let Some(user_id) = branch.strip_prefix("user/") {
         repo.ensure_user_branch(user_id)
             .map_err(|e| AppError::Internal(format!("failed to ensure user branch '{branch}': {e}")))?;

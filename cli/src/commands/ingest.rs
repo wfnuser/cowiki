@@ -8,6 +8,7 @@ use crate::types::IngestRequest;
 pub async fn run(
     client: &CowikiClient,
     branch: &str,
+    workspace: Option<&str>,
     source_type: String,
     content_arg: Option<String>,
     json: bool,
@@ -21,7 +22,11 @@ pub async fn run(
         branch: branch.to_string(),
     };
 
-    let resp = client.ingest(req).await?;
+    let resp = if let Some(ws) = workspace {
+        client.ingest_ws(ws, req).await?
+    } else {
+        client.ingest(req).await?
+    };
 
     if json {
         let j = serde_json::to_string_pretty(&resp)

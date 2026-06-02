@@ -80,11 +80,13 @@ pub struct Invitation {
 }
 
 pub async fn create(pool: &PgPool, name: &str, slug: &str, visibility: &str, created_by: Uuid) -> sqlx::Result<Workspace> {
+    let mut tx = pool.begin().await.map_err(|e| { tracing::error!("DB begin tx error: {e}"); e })?;
+
     let ws = sqlx::query_as::<_, Workspace>(
         "INSERT INTO workspaces (name, slug, visibility, created_by) VALUES ($1, $2, $3, $4) RETURNING *"
     )
     .bind(name).bind(slug).bind(visibility).bind(created_by)
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await.map_err(|e| { tracing::error!("DB error: {e}"); e })?;
 
     // Add creator as owner
@@ -92,8 +94,10 @@ pub async fn create(pool: &PgPool, name: &str, slug: &str, visibility: &str, cre
         "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, 'owner')"
     )
     .bind(ws.id).bind(created_by)
-    .execute(pool)
+    .execute(&mut *tx)
     .await.map_err(|e| { tracing::error!("DB error: {e}"); e })?;
+
+    tx.commit().await.map_err(|e| { tracing::error!("DB commit tx error: {e}"); e })?;
 
     Ok(ws)
 }

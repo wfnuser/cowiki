@@ -3,8 +3,10 @@
 //! Acts as an MCP→REST proxy: MCP tools call cowiki-server's HTTP API
 //! instead of duplicating business logic. No cowiki-core/db deps needed.
 //!
-//! Port: COWIKI_MCP_PORT > COWIKI_PORT > [server].port > default 8080.
+//! Configuration: COWIKI_MCP_PORT (default 8080), COWIKI_BASE_URL (default http://localhost:3000).
+//! Priority: CLI args > env vars > defaults.
 
+use clap::Parser;
 use hyper_util::{rt::TokioExecutor, server::conn::auto::Builder, service::TowerToHyperService};
 use rmcp::transport::streamable_http_server::{
     session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
@@ -13,20 +15,38 @@ use rmcp::transport::streamable_http_server::{
 mod server;
 use server::CowikiServer;
 
+#[derive(Parser, Debug)]
+#[command(name = "cowiki-mcp")]
+struct Cli {
+    /// MCP server listen port
+    #[arg(long, env = "COWIKI_MCP_PORT")]
+    port: Option<u16>,
+    /// cowiki-server REST API base URL
+    #[arg(long, env = "COWIKI_BASE_URL")]
+    server_url: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,cowiki_rmcp_server=debug".into()),
+                .unwrap_or_else(|_| "info,cowiki_mcp_server=debug".into()),
         )
         .init();
 
-    let args = clap::Parser::parse();
-    let config = cowiki_utils::CowikiConfig::load(Some(args));
+    dotenvy::dotenv().ok();
 
-    let port = config.mcp.port;
-    let api_base = config.mcp.api_url.clone();
+    let cli = Cli::parse();
+    let port = cli
+        .port
+        .or_else(|| std::env::var("COWIKI_MCP_PORT").ok().and_then(|v| v.parse().ok()))
+        .unwrap_or(8080);
+    let api_base = cli
+        .server_url
+        .or_else(|| std::env::var("COWIKI_BASE_URL").ok())
+        .unwrap_or_else(|| "http://localhost:3000".into());
+
     let bind_addr = format!("0.0.0.0:{port}");
     tracing::info!("MCP server on {bind_addr}, backend: {api_base}");
 

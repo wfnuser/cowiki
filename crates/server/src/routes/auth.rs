@@ -108,8 +108,9 @@ struct GithubTokenResponse {
 struct GithubUser {
     login: String,
     email: Option<String>,
-    #[allow(dead_code)]
-    avatar_url: Option<String>,
+    // Retained for JSON deserialization compatibility with GitHub API response.
+    #[serde(default, rename = "avatar_url")]
+    _avatar_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -149,16 +150,27 @@ pub async fn github_callback(
     let email = if gh_user.email.is_some() {
         gh_user.email.clone()
     } else {
-        let emails = client
+        let emails = match client
             .get("https://api.github.com/user/emails")
             .header("Authorization", format!("Bearer {}", token_resp.access_token))
             .header("User-Agent", "cowiki")
-            .send().await.ok()
-            .and_then(|r| futures::executor::block_on(r.json::<Vec<GithubEmail>>()).ok());
+            .send().await
+        {
+            Ok(r) => r.json::<Vec<GithubEmail>>().await.ok(),
+            Err(_) => None,
+        };
         emails.and_then(|list| list.into_iter().find(|e| e.primary).map(|e| e.email))
     };
 
     let user = if let Some(existing) = cowiki_db::users::find_by_name(&state.db, &gh_user.login).await? {
+        // Update email if the existing user has none but GitHub provides one
+        if existing.email.is_none() {
+            if let Some(ref gh_email) = email {
+                if let Err(e) = cowiki_db::users::update_email(&state.db, existing.id, gh_email).await {
+                    tracing::warn!("failed to update email for user {}: {:?}", existing.name, e);
+                }
+            }
+        }
         existing
     } else {
         let user = cowiki_db::users::create(&state.db, &gh_user.login, email.as_deref(), None).await?;
@@ -169,6 +181,10 @@ pub async fn github_callback(
         user
     };
 
+    // TODO: SECURITY — Passing the API key as a query parameter in the redirect URL is a risk:
+    // it may be logged in server access logs, browser history, and HTTP Referer headers.
+    // This should be replaced with a short-lived auth code exchange or secure HttpOnly cookie flow.
+    // Not changing the flow now as it would break the current login integration.
     let redirect_url = format!(
         "{}/?api_key={}&user_name={}&user_id={}",
         state.config.frontend_url,

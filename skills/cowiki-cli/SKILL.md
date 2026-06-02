@@ -40,7 +40,8 @@ Command reference and troubleshooting sections are read-only — AI agent reads 
 | 2. Source | After detection | How to install? | Build from source / Prebuilt binary / Already installed |
 | 3. API Key | After source | How to get API key? | Register on web / I already have one |
 | 4. Server URL | After key | Server endpoint | Local (localhost:3000) / Remote / Custom |
-| 5. Shell | After URL | Setup shell completions? | bash / zsh / fish / Skip |
+| 5. Config Method | After URL | How to store config? | .env file (recommended) / Shell export / Config file (cowiki config set) |
+| 6. Shell | After config | Setup shell completions? | bash / zsh / fish / Skip |
 
 ## Quick Start
 
@@ -56,17 +57,42 @@ The CLI is a standalone crate — excluded from the root workspace. Build it ind
 
 ### Configure
 
-```bash
-# Create config interactively
-cowiki config set server-url http://localhost:3000
-cowiki config set api-key <your-key>
+Three configuration methods, listed in priority order (highest first):
 
-# Or use environment variables
+#### 1. `.env` file (recommended for development)
+
+Create `/home/deadpool/OpenSource/cowiki/cli/.env` — loaded automatically via `dotenvy` when running from the `cli/` directory:
+
+```bash
+cd /home/deadpool/OpenSource/cowiki/cli
+cp .env.example .env
+# Edit .env with your actual API key
+```
+
+`.env` file format:
+
+```env
+COWIKI_BASE_URL=http://localhost:3000
+COWIKI_API_KEY=cw_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+> **Note**: The `.env` file takes priority over config file but is overridden by shell environment variables and `--server` flag. See [reference/config.md](reference/config.md) for full priority order.
+
+#### 2. Shell environment variables
+
+```bash
 export COWIKI_BASE_URL=http://localhost:3000
 export COWIKI_API_KEY=<your-key>
 ```
 
-Config file: `~/.config/cowiki/config.toml`
+#### 3. Config file
+
+```bash
+cowiki config set server-url http://localhost:3000
+cowiki config set api-key <your-key>
+```
+
+Config file location: `~/.config/cowiki/config.toml`
 
 ```toml
 server_url = "http://localhost:3000"

@@ -18,7 +18,7 @@ END $$;
 -- 2. Audit log table for management operations
 CREATE TABLE IF NOT EXISTS audit_log (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    workspace_id UUID REFERENCES workspaces(id) ON DELETE SET NULL,
     actor_id UUID NOT NULL REFERENCES users(id),
     action VARCHAR(50) NOT NULL,
     target_type VARCHAR(50),

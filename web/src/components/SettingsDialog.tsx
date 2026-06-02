@@ -17,12 +17,6 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const stagger = {
-  animate: {
-    transition: { staggerChildren: 0.06 },
-  },
-};
-
 const itemFade = {
   initial: { opacity: 0, y: 12 },
   animate: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 400, damping: 30 } },
@@ -30,31 +24,6 @@ const itemFade = {
 };
 
 // ── Sub-components ──
-
-function SecurityBanner() {
-  return (
-    <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-sm text-amber-800">
-      <Shield className="mt-0.5 h-4 w-4 shrink-0" />
-      <span>API keys are only shown once upon creation. Copy and store them securely.</span>
-    </div>
-  );
-}
-
-function EmptyState({ onCreate }: { onCreate: () => void }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-12 text-center">
-      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-        <Key className="h-5 w-5 text-muted-foreground" />
-      </div>
-      <p className="text-sm font-medium text-foreground">No API keys yet</p>
-      <p className="mt-1 text-xs text-muted-foreground">Create your first API key to get started.</p>
-      <Button size="sm" className="mt-4 gap-1.5" onClick={onCreate}>
-        <Plus className="h-3.5 w-3.5" />
-        Create API Key
-      </Button>
-    </div>
-  );
-}
 
 function KeyCardSkeleton() {
   return (
@@ -139,16 +108,16 @@ function CreateKeyDialog({
   const [revealedKey, setRevealedKey] = useState<ApiKeyCreated | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Reset state when dialog opens/closes
   useEffect(() => {
     if (!open) {
-      setTimeout(() => {
+      const t = setTimeout(() => {
         setStep('name');
         setName('');
         setError(null);
         setRevealedKey(null);
         setCopied(false);
       }, 200);
+      return () => clearTimeout(t);
     }
   }, [open]);
 
@@ -167,7 +136,6 @@ function CreateKeyDialog({
       onCreated();
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to create key.';
-      // Provide friendlier messages for common auth errors
       if (msg.includes('invalid API key') || msg.includes('Unauthorized')) {
         setError('Authentication failed. Your session may have expired — try logging in again.');
       } else {
@@ -183,10 +151,6 @@ function CreateKeyDialog({
     await navigator.clipboard.writeText(revealedKey.raw_key);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleDone = () => {
-    onOpenChange(false);
   };
 
   return (
@@ -241,9 +205,7 @@ function CreateKeyDialog({
             transition={{ type: 'spring', stiffness: 400, damping: 30 }}
             className="space-y-4"
           >
-            {/* Key reveal card — glassmorphism style */}
             <div className="relative overflow-hidden rounded-lg border border-border bg-gradient-to-br from-accent/5 to-accent/10 p-4">
-              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-accent/10 via-transparent to-transparent" />
               <div className="relative space-y-3">
                 <p className="text-xs font-medium text-muted-foreground">
                   Your API Key — copy it now!
@@ -260,21 +222,11 @@ function CreateKeyDialog({
                   >
                     <AnimatePresence mode="wait" initial={false}>
                       {copied ? (
-                        <motion.div
-                          key="check"
-                          initial={{ scale: 0 }}
-                          animate={{ scale: 1 }}
-                          exit={{ scale: 0 }}
-                        >
+                        <motion.div key="check" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
                           <Check className="h-4 w-4" />
                         </motion.div>
                       ) : (
-                        <motion.div
-                          key="copy"
-                          initial={{ scale: 0 }}
-                          animate={{ scale: 1 }}
-                          exit={{ scale: 0 }}
-                        >
+                        <motion.div key="copy" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
                           <Copy className="h-4 w-4" />
                         </motion.div>
                       )}
@@ -287,11 +239,8 @@ function CreateKeyDialog({
                 </div>
               </div>
             </div>
-
             <div className="flex justify-end">
-              <Button size="sm" onClick={handleDone}>
-                Done
-              </Button>
+              <Button size="sm" onClick={() => onOpenChange(false)}>Done</Button>
             </div>
           </motion.div>
         )}
@@ -324,18 +273,13 @@ function RevokeConfirmDialog({
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
             Are you sure you want to revoke <span className="font-medium text-foreground">"{keyName}"</span>?
-            This action cannot be undone. Any services using this key will stop working.
+            This action cannot be undone.
           </p>
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={onCancel} disabled={revoking}>
-              Cancel
-            </Button>
+            <Button variant="ghost" size="sm" onClick={onCancel} disabled={revoking}>Cancel</Button>
             <Button variant="destructive" size="sm" onClick={onConfirm} disabled={revoking}>
               {revoking ? (
-                <>
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                  Revoking...
-                </>
+                <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Revoking...</>
               ) : (
                 'Revoke'
               )}
@@ -350,7 +294,7 @@ function RevokeConfirmDialog({
 // ── Main Settings Dialog ──
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
-  const auth = getStoredAuth();
+  const [auth] = useState(() => getStoredAuth());
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -407,13 +351,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <DialogTitle>Settings</DialogTitle>
           </DialogHeader>
 
-          <Tabs defaultValue="keys" className="w-full">
+          <Tabs defaultValue="profile" className="w-full">
             <TabsList className="w-full">
               <TabsTrigger value="profile" className="flex-1">Profile</TabsTrigger>
               <TabsTrigger value="keys" className="flex-1">API Keys</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="profile" className="mt-4 space-y-4">
+            <TabsContent value="profile" className="mt-4 space-y-4 data-[state=inactive]:hidden" forceMount style={{ minHeight: 320 }}>
               <div className="space-y-3">
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Name</label>
@@ -426,10 +370,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               </div>
             </TabsContent>
 
-            <TabsContent value="keys" className="mt-4 space-y-4">
-              <SecurityBanner />
+            <TabsContent value="keys" className="mt-4 flex flex-col data-[state=inactive]:hidden" forceMount style={{ minHeight: 320 }}>
+              <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-sm text-amber-800 mb-4">
+                <Shield className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>API keys are only shown once upon creation. Copy and store them securely.</span>
+              </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between mb-4">
                 <h4 className="text-sm font-medium">Your API Keys</h4>
                 <Button size="sm" className="gap-1.5" onClick={() => setShowCreate(true)}>
                   <Plus className="h-3.5 w-3.5" />
@@ -437,34 +384,32 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 </Button>
               </div>
 
-              {/* Loading */}
               {loading && (
                 <div className="space-y-2">
                   <KeyCardSkeleton />
                   <KeyCardSkeleton />
-                  <KeyCardSkeleton />
                 </div>
               )}
 
-              {/* Error */}
               {!loading && error && (
                 <div className="flex flex-col items-center gap-2 rounded-lg border border-red-200 bg-red-50 py-6 text-center">
                   <p className="text-sm text-red-700">{error}</p>
-                  <Button variant="outline" size="sm" onClick={fetchKeys}>
-                    Retry
-                  </Button>
+                  <Button variant="outline" size="sm" onClick={fetchKeys}>Retry</Button>
                 </div>
               )}
 
-              {/* Empty */}
               {!loading && !error && keys.length === 0 && (
-                <EmptyState onCreate={() => setShowCreate(true)} />
+                <div className="flex flex-1 flex-col items-center justify-center text-center">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                    <Key className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <p className="text-sm font-medium text-foreground">No API keys yet</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Create your first API key to get started.</p>
+                </div>
               )}
 
-              {/* Key list */}
               {!loading && !error && keys.length > 0 && (
                 <motion.div
-                  variants={stagger}
                   initial="initial"
                   animate="animate"
                   className="space-y-2"
@@ -489,7 +434,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         </DialogContent>
       </Dialog>
 
-      {/* Sub-dialogs (outside main dialog to avoid nesting) */}
       <CreateKeyDialog
         open={showCreate}
         onOpenChange={setShowCreate}

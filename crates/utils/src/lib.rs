@@ -1,7 +1,7 @@
 //! Shared configuration for cowiki services.
 //!
 //! Supports loading from `cowiki.conf` (TOML) with environment variable
-//! fallback. Shared by `cowiki-server` and `cowiki-rmcp-server`.
+//! fallback. Shared by `cowiki-server`.
 
 use clap::Parser;
 use serde::Deserialize;
