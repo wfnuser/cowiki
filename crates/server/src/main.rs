@@ -141,6 +141,9 @@ async fn main() {
         // Compile
         .route("/api/compile", post(routes::compile::compile))
         .route("/api/workspaces/{ws_slug}/compile", post(routes::compile::compile_ws))
+        // Sources
+        .route("/api/workspaces/{ws_slug}/sources", get(routes::sources::list_sources))
+        .route("/api/workspaces/{ws_slug}/sources/{filename}", get(routes::sources::get_source))
         // Submit
         .route("/api/submit", post(routes::submit::submit))
         // Reviews

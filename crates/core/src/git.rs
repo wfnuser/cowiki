@@ -140,19 +140,23 @@ impl WikiRepo {
 
     pub fn ensure_user_branch(&self, user_id: &str) -> Result<String, git2::Error> {
         let branch_name = format!("user/{user_id}");
+        self.ensure_branch_exists(&branch_name)
+    }
+
+    /// Ensure a branch exists, creating it from main if needed.
+    pub fn ensure_branch_exists(&self, branch_name: &str) -> Result<String, git2::Error> {
         let repo = self.repo()?;
 
-        if repo.find_branch(&branch_name, BranchType::Local).is_ok() {
-            return Ok(branch_name);
+        if repo.find_branch(branch_name, BranchType::Local).is_ok() {
+            return Ok(branch_name.to_string());
         }
 
-        // Find main or master branch
         let main = repo
             .find_branch("main", BranchType::Local)
             .or_else(|_| repo.find_branch("master", BranchType::Local))?;
         let commit = main.get().peel_to_commit()?;
-        repo.branch(&branch_name, &commit, false)?;
-        Ok(branch_name)
+        repo.branch(branch_name, &commit, false)?;
+        Ok(branch_name.to_string())
     }
 
     pub fn write_file(

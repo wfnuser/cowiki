@@ -76,6 +76,19 @@ export interface PendingInvitation {
   created_at: string;
 }
 
+export interface SourceItem {
+  filename: string;
+  compiled: boolean;
+  compiled_pages: string[];
+}
+
+export interface SourceContent {
+  filename: string;
+  content: string;
+  compiled: boolean;
+  compiled_pages: string[];
+}
+
 // ── Workspaces ──
 
 export async function listWorkspaces(): Promise<Workspace[]> {
@@ -415,4 +428,18 @@ export async function revokeApiKey(id: string): Promise<void> {
     headers: h(),
   });
   if (!res.ok) throw new Error(await res.text());
+}
+
+// ── Sources ──
+
+export async function listSources(workspaceSlug: string, branch = 'main'): Promise<SourceItem[]> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/sources?branch=${encodeURIComponent(branch)}`, { headers: h() });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getSource(workspaceSlug: string, filename: string, branch = 'main'): Promise<SourceContent> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/sources/${encodeURIComponent(filename)}?branch=${encodeURIComponent(branch)}`, { headers: h() });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }

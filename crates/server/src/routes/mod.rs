@@ -5,5 +5,6 @@ pub mod keys;
 pub mod pages;
 pub mod review;
 pub mod search;
+pub mod sources;
 pub mod submit;
 pub mod workspace;
