@@ -1046,6 +1046,74 @@ export function MainLayout() {
 
 // ── Sidebar Components ──
 
+/**
+ * SourcesFolder: Reusable Sources section for both personal and shared workspaces.
+ * @param indent - CSS class for indentation (e.g., "" for personal, "pl-4" for shared)
+ * @param emptyIndent - CSS class for empty state padding (e.g., "pl-8" for personal, "pl-12" for shared)
+ */
+function SourcesFolder({
+  sources,
+  onSelectSource,
+  onSelectPage,
+  onShowIngest,
+  onCompile,
+  indent = '',
+  emptyIndent = 'pl-8',
+}: {
+  sources: SourceItem[];
+  onSelectSource: (filename: string) => void;
+  onSelectPage: (slug: string) => void;
+  onShowIngest: () => void;
+  onCompile: () => void;
+  indent?: string;
+  emptyIndent?: string;
+}) {
+  const [sourcesExpanded, setSourcesExpanded] = useState(false);
+
+  return (
+    <>
+      <SidebarMenuItem className={`group/source-folder relative ${indent}`}>
+        <SidebarMenuButton onClick={() => setSourcesExpanded(!sourcesExpanded)}>
+          <ChevronRight size={12} className={`transition-transform ${sourcesExpanded ? 'rotate-90' : ''}`} />
+          <Folder size={16} />
+          <span>Sources</span>
+        </SidebarMenuButton>
+        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover/source-folder:opacity-100 transition-all">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="p-0.5 rounded text-sidebar-foreground/40 hover:text-sidebar-foreground/70 outline-none focus:outline-none ring-0 focus:ring-0">
+                <MoreHorizontal size={12} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-36">
+              <DropdownMenuItem onClick={onShowIngest}><Upload size={14} className="mr-2" /> Add Source</DropdownMenuItem>
+              <DropdownMenuItem onClick={onCompile}><Wand2 size={14} className="mr-2" /> Compile</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </SidebarMenuItem>
+      {sourcesExpanded && (
+        <>
+          {sources.length === 0 ? (
+            <SidebarMenuItem className={emptyIndent}>
+              <span className="text-xs text-sidebar-foreground/40 italic">No sources yet</span>
+            </SidebarMenuItem>
+          ) : (
+            sources.map((s) => (
+              <SourceTreeItem
+                key={s.filename}
+                source={s}
+                onSelect={() => onSelectSource(s.filename)}
+                onSelectPage={onSelectPage}
+              />
+            ))
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
 function SpaceSection({
   workspace, label, pages, sources, expanded, activeWorkspace, activeView, onToggle, onSelectPage, onSelectSource, onShowIngest, onCompile, onNewPage, onNewFolder, onAddPageInFolder, onAddFolderInFolder,
 }: {
@@ -1057,7 +1125,6 @@ function SpaceSection({
   onNewPage: () => void; onNewFolder: () => void;
   onAddPageInFolder: (folderPath: string) => void; onAddFolderInFolder: (parentPath: string) => void;
 }) {
-  const [sourcesExpanded, setSourcesExpanded] = useState(false);
   return (
     <SidebarGroup>
       <SidebarGroupLabel className="group/label">
@@ -1077,44 +1144,14 @@ function SpaceSection({
       {expanded && (
         <>
           {/* Sources Section — pinned at top */}
-          <SidebarMenuItem className="group/source-folder relative">
-            <SidebarMenuButton onClick={() => setSourcesExpanded(!sourcesExpanded)}>
-              <ChevronRight size={12} className={`transition-transform ${sourcesExpanded ? 'rotate-90' : ''}`} />
-              <Folder size={16} />
-              <span>Sources</span>
-            </SidebarMenuButton>
-            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover/source-folder:opacity-100 transition-all">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="p-0.5 rounded text-sidebar-foreground/40 hover:text-sidebar-foreground/70 outline-none focus:outline-none ring-0 focus:ring-0">
-                    <MoreHorizontal size={12} />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-36">
-                  <DropdownMenuItem onClick={onShowIngest}><Upload size={14} className="mr-2" /> Add Source</DropdownMenuItem>
-                  <DropdownMenuItem onClick={onCompile}><Wand2 size={14} className="mr-2" /> Compile</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </SidebarMenuItem>
-          {sourcesExpanded && (
-            <>
-              {sources.length === 0 ? (
-                <SidebarMenuItem className="pl-8">
-                  <span className="text-xs text-sidebar-foreground/40 italic">No sources yet</span>
-                </SidebarMenuItem>
-              ) : (
-                sources.map((s) => (
-                  <SourceTreeItem
-                    key={s.filename}
-                    source={s}
-                    onSelect={() => onSelectSource(s.filename)}
-                    onSelectPage={onSelectPage}
-                  />
-                ))
-              )}
-            </>
-          )}
+          <SourcesFolder
+            sources={sources}
+            onSelectSource={onSelectSource}
+            onSelectPage={onSelectPage}
+            onShowIngest={onShowIngest}
+            onCompile={onCompile}
+            emptyIndent="pl-8"
+          />
           <SidebarMenu>
             {pages.map((p) => (
               <PageItem
@@ -1146,7 +1183,6 @@ function SpaceTreeItem({
   onInvite: () => void; onManageMembers: () => void; onDelete: () => void;
 }) {
   const isOwner = workspace.role === 'owner';
-  const [sourcesExpanded, setSourcesExpanded] = useState(false);
   return (
     <>
       <SidebarMenuItem className="group/space relative">
@@ -1194,44 +1230,15 @@ function SpaceTreeItem({
       {expanded && (
         <>
           {/* Sources Section — pinned at top, indented like pages */}
-          <SidebarMenuItem className="group/source-folder relative pl-4">
-            <SidebarMenuButton onClick={() => setSourcesExpanded(!sourcesExpanded)}>
-              <ChevronRight size={12} className={`transition-transform ${sourcesExpanded ? 'rotate-90' : ''}`} />
-              <Folder size={16} />
-              <span>Sources</span>
-            </SidebarMenuButton>
-            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover/source-folder:opacity-100 transition-all">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="p-0.5 rounded text-sidebar-foreground/40 hover:text-sidebar-foreground/70 outline-none focus:outline-none ring-0 focus:ring-0">
-                    <MoreHorizontal size={12} />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-36">
-                  <DropdownMenuItem onClick={onShowIngest}><Upload size={14} className="mr-2" /> Add Source</DropdownMenuItem>
-                  <DropdownMenuItem onClick={onCompile}><Wand2 size={14} className="mr-2" /> Compile</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </SidebarMenuItem>
-          {sourcesExpanded && (
-            <>
-              {sources.length === 0 ? (
-                <SidebarMenuItem className="pl-12">
-                  <span className="text-xs text-sidebar-foreground/40 italic">No sources yet</span>
-                </SidebarMenuItem>
-              ) : (
-                sources.map((s) => (
-                  <SourceTreeItem
-                    key={s.filename}
-                    source={s}
-                    onSelect={() => onSelectSource(s.filename)}
-                    onSelectPage={onSelectPage}
-                  />
-                ))
-              )}
-            </>
-          )}
+          <SourcesFolder
+            sources={sources}
+            onSelectSource={onSelectSource}
+            onSelectPage={onSelectPage}
+            onShowIngest={onShowIngest}
+            onCompile={onCompile}
+            indent="pl-4"
+            emptyIndent="pl-12"
+          />
         </>
       )}
       {expanded && pages.map((p) => (
@@ -1286,7 +1293,7 @@ function SourceTreeItem({ source, onSelect, onSelectPage }: {
   );
 }
 
-function PageItem({ page, isActive, onSelect, onSelectChild, onAddPage, onAddFolder, depth = 0, activeSlug }: {
+function PageItem({ page, isActive, onSelect, onSelectChild, onAddPage, onAddFolder, depth = 0, activeSlug = null }: {
   page: PageMeta; isActive: boolean; onSelect: () => void;
   onSelectChild?: (slug: string) => void; onAddPage?: (folderPath: string) => void;
   onAddFolder?: (parentPath: string) => void; depth?: number; activeSlug?: string | null;
