@@ -60,7 +60,7 @@ export function MainLayout() {
   const [pageContent, setPageContent] = useState<PageFull | null>(null);
   const [activeSource, setActiveSource] = useState<{ workspace: Workspace; filename: string } | null>(null);
   const [sourceContent, setSourceContent] = useState<SourceContent | null>(null);
-  const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
+  const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Modals
@@ -110,7 +110,7 @@ export function MainLayout() {
     const personal = ws.find((w) => w.visibility === 'private' && w.role === 'owner');
     if (personal) {
       setExpandedSpaces((prev) => new Set([...prev, personal.id]));
-      setCurrentWorkspace(personal);
+      setActiveWorkspace(personal);
       await loadSpacePages(personal);
       await loadSpaceSources(personal);
     }
@@ -123,7 +123,7 @@ export function MainLayout() {
       const targetWs = ws.find((w) => w.slug === wsSlug);
       if (targetWs) {
         // Expand the target workspace
-        setCurrentWorkspace(targetWs);
+        setActiveWorkspace(targetWs);
         setExpandedSpaces((prev) => new Set([...prev, targetWs.id]));
         if (!spacePages[targetWs.id]) {
           await loadSpacePages(targetWs);
@@ -220,7 +220,7 @@ export function MainLayout() {
 
   // Select a source file
   const selectSource = async (ws: Workspace, filename: string) => {
-    setCurrentWorkspace(ws);
+    setActiveWorkspace(ws);
     setActivePage(null);
     setPageContent(null);
     setActiveSource({ workspace: ws, filename });
@@ -238,7 +238,7 @@ export function MainLayout() {
 
   // Toggle space expansion — always reload sources
   const toggleSpace = (ws: Workspace) => {
-    setCurrentWorkspace(ws);
+    setActiveWorkspace(ws);
     setExpandedSpaces((prev) => {
       const next = new Set(prev);
       if (next.has(ws.id)) {
@@ -254,7 +254,7 @@ export function MainLayout() {
 
   // Select a page — try user branch first (for drafts), fall back to main
   const selectPage = async (ws: Workspace, slug: string) => {
-    setCurrentWorkspace(ws);
+    setActiveWorkspace(ws);
     setActiveSource(null);
     setSourceContent(null);
     setActivePage({ workspace: ws, slug });
@@ -364,10 +364,10 @@ export function MainLayout() {
     }
   };
 
-  // Compile pages in the active workspace (top bar, uses currentWorkspace)
+  // Compile pages in the active workspace
   const handleCompile = async () => {
-    const ws = activePage?.workspace || activeSource?.workspace || currentWorkspace;
-    if (!ws) return;
+    if (!activeWorkspace) return;
+    const ws = activeWorkspace;
     setCompiling(true);
     setMessage(null);
     try {
@@ -386,8 +386,8 @@ export function MainLayout() {
 
   // Submit pages for review (or direct commit for personal)
   const handleSubmit = async () => {
-    const ws = activePage?.workspace || activeSource?.workspace || currentWorkspace;
-    if (!ws) return;
+    if (!activeWorkspace) return;
+    const ws = activeWorkspace;
     setSubmitting(true);
     setMessage(null);
     try {
@@ -410,8 +410,8 @@ export function MainLayout() {
   // Handle ingest completion
   const handleIngestDone = () => {
     setShowIngest(false);
-    const ws = activePage?.workspace || activeSource?.workspace || currentWorkspace;
-    if (ws) {
+    if (activeWorkspace) {
+      const ws = activeWorkspace;
       loadSpacePages(ws);
       loadSpaceSources(ws);
     }
@@ -633,7 +633,7 @@ export function MainLayout() {
                   onToggle={() => toggleSpace(ws)}
                   onSelectPage={(slug) => selectPage(ws, slug)}
                   onSelectSource={(filename) => selectSource(ws, filename)}
-                  onShowIngest={() => { setCurrentWorkspace(ws); setShowIngest(true); }}
+                  onShowIngest={() => { setActiveWorkspace(ws); setShowIngest(true); }}
                   onCompile={() => handleCompileForWs(ws)}
                   onNewPage={() => { setShowNewPage(ws); setNewName(''); setNewPageFolder(null); }}
                   onNewFolder={() => { setShowNewFolder(ws); setNewName(''); setNewFolderParent(null); }}
@@ -657,7 +657,7 @@ export function MainLayout() {
                       onToggle={() => toggleSpace(ws)}
                       onSelectPage={(slug) => selectPage(ws, slug)}
                       onSelectSource={(filename) => selectSource(ws, filename)}
-                      onShowIngest={() => { setCurrentWorkspace(ws); setShowIngest(true); }}
+                      onShowIngest={() => { setActiveWorkspace(ws); setShowIngest(true); }}
                       onCompile={() => handleCompileForWs(ws)}
                       onNewPage={() => { setShowNewPage(ws); setNewName(''); setNewPageFolder(null); }}
                       onNewFolder={() => { setShowNewFolder(ws); setNewName(''); setNewFolderParent(null); }}
@@ -739,9 +739,9 @@ export function MainLayout() {
                   <button
                     onClick={() => setShowIngest(true)}
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                    title={currentWorkspace ? `Add source to ${currentWorkspace.name}` : 'Add Source'}
+                    title={activeWorkspace ? `Add source to ${activeWorkspace.name}` : 'Add Source'}
                   >
-                    <Upload size={13} /> Add Source{currentWorkspace ? ` to ${currentWorkspace.name}` : ''}
+                    <Upload size={13} /> Add Source{activeWorkspace ? ` to ${activeWorkspace.name}` : ''}
                   </button>
                   <button
                     onClick={handleCompile}
@@ -778,12 +778,12 @@ export function MainLayout() {
             )}
 
             {/* Ingest panel */}
-            {showIngest && (activePage || activeSource || currentWorkspace) && (
+            {showIngest && activeWorkspace && (
               <div className="mx-6 mt-2 rounded-lg border border-[var(--color-border)] p-4 bg-[var(--color-bg-secondary)]">
                 <div className="text-xs text-[var(--color-text-tertiary)] mb-2">
-                  Add source to <span className="font-medium text-[var(--color-text)]">{currentWorkspace?.name || activePage?.workspace?.name || activeSource?.workspace?.name}</span>
+                  Add source to <span className="font-medium text-[var(--color-text)]">{activeWorkspace.name}</span>
                 </div>
-                <IngestForm branch={userBranch} onDone={handleIngestDone} workspaceSlug={currentWorkspace?.slug || activePage?.workspace?.slug || activeSource?.workspace?.slug || ''} />
+                <IngestForm branch={userBranch} onDone={handleIngestDone} workspaceSlug={activeWorkspace.slug} />
               </div>
             )}
 
