@@ -51,34 +51,8 @@ fn load_compile_state(repo: &cowiki_core::git::WikiRepo, branch: &str) -> HashMa
         .unwrap_or_default()
 }
 
+/// Find wiki pages that reference a source (from pre-loaded wiki contents).
 fn find_referencing_pages(
-    repo: &cowiki_core::git::WikiRepo,
-    branch: &str,
-    source_filename: &str,
-) -> Vec<String> {
-    let wiki_files = repo.list_files_recursive(branch, "wiki").unwrap_or_default();
-    let mut pages = Vec::new();
-    for file in &wiki_files {
-        if let Ok(Some(content)) = repo.read_file(branch, file) {
-            let text = String::from_utf8_lossy(&content);
-            if text.contains(&format!("  - {source_filename}"))
-                || text.contains(&format!("- {source_filename}"))
-            {
-                let slug = file
-                    .strip_prefix("wiki/")
-                    .unwrap_or(file)
-                    .strip_suffix(".md")
-                    .unwrap_or(file)
-                    .to_string();
-                pages.push(slug);
-            }
-        }
-    }
-    pages
-}
-
-/// Pre-load all wiki file contents for a branch once, then find referencing pages.
-fn find_referencing_pages_batched(
     wiki_contents: &[(String, String)],
     source_filename: &str,
 ) -> Vec<String> {
@@ -141,7 +115,7 @@ pub async fn list_sources(
             .to_string();
         let compiled = compile_state.contains_key(&filename);
         let compiled_pages = if compiled {
-            find_referencing_pages_batched(&wiki_contents, &filename)
+            find_referencing_pages(&wiki_contents, &filename)
         } else {
             Vec::new()
         };
@@ -155,16 +129,7 @@ pub async fn get_source(
     Path((ws_slug, filename)): Path<(String, String)>,
     Query(params): Query<GetSourceParams>,
 ) -> Result<Json<SourceContent>> {
-    // Path traversal protection
-    if filename.is_empty()
-        || filename.contains("..")
-        || filename.contains('/')
-        || filename.contains('\\')
-        || filename.starts_with('.')
-        || filename.len() > 255
-    {
-        return Err(AppError::BadRequest("invalid filename".into()));
-    }
+    super::validate_source_filename(&filename)?;
 
     let repo = state
         .repo_manager
@@ -172,11 +137,6 @@ pub async fn get_source(
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
 
     let branch = &params.branch;
-    // Ensure branch exists (lazy-create for user branches)
-    if branch != "main" {
-        repo.ensure_branch_exists(branch)
-            .map_err(|e| AppError::Internal(format!("failed to create branch {}: {e}", branch)))?;
-    }
     let file_path = format!("sources/{filename}");
     let content_bytes = repo
         .read_file(branch, &file_path)
@@ -187,7 +147,8 @@ pub async fn get_source(
     let compile_state = load_compile_state(&repo, branch);
     let compiled = compile_state.contains_key(&filename);
     let compiled_pages = if compiled {
-        find_referencing_pages(&repo, branch, &filename)
+        let wiki_contents = load_all_wiki(&repo, branch);
+        find_referencing_pages(&wiki_contents, &filename)
     } else {
         Vec::new()
     };
