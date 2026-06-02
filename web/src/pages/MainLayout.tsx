@@ -703,25 +703,22 @@ export function MainLayout() {
           <SidebarInset>
             {/* Top bar with breadcrumb + actions */}
             {activeView?.content ? (
-              <div className="sticky top-0 z-10 bg-[var(--color-bg)] border-b border-[var(--color-border)] px-6 py-2 flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)]">
-                  <span>{auth?.name}</span>
+              <div className="sticky top-0 z-10 bg-[var(--color-bg)] border-b border-[var(--color-border)] px-6 py-2 flex items-center justify-between min-w-0">
+                <div className="flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)] min-w-0 overflow-hidden">
                   {activeView.kind === 'page' && activeView.content && (
                     <>
-                      <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span>{activeWorkspace?.name}</span>
-                      <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span className="text-[var(--color-text)]">{activeView.content.title}</span>
+                      <span className="shrink-0">{activeWorkspace?.name}</span>
+                      <span className="text-[var(--color-text-tertiary)] shrink-0">/</span>
+                      <span className="text-[var(--color-text)] truncate">{activeView.content.title}</span>
                     </>
                   )}
                   {activeView.kind === 'source' && (
                     <>
-                      <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span>{activeWorkspace?.name}</span>
-                      <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span className="text-[var(--color-text-tertiary)]">sources</span>
-                      <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span className="text-[var(--color-text)]">{activeView.filename}</span>
+                      <span className="shrink-0">{activeWorkspace?.name}</span>
+                      <span className="text-[var(--color-text-tertiary)] shrink-0">/</span>
+                      <span className="text-[var(--color-text-tertiary)] shrink-0">sources</span>
+                      <span className="text-[var(--color-text-tertiary)] shrink-0">/</span>
+                      <span className="text-[var(--color-text)] truncate">{activeView.filename}</span>
                     </>
                   )}
                 </div>
@@ -731,7 +728,7 @@ export function MainLayout() {
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                     title={activeWorkspace ? `Add source to ${activeWorkspace.name}` : 'Add Source'}
                   >
-                    <Upload size={13} /> Add Source{activeWorkspace ? ` to ${activeWorkspace.name}` : ''}
+                    <Upload size={13} /> Add Source
                   </button>
                   <button
                     onClick={handleCompile}
