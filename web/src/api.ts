@@ -228,6 +228,7 @@ export async function ingest(sourceType: string, content: string, branch: string
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ source_type: sourceType, content, branch, filename }),
   });
+  if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
