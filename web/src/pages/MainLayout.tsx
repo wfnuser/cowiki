@@ -1298,10 +1298,10 @@ function SourceTreeItem({ source, workspace, onSelect, onSelectPage }: {
   );
 }
 
-function PageItem({ page, isActive, onSelect, onSelectChild, onAddPage, onAddFolder, indent }: {
+function PageItem({ page, isActive, onSelect, onSelectChild, onAddPage, onAddFolder, depth = 0, activeSlug }: {
   page: PageMeta; isActive: boolean; onSelect: () => void;
   onSelectChild?: (slug: string) => void; onAddPage?: (folderPath: string) => void;
-  onAddFolder?: (parentPath: string) => void; depth?: number;
+  onAddFolder?: (parentPath: string) => void; depth?: number; activeSlug?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const paddingLeft = depth * 16; // 16px per level
