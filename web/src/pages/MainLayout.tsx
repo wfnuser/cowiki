@@ -33,10 +33,10 @@ import { IngestForm } from '../components/IngestForm';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { getStoredAuth, clearAuth } from '../auth';
 
-interface ActivePage {
-  workspace: Workspace;
-  slug: string;
-}
+type ActiveView =
+  | { kind: 'page'; slug: string }
+  | { kind: 'source'; filename: string }
+  | null;
 
 export function MainLayout() {
   const [auth, setAuth] = useState(() => getStoredAuth());
@@ -56,9 +56,8 @@ export function MainLayout() {
   const [expandedSpaces, setExpandedSpaces] = useState<Set<string>>(new Set());
   const [spacePages, setSpacePages] = useState<Record<string, PageMeta[]>>({});
   const [spaceSources, setSpaceSources] = useState<Record<string, SourceItem[]>>({});
-  const [activePage, setActivePage] = useState<ActivePage | null>(null);
+  const [activeView, setActiveView] = useState<ActiveView>(null);
   const [pageContent, setPageContent] = useState<PageFull | null>(null);
-  const [activeSource, setActiveSource] = useState<{ workspace: Workspace; filename: string } | null>(null);
   const [sourceContent, setSourceContent] = useState<SourceContent | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
   const [loading, setLoading] = useState(true);
@@ -135,7 +134,7 @@ export function MainLayout() {
         const branch = targetWs.visibility === 'private' ? userBranch : 'main';
         try {
           const page = await getPage(pageSlug, branch, targetWs.slug);
-          setActivePage({ workspace: targetWs, slug: pageSlug });
+          setActiveView({ kind: 'page', slug: pageSlug });
           setPageContent(page);
         } catch {
           // Page not found, just show home
@@ -146,7 +145,7 @@ export function MainLayout() {
       const personalPages = await listPages(userBranch, personal.slug);
       const firstPage = personalPages.find((p) => p.kind === 'page');
       if (firstPage) {
-        setActivePage({ workspace: personal, slug: firstPage.slug });
+        setActiveView({ kind: 'page', slug: firstPage.slug });
         const owner = auth?.name || 'user';
         navigate(`/${owner}/${personal.slug}/${firstPage.slug}`, { replace: true });
         try {
@@ -221,9 +220,8 @@ export function MainLayout() {
   // Select a source file
   const selectSource = async (ws: Workspace, filename: string) => {
     setActiveWorkspace(ws);
-    setActivePage(null);
     setPageContent(null);
-    setActiveSource({ workspace: ws, filename });
+    setActiveView({ kind: 'source', filename });
     try {
       // Try user branch first (where newly ingested sources live), fall back to main
       let content = await getSource(ws.slug, filename, userBranch).catch(() => null);
@@ -255,9 +253,8 @@ export function MainLayout() {
   // Select a page — try user branch first (for drafts), fall back to main
   const selectPage = async (ws: Workspace, slug: string) => {
     setActiveWorkspace(ws);
-    setActiveSource(null);
     setSourceContent(null);
-    setActivePage({ workspace: ws, slug });
+    setActiveView({ kind: 'page', slug });
     const owner = auth?.name || 'user';
     navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
 
@@ -321,7 +318,7 @@ export function MainLayout() {
       setNewPageFolder(null);
       await loadSpacePages(ws);
       // Set page content directly from what we just wrote — avoids a re-fetch that may fail
-      setActivePage({ workspace: ws, slug });
+      setActiveView({ kind: 'page', slug });
       setPageContent({ slug, title, summary: '', body, branch: userBranch });
       const owner = auth?.name || 'user';
       navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
@@ -629,7 +626,8 @@ export function MainLayout() {
                   pages={spacePages[ws.id] || []}
                   sources={spaceSources[ws.id] || []}
                   expanded={expandedSpaces.has(ws.id)}
-                  activePage={activePage}
+                  activeWorkspace={activeWorkspace}
+                  activeView={activeView}
                   onToggle={() => toggleSpace(ws)}
                   onSelectPage={(slug) => selectPage(ws, slug)}
                   onSelectSource={(filename) => selectSource(ws, filename)}
@@ -653,7 +651,8 @@ export function MainLayout() {
                       pages={spacePages[ws.id] || []}
                       sources={spaceSources[ws.id] || []}
                       expanded={expandedSpaces.has(ws.id)}
-                      activePage={activePage}
+                      activeWorkspace={activeWorkspace}
+                      activeView={activeView}
                       onToggle={() => toggleSpace(ws)}
                       onSelectPage={(slug) => selectPage(ws, slug)}
                       onSelectSource={(filename) => selectSource(ws, filename)}
@@ -682,7 +681,7 @@ export function MainLayout() {
               <SidebarGroup>
                 <SidebarMenu>
                   <SidebarMenuItem>
-                    <SidebarMenuButton onClick={() => { setActivePage(null); setActiveSource(null); setPageContent(null); setSourceContent(null); navigate('/discover'); }} tooltip="Discover public wikis">
+                    <SidebarMenuButton onClick={() => { setActiveView(null); setPageContent(null); setSourceContent(null); navigate('/discover'); }} tooltip="Discover public wikis">
                       <Compass size={16} />
                       <span>Discover</span>
                     </SidebarMenuButton>
@@ -712,26 +711,26 @@ export function MainLayout() {
 
           <SidebarInset>
             {/* Top bar with breadcrumb + actions */}
-            {(activePage && pageContent) || (activeSource && sourceContent) ? (
+            {activeView && ((activeView.kind === 'page' && pageContent) || (activeView.kind === 'source' && sourceContent)) ? (
               <div className="sticky top-0 z-10 bg-[var(--color-bg)] border-b border-[var(--color-border)] px-6 py-2 flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)]">
                   <span>{auth?.name}</span>
-                  {activePage && pageContent && (
+                  {activeView.kind === 'page' && pageContent && (
                     <>
                       <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span>{activePage.workspace.name}</span>
+                      <span>{activeWorkspace?.name}</span>
                       <span className="text-[var(--color-text-tertiary)]">/</span>
                       <span className="text-[var(--color-text)]">{pageContent.title}</span>
                     </>
                   )}
-                  {activeSource && (
+                  {activeView.kind === 'source' && (
                     <>
                       <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span>{activeSource.workspace.name}</span>
+                      <span>{activeWorkspace?.name}</span>
                       <span className="text-[var(--color-text-tertiary)]">/</span>
                       <span className="text-[var(--color-text-tertiary)]">sources</span>
                       <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span className="text-[var(--color-text)]">{activeSource.filename}</span>
+                      <span className="text-[var(--color-text)]">{activeView.filename}</span>
                     </>
                   )}
                 </div>
@@ -840,7 +839,7 @@ export function MainLayout() {
                         <span key={slug}>
                           {i > 0 && ', '}
                           <button
-                            onClick={() => selectPage(activeSource!.workspace, slug)}
+                            onClick={() => selectPage(activeWorkspace!, slug)}
                             className="text-xs text-blue-500 hover:underline"
                           >
                             {slug}
@@ -1057,10 +1056,10 @@ export function MainLayout() {
 // ── Sidebar Components ──
 
 function SpaceSection({
-  workspace, label, pages, sources, expanded, activePage, onToggle, onSelectPage, onSelectSource, onShowIngest, onCompile, onNewPage, onNewFolder, onAddPageInFolder, onAddFolderInFolder,
+  workspace, label, pages, sources, expanded, activeWorkspace, activeView, onToggle, onSelectPage, onSelectSource, onShowIngest, onCompile, onNewPage, onNewFolder, onAddPageInFolder, onAddFolderInFolder,
 }: {
   workspace: Workspace; label: string; pages: PageMeta[]; sources: SourceItem[];
-  expanded: boolean; activePage: ActivePage | null;
+  expanded: boolean; activeWorkspace: Workspace | null; activeView: ActiveView;
   onToggle: () => void; onSelectPage: (slug: string) => void;
   onSelectSource: (filename: string) => void;
   onShowIngest: () => void; onCompile: () => void;
@@ -1131,7 +1130,7 @@ function SpaceSection({
               <PageItem
                 key={p.slug}
                 page={p}
-                isActive={activePage?.workspace.id === workspace.id && activePage?.slug === p.slug}
+                isActive={activeWorkspace?.id === workspace.id && activeView?.kind === 'page' && activeView.slug === p.slug}
                 onSelect={() => onSelectPage(p.slug)} onSelectChild={(slug) => onSelectPage(slug)}
                 onAddPage={(folderPath) => onAddPageInFolder(folderPath)}
                 onAddFolder={(parentPath) => onAddFolderInFolder(parentPath)}
@@ -1145,10 +1144,10 @@ function SpaceSection({
 }
 
 function SpaceTreeItem({
-  workspace, pages, sources, expanded, activePage, onToggle, onSelectPage, onSelectSource, onShowIngest, onCompile, onNewPage, onNewFolder, onAddPageInFolder, onAddFolderInFolder, onRename, onInvite, onManageMembers, onDelete,
+  workspace, pages, sources, expanded, activeWorkspace, activeView, onToggle, onSelectPage, onSelectSource, onShowIngest, onCompile, onNewPage, onNewFolder, onAddPageInFolder, onAddFolderInFolder, onRename, onInvite, onManageMembers, onDelete,
 }: {
   workspace: Workspace; pages: PageMeta[]; sources: SourceItem[];
-  expanded: boolean; activePage: ActivePage | null;
+  expanded: boolean; activeWorkspace: Workspace | null; activeView: ActiveView;
   onToggle: () => void; onSelectPage: (slug: string) => void;
   onSelectSource: (filename: string) => void;
   onShowIngest: () => void; onCompile: () => void;
@@ -1250,8 +1249,8 @@ function SpaceTreeItem({
         <PageItem
           key={p.slug}
           page={p}
-          isActive={activePage?.workspace.id === workspace.id && activePage?.slug === p.slug}
-          activeSlug={activePage?.workspace.id === workspace.id ? activePage?.slug : null}
+          isActive={activeWorkspace?.id === workspace.id && activeView?.kind === 'page' && activeView.slug === p.slug}
+          activeSlug={activeWorkspace?.id === workspace.id && activeView?.kind === 'page' ? activeView.slug : null}
           onSelect={() => onSelectPage(p.slug)} onSelectChild={(slug) => onSelectPage(slug)}
           onAddPage={(folderPath) => onAddPageInFolder(folderPath)}
           onAddFolder={(parentPath) => onAddFolderInFolder(parentPath)}
