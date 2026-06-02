@@ -34,8 +34,8 @@ import { SettingsDialog } from '../components/SettingsDialog';
 import { getStoredAuth, clearAuth } from '../auth';
 
 type ActiveView =
-  | { kind: 'page'; slug: string }
-  | { kind: 'source'; filename: string }
+  | { kind: 'page'; slug: string; content: PageFull | null }
+  | { kind: 'source'; filename: string; content: SourceContent | null }
   | null;
 
 export function MainLayout() {
@@ -57,8 +57,6 @@ export function MainLayout() {
   const [spacePages, setSpacePages] = useState<Record<string, PageMeta[]>>({});
   const [spaceSources, setSpaceSources] = useState<Record<string, SourceItem[]>>({});
   const [activeView, setActiveView] = useState<ActiveView>(null);
-  const [pageContent, setPageContent] = useState<PageFull | null>(null);
-  const [sourceContent, setSourceContent] = useState<SourceContent | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -134,8 +132,7 @@ export function MainLayout() {
         const branch = targetWs.visibility === 'private' ? userBranch : 'main';
         try {
           const page = await getPage(pageSlug, branch, targetWs.slug);
-          setActiveView({ kind: 'page', slug: pageSlug });
-          setPageContent(page);
+          setActiveView({ kind: 'page', slug: pageSlug, content: page });
         } catch {
           // Page not found, just show home
         }
@@ -145,12 +142,12 @@ export function MainLayout() {
       const personalPages = await listPages(userBranch, personal.slug);
       const firstPage = personalPages.find((p) => p.kind === 'page');
       if (firstPage) {
-        setActiveView({ kind: 'page', slug: firstPage.slug });
+        setActiveView({ kind: 'page', slug: firstPage.slug, content: null });
         const owner = auth?.name || 'user';
         navigate(`/${owner}/${personal.slug}/${firstPage.slug}`, { replace: true });
         try {
           const page = await getPage(firstPage.slug, userBranch, personal.slug);
-          setPageContent(page);
+          setActiveView(prev => prev?.kind === 'page' ? { ...prev, content: page } : prev);
         } catch {
           // Page not found
         }
@@ -220,17 +217,15 @@ export function MainLayout() {
   // Select a source file
   const selectSource = async (ws: Workspace, filename: string) => {
     setActiveWorkspace(ws);
-    setPageContent(null);
-    setActiveView({ kind: 'source', filename });
+    setActiveView({ kind: 'source', filename, content: null });
     try {
-      // Try user branch first (where newly ingested sources live), fall back to main
       let content = await getSource(ws.slug, filename, userBranch).catch(() => null);
       if (!content) {
         content = await getSource(ws.slug, filename, 'main');
       }
-      setSourceContent(content);
+      setActiveView(prev => prev?.kind === 'source' ? { ...prev, content } : prev);
     } catch {
-      setSourceContent(null);
+      setActiveView(prev => prev?.kind === 'source' ? { ...prev, content: null } : prev);
     }
   };
 
@@ -253,30 +248,31 @@ export function MainLayout() {
   // Select a page — try user branch first (for drafts), fall back to main
   const selectPage = async (ws: Workspace, slug: string) => {
     setActiveWorkspace(ws);
-    setSourceContent(null);
-    setActiveView({ kind: 'page', slug });
+    setActiveView({ kind: 'page', slug, content: null });
     const owner = auth?.name || 'user';
     navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
+
+    const setContent = (content: PageFull | null) =>
+      setActiveView(prev => prev?.kind === 'page' ? { ...prev, content } : prev);
 
     if (ws.visibility === 'private') {
       try {
         const page = await getPage(slug, userBranch, ws.slug);
-        setPageContent(page);
+        setContent(page);
       } catch {
-        setPageContent(null);
+        setContent(null);
         setMessage({ text: `Page "${slug}" not found`, type: 'error' });
       }
     } else {
-      // Team space: try user branch first (draft), then main
       try {
         const page = await getPage(slug, userBranch, ws.slug);
-        setPageContent(page);
+        setContent(page);
       } catch {
         try {
           const page = await getPage(slug, 'main', ws.slug);
-          setPageContent(page);
+          setContent(page);
         } catch {
-          setPageContent(null);
+          setContent(null);
           setMessage({ text: `Page "${slug}" not found`, type: 'error' });
         }
       }
@@ -318,8 +314,7 @@ export function MainLayout() {
       setNewPageFolder(null);
       await loadSpacePages(ws);
       // Set page content directly from what we just wrote — avoids a re-fetch that may fail
-      setActiveView({ kind: 'page', slug });
-      setPageContent({ slug, title, summary: '', body, branch: userBranch });
+      setActiveView({ kind: 'page', slug, content: { slug, title, summary: '', body, branch: userBranch, kind: 'page', children: [] } });
       const owner = auth?.name || 'user';
       navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
     } catch {
@@ -681,7 +676,7 @@ export function MainLayout() {
               <SidebarGroup>
                 <SidebarMenu>
                   <SidebarMenuItem>
-                    <SidebarMenuButton onClick={() => { setActiveView(null); setPageContent(null); setSourceContent(null); navigate('/discover'); }} tooltip="Discover public wikis">
+                    <SidebarMenuButton onClick={() => { setActiveView(null); navigate('/discover'); }} tooltip="Discover public wikis">
                       <Compass size={16} />
                       <span>Discover</span>
                     </SidebarMenuButton>
@@ -711,16 +706,16 @@ export function MainLayout() {
 
           <SidebarInset>
             {/* Top bar with breadcrumb + actions */}
-            {activeView && ((activeView.kind === 'page' && pageContent) || (activeView.kind === 'source' && sourceContent)) ? (
+            {activeView?.content ? (
               <div className="sticky top-0 z-10 bg-[var(--color-bg)] border-b border-[var(--color-border)] px-6 py-2 flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)]">
                   <span>{auth?.name}</span>
-                  {activeView.kind === 'page' && pageContent && (
+                  {activeView.kind === 'page' && activeView.content && (
                     <>
                       <span className="text-[var(--color-text-tertiary)]">/</span>
                       <span>{activeWorkspace?.name}</span>
                       <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span className="text-[var(--color-text)]">{pageContent.title}</span>
+                      <span className="text-[var(--color-text)]">{activeView.content.title}</span>
                     </>
                   )}
                   {activeView.kind === 'source' && (
@@ -816,13 +811,13 @@ export function MainLayout() {
                     </div>
                   )}
                 </div>
-              ) : sourceContent ? (
+              ) : activeView?.kind === 'source' && activeView.content ? (
                 <div>
                   <div className="flex items-center gap-2 mb-4">
                     <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
                       Source File
                     </span>
-                    {sourceContent.compiled ? (
+                    {activeView.content.compiled ? (
                       <span className="flex items-center gap-1 text-xs text-green-600">
                         <CheckCircle2 size={12} /> Compiled
                       </span>
@@ -832,10 +827,10 @@ export function MainLayout() {
                       </span>
                     )}
                   </div>
-                  {sourceContent.compiled && sourceContent.compiled_pages.length > 0 && (
+                  {activeView.content.compiled && activeView.content.compiled_pages.length > 0 && (
                     <div className="mb-4 p-3 rounded-lg bg-[var(--color-bg-secondary)] border border-[var(--color-border)]">
                       <span className="text-xs text-[var(--color-text-tertiary)]">Compiled to: </span>
-                      {sourceContent.compiled_pages.map((slug, i) => (
+                      {activeView.content.compiled_pages.map((slug, i) => (
                         <span key={slug}>
                           {i > 0 && ', '}
                           <button
@@ -850,23 +845,23 @@ export function MainLayout() {
                   )}
                   <article>
                     <h1 className="text-2xl font-bold mb-4" style={{ fontFamily: 'var(--font-serif)' }}>
-                      {sourceContent.filename}
+                      {activeView.content.filename}
                     </h1>
                     <div className="prose">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{sourceContent.content}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeView.content.content}</ReactMarkdown>
                     </div>
                   </article>
                 </div>
-              ) : pageContent ? (
+              ) : activeView?.kind === 'page' && activeView.content ? (
                 <article>
                   <h1 className="text-4xl font-bold mb-2 leading-tight" style={{ fontFamily: 'var(--font-serif)' }}>
-                    {pageContent.title}
+                    {activeView.content.title}
                   </h1>
-                  {pageContent.summary && (
-                    <p className="text-[var(--color-text-secondary)] mb-8">{pageContent.summary}</p>
+                  {activeView.content.summary && (
+                    <p className="text-[var(--color-text-secondary)] mb-8">{activeView.content.summary}</p>
                   )}
                   <div className="prose">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{renderBody(pageContent.body)}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{renderBody(activeView.content.body)}</ReactMarkdown>
                   </div>
                 </article>
               ) : location.pathname === '/discover' ? (
