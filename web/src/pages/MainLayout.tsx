@@ -58,7 +58,6 @@ export function MainLayout() {
   const [spaceSources, setSpaceSources] = useState<Record<string, SourceItem[]>>({});
   const [activeView, setActiveView] = useState<ActiveView>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
-  const [loading, setLoading] = useState(true);
 
   // Modals
   const [showCreate, setShowCreate] = useState(false);
@@ -99,7 +98,6 @@ export function MainLayout() {
   // Load workspaces + restore state from URL
   const loadWorkspaces = useCallback(async () => {
     if (!auth) return;
-    setLoading(true);
     const ws = await listWorkspaces();
     setWorkspaces(ws);
 
@@ -153,8 +151,6 @@ export function MainLayout() {
         }
       }
     }
-
-    setLoading(false);
   }, [auth?.id]);
 
   useEffect(() => {
@@ -1112,7 +1108,6 @@ function SpaceSection({
                   <SourceTreeItem
                     key={s.filename}
                     source={s}
-                    workspace={workspace}
                     onSelect={() => onSelectSource(s.filename)}
                     onSelectPage={onSelectPage}
                   />
@@ -1230,7 +1225,6 @@ function SpaceTreeItem({
                   <SourceTreeItem
                     key={s.filename}
                     source={s}
-                    workspace={workspace}
                     onSelect={() => onSelectSource(s.filename)}
                     onSelectPage={onSelectPage}
                   />
@@ -1256,9 +1250,8 @@ function SpaceTreeItem({
   );
 }
 
-function SourceTreeItem({ source, workspace, onSelect, onSelectPage }: {
+function SourceTreeItem({ source, onSelect, onSelectPage }: {
   source: SourceItem;
-  workspace: Workspace;
   onSelect: () => void;
   onSelectPage: (slug: string) => void;
 }) {
