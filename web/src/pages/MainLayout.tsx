@@ -110,10 +110,10 @@ export function MainLayout() {
       await loadSpaceSources(personal);
     }
 
-    // Restore page from URL: /:owner/:wsSlug/:pageSlug
+    // Restore page from URL: /:wsSlug/:pageSlug
     const pathParts = location.pathname.split('/').filter(Boolean);
-    if (pathParts.length >= 3) {
-      const [, wsSlug, ...pageParts] = pathParts;
+    if (pathParts.length >= 2) {
+      const [wsSlug, ...pageParts] = pathParts;
       const pageSlug = pageParts.join('/');
       const targetWs = ws.find((w) => w.slug === wsSlug);
       if (targetWs) {
@@ -141,8 +141,7 @@ export function MainLayout() {
       const firstPage = personalPages.find((p) => p.kind === 'page');
       if (firstPage) {
         setActiveView({ kind: 'page', slug: firstPage.slug, content: null });
-        const owner = auth?.name || 'user';
-        navigate(`/${owner}/${personal.slug}/${firstPage.slug}`, { replace: true });
+        navigate(`/${personal.slug}/${firstPage.slug}`, { replace: true });
         try {
           const page = await getPage(firstPage.slug, userBranch, personal.slug);
           setActiveView(prev => prev?.kind === 'page' ? { ...prev, content: page } : prev);
@@ -245,8 +244,7 @@ export function MainLayout() {
   const selectPage = async (ws: Workspace, slug: string) => {
     setActiveWorkspace(ws);
     setActiveView({ kind: 'page', slug, content: null });
-    const owner = auth?.name || 'user';
-    navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
+    navigate(`/${ws.slug}/${slug}`, { replace: true });
 
     const setContent = (content: PageFull | null) =>
       setActiveView(prev => prev?.kind === 'page' ? { ...prev, content } : prev);
@@ -311,8 +309,7 @@ export function MainLayout() {
       await loadSpacePages(ws);
       // Set page content directly from what we just wrote — avoids a re-fetch that may fail
       setActiveView({ kind: 'page', slug, content: { slug, title, summary: '', body, branch: userBranch, kind: 'page', children: [] } });
-      const owner = auth?.name || 'user';
-      navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
+      navigate(`/${ws.slug}/${slug}`, { replace: true });
     } catch {
       setMessage({ text: 'Failed to create page', type: 'error' });
     }
