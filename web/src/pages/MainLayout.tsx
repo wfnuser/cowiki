@@ -33,10 +33,10 @@ import { IngestForm } from '../components/IngestForm';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { getStoredAuth, clearAuth } from '../auth';
 
-interface ActivePage {
-  workspace: Workspace;
-  slug: string;
-}
+type ActiveView =
+  | { kind: 'page'; slug: string; content: PageFull | null }
+  | { kind: 'source'; filename: string; content: SourceContent | null }
+  | null;
 
 export function MainLayout() {
   const [auth, setAuth] = useState(() => getStoredAuth());
@@ -56,12 +56,8 @@ export function MainLayout() {
   const [expandedSpaces, setExpandedSpaces] = useState<Set<string>>(new Set());
   const [spacePages, setSpacePages] = useState<Record<string, PageMeta[]>>({});
   const [spaceSources, setSpaceSources] = useState<Record<string, SourceItem[]>>({});
-  const [activePage, setActivePage] = useState<ActivePage | null>(null);
-  const [pageContent, setPageContent] = useState<PageFull | null>(null);
-  const [activeSource, setActiveSource] = useState<{ workspace: Workspace; filename: string } | null>(null);
-  const [sourceContent, setSourceContent] = useState<SourceContent | null>(null);
-  const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [activeView, setActiveView] = useState<ActiveView>(null);
+  const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
 
   // Modals
   const [showCreate, setShowCreate] = useState(false);
@@ -102,7 +98,6 @@ export function MainLayout() {
   // Load workspaces + restore state from URL
   const loadWorkspaces = useCallback(async () => {
     if (!auth) return;
-    setLoading(true);
     const ws = await listWorkspaces();
     setWorkspaces(ws);
 
@@ -110,7 +105,7 @@ export function MainLayout() {
     const personal = ws.find((w) => w.visibility === 'private' && w.role === 'owner');
     if (personal) {
       setExpandedSpaces((prev) => new Set([...prev, personal.id]));
-      setCurrentWorkspace(personal);
+      setActiveWorkspace(personal);
       await loadSpacePages(personal);
       await loadSpaceSources(personal);
     }
@@ -123,7 +118,7 @@ export function MainLayout() {
       const targetWs = ws.find((w) => w.slug === wsSlug);
       if (targetWs) {
         // Expand the target workspace
-        setCurrentWorkspace(targetWs);
+        setActiveWorkspace(targetWs);
         setExpandedSpaces((prev) => new Set([...prev, targetWs.id]));
         if (!spacePages[targetWs.id]) {
           await loadSpacePages(targetWs);
@@ -135,8 +130,7 @@ export function MainLayout() {
         const branch = targetWs.visibility === 'private' ? userBranch : 'main';
         try {
           const page = await getPage(pageSlug, branch, targetWs.slug);
-          setActivePage({ workspace: targetWs, slug: pageSlug });
-          setPageContent(page);
+          setActiveView({ kind: 'page', slug: pageSlug, content: page });
         } catch {
           // Page not found, just show home
         }
@@ -146,19 +140,17 @@ export function MainLayout() {
       const personalPages = await listPages(userBranch, personal.slug);
       const firstPage = personalPages.find((p) => p.kind === 'page');
       if (firstPage) {
-        setActivePage({ workspace: personal, slug: firstPage.slug });
+        setActiveView({ kind: 'page', slug: firstPage.slug, content: null });
         const owner = auth?.name || 'user';
         navigate(`/${owner}/${personal.slug}/${firstPage.slug}`, { replace: true });
         try {
           const page = await getPage(firstPage.slug, userBranch, personal.slug);
-          setPageContent(page);
+          setActiveView(prev => prev?.kind === 'page' ? { ...prev, content: page } : prev);
         } catch {
           // Page not found
         }
       }
     }
-
-    setLoading(false);
   }, [auth?.id]);
 
   useEffect(() => {
@@ -220,25 +212,22 @@ export function MainLayout() {
 
   // Select a source file
   const selectSource = async (ws: Workspace, filename: string) => {
-    setCurrentWorkspace(ws);
-    setActivePage(null);
-    setPageContent(null);
-    setActiveSource({ workspace: ws, filename });
+    setActiveWorkspace(ws);
+    setActiveView({ kind: 'source', filename, content: null });
     try {
-      // Try user branch first (where newly ingested sources live), fall back to main
       let content = await getSource(ws.slug, filename, userBranch).catch(() => null);
       if (!content) {
         content = await getSource(ws.slug, filename, 'main');
       }
-      setSourceContent(content);
+      setActiveView(prev => prev?.kind === 'source' ? { ...prev, content } : prev);
     } catch {
-      setSourceContent(null);
+      setActiveView(prev => prev?.kind === 'source' ? { ...prev, content: null } : prev);
     }
   };
 
   // Toggle space expansion — always reload sources
   const toggleSpace = (ws: Workspace) => {
-    setCurrentWorkspace(ws);
+    setActiveWorkspace(ws);
     setExpandedSpaces((prev) => {
       const next = new Set(prev);
       if (next.has(ws.id)) {
@@ -254,32 +243,32 @@ export function MainLayout() {
 
   // Select a page — try user branch first (for drafts), fall back to main
   const selectPage = async (ws: Workspace, slug: string) => {
-    setCurrentWorkspace(ws);
-    setActiveSource(null);
-    setSourceContent(null);
-    setActivePage({ workspace: ws, slug });
+    setActiveWorkspace(ws);
+    setActiveView({ kind: 'page', slug, content: null });
     const owner = auth?.name || 'user';
     navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
+
+    const setContent = (content: PageFull | null) =>
+      setActiveView(prev => prev?.kind === 'page' ? { ...prev, content } : prev);
 
     if (ws.visibility === 'private') {
       try {
         const page = await getPage(slug, userBranch, ws.slug);
-        setPageContent(page);
+        setContent(page);
       } catch {
-        setPageContent(null);
+        setContent(null);
         setMessage({ text: `Page "${slug}" not found`, type: 'error' });
       }
     } else {
-      // Team space: try user branch first (draft), then main
       try {
         const page = await getPage(slug, userBranch, ws.slug);
-        setPageContent(page);
+        setContent(page);
       } catch {
         try {
           const page = await getPage(slug, 'main', ws.slug);
-          setPageContent(page);
+          setContent(page);
         } catch {
-          setPageContent(null);
+          setContent(null);
           setMessage({ text: `Page "${slug}" not found`, type: 'error' });
         }
       }
@@ -321,8 +310,7 @@ export function MainLayout() {
       setNewPageFolder(null);
       await loadSpacePages(ws);
       // Set page content directly from what we just wrote — avoids a re-fetch that may fail
-      setActivePage({ workspace: ws, slug });
-      setPageContent({ slug, title, summary: '', body, branch: userBranch });
+      setActiveView({ kind: 'page', slug, content: { slug, title, summary: '', body, branch: userBranch, kind: 'page', children: [] } });
       const owner = auth?.name || 'user';
       navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
     } catch {
@@ -364,10 +352,10 @@ export function MainLayout() {
     }
   };
 
-  // Compile pages in the active workspace (top bar, uses currentWorkspace)
+  // Compile pages in the active workspace
   const handleCompile = async () => {
-    const ws = activePage?.workspace || activeSource?.workspace || currentWorkspace;
-    if (!ws) return;
+    if (!activeWorkspace) return;
+    const ws = activeWorkspace;
     setCompiling(true);
     setMessage(null);
     try {
@@ -386,8 +374,8 @@ export function MainLayout() {
 
   // Submit pages for review (or direct commit for personal)
   const handleSubmit = async () => {
-    const ws = activePage?.workspace || activeSource?.workspace || currentWorkspace;
-    if (!ws) return;
+    if (!activeWorkspace) return;
+    const ws = activeWorkspace;
     setSubmitting(true);
     setMessage(null);
     try {
@@ -410,8 +398,8 @@ export function MainLayout() {
   // Handle ingest completion
   const handleIngestDone = () => {
     setShowIngest(false);
-    const ws = activePage?.workspace || activeSource?.workspace || currentWorkspace;
-    if (ws) {
+    if (activeWorkspace) {
+      const ws = activeWorkspace;
       loadSpacePages(ws);
       loadSpaceSources(ws);
     }
@@ -629,11 +617,12 @@ export function MainLayout() {
                   pages={spacePages[ws.id] || []}
                   sources={spaceSources[ws.id] || []}
                   expanded={expandedSpaces.has(ws.id)}
-                  activePage={activePage}
+                  activeWorkspace={activeWorkspace}
+                  activeView={activeView}
                   onToggle={() => toggleSpace(ws)}
                   onSelectPage={(slug) => selectPage(ws, slug)}
                   onSelectSource={(filename) => selectSource(ws, filename)}
-                  onShowIngest={() => { setCurrentWorkspace(ws); setShowIngest(true); }}
+                  onShowIngest={() => { setActiveWorkspace(ws); setShowIngest(true); }}
                   onCompile={() => handleCompileForWs(ws)}
                   onNewPage={() => { setShowNewPage(ws); setNewName(''); setNewPageFolder(null); }}
                   onNewFolder={() => { setShowNewFolder(ws); setNewName(''); setNewFolderParent(null); }}
@@ -653,11 +642,12 @@ export function MainLayout() {
                       pages={spacePages[ws.id] || []}
                       sources={spaceSources[ws.id] || []}
                       expanded={expandedSpaces.has(ws.id)}
-                      activePage={activePage}
+                      activeWorkspace={activeWorkspace}
+                      activeView={activeView}
                       onToggle={() => toggleSpace(ws)}
                       onSelectPage={(slug) => selectPage(ws, slug)}
                       onSelectSource={(filename) => selectSource(ws, filename)}
-                      onShowIngest={() => { setCurrentWorkspace(ws); setShowIngest(true); }}
+                      onShowIngest={() => { setActiveWorkspace(ws); setShowIngest(true); }}
                       onCompile={() => handleCompileForWs(ws)}
                       onNewPage={() => { setShowNewPage(ws); setNewName(''); setNewPageFolder(null); }}
                       onNewFolder={() => { setShowNewFolder(ws); setNewName(''); setNewFolderParent(null); }}
@@ -682,7 +672,7 @@ export function MainLayout() {
               <SidebarGroup>
                 <SidebarMenu>
                   <SidebarMenuItem>
-                    <SidebarMenuButton onClick={() => { setActivePage(null); setActiveSource(null); setPageContent(null); setSourceContent(null); navigate('/discover'); }} tooltip="Discover public wikis">
+                    <SidebarMenuButton onClick={() => { setActiveView(null); navigate('/discover'); }} tooltip="Discover public wikis">
                       <Compass size={16} />
                       <span>Discover</span>
                     </SidebarMenuButton>
@@ -712,26 +702,26 @@ export function MainLayout() {
 
           <SidebarInset>
             {/* Top bar with breadcrumb + actions */}
-            {(activePage && pageContent) || (activeSource && sourceContent) ? (
+            {activeView?.content ? (
               <div className="sticky top-0 z-10 bg-[var(--color-bg)] border-b border-[var(--color-border)] px-6 py-2 flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)]">
                   <span>{auth?.name}</span>
-                  {activePage && pageContent && (
+                  {activeView.kind === 'page' && activeView.content && (
                     <>
                       <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span>{activePage.workspace.name}</span>
+                      <span>{activeWorkspace?.name}</span>
                       <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span className="text-[var(--color-text)]">{pageContent.title}</span>
+                      <span className="text-[var(--color-text)]">{activeView.content.title}</span>
                     </>
                   )}
-                  {activeSource && (
+                  {activeView.kind === 'source' && (
                     <>
                       <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span>{activeSource.workspace.name}</span>
+                      <span>{activeWorkspace?.name}</span>
                       <span className="text-[var(--color-text-tertiary)]">/</span>
                       <span className="text-[var(--color-text-tertiary)]">sources</span>
                       <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span className="text-[var(--color-text)]">{activeSource.filename}</span>
+                      <span className="text-[var(--color-text)]">{activeView.filename}</span>
                     </>
                   )}
                 </div>
@@ -739,9 +729,9 @@ export function MainLayout() {
                   <button
                     onClick={() => setShowIngest(true)}
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                    title={currentWorkspace ? `Add source to ${currentWorkspace.name}` : 'Add Source'}
+                    title={activeWorkspace ? `Add source to ${activeWorkspace.name}` : 'Add Source'}
                   >
-                    <Upload size={13} /> Add Source{currentWorkspace ? ` to ${currentWorkspace.name}` : ''}
+                    <Upload size={13} /> Add Source{activeWorkspace ? ` to ${activeWorkspace.name}` : ''}
                   </button>
                   <button
                     onClick={handleCompile}
@@ -778,12 +768,12 @@ export function MainLayout() {
             )}
 
             {/* Ingest panel */}
-            {showIngest && (activePage || activeSource || currentWorkspace) && (
+            {showIngest && activeWorkspace && (
               <div className="mx-6 mt-2 rounded-lg border border-[var(--color-border)] p-4 bg-[var(--color-bg-secondary)]">
                 <div className="text-xs text-[var(--color-text-tertiary)] mb-2">
-                  Add source to <span className="font-medium text-[var(--color-text)]">{currentWorkspace?.name || activePage?.workspace?.name || activeSource?.workspace?.name}</span>
+                  Add source to <span className="font-medium text-[var(--color-text)]">{activeWorkspace.name}</span>
                 </div>
-                <IngestForm branch={userBranch} onDone={handleIngestDone} workspaceSlug={currentWorkspace?.slug || activePage?.workspace?.slug || activeSource?.workspace?.slug || ''} />
+                <IngestForm branch={userBranch} onDone={handleIngestDone} workspaceSlug={activeWorkspace.slug} />
               </div>
             )}
 
@@ -817,13 +807,13 @@ export function MainLayout() {
                     </div>
                   )}
                 </div>
-              ) : sourceContent ? (
+              ) : activeView?.kind === 'source' && activeView.content ? (
                 <div>
                   <div className="flex items-center gap-2 mb-4">
                     <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
                       Source File
                     </span>
-                    {sourceContent.compiled ? (
+                    {activeView.content.compiled ? (
                       <span className="flex items-center gap-1 text-xs text-green-600">
                         <CheckCircle2 size={12} /> Compiled
                       </span>
@@ -833,14 +823,14 @@ export function MainLayout() {
                       </span>
                     )}
                   </div>
-                  {sourceContent.compiled && sourceContent.compiled_pages.length > 0 && (
+                  {activeView.content.compiled && activeView.content.compiled_pages.length > 0 && (
                     <div className="mb-4 p-3 rounded-lg bg-[var(--color-bg-secondary)] border border-[var(--color-border)]">
                       <span className="text-xs text-[var(--color-text-tertiary)]">Compiled to: </span>
-                      {sourceContent.compiled_pages.map((slug, i) => (
+                      {activeView.content.compiled_pages.map((slug, i) => (
                         <span key={slug}>
                           {i > 0 && ', '}
                           <button
-                            onClick={() => selectPage(activeSource!.workspace, slug)}
+                            onClick={() => selectPage(activeWorkspace!, slug)}
                             className="text-xs text-blue-500 hover:underline"
                           >
                             {slug}
@@ -851,23 +841,23 @@ export function MainLayout() {
                   )}
                   <article>
                     <h1 className="text-2xl font-bold mb-4" style={{ fontFamily: 'var(--font-serif)' }}>
-                      {sourceContent.filename}
+                      {activeView.content.filename}
                     </h1>
                     <div className="prose">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{sourceContent.content}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeView.content.content}</ReactMarkdown>
                     </div>
                   </article>
                 </div>
-              ) : pageContent ? (
+              ) : activeView?.kind === 'page' && activeView.content ? (
                 <article>
                   <h1 className="text-4xl font-bold mb-2 leading-tight" style={{ fontFamily: 'var(--font-serif)' }}>
-                    {pageContent.title}
+                    {activeView.content.title}
                   </h1>
-                  {pageContent.summary && (
-                    <p className="text-[var(--color-text-secondary)] mb-8">{pageContent.summary}</p>
+                  {activeView.content.summary && (
+                    <p className="text-[var(--color-text-secondary)] mb-8">{activeView.content.summary}</p>
                   )}
                   <div className="prose">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{renderBody(pageContent.body)}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{renderBody(activeView.content.body)}</ReactMarkdown>
                   </div>
                 </article>
               ) : location.pathname === '/discover' ? (
@@ -1057,10 +1047,10 @@ export function MainLayout() {
 // ── Sidebar Components ──
 
 function SpaceSection({
-  workspace, label, pages, sources, expanded, activePage, onToggle, onSelectPage, onSelectSource, onShowIngest, onCompile, onNewPage, onNewFolder, onAddPageInFolder, onAddFolderInFolder,
+  workspace, label, pages, sources, expanded, activeWorkspace, activeView, onToggle, onSelectPage, onSelectSource, onShowIngest, onCompile, onNewPage, onNewFolder, onAddPageInFolder, onAddFolderInFolder,
 }: {
   workspace: Workspace; label: string; pages: PageMeta[]; sources: SourceItem[];
-  expanded: boolean; activePage: ActivePage | null;
+  expanded: boolean; activeWorkspace: Workspace | null; activeView: ActiveView;
   onToggle: () => void; onSelectPage: (slug: string) => void;
   onSelectSource: (filename: string) => void;
   onShowIngest: () => void; onCompile: () => void;
@@ -1118,7 +1108,6 @@ function SpaceSection({
                   <SourceTreeItem
                     key={s.filename}
                     source={s}
-                    workspace={workspace}
                     onSelect={() => onSelectSource(s.filename)}
                     onSelectPage={onSelectPage}
                   />
@@ -1131,7 +1120,7 @@ function SpaceSection({
               <PageItem
                 key={p.slug}
                 page={p}
-                isActive={activePage?.workspace.id === workspace.id && activePage?.slug === p.slug}
+                isActive={activeWorkspace?.id === workspace.id && activeView?.kind === 'page' && activeView.slug === p.slug}
                 onSelect={() => onSelectPage(p.slug)} onSelectChild={(slug) => onSelectPage(slug)}
                 onAddPage={(folderPath) => onAddPageInFolder(folderPath)}
                 onAddFolder={(parentPath) => onAddFolderInFolder(parentPath)}
@@ -1145,10 +1134,10 @@ function SpaceSection({
 }
 
 function SpaceTreeItem({
-  workspace, pages, sources, expanded, activePage, onToggle, onSelectPage, onSelectSource, onShowIngest, onCompile, onNewPage, onNewFolder, onAddPageInFolder, onAddFolderInFolder, onRename, onInvite, onManageMembers, onDelete,
+  workspace, pages, sources, expanded, activeWorkspace, activeView, onToggle, onSelectPage, onSelectSource, onShowIngest, onCompile, onNewPage, onNewFolder, onAddPageInFolder, onAddFolderInFolder, onRename, onInvite, onManageMembers, onDelete,
 }: {
   workspace: Workspace; pages: PageMeta[]; sources: SourceItem[];
-  expanded: boolean; activePage: ActivePage | null;
+  expanded: boolean; activeWorkspace: Workspace | null; activeView: ActiveView;
   onToggle: () => void; onSelectPage: (slug: string) => void;
   onSelectSource: (filename: string) => void;
   onShowIngest: () => void; onCompile: () => void;
@@ -1236,7 +1225,6 @@ function SpaceTreeItem({
                   <SourceTreeItem
                     key={s.filename}
                     source={s}
-                    workspace={workspace}
                     onSelect={() => onSelectSource(s.filename)}
                     onSelectPage={onSelectPage}
                   />
@@ -1250,8 +1238,8 @@ function SpaceTreeItem({
         <PageItem
           key={p.slug}
           page={p}
-          isActive={activePage?.workspace.id === workspace.id && activePage?.slug === p.slug}
-          activeSlug={activePage?.workspace.id === workspace.id ? activePage?.slug : null}
+          isActive={activeWorkspace?.id === workspace.id && activeView?.kind === 'page' && activeView.slug === p.slug}
+          activeSlug={activeWorkspace?.id === workspace.id && activeView?.kind === 'page' ? activeView.slug : null}
           onSelect={() => onSelectPage(p.slug)} onSelectChild={(slug) => onSelectPage(slug)}
           onAddPage={(folderPath) => onAddPageInFolder(folderPath)}
           onAddFolder={(parentPath) => onAddFolderInFolder(parentPath)}
@@ -1262,9 +1250,8 @@ function SpaceTreeItem({
   );
 }
 
-function SourceTreeItem({ source, workspace, onSelect, onSelectPage }: {
+function SourceTreeItem({ source, onSelect, onSelectPage }: {
   source: SourceItem;
-  workspace: Workspace;
   onSelect: () => void;
   onSelectPage: (slug: string) => void;
 }) {
@@ -1299,10 +1286,10 @@ function SourceTreeItem({ source, workspace, onSelect, onSelectPage }: {
   );
 }
 
-function PageItem({ page, isActive, onSelect, onSelectChild, onAddPage, onAddFolder, indent }: {
+function PageItem({ page, isActive, onSelect, onSelectChild, onAddPage, onAddFolder, depth = 0, activeSlug }: {
   page: PageMeta; isActive: boolean; onSelect: () => void;
   onSelectChild?: (slug: string) => void; onAddPage?: (folderPath: string) => void;
-  onAddFolder?: (parentPath: string) => void; depth?: number;
+  onAddFolder?: (parentPath: string) => void; depth?: number; activeSlug?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const paddingLeft = depth * 16; // 16px per level
