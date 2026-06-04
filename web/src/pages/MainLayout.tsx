@@ -386,7 +386,7 @@ export function MainLayout() {
       }
       const slugs = pages.map((p) => p.slug);
       const isPersonal = ws.visibility === 'private';
-      await submit(userBranch, slugs, isPersonal);
+      await submit(userBranch, slugs, isPersonal, ws.slug);
       setMessage({ text: isPersonal ? 'Committed.' : 'Submitted for review.', type: 'success' });
     } catch {
       setMessage({ text: 'Submit failed', type: 'error' });
