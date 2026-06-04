@@ -29,7 +29,7 @@ import {
   listSources, getSource,
   type Workspace, type PageMeta, type PageFull, type PendingInvitation, type MemberInfo, type SourceItem, type SourceContent,
 } from '../api';
-import { IngestForm } from '../components/IngestForm';
+import { AddSourceDialog } from '@/components/AddSourceDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { getStoredAuth, clearAuth } from '../auth';
 
@@ -761,15 +761,15 @@ export function MainLayout() {
               </div>
             )}
 
-            {/* Ingest panel */}
-            {showIngest && activeWorkspace && (
-              <div className="mx-6 mt-2 rounded-lg border border-[var(--color-border)] p-4 bg-[var(--color-bg-secondary)]">
-                <div className="text-xs text-[var(--color-text-tertiary)] mb-2">
-                  Add source to <span className="font-medium text-[var(--color-text)]">{activeWorkspace.name}</span>
-                </div>
-                <IngestForm branch={userBranch} onDone={handleIngestDone} workspaceSlug={activeWorkspace.slug} />
-              </div>
-            )}
+            {/* Ingest dialog */}
+            <AddSourceDialog
+              open={showIngest && !!activeWorkspace}
+              onOpenChange={(open) => setShowIngest(open)}
+              branch={userBranch}
+              workspaceName={activeWorkspace?.name || ''}
+              workspaceSlug={activeWorkspace?.slug || ''}
+              onDone={handleIngestDone}
+            />
 
             {/* Content */}
             <div className="max-w-3xl px-16 py-10">
