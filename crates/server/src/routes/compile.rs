@@ -27,8 +27,10 @@ pub struct CompiledPage {
 }
 
 #[derive(Serialize, Deserialize, Default)]
-struct CompileState {
-    sources: HashMap<String, String>,
+pub(crate) struct CompileState {
+    pub sources: HashMap<String, String>,
+    #[serde(default)]
+    pub source_pages: HashMap<String, Vec<String>>,
 }
 
 /// Legacy compile (uses default repo)
@@ -119,6 +121,15 @@ async fn do_compile(
         if let Ok(emb) = state.compiler.embed(&format!("{}\n{}", page.title, page.summary)).await {
             cowiki_db::pages::upsert(&state.db, &page.slug, &page.title, &page.summary, branch, &hash, Some(&emb), default_user.id)
                 .await.ok();
+        }
+
+        // Record source→page mapping from the compiler's output
+        for source in &page.sources {
+            compile_state
+                .source_pages
+                .entry(source.clone())
+                .or_default()
+                .push(page.slug.clone());
         }
 
         result_pages.push(CompiledPage { slug: page.slug.clone(), title: page.title.clone(), summary: page.summary.clone() });
