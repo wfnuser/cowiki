@@ -24,7 +24,7 @@ export function AddSourceDialog({
   workspaceSlug,
   onDone,
 }: AddSourceDialogProps) {
-  const [activeTab, setActiveTab] = useState<'text' | 'url'>('text');
+  const [activeTab, setActiveTab] = useState<'text' | 'url'>('url');
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -61,7 +61,7 @@ export function AddSourceDialog({
         <DialogHeader>
           <DialogTitle>
             Add Source to{' '}
-            <span className="text-[var(--color-accent)]">{workspaceName}</span>
+            <span className="text-foreground/70 italic">{workspaceName}</span>
           </DialogTitle>
         </DialogHeader>
 
