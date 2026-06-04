@@ -1,4 +1,4 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -15,8 +15,6 @@ pub struct SubmitRequest {
     /// If true, skip review and merge directly to main (for Personal Space)
     #[serde(default)]
     pub skip_review: bool,
-    /// Required when skip_review is true — identifies the workspace to verify authorization.
-    pub workspace_slug: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -28,13 +26,16 @@ pub struct SubmitResponse {
 
 pub async fn submit(
     State(state): State<Arc<AppState>>,
+    Path(ws_slug): Path<String>,
     headers: axum::http::HeaderMap,
     Json(input): Json<SubmitRequest>,
 ) -> Result<Json<SubmitResponse>> {
     let user = extract_user(&state.db, &headers).await?;
-    super::pages::ensure_user_branch_if_needed(&state.wiki_repo, &input.branch)?;
+    let repo = state.repo_manager.get(&ws_slug)
+        .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
+    super::pages::ensure_user_branch_if_needed(&repo, &input.branch)?;
 
-    let diffs = match state.wiki_repo.diff_files(&input.branch, &input.page_slugs) {
+    let diffs = match repo.diff_files(&input.branch, &input.page_slugs) {
         Ok(d) => d,
         Err(e) => {
             tracing::error!(
@@ -51,8 +52,7 @@ pub async fn submit(
     let mut embeddings = Vec::new();
     for slug in &input.page_slugs {
         let path = format!("wiki/{slug}.md");
-        if let Some(content) = state
-            .wiki_repo
+        if let Some(content) = repo
             .read_file(&input.branch, &path)
             .map_err(|e| AppError::Internal(e.to_string()))?
         {
@@ -105,10 +105,7 @@ pub async fn submit(
 
     if input.skip_review {
         // Authorization: skip_review only allowed for personal workspaces (private + owner)
-        let ws_slug = input.workspace_slug.as_deref().ok_or_else(|| {
-            AppError::BadRequest("workspace_slug is required when skip_review is true".into())
-        })?;
-        let ws = cowiki_db::workspaces::find_by_slug(&state.db, ws_slug)
+        let ws = cowiki_db::workspaces::find_by_slug(&state.db, &ws_slug)
             .await?
             .ok_or_else(|| AppError::NotFound("workspace not found".into()))?;
         if ws.visibility != "private" {
@@ -131,8 +128,7 @@ pub async fn submit(
             .iter()
             .map(|s| format!("wiki/{s}.md"))
             .collect();
-        state
-            .wiki_repo
+        repo
             .merge_to_main(
                 &input.branch,
                 &file_paths,
@@ -155,6 +151,7 @@ pub async fn submit(
         &summary,
         &input.page_slugs,
         &input.branch,
+        &ws_slug,
     )
     .await?;
 

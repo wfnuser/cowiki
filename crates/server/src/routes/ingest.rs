@@ -21,15 +21,6 @@ pub struct IngestResponse {
     pub content_hash: String,
 }
 
-/// Legacy ingest (uses default repo)
-pub async fn ingest(
-    State(state): State<Arc<AppState>>,
-    Json(input): Json<IngestRequest>,
-) -> Result<Json<IngestResponse>> {
-    super::pages::ensure_user_branch_if_needed(&state.wiki_repo, &input.branch)?;
-    do_ingest(&state.wiki_repo, input).await
-}
-
 /// Workspace-scoped ingest
 pub async fn ingest_ws(
     State(state): State<Arc<AppState>>,

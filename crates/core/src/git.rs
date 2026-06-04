@@ -81,12 +81,6 @@ impl WikiRepoManager {
         repos.insert(workspace_slug.to_string(), Arc::clone(&repo));
         Ok(repo)
     }
-
-    /// Get the "default" repo for backward compatibility.
-    /// TODO: Remove once all routes use workspace-scoped repos.
-    pub fn default_repo(&self) -> Result<Arc<WikiRepo>, git2::Error> {
-        self.get("_default")
-    }
 }
 
 impl WikiRepo {

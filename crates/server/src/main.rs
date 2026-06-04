@@ -17,7 +17,6 @@ use config::CliArgs;
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub config: config::Config,
-    pub wiki_repo: cowiki_core::git::WikiRepo,       // default repo (backward compat)
     pub repo_manager: cowiki_core::git::WikiRepoManager, // per-workspace repos
     pub compiler: Compiler,
 }
@@ -58,14 +57,8 @@ async fn main() {
         .expect("failed to run migrations");
     tracing::info!("database connected and migrations applied");
 
-    // Git repos
+    // Git repos (one per workspace, created lazily)
     let repo_manager = cowiki_core::git::WikiRepoManager::new(&config.server.data_dir);
-    // Default repo for backward compat
-    let wiki_repo = cowiki_core::git::WikiRepo::open_or_init(&config.server.data_dir)
-        .expect("failed to init default wiki repo");
-    wiki_repo
-        .ensure_user_branch("default")
-        .expect("failed to create default user branch");
     tracing::info!("wiki repos dir: {}", config.server.data_dir);
 
     let llm = create_llm(LlmConfig {
@@ -93,7 +86,6 @@ async fn main() {
     let state = Arc::new(AppState {
         db,
         config,
-        wiki_repo,
         repo_manager,
         compiler,
     });
@@ -125,31 +117,24 @@ async fn main() {
         .route("/api/workspaces/{slug}/members/role", post(routes::workspace::change_member_role))
         // Workspace deletion (owner only)
         .route("/api/workspaces/{slug}", delete(routes::workspace::delete_workspace))
-        // Pages (legacy — uses default repo)
-        .route("/api/pages", get(routes::pages::list_pages))
-        .route("/api/pages", post(routes::pages::write_page))
-        .route("/api/folders", post(routes::pages::create_folder))
-        .route("/api/pages/{*slug}", get(routes::pages::get_page))
         // Pages (workspace-scoped — uses per-workspace repo)
         .route("/api/workspaces/{ws_slug}/pages", get(routes::pages::list_pages_ws))
         .route("/api/workspaces/{ws_slug}/pages", post(routes::pages::write_page_ws))
         .route("/api/workspaces/{ws_slug}/folders", post(routes::pages::create_folder_ws))
         .route("/api/workspaces/{ws_slug}/pages/{*slug}", get(routes::pages::get_page_ws))
         // Ingest
-        .route("/api/ingest", post(routes::ingest::ingest))
         .route("/api/workspaces/{ws_slug}/ingest", post(routes::ingest::ingest_ws))
         // Compile
-        .route("/api/compile", post(routes::compile::compile))
         .route("/api/workspaces/{ws_slug}/compile", post(routes::compile::compile_ws))
         // Sources
         .route("/api/workspaces/{ws_slug}/sources", get(routes::sources::list_sources))
         .route("/api/workspaces/{ws_slug}/sources/{filename}", get(routes::sources::get_source))
-        // Submit
-        .route("/api/submit", post(routes::submit::submit))
-        // Reviews
-        .route("/api/reviews", get(routes::review::list_reviews))
-        .route("/api/reviews/{id}", get(routes::review::get_review))
-        .route("/api/reviews/{id}", post(routes::review::review_action))
+        // Submit (workspace-scoped)
+        .route("/api/workspaces/{ws_slug}/submit", post(routes::submit::submit))
+        // Reviews (workspace-scoped)
+        .route("/api/workspaces/{ws_slug}/reviews", get(routes::review::list_reviews))
+        .route("/api/workspaces/{ws_slug}/reviews/{id}", get(routes::review::get_review))
+        .route("/api/workspaces/{ws_slug}/reviews/{id}", post(routes::review::review_action))
         // Search
         .route("/api/search", get(routes::search::search))
         // API Keys — multi-key management
