@@ -29,7 +29,7 @@ import {
   listSources, getSource,
   type Workspace, type PageMeta, type PageFull, type PendingInvitation, type MemberInfo, type SourceItem, type SourceContent,
 } from '../api';
-import { IngestForm } from '../components/IngestForm';
+import { AddSourceDialog } from '@/components/AddSourceDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { getStoredAuth, clearAuth } from '../auth';
 
@@ -110,10 +110,10 @@ export function MainLayout() {
       await loadSpaceSources(personal);
     }
 
-    // Restore page from URL: /:owner/:wsSlug/:pageSlug
+    // Restore page from URL: /:wsSlug/:pageSlug
     const pathParts = location.pathname.split('/').filter(Boolean);
-    if (pathParts.length >= 3) {
-      const [, wsSlug, ...pageParts] = pathParts;
+    if (pathParts.length >= 2) {
+      const [wsSlug, ...pageParts] = pathParts;
       const pageSlug = pageParts.join('/');
       const targetWs = ws.find((w) => w.slug === wsSlug);
       if (targetWs) {
@@ -141,8 +141,7 @@ export function MainLayout() {
       const firstPage = personalPages.find((p) => p.kind === 'page');
       if (firstPage) {
         setActiveView({ kind: 'page', slug: firstPage.slug, content: null });
-        const owner = auth?.name || 'user';
-        navigate(`/${owner}/${personal.slug}/${firstPage.slug}`, { replace: true });
+        navigate(`/${personal.slug}/${firstPage.slug}`, { replace: true });
         try {
           const page = await getPage(firstPage.slug, userBranch, personal.slug);
           setActiveView(prev => prev?.kind === 'page' ? { ...prev, content: page } : prev);
@@ -245,8 +244,7 @@ export function MainLayout() {
   const selectPage = async (ws: Workspace, slug: string) => {
     setActiveWorkspace(ws);
     setActiveView({ kind: 'page', slug, content: null });
-    const owner = auth?.name || 'user';
-    navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
+    navigate(`/${ws.slug}/${slug}`, { replace: true });
 
     const setContent = (content: PageFull | null) =>
       setActiveView(prev => prev?.kind === 'page' ? { ...prev, content } : prev);
@@ -311,8 +309,7 @@ export function MainLayout() {
       await loadSpacePages(ws);
       // Set page content directly from what we just wrote — avoids a re-fetch that may fail
       setActiveView({ kind: 'page', slug, content: { slug, title, summary: '', body, branch: userBranch, kind: 'page', children: [] } });
-      const owner = auth?.name || 'user';
-      navigate(`/${owner}/${ws.slug}/${slug}`, { replace: true });
+      navigate(`/${ws.slug}/${slug}`, { replace: true });
     } catch {
       setMessage({ text: 'Failed to create page', type: 'error' });
     }
@@ -703,25 +700,22 @@ export function MainLayout() {
           <SidebarInset>
             {/* Top bar with breadcrumb + actions */}
             {activeView?.content ? (
-              <div className="sticky top-0 z-10 bg-[var(--color-bg)] border-b border-[var(--color-border)] px-6 py-2 flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)]">
-                  <span>{auth?.name}</span>
+              <div className="sticky top-0 z-10 bg-[var(--color-bg)] border-b border-[var(--color-border)] px-6 py-2 flex items-center justify-between min-w-0">
+                <div className="flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)] min-w-0 overflow-hidden">
                   {activeView.kind === 'page' && activeView.content && (
                     <>
-                      <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span>{activeWorkspace?.name}</span>
-                      <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span className="text-[var(--color-text)]">{activeView.content.title}</span>
+                      <span className="shrink-0">{activeWorkspace?.name}</span>
+                      <span className="text-[var(--color-text-tertiary)] shrink-0">/</span>
+                      <span className="text-[var(--color-text)] truncate">{activeView.content.title}</span>
                     </>
                   )}
                   {activeView.kind === 'source' && (
                     <>
-                      <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span>{activeWorkspace?.name}</span>
-                      <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span className="text-[var(--color-text-tertiary)]">sources</span>
-                      <span className="text-[var(--color-text-tertiary)]">/</span>
-                      <span className="text-[var(--color-text)]">{activeView.filename}</span>
+                      <span className="shrink-0">{activeWorkspace?.name}</span>
+                      <span className="text-[var(--color-text-tertiary)] shrink-0">/</span>
+                      <span className="text-[var(--color-text-tertiary)] shrink-0">sources</span>
+                      <span className="text-[var(--color-text-tertiary)] shrink-0">/</span>
+                      <span className="text-[var(--color-text)] truncate">{activeView.filename}</span>
                     </>
                   )}
                 </div>
@@ -731,7 +725,7 @@ export function MainLayout() {
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                     title={activeWorkspace ? `Add source to ${activeWorkspace.name}` : 'Add Source'}
                   >
-                    <Upload size={13} /> Add Source{activeWorkspace ? ` to ${activeWorkspace.name}` : ''}
+                    <Upload size={13} /> Add Source
                   </button>
                   <button
                     onClick={handleCompile}
@@ -767,15 +761,15 @@ export function MainLayout() {
               </div>
             )}
 
-            {/* Ingest panel */}
-            {showIngest && activeWorkspace && (
-              <div className="mx-6 mt-2 rounded-lg border border-[var(--color-border)] p-4 bg-[var(--color-bg-secondary)]">
-                <div className="text-xs text-[var(--color-text-tertiary)] mb-2">
-                  Add source to <span className="font-medium text-[var(--color-text)]">{activeWorkspace.name}</span>
-                </div>
-                <IngestForm branch={userBranch} onDone={handleIngestDone} workspaceSlug={activeWorkspace.slug} />
-              </div>
-            )}
+            {/* Ingest dialog */}
+            <AddSourceDialog
+              open={showIngest && !!activeWorkspace}
+              onOpenChange={(open) => setShowIngest(open)}
+              branch={userBranch}
+              workspaceName={activeWorkspace?.name || ''}
+              workspaceSlug={activeWorkspace?.slug || ''}
+              onDone={handleIngestDone}
+            />
 
             {/* Content */}
             <div className="max-w-3xl px-16 py-10">
@@ -1046,6 +1040,74 @@ export function MainLayout() {
 
 // ── Sidebar Components ──
 
+/**
+ * SourcesFolder: Reusable Sources section for both personal and shared workspaces.
+ * @param indent - CSS class for indentation (e.g., "" for personal, "pl-4" for shared)
+ * @param emptyIndent - CSS class for empty state padding (e.g., "pl-8" for personal, "pl-12" for shared)
+ */
+function SourcesFolder({
+  sources,
+  onSelectSource,
+  onSelectPage,
+  onShowIngest,
+  onCompile,
+  indent = '',
+  emptyIndent = 'pl-8',
+}: {
+  sources: SourceItem[];
+  onSelectSource: (filename: string) => void;
+  onSelectPage: (slug: string) => void;
+  onShowIngest: () => void;
+  onCompile: () => void;
+  indent?: string;
+  emptyIndent?: string;
+}) {
+  const [sourcesExpanded, setSourcesExpanded] = useState(false);
+
+  return (
+    <>
+      <SidebarMenuItem className={`group/source-folder relative ${indent}`}>
+        <SidebarMenuButton onClick={() => setSourcesExpanded(!sourcesExpanded)}>
+          <ChevronRight size={12} className={`transition-transform ${sourcesExpanded ? 'rotate-90' : ''}`} />
+          <Folder size={16} />
+          <span>Sources</span>
+        </SidebarMenuButton>
+        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover/source-folder:opacity-100 transition-all">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="p-0.5 rounded text-sidebar-foreground/40 hover:text-sidebar-foreground/70 outline-none focus:outline-none ring-0 focus:ring-0">
+                <MoreHorizontal size={12} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-36">
+              <DropdownMenuItem onClick={onShowIngest}><Upload size={14} className="mr-2" /> Add Source</DropdownMenuItem>
+              <DropdownMenuItem onClick={onCompile}><Wand2 size={14} className="mr-2" /> Compile</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </SidebarMenuItem>
+      {sourcesExpanded && (
+        <>
+          {sources.length === 0 ? (
+            <SidebarMenuItem className={emptyIndent}>
+              <span className="text-xs text-sidebar-foreground/40 italic">No sources yet</span>
+            </SidebarMenuItem>
+          ) : (
+            sources.map((s) => (
+              <SourceTreeItem
+                key={s.filename}
+                source={s}
+                onSelect={() => onSelectSource(s.filename)}
+                onSelectPage={onSelectPage}
+              />
+            ))
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
 function SpaceSection({
   workspace, label, pages, sources, expanded, activeWorkspace, activeView, onToggle, onSelectPage, onSelectSource, onShowIngest, onCompile, onNewPage, onNewFolder, onAddPageInFolder, onAddFolderInFolder,
 }: {
@@ -1057,7 +1119,6 @@ function SpaceSection({
   onNewPage: () => void; onNewFolder: () => void;
   onAddPageInFolder: (folderPath: string) => void; onAddFolderInFolder: (parentPath: string) => void;
 }) {
-  const [sourcesExpanded, setSourcesExpanded] = useState(false);
   return (
     <SidebarGroup>
       <SidebarGroupLabel className="group/label">
@@ -1077,44 +1138,14 @@ function SpaceSection({
       {expanded && (
         <>
           {/* Sources Section — pinned at top */}
-          <SidebarMenuItem className="group/source-folder relative">
-            <SidebarMenuButton onClick={() => setSourcesExpanded(!sourcesExpanded)}>
-              <ChevronRight size={12} className={`transition-transform ${sourcesExpanded ? 'rotate-90' : ''}`} />
-              <Folder size={16} />
-              <span>Sources</span>
-            </SidebarMenuButton>
-            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover/source-folder:opacity-100 transition-all">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="p-0.5 rounded text-sidebar-foreground/40 hover:text-sidebar-foreground/70 outline-none focus:outline-none ring-0 focus:ring-0">
-                    <MoreHorizontal size={12} />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-36">
-                  <DropdownMenuItem onClick={onShowIngest}><Upload size={14} className="mr-2" /> Add Source</DropdownMenuItem>
-                  <DropdownMenuItem onClick={onCompile}><Wand2 size={14} className="mr-2" /> Compile</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </SidebarMenuItem>
-          {sourcesExpanded && (
-            <>
-              {sources.length === 0 ? (
-                <SidebarMenuItem className="pl-8">
-                  <span className="text-xs text-sidebar-foreground/40 italic">No sources yet</span>
-                </SidebarMenuItem>
-              ) : (
-                sources.map((s) => (
-                  <SourceTreeItem
-                    key={s.filename}
-                    source={s}
-                    onSelect={() => onSelectSource(s.filename)}
-                    onSelectPage={onSelectPage}
-                  />
-                ))
-              )}
-            </>
-          )}
+          <SourcesFolder
+            sources={sources}
+            onSelectSource={onSelectSource}
+            onSelectPage={onSelectPage}
+            onShowIngest={onShowIngest}
+            onCompile={onCompile}
+            emptyIndent="pl-8"
+          />
           <SidebarMenu>
             {pages.map((p) => (
               <PageItem
@@ -1146,7 +1177,6 @@ function SpaceTreeItem({
   onInvite: () => void; onManageMembers: () => void; onDelete: () => void;
 }) {
   const isOwner = workspace.role === 'owner';
-  const [sourcesExpanded, setSourcesExpanded] = useState(false);
   return (
     <>
       <SidebarMenuItem className="group/space relative">
@@ -1194,44 +1224,15 @@ function SpaceTreeItem({
       {expanded && (
         <>
           {/* Sources Section — pinned at top, indented like pages */}
-          <SidebarMenuItem className="group/source-folder relative pl-4">
-            <SidebarMenuButton onClick={() => setSourcesExpanded(!sourcesExpanded)}>
-              <ChevronRight size={12} className={`transition-transform ${sourcesExpanded ? 'rotate-90' : ''}`} />
-              <Folder size={16} />
-              <span>Sources</span>
-            </SidebarMenuButton>
-            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover/source-folder:opacity-100 transition-all">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="p-0.5 rounded text-sidebar-foreground/40 hover:text-sidebar-foreground/70 outline-none focus:outline-none ring-0 focus:ring-0">
-                    <MoreHorizontal size={12} />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-36">
-                  <DropdownMenuItem onClick={onShowIngest}><Upload size={14} className="mr-2" /> Add Source</DropdownMenuItem>
-                  <DropdownMenuItem onClick={onCompile}><Wand2 size={14} className="mr-2" /> Compile</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </SidebarMenuItem>
-          {sourcesExpanded && (
-            <>
-              {sources.length === 0 ? (
-                <SidebarMenuItem className="pl-12">
-                  <span className="text-xs text-sidebar-foreground/40 italic">No sources yet</span>
-                </SidebarMenuItem>
-              ) : (
-                sources.map((s) => (
-                  <SourceTreeItem
-                    key={s.filename}
-                    source={s}
-                    onSelect={() => onSelectSource(s.filename)}
-                    onSelectPage={onSelectPage}
-                  />
-                ))
-              )}
-            </>
-          )}
+          <SourcesFolder
+            sources={sources}
+            onSelectSource={onSelectSource}
+            onSelectPage={onSelectPage}
+            onShowIngest={onShowIngest}
+            onCompile={onCompile}
+            indent="pl-4"
+            emptyIndent="pl-12"
+          />
         </>
       )}
       {expanded && pages.map((p) => (
@@ -1286,7 +1287,7 @@ function SourceTreeItem({ source, onSelect, onSelectPage }: {
   );
 }
 
-function PageItem({ page, isActive, onSelect, onSelectChild, onAddPage, onAddFolder, depth = 0, activeSlug }: {
+function PageItem({ page, isActive, onSelect, onSelectChild, onAddPage, onAddFolder, depth = 0, activeSlug = null }: {
   page: PageMeta; isActive: boolean; onSelect: () => void;
   onSelectChild?: (slug: string) => void; onAddPage?: (folderPath: string) => void;
   onAddFolder?: (parentPath: string) => void; depth?: number; activeSlug?: string | null;
