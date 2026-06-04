@@ -44,7 +44,18 @@ pub async fn ingest_ws(
 
 async fn do_ingest(repo: &cowiki_core::git::WikiRepo, input: IngestRequest) -> Result<Json<IngestResponse>> {
     let content = match input.source_type.as_str() {
-        "url" => fetch_url(&input.content).await?,
+        "url" => {
+            let result = cowiki_extractor::extract_url(&input.content)
+                .await
+                .map_err(|e| AppError::Internal(format!("URL extraction failed: {e}")))?;
+            format!(
+                "---\ntitle: \"{}\"\nsource_url: \"{}\"\ndomain: \"{}\"\n---\n\n{}",
+                result.title.replace('"', "\\\""),
+                result.url,
+                result.metadata.domain,
+                result.text,
+            )
+        }
         "text" | "file" => input.content.clone(),
         _ => return Err(AppError::BadRequest("invalid source_type".into())),
     };
@@ -70,13 +81,4 @@ async fn do_ingest(repo: &cowiki_core::git::WikiRepo, input: IngestRequest) -> R
     ).map_err(|e| AppError::Internal(e.to_string()))?;
 
     Ok(Json(IngestResponse { filename, content_hash: hash }))
-}
-
-async fn fetch_url(url: &str) -> Result<String> {
-    reqwest::get(url)
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
-        .text()
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))
 }
