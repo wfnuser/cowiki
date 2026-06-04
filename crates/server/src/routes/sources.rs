@@ -83,16 +83,7 @@ pub async fn get_source(
     Path((ws_slug, filename)): Path<(String, String)>,
     Query(params): Query<GetSourceParams>,
 ) -> Result<Json<SourceContent>> {
-    // Path traversal protection
-    if filename.is_empty()
-        || filename.contains("..")
-        || filename.contains('/')
-        || filename.contains('\\')
-        || filename.starts_with('.')
-        || filename.len() > 255
-    {
-        return Err(AppError::BadRequest("invalid filename".into()));
-    }
+    super::validate_source_filename(&filename)?;
 
     let repo = state
         .repo_manager
@@ -100,11 +91,6 @@ pub async fn get_source(
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
 
     let branch = &params.branch;
-    // Ensure branch exists (lazy-create for user branches)
-    if branch != "main" {
-        repo.ensure_branch_exists(branch)
-            .map_err(|e| AppError::Internal(format!("failed to create branch {}: {e}", branch)))?;
-    }
     let file_path = format!("sources/{filename}");
     let content_bytes = repo
         .read_file(branch, &file_path)

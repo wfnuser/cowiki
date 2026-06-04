@@ -2,7 +2,6 @@
 //! Delegates to `cowiki_utils::CowikiConfig` for shared config,
 //! adds server-specific fields (GitHub OAuth).
 
-use clap::Parser;
 pub use cowiki_utils::CliArgs;
 
 #[derive(Debug, Clone)]
