@@ -27,5 +27,7 @@ pub async fn run_migrations(pool: &PgPool, embedding_dim: u32) -> sqlx::Result<(
     sqlx::raw_sql(sql6).execute(pool).await.map_err(|e| { tracing::error!("DB error: {e}"); e })?;
     let sql7 = include_str!("migrations/007_team_permissions.sql");
     sqlx::raw_sql(sql7).execute(pool).await.map_err(|e| { tracing::error!("DB error: {e}"); e })?;
+    let sql8 = include_str!("migrations/008_submission_workspace.sql");
+    sqlx::raw_sql(sql8).execute(pool).await.map_err(|e| { tracing::error!("DB error: {e}"); e })?;
     Ok(())
 }
