@@ -23,15 +23,15 @@
 │  │                                                                        │  │
 │  └────────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
-│  ┌─ 数据库 (全新 schema，单次 migration) ───────────────────────────────┐  │
+│  ┌─ 数据库 (增量 migration 009) ────────────────────────────────────────┐  │
 │  │                                                                        │  │
-│  │   users ────────────────────────────────── 用户表                      │  │
-│  │   workspaces ───────────────────────────── 工作空间                    │  │
-│  │   workspace_members ────────────────────── 成员关系 (含 role + 来源)   │  │
-│  │   invitations ──────────────────────────── 邮箱邀请 (批量/过期/撤回)   │  │
-│  │   share_links ──────────────────────────── 分享链接 (密码/过期)        │  │
-│  │   share_link_joins ─────────────────────── 链接使用记录                │  │
-│  │   audit_log ────────────────────────────── 审计日志                    │  │
+│  │   保留 001–008 migration，新增 009:                                    │  │
+│  │   workspace_members ─ 角色扩展 + 来源追踪 + last_active_at             │  │
+│  │   invitations ─────── 角色扩展 + message/过期/重发字段                 │  │
+│  │   share_links ─────── 分享链接表 (token + role + password + expiry)    │  │
+│  │   share_link_joins ── 链接使用记录表                                   │  │
+│  │   ownership_transfers  转让记录表                                      │  │
+│  │   向后兼容 ─────────── writer→editor, reader→viewer                    │  │
 │  │                                                                        │  │
 │  └────────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
@@ -128,8 +128,8 @@
 
 | 决策项 | 决定 | 理由 |
 |--------|------|------|
-| 兼容旧数据库 | 不兼容，全新 schema | 旧 migration 链复杂，旧 role name 无保留价值 |
-| 旧 migration 文件 | 全部删除，写一套干净 migration | 维护简单，干净起点 |
+| 兼容旧数据库 | 增量 migration 009 + 兼容转换 | 保留 001–008，只新增 009，writer→editor, reader→viewer |
+| migration 策略 | 新建 009，在现有基础上叠加 | 最小改动，已有数据库平滑升级 |
 | 角色数量 | 4 级 (Owner/Manager/Editor/Viewer) | Reviewer 评论功能未排期，未来再加 |
 | 邀请体系 | email 邀请 + 分享链接两套独立表 | 不同实体、不同字段、不同生命周期，不应合并 |
 | 分享链接次数限制 | 去掉 max_uses/use_count | 减少复杂度，密码+过期已够用 |
@@ -218,7 +218,7 @@ impl Role {
 
 ## 3. 数据库 Schema
 
-> 全新的单次 migration。旧 migration 文件 (001–008) 全部删除。
+> 在现有 migration 001–008 基础上新建 **migration 009**，包含角色扩展 + 新表 + 兼容转换。
 
 ### 3.1 ER 图
 
@@ -320,76 +320,59 @@ erDiagram
     }
 ```
 
-### 3.2 Migration SQL
+### 3.2 Migration 009 SQL
+
+> 保留现有 001–008 migration，仅新增 009。
 
 ```sql
--- Migration 001: Initial schema (replaces all previous migrations)
--- Fresh start — no backward compatibility with old role names
+-- ============================================================
+-- Migration 009: Enhanced Role System + Share Links
+-- Preserves 001–008, adds role expansion + new tables
+-- ============================================================
 
--- Users
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL UNIQUE,
-    email TEXT UNIQUE,
-    api_key TEXT NOT NULL,
-    password_hash TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+-- 1. 更新 workspace_members 角色约束
+ALTER TABLE workspace_members
+    DROP CONSTRAINT IF EXISTS workspace_members_role_check;
 
--- Workspaces
-CREATE TABLE workspaces (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL,
-    slug TEXT NOT NULL UNIQUE,
-    visibility TEXT NOT NULL DEFAULT 'private'
-        CHECK (visibility IN ('private', 'public')),
-    created_by UUID NOT NULL REFERENCES users(id),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+ALTER TABLE workspace_members
+    ADD CONSTRAINT workspace_members_role_check
+    CHECK (role IN ('owner', 'manager', 'editor', 'reviewer', 'viewer'));
 
--- Workspace members
-CREATE TABLE workspace_members (
-    workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role TEXT NOT NULL DEFAULT 'viewer'
-        CHECK (role IN ('owner', 'manager', 'editor', 'viewer')),
-    invited_by UUID REFERENCES users(id),
-    joined_via TEXT NOT NULL DEFAULT 'direct'
-        CHECK (joined_via IN ('direct', 'invitation', 'share_link', 'public_join')),
-    share_link_id UUID,  -- FK added below after share_links table created
-    joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_active_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (workspace_id, user_id)
-);
+-- 2. 新增列：来源追踪 + 最后活跃时间
+ALTER TABLE workspace_members
+    ADD COLUMN IF NOT EXISTS joined_via TEXT NOT NULL DEFAULT 'direct',
+    ADD COLUMN IF NOT EXISTS share_link_id UUID,
+    ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
--- Email invitations
-CREATE TABLE invitations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    email TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'editor'
-        CHECK (role IN ('owner', 'manager', 'editor', 'viewer')),
-    invited_by UUID NOT NULL REFERENCES users(id),
-    status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending', 'accepted', 'rejected', 'expired')),
-    message TEXT,
-    expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + INTERVAL '7 days'),
-    resent_count INT NOT NULL DEFAULT 0,
-    last_resent_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+ALTER TABLE workspace_members
+    ADD CONSTRAINT workspace_members_joined_via_check
+    CHECK (joined_via IN ('direct', 'invitation', 'share_link', 'public_join'));
 
-CREATE INDEX idx_invitations_workspace ON invitations(workspace_id);
-CREATE INDEX idx_invitations_status ON invitations(status);
+-- 3. 更新 invitations 角色约束 + 新增字段
+ALTER TABLE invitations
+    DROP CONSTRAINT IF EXISTS invitations_role_check;
 
--- Share links
-CREATE TABLE share_links (
+ALTER TABLE invitations
+    ADD CONSTRAINT invitations_role_check
+    CHECK (role IN ('owner', 'manager', 'editor', 'reviewer', 'viewer'));
+
+ALTER TABLE invitations
+    ADD COLUMN IF NOT EXISTS message TEXT,
+    ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ
+        DEFAULT (now() + INTERVAL '7 days'),
+    ADD COLUMN IF NOT EXISTS resent_count INT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS last_resent_at TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS idx_invitations_status ON invitations(status);
+
+-- 4. 分享链接表
+CREATE TABLE IF NOT EXISTS share_links (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     created_by UUID NOT NULL REFERENCES users(id),
     label VARCHAR(100),
     token VARCHAR(64) UNIQUE NOT NULL,
-    role TEXT NOT NULL DEFAULT 'viewer'
+    role VARCHAR(20) NOT NULL DEFAULT 'viewer'
         CHECK (role IN ('viewer', 'editor')),
     password_hash VARCHAR(256),
     expires_at TIMESTAMPTZ,
@@ -398,11 +381,11 @@ CREATE TABLE share_links (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_share_links_workspace ON share_links(workspace_id);
-CREATE UNIQUE INDEX idx_share_links_token ON share_links(token);
+CREATE INDEX IF NOT EXISTS idx_share_links_workspace ON share_links(workspace_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_share_links_token ON share_links(token);
 
--- Share link join records
-CREATE TABLE share_link_joins (
+-- 5. 分享链接使用记录
+CREATE TABLE IF NOT EXISTS share_link_joins (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     share_link_id UUID NOT NULL REFERENCES share_links(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id),
@@ -410,13 +393,13 @@ CREATE TABLE share_link_joins (
     UNIQUE(share_link_id, user_id)
 );
 
--- FK constraint for workspace_members referencing share_links
+-- 6. FK: workspace_members.share_link_id → share_links
 ALTER TABLE workspace_members
     ADD CONSTRAINT fk_member_share_link
     FOREIGN KEY (share_link_id) REFERENCES share_links(id) ON DELETE SET NULL;
 
--- Ownership transfers
-CREATE TABLE ownership_transfers (
+-- 7. Ownership 转让表
+CREATE TABLE IF NOT EXISTS ownership_transfers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     from_user_id UUID NOT NULL REFERENCES users(id),
@@ -428,23 +411,16 @@ CREATE TABLE ownership_transfers (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_transfers_workspace ON ownership_transfers(workspace_id);
-CREATE INDEX idx_transfers_to_user ON ownership_transfers(to_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_transfers_workspace
+    ON ownership_transfers(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_transfers_to_user
+    ON ownership_transfers(to_user_id, status);
 
--- Audit log
-CREATE TABLE audit_log (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id UUID REFERENCES workspaces(id) ON DELETE SET NULL,
-    actor_id UUID NOT NULL REFERENCES users(id),
-    action VARCHAR(50) NOT NULL,
-    target_type VARCHAR(50),
-    target_id UUID,
-    metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX idx_audit_log_workspace ON audit_log(workspace_id, created_at DESC);
-CREATE INDEX idx_audit_log_actor ON audit_log(actor_id);
+-- 8. 旧角色兼容转换 (向后兼容)
+UPDATE workspace_members SET role = 'editor' WHERE role = 'writer';
+UPDATE workspace_members SET role = 'viewer' WHERE role = 'reader';
+UPDATE invitations SET role = 'editor' WHERE role = 'writer';
+UPDATE invitations SET role = 'viewer' WHERE role = 'reader';
 ```
 
 ---

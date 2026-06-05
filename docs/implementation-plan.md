@@ -5,35 +5,27 @@
 
 ---
 
-## Phase 1: 全新数据库 Schema + Role Enum 重构
+## Phase 1: 数据库 Migration 009 + Role Enum 重构
 
-**目标**: 删旧 migration，建新 schema，更新 Rust 代码适配 4 级角色
+**目标**: 新建增量 migration，更新 Rust 代码适配 4 级角色，保留现有 001–008
 
-### 1.1 删除旧文件
+### 1.1 创建 migration 009
 | 操作 | 文件 |
 |------|------|
-| 删除 | `crates/db/src/migrations/001_init.sql` |
-| 删除 | `crates/db/src/migrations/002_workspaces.sql` |
-| 删除 | `crates/db/src/migrations/003_workspace_visibility.sql` |
-| 删除 | `crates/db/src/migrations/004_role_update.sql` |
-| 删除 | `crates/db/src/migrations/005_fts.sql` |
-| 删除 | `crates/db/src/migrations/006_api_keys.sql` |
-| 删除 | `crates/db/src/migrations/007_team_permissions.sql` |
-| 删除 | `crates/db/src/migrations/008_submission_workspace.sql` |
+| 创建 | `crates/db/src/migrations/009_role_management.sql` |
 
-### 1.2 创建新 migration
-| 操作 | 文件 |
-|------|------|
-| 创建 | `crates/db/src/migrations/001_init.sql` |
+内容: 完整 migration SQL（见 spec §3.2），包括：
+- workspace_members: 角色扩展 + joined_via + share_link_id + last_active_at
+- invitations: 角色扩展 + message + expires_at + resent_count + last_resent_at
+- 新表: share_links, share_link_joins, ownership_transfers
+- 向后兼容: writer→editor, reader→viewer
 
-内容: spec 中定义的完整 schema（users, workspaces, workspace_members, invitations, share_links, share_link_joins, ownership_transfers, audit_log），一次性建表。不再包含任何向后兼容 UPDATE 语句。
-
-### 1.3 更新 migration runner
+### 1.2 更新 migration runner
 | 操作 | 文件 | 改动 |
 |------|------|------|
-| 修改 | `crates/db/src/lib.rs` | `run_migrations()` 只跑 `001_init.sql`，移除 002-008 的引用 |
+| 修改 | `crates/db/src/lib.rs` | `run_migrations()` 增加 `009_role_management.sql` |
 
-### 1.4 重构 Role enum
+### 1.3 重构 Role enum
 | 操作 | 文件 | 改动 |
 |------|------|------|
 | 修改 | `crates/db/src/workspaces.rs` | `Role` enum: `Viewer=1, Editor=2, Manager=3, Owner=4`，实现 `PartialOrd`/`Ord`，添加 `can_manage()`/`can_edit()`/`can_view()`/`can_delete_workspace()`/`can_transfer_ownership()`/`is_shareable()`/`can_manage_role()` |
@@ -41,7 +33,7 @@
 | 修改 | `crates/db/src/workspaces.rs` | `FromStr for Role` 支持 4 个新变体 |
 | 修改 | `crates/db/src/workspaces.rs` | `Display for Role` 输出 lowercase |
 
-### 1.5 更新 DB 函数签名
+### 1.4 更新 DB 函数签名
 | 操作 | 文件 | 改动 |
 |------|------|------|
 | 修改 | `crates/db/src/workspaces.rs` | `add_member()` 增加 `joined_via` 和 `share_link_id` 参数 |
@@ -53,7 +45,7 @@
 | 修改 | `crates/db/src/workspaces.rs` | 新增 `add_member_direct()` — 直接添加已有用户 |
 | 修改 | `crates/db/src/workspaces.rs` | `create_invitation()` 支持可选 `message` 参数 |
 
-### 1.6 更新测试
+### 1.5 更新测试
 | 操作 | 文件 | 改动 |
 |------|------|------|
 | 修改 | `crates/db/src/workspaces.rs` | 测试: `test_pool()` 只跑新 `001_init.sql` |
@@ -289,18 +281,8 @@
 ## 文件变更总览
 
 ```
-删除 (8):
-  crates/db/src/migrations/001_init.sql
-  crates/db/src/migrations/002_workspaces.sql
-  crates/db/src/migrations/003_workspace_visibility.sql
-  crates/db/src/migrations/004_role_update.sql
-  crates/db/src/migrations/005_fts.sql
-  crates/db/src/migrations/006_api_keys.sql
-  crates/db/src/migrations/007_team_permissions.sql
-  crates/db/src/migrations/008_submission_workspace.sql
-
-创建 (21):
-  crates/db/src/migrations/001_init.sql
+创建 (22):
+  crates/db/src/migrations/009_role_management.sql
   crates/server/src/routes/guard.rs
   crates/server/src/routes/share_links.rs
   crates/server/src/routes/transfers.rs
