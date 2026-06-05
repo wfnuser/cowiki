@@ -367,10 +367,12 @@ impl CowikiConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     // ── Config defaults ───────────────────────────────────────
 
     #[test]
+    #[serial]
     fn test_env_config_defaults() {
         let config = CowikiConfig::from_env();
         assert_eq!(config.server.port, 3000, "COWIKI_PORT default");
@@ -380,6 +382,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_config_server_port() {
         std::env::set_var("COWIKI_PORT", "4000");
         let config = CowikiConfig::from_env();
@@ -389,6 +392,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_config_mcp_port() {
         std::env::set_var("COWIKI_MCP_PORT", "9090");
         let config = CowikiConfig::from_env();
@@ -398,6 +402,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_config_both_ports_independent() {
         std::env::set_var("COWIKI_PORT", "4000");
         std::env::set_var("COWIKI_MCP_PORT", "9090");
@@ -409,6 +414,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_config_api_url() {
         std::env::set_var("COWIKI_API_URL", "http://remote:3000/api");
         let config = CowikiConfig::from_env();
