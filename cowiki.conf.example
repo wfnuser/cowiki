@@ -45,11 +45,9 @@ api_base = ""
 # Output vector dimension (0 = model default)
 dimension = 1536
 
-[github]
-# GitHub OAuth app credentials
-client_id = "your_github_client_id"
-client_secret = "your_github_client_secret"
-redirect_uri = "http://localhost:3000/api/auth/github/callback"
+# GitHub OAuth is configured via environment variables only (see .env.example):
+#   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_REDIRECT_URI
+# It is intentionally NOT read from this file, to keep a single source of truth.
 
 [frontend]
 # Frontend URL (for CORS and redirects)
