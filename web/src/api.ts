@@ -242,11 +242,8 @@ export async function listMembers(workspaceSlug: string): Promise<MemberInfo[]> 
 
 // ── Pages ──
 
-export async function listPages(branch = 'main', workspaceSlug?: string): Promise<PageMeta[]> {
-  const url = workspaceSlug
-    ? `${BASE}/workspaces/${workspaceSlug}/pages?branch=${branch}`
-    : `${BASE}/pages?branch=${branch}`;
-  const res = await fetch(url, { headers: h() });
+export async function listPages(branch = 'main', workspaceSlug: string): Promise<PageMeta[]> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages?branch=${branch}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Request failed: ${res.status}`);
@@ -254,11 +251,8 @@ export async function listPages(branch = 'main', workspaceSlug?: string): Promis
   return res.json();
 }
 
-export async function getPage(slug: string, branch = 'main', workspaceSlug?: string): Promise<PageFull> {
-  const url = workspaceSlug
-    ? `${BASE}/workspaces/${workspaceSlug}/pages/${slug}?branch=${branch}`
-    : `${BASE}/pages/${slug}?branch=${branch}`;
-  const res = await fetch(url, { headers: h() });
+export async function getPage(slug: string, branch = 'main', workspaceSlug: string): Promise<PageFull> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages/${slug}?branch=${branch}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Request failed: ${res.status}`);
@@ -266,11 +260,8 @@ export async function getPage(slug: string, branch = 'main', workspaceSlug?: str
   return res.json();
 }
 
-export async function writePage(slug: string, body: string, branch: string, workspaceSlug?: string): Promise<void> {
-  const url = workspaceSlug
-    ? `${BASE}/workspaces/${workspaceSlug}/pages`
-    : `${BASE}/pages`;
-  const res = await fetch(url, {
+export async function writePage(slug: string, body: string, branch: string, workspaceSlug: string): Promise<void> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ slug, body, branch }),
@@ -283,11 +274,8 @@ export async function writePage(slug: string, body: string, branch: string, work
 
 // ── Ingest & Compile ──
 
-export async function ingest(sourceType: string, content: string, branch: string, filename?: string, workspaceSlug?: string) {
-  const url = workspaceSlug
-    ? `${BASE}/workspaces/${workspaceSlug}/ingest`
-    : `${BASE}/ingest`;
-  const res = await fetch(url, {
+export async function ingest(sourceType: string, content: string, branch: string, filename: string | undefined, workspaceSlug: string) {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/ingest`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ source_type: sourceType, content, branch, filename }),
@@ -299,11 +287,8 @@ export async function ingest(sourceType: string, content: string, branch: string
   return res.json();
 }
 
-export async function compile(branch: string, workspaceSlug?: string) {
-  const url = workspaceSlug
-    ? `${BASE}/workspaces/${workspaceSlug}/compile`
-    : `${BASE}/compile`;
-  const res = await fetch(url, {
+export async function compile(branch: string, workspaceSlug: string) {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/compile`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ branch }),
@@ -317,8 +302,8 @@ export async function compile(branch: string, workspaceSlug?: string) {
 
 // ── Submit & Review ──
 
-export async function submit(branch: string, pageSlugs: string[], skipReview = false) {
-  const res = await fetch(`${BASE}/submit`, {
+export async function submit(branch: string, pageSlugs: string[], skipReview: boolean, workspaceSlug: string) {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/submit`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ branch, page_slugs: pageSlugs, skip_review: skipReview }),
@@ -330,8 +315,8 @@ export async function submit(branch: string, pageSlugs: string[], skipReview = f
   return res.json();
 }
 
-export async function listReviews(): Promise<Submission[]> {
-  const res = await fetch(`${BASE}/reviews`, { headers: h() });
+export async function listReviews(workspaceSlug: string): Promise<Submission[]> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/reviews`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Request failed: ${res.status}`);
@@ -339,8 +324,8 @@ export async function listReviews(): Promise<Submission[]> {
   return res.json();
 }
 
-export async function getReview(id: string): Promise<ReviewDetail> {
-  const res = await fetch(`${BASE}/reviews/${id}`, { headers: h() });
+export async function getReview(workspaceSlug: string, id: string): Promise<ReviewDetail> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/reviews/${id}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Request failed: ${res.status}`);
@@ -348,8 +333,8 @@ export async function getReview(id: string): Promise<ReviewDetail> {
   return res.json();
 }
 
-export async function reviewAction(id: string, action: string) {
-  const res = await fetch(`${BASE}/reviews/${id}`, {
+export async function reviewAction(workspaceSlug: string, id: string, action: string) {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/reviews/${id}`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ action }),
@@ -361,11 +346,8 @@ export async function reviewAction(id: string, action: string) {
   return res.json();
 }
 
-export async function createFolder(name: string, branch: string, parent?: string, workspaceSlug?: string) {
-  const url = workspaceSlug
-    ? `${BASE}/workspaces/${workspaceSlug}/folders`
-    : `${BASE}/folders`;
-  const res = await fetch(url, {
+export async function createFolder(name: string, branch: string, parent: string | undefined, workspaceSlug: string) {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/folders`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, branch, parent }),

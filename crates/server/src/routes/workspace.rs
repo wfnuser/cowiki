@@ -118,10 +118,7 @@ pub async fn join_workspace(
 
     cowiki_db::workspaces::add_member(&state.db, ws.id, user.id, "writer", user.id).await?;
 
-    // Create user branch in default repo AND workspace repo
-    state.wiki_repo
-        .ensure_user_branch(&user.id.to_string())
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    // Create user branch in the workspace repo
     state.repo_manager
         .get(&workspace_slug)
         .map_err(|e| AppError::Internal(e.to_string()))?
@@ -325,15 +322,12 @@ pub async fn accept_invitation(
         Some(serde_json::json!({"role": invitation.role})),
     ).await?;
 
-    // Create user branch in default repo AND workspace repo
+    // Create user branch in the workspace repo
     let ws = cowiki_db::workspaces::find_by_id(
         &state.db, invitation.workspace_id,
     ).await?
     .ok_or_else(|| AppError::NotFound("workspace not found".into()))?;
-    
-    state.wiki_repo
-        .ensure_user_branch(&user.id.to_string())
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+
     state.repo_manager
         .get(&ws.slug)
         .map_err(|e| AppError::Internal(e.to_string()))?

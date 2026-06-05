@@ -446,29 +446,32 @@ mod tests {
         let _ = sqlx::raw_sql(include_str!("migrations/005_fts.sql")).execute(&pool).await;
         let _ = sqlx::raw_sql(include_str!("migrations/006_api_keys.sql")).execute(&pool).await;
         let _ = sqlx::raw_sql(include_str!("migrations/007_team_permissions.sql")).execute(&pool).await;
+        let _ = sqlx::raw_sql(include_str!("migrations/008_submission_workspace.sql")).execute(&pool).await;
         Some(pool)
     }
 
-    /// Create test users and return (user_a_id, user_b_id, user_c_id)
+    /// Create test users and return (user_a_id, user_b_id, user_c_id).
+    /// Uses stable names/emails (some tests match invitations by email) but
+    /// supplies the required NOT NULL api_key and returns the existing row's id
+    /// on conflict, so the helper is safe to call repeatedly against a shared DB.
     async fn create_test_users(pool: &PgPool) -> (Uuid, Uuid, Uuid) {
-        let a = Uuid::new_v4();
-        let b = Uuid::new_v4();
-        let c = Uuid::new_v4();
-        let _ = sqlx::query(
-            "INSERT INTO users (id, name, email) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING"
-        )
-        .bind(a).bind("Alice").bind("alice@test.com")
-        .execute(pool).await;
-        let _ = sqlx::query(
-            "INSERT INTO users (id, name, email) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING"
-        )
-        .bind(b).bind("Bob").bind("bob@test.com")
-        .execute(pool).await;
-        let _ = sqlx::query(
-            "INSERT INTO users (id, name, email) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING"
-        )
-        .bind(c).bind("Carol").bind("carol@test.com")
-        .execute(pool).await;
+        async fn upsert(pool: &PgPool, name: &str, email: &str) -> Uuid {
+            let id = Uuid::new_v4();
+            sqlx::query_scalar::<_, Uuid>(
+                "INSERT INTO users (id, name, email, api_key) VALUES ($1, $2, $3, $4) \
+                 ON CONFLICT (name) DO UPDATE SET email = EXCLUDED.email RETURNING id",
+            )
+            .bind(id)
+            .bind(name)
+            .bind(email)
+            .bind(format!("key-{id}"))
+            .fetch_one(pool)
+            .await
+            .expect("seed test user")
+        }
+        let a = upsert(pool, "Alice", "alice@test.com").await;
+        let b = upsert(pool, "Bob", "bob@test.com").await;
+        let c = upsert(pool, "Carol", "carol@test.com").await;
         (a, b, c)
     }
 

@@ -31,15 +31,6 @@ struct CompileState {
     sources: HashMap<String, String>,
 }
 
-/// Legacy compile (uses default repo)
-pub async fn compile(
-    State(state): State<Arc<AppState>>,
-    Json(input): Json<CompileRequest>,
-) -> Result<Json<CompileResponse>> {
-    super::pages::ensure_user_branch_if_needed(&state.wiki_repo, &input.branch)?;
-    do_compile(&state, &state.wiki_repo, &input.branch).await
-}
-
 /// Workspace-scoped compile
 pub async fn compile_ws(
     State(state): State<Arc<AppState>>,
