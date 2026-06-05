@@ -25,7 +25,6 @@ pub struct TomlConfig {
     pub server: Option<TomlServer>,
     pub llm: Option<TomlLlm>,
     pub embedder: Option<TomlEmbedder>,
-    pub github: Option<TomlGithub>,
     pub frontend: Option<TomlFrontend>,
     #[serde(rename = "mcp-server")]
     pub mcp_server: Option<TomlMcpServer>,
@@ -60,13 +59,6 @@ pub struct TomlEmbedder {
     pub api_key: Option<String>,
     pub api_base: Option<String>,
     pub dimension: Option<u32>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct TomlGithub {
-    pub client_id: Option<String>,
-    pub client_secret: Option<String>,
-    pub redirect_uri: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
