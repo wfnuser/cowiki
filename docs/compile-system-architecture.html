@@ -3,396 +3,185 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>cowiki Compile System — Architecture v2</title>
+<title>cowiki Compile System — Architecture v3</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg:        #faf7f2;
-    --surface:   #ffffff;
-    --surface2:  #f5f1ea;
-    --border:    #e6dfd3;
-    --line:      #ede6db;
-    --text:      #3a3530;
-    --text-dim:  #7a7369;
-    --text-muted:#b5aea4;
-    --gold:      #b8860b;
-    --gold-bright:#c9952a;
-    --gold-bg:   #fef9ee;
-    --gold-border:#e8d5a3;
-    --teal:      #3d9078;
-    --teal-bg:   #f2f9f6;
-    --teal-border:#b8dcd0;
-    --rose:      #c06050;
-    --rose-bg:   #fef7f5;
-    --rose-border:#f0ccc4;
-    --indigo:    #5b6fb0;
-    --indigo-bg: #f5f6fc;
-    --indigo-border:#cdd4ee;
-    --slate:     #6b7d8e;
-    --radius:    6px;
-    --radius-lg: 10px;
-    --max-w:     1120px;
-    --shadow-sm: 0 1px 3px rgba(0,0,0,0.04);
-    --shadow-md: 0 4px 16px rgba(0,0,0,0.06);
-  }
-
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    line-height: 1.65;
-    font-size: 15px;
-    -webkit-font-smoothing: antialiased;
-  }
-
-  .masthead {
-    max-width: var(--max-w);
-    margin: 0 auto;
-    padding: 4rem 2rem 2.5rem;
-    text-align: center;
-    position: relative;
-  }
-  .masthead::after {
-    content: '';
-    display: block;
-    width: 80px; height: 2px;
-    background: linear-gradient(90deg, transparent, var(--gold-border), var(--gold), var(--gold-border), transparent);
-    margin: 2rem auto 0;
-  }
-  .masthead h1 {
-    font-family: 'EB Garamond', 'Georgia', serif;
-    font-size: 3.2rem;
-    font-weight: 600;
-    color: #2a2520;
-    letter-spacing: -0.01em;
-    line-height: 1.15;
-  }
-  .masthead h1 span { color: var(--gold); }
-  .masthead .subtitle {
-    font-size: 1rem;
-    color: var(--text-dim);
-    margin-top: 0.6rem;
-    font-weight: 400;
-    letter-spacing: 0.02em;
-  }
-  .masthead .meta {
-    margin-top: 1.2rem;
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    font-family: 'JetBrains Mono', monospace;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-
-  .container { max-width: var(--max-w); margin: 0 auto; padding: 0 2rem 4rem; }
-
-  section { margin-bottom: 3.5rem; position: relative; }
-  .section-num {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.7rem;
-    color: var(--gold);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    margin-bottom: 0.3rem;
-    font-weight: 600;
-  }
-  section h2 {
-    font-family: 'EB Garamond', 'Georgia', serif;
-    font-size: 1.75rem;
-    font-weight: 600;
-    color: #2a2520;
-    margin-bottom: 1.2rem;
-    letter-spacing: -0.005em;
-  }
-  section h2::after {
-    content: '';
-    display: block;
-    width: 36px; height: 1.5px;
-    background: var(--gold);
-    margin-top: 0.35rem;
-  }
-  section h3 {
-    font-family: 'Inter', sans-serif;
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: var(--text);
-    margin: 1.4rem 0 0.6rem;
-    letter-spacing: 0.01em;
-  }
-
-  .arch-diagram {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    overflow-x: auto;
-    box-shadow: var(--shadow-sm);
-  }
-  .arch-diagram svg { display: block; width: 100%; min-width: 800px; }
-
-  .flow-row {
-    display: flex; align-items: center; gap: 0.5rem;
-    flex-wrap: wrap; padding: 0.5rem 0;
-    font-size: 0.8rem; font-family: 'JetBrains Mono', monospace;
-  }
-  .flow-step {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.4rem 0.75rem;
-    color: var(--text);
-    font-weight: 500;
-    box-shadow: var(--shadow-sm);
-    white-space: nowrap;
-  }
-  .flow-step.gold  { border-color: var(--gold-border); background: var(--gold-bg); }
-  .flow-step.teal  { border-color: var(--teal-border); background: var(--teal-bg); }
-  .flow-step.rose  { border-color: var(--rose-border); background: var(--rose-bg); }
-  .flow-step.indigo{ border-color: var(--indigo-border); background: var(--indigo-bg); }
-  .flow-arrow { color: var(--text-muted); font-weight: 600; font-size: 0.9rem; }
-
-  .card-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 1rem;
-    margin: 1rem 0;
-  }
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: 1.25rem 1.4rem;
-    box-shadow: var(--shadow-sm);
-    transition: box-shadow 0.2s, border-color 0.2s;
-  }
-  .card:hover { box-shadow: var(--shadow-md); border-color: var(--gold-border); }
-  .card .card-icon {
-    font-size: 1.1rem;
-    margin-bottom: 0.5rem;
-    width: 32px; height: 32px;
-    display: flex; align-items: center; justify-content: center;
-    border-radius: 50%;
-    font-weight: 700;
-    font-family: 'EB Garamond', serif;
-  }
-  .card .card-icon.gold  { background: var(--gold-bg); color: var(--gold); }
-  .card .card-icon.teal  { background: var(--teal-bg); color: var(--teal); }
-  .card .card-icon.indigo{ background: var(--indigo-bg); color: var(--indigo); }
-  .card .card-icon.rose  { background: var(--rose-bg); color: var(--rose); }
-  .card h4 {
-    font-family: 'EB Garamond', serif;
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #2a2520;
-    margin-bottom: 0.5rem;
-  }
-  .card .field-list {
-    font-size: 0.78rem;
-    font-family: 'JetBrains Mono', monospace;
-    color: var(--text-dim);
-    line-height: 1.7;
-  }
-  .card .field-list .fname { color: var(--indigo); font-weight: 500; }
-  .card .field-list .ftype { color: var(--teal); }
-  .card .field-list .fnote { color: var(--text-muted); font-style: italic; font-size: 0.72rem; }
-
-  .table-wrap {
-    overflow-x: auto;
-    margin: 1rem 0;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-sm);
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.82rem;
-  }
-  thead th {
-    background: var(--surface2);
-    text-align: left;
-    padding: 0.6rem 0.9rem;
-    font-weight: 600;
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-dim);
-    border-bottom: 1px solid var(--border);
-    font-family: 'JetBrains Mono', monospace;
-  }
-  tbody td {
-    padding: 0.55rem 0.9rem;
-    border-bottom: 1px solid var(--line);
-    vertical-align: top;
-    color: var(--text);
-  }
-  tbody tr:last-child td { border-bottom: none; }
-  tbody tr:hover { background: var(--gold-bg); }
-  td strong { color: #2a2520; }
-  td code { font-size: 0.9em; }
-  code {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.82em;
-    background: var(--surface2);
-    padding: 0.1em 0.35em;
-    border-radius: 3px;
-    color: var(--rose);
-  }
-
-  .badge {
-    display: inline-block;
-    padding: 0.15em 0.55em;
-    border-radius: 3px;
-    font-size: 0.65rem;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    font-family: 'JetBrains Mono', monospace;
-    text-transform: uppercase;
-  }
-  .badge-sync   { background: var(--gold-bg); color: var(--gold); border: 1px solid var(--gold-border); }
-  .badge-async  { background: var(--teal-bg); color: var(--teal); border: 1px solid var(--teal-border); }
-  .badge-future { background: #f5f3f0; color: var(--text-dim); border: 1px solid var(--border); }
-  .badge-mutex  { background: var(--rose-bg); color: var(--rose); border: 1px solid var(--rose-border); }
-  .badge-pool   { background: var(--indigo-bg); color: var(--indigo); border: 1px solid var(--indigo-border); }
-
-  .code-block {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 1rem 1.2rem;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.74rem;
-    line-height: 1.65;
-    overflow-x: auto;
-    color: var(--text-dim);
-    margin: 0.8rem 0;
-  }
-  .code-block .key    { color: var(--indigo); }
-  .code-block .str    { color: var(--teal); }
-  .code-block .num    { color: var(--gold); }
-  .code-block .cmt    { color: var(--text-muted); font-style: italic; }
-  .code-block .kw     { color: var(--rose); }
-  .code-block .evt    { color: var(--rose); }
-  .code-block .prop   { color: var(--gold); }
-
-  .callout {
-    background: var(--gold-bg);
-    border: 1px solid var(--gold-border);
-    border-left: 3px solid var(--gold);
-    border-radius: 0 var(--radius) var(--radius) 0;
-    padding: 0.8rem 1.1rem;
-    margin: 1rem 0;
-    font-size: 0.85rem;
-    color: var(--text);
-  }
-  .callout strong { color: #8a6208; }
-  .callout.info {
-    background: var(--indigo-bg);
-    border-color: var(--indigo-border);
-    border-left-color: var(--indigo);
-  }
-  .callout.info strong { color: #3b4a80; }
-  .callout.warn {
-    background: var(--rose-bg);
-    border-color: var(--rose-border);
-    border-left-color: var(--rose);
-  }
-  .callout.warn strong { color: #8a3530; }
-
-  .decisions {
-    counter-reset: dec;
-    list-style: none;
-    padding: 0;
-  }
-  .decisions li {
-    counter-increment: dec;
-    padding: 0.6rem 0 0.6rem 2.8rem;
-    position: relative;
-    font-size: 0.86rem;
-    border-bottom: 1px solid var(--line);
-  }
-  .decisions li:last-child { border-bottom: none; }
-  .decisions li::before {
-    content: '0' counter(dec);
-    position: absolute; left: 0; top: 0.55rem;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.72rem;
-    color: var(--gold);
-    font-weight: 600;
-    background: var(--gold-bg);
-    padding: 0.1em 0.5em;
-    border-radius: 3px;
-  }
-  .decisions li strong { color: #2a2520; }
-  .decisions li code { font-size: 0.8em; }
-
-  .grid-2 {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1.25rem;
-    margin: 1rem 0;
-  }
-  .grid-3 {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1rem;
-    margin: 1rem 0;
-  }
-
-  .compact-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.6rem;
-    margin: 0.6rem 0;
-  }
-
-  footer {
-    max-width: var(--max-w);
-    margin: 0 auto;
-    padding: 2rem;
-    text-align: center;
-    border-top: 1px solid var(--line);
-    color: var(--text-muted);
-    font-size: 0.75rem;
-    font-family: 'JetBrains Mono', monospace;
-  }
-  footer a { color: var(--gold); text-decoration: none; }
-  footer a:hover { color: var(--gold-bright); }
-
-  .tool-table td:first-child {
-    font-family: 'JetBrains Mono', monospace;
-    color: var(--indigo);
-    font-weight: 500;
-  }
-
-  @media (max-width: 768px) {
-    .grid-2, .grid-3, .compact-grid { grid-template-columns: 1fr; }
-    .masthead h1 { font-size: 2rem; }
-    .arch-diagram svg { min-width: 600px; }
-  }
-
-  @media print {
-    body { background: #fff; }
-    .card, .table-wrap, .arch-diagram { box-shadow: none; }
-  }
+  :root{--bg:#faf7f2;--surface:#fff;--surface2:#f5f1ea;--border:#e6dfd3;--line:#ede6db;--text:#3a3530;--text-dim:#7a7369;--text-muted:#b5aea4;--gold:#b8860b;--gold-bright:#c9952a;--gold-bg:#fef9ee;--gold-border:#e8d5a3;--teal:#3d9078;--teal-bg:#f2f9f6;--teal-border:#b8dcd0;--rose:#c06050;--rose-bg:#fef7f5;--rose-border:#f0ccc4;--indigo:#5b6fb0;--indigo-bg:#f5f6fc;--indigo-border:#cdd4ee;--radius:6px;--radius-lg:10px;--max-w:1120px;--shadow-sm:0 1px 3px rgba(0,0,0,.04);--shadow-md:0 4px 16px rgba(0,0,0,.06)}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.65;font-size:15px;-webkit-font-smoothing:antialiased}
+  .masthead{max-width:var(--max-w);margin:0 auto;padding:4rem 2rem 2.5rem;text-align:center}
+  .masthead::after{content:'';display:block;width:80px;height:2px;background:linear-gradient(90deg,transparent,var(--gold-border),var(--gold),var(--gold-border),transparent);margin:2rem auto 0}
+  .masthead h1{font-family:'EB Garamond',serif;font-size:3.2rem;font-weight:600;color:#2a2520;letter-spacing:-.01em;line-height:1.15}
+  .masthead h1 span{color:var(--gold)}.masthead .subtitle{font-size:1rem;color:var(--text-dim);margin-top:.6rem}
+  .masthead .meta{margin-top:1.2rem;font-size:.78rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;letter-spacing:.04em;text-transform:uppercase}
+  .container{max-width:var(--max-w);margin:0 auto;padding:0 2rem 4rem}
+  section{margin-bottom:3.5rem}
+  .section-num{font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--gold);text-transform:uppercase;letter-spacing:.12em;margin-bottom:.3rem;font-weight:600}
+  section h2{font-family:'EB Garamond',serif;font-size:1.75rem;font-weight:600;color:#2a2520;margin-bottom:1.2rem;letter-spacing:-.005em}
+  section h2::after{content:'';display:block;width:36px;height:1.5px;background:var(--gold);margin-top:.35rem}
+  section h3{font-family:'Inter',sans-serif;font-size:.95rem;font-weight:600;color:var(--text);margin:1.4rem 0 .6rem}
+  .arch-diagram{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow-x:auto;box-shadow:var(--shadow-sm)}
+  .arch-diagram svg{display:block;width:100%;min-width:800px}
+  .flow-row{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;padding:.5rem 0;font-size:.8rem;font-family:'JetBrains Mono',monospace}
+  .flow-step{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:.4rem .75rem;color:var(--text);font-weight:500;box-shadow:var(--shadow-sm);white-space:nowrap}
+  .flow-step.gold{border-color:var(--gold-border);background:var(--gold-bg)}.flow-step.teal{border-color:var(--teal-border);background:var(--teal-bg)}
+  .flow-step.rose{border-color:var(--rose-border);background:var(--rose-bg)}.flow-step.indigo{border-color:var(--indigo-border);background:var(--indigo-bg)}
+  .flow-arrow{color:var(--text-muted);font-weight:600;font-size:.9rem}
+  .card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin:1rem 0}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem 1.4rem;box-shadow:var(--shadow-sm);transition:box-shadow .2s,border-color .2s}
+  .card:hover{box-shadow:var(--shadow-md);border-color:var(--gold-border)}
+  .card .card-icon{font-size:1.1rem;margin-bottom:.5rem;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:50%;font-weight:700;font-family:'EB Garamond',serif}
+  .card .card-icon.gold{background:var(--gold-bg);color:var(--gold)}.card .card-icon.teal{background:var(--teal-bg);color:var(--teal)}
+  .card .card-icon.indigo{background:var(--indigo-bg);color:var(--indigo)}.card .card-icon.rose{background:var(--rose-bg);color:var(--rose)}
+  .card h4{font-family:'EB Garamond',serif;font-size:1.1rem;font-weight:600;color:#2a2520;margin-bottom:.5rem}
+  .card .field-list{font-size:.78rem;font-family:'JetBrains Mono',monospace;color:var(--text-dim);line-height:1.7}
+  .card .field-list .fname{color:var(--indigo);font-weight:500}.card .field-list .ftype{color:var(--teal)}.card .field-list .fnote{color:var(--text-muted);font-style:italic;font-size:.72rem}
+  .table-wrap{overflow-x:auto;margin:1rem 0;border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm)}
+  table{width:100%;border-collapse:collapse;font-size:.82rem}
+  thead th{background:var(--surface2);text-align:left;padding:.6rem .9rem;font-weight:600;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace}
+  tbody td{padding:.55rem .9rem;border-bottom:1px solid var(--line);vertical-align:top;color:var(--text)}
+  tbody tr:last-child td{border-bottom:none}tbody tr:hover{background:var(--gold-bg)}td strong{color:#2a2520}
+  code{font-family:'JetBrains Mono',monospace;font-size:.82em;background:var(--surface2);padding:.1em .35em;border-radius:3px;color:var(--rose)}
+  .badge{display:inline-block;padding:.15em .55em;border-radius:3px;font-size:.65rem;font-weight:600;letter-spacing:.04em;font-family:'JetBrains Mono',monospace;text-transform:uppercase}
+  .badge-sync{background:var(--gold-bg);color:var(--gold);border:1px solid var(--gold-border)}
+  .badge-async{background:var(--teal-bg);color:var(--teal);border:1px solid var(--teal-border)}
+  .badge-future{background:#f5f3f0;color:var(--text-dim);border:1px solid var(--border)}
+  .badge-mutex{background:var(--rose-bg);color:var(--rose);border:1px solid var(--rose-border)}
+  .code-block{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:1rem 1.2rem;font-family:'JetBrains Mono',monospace;font-size:.74rem;line-height:1.65;overflow-x:auto;color:var(--text-dim);margin:.8rem 0}
+  .code-block .key{color:var(--indigo)}.code-block .str{color:var(--teal)}.code-block .num{color:var(--gold)}.code-block .cmt{color:var(--text-muted);font-style:italic}.code-block .kw{color:var(--rose)}
+  .callout{background:var(--gold-bg);border:1px solid var(--gold-border);border-left:3px solid var(--gold);border-radius:0 var(--radius) var(--radius) 0;padding:.8rem 1.1rem;margin:1rem 0;font-size:.85rem}
+  .callout strong{color:#8a6208}.callout.info{background:var(--indigo-bg);border-color:var(--indigo-border);border-left-color:var(--indigo)}.callout.warn{background:var(--rose-bg);border-color:var(--rose-border);border-left-color:var(--rose)}
+  .decisions{counter-reset:dec;list-style:none;padding:0}
+  .decisions li{counter-increment:dec;padding:.6rem 0 .6rem 2.8rem;position:relative;font-size:.86rem;border-bottom:1px solid var(--line)}
+  .decisions li:last-child{border-bottom:none}
+  .decisions li::before{content:'0'counter(dec);position:absolute;left:0;top:.55rem;font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--gold);font-weight:600;background:var(--gold-bg);padding:.1em .5em;border-radius:3px}
+  .decisions li strong{color:#2a2520}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin:1rem 0}
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin:1rem 0}
+  .tool-table td:first-child{font-family:'JetBrains Mono',monospace;color:var(--indigo);font-weight:500}
+  footer{max-width:var(--max-w);margin:0 auto;padding:2rem;text-align:center;border-top:1px solid var(--line);color:var(--text-muted);font-size:.75rem;font-family:'JetBrains Mono',monospace}
+  footer a{color:var(--gold);text-decoration:none}footer a:hover{color:var(--gold-bright)}
+  @media(max-width:768px){.grid-2,.grid-3{grid-template-columns:1fr}.masthead h1{font-size:2rem}.arch-diagram svg{min-width:600px}}
+  @media print{body{background:#fff}.card,.table-wrap,.arch-diagram{box-shadow:none}}
 </style>
 </head>
 <body>
 
 <header class="masthead">
   <h1>cowiki <span>Compile System</span></h1>
-  <p class="subtitle">Two-phase pipeline with agent pools, per-space concurrency, and full observability</p>
-  <p class="meta">Design v2 &ensp;·&ensp; 2026-06-06 &ensp;·&ensp; Issue #15</p>
+  <p class="subtitle">Source directories &middot; Two-stage pipeline &middot; Split agent tools &middot; SSE observability</p>
+  <p class="meta">Design v3 &ensp;&middot;&ensp; 2026-06-07 &ensp;&middot;&ensp; Issue #15</p>
 </header>
 
 <div class="container">
 
-<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════ 01 ═══════════════════════════ -->
 <section>
   <div class="section-num">Section 01</div>
+  <h2>Data Flow — Personal vs Team Space</h2>
+
+  <div class="arch-diagram">
+    <svg viewBox="0 0 960 330" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="s"><feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#00000010"/></filter>
+        <marker id="ar" viewBox="0 0 10 10" refX="5" refY="5" markerW="6" markerH="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#b5aea4"/></marker>
+        <marker id="ar-g" viewBox="0 0 10 10" refX="5" refY="5" markerW="6" markerH="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#b8860b"/></marker>
+        <marker id="ar-t" viewBox="0 0 10 10" refX="5" refY="5" markerW="6" markerH="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#3d9078"/></marker>
+      </defs>
+
+      <!-- == Personal Space row == -->
+      <text x="20" y="36" font-family="Inter,sans-serif" font-size="11" font-weight="700" fill="#b8860b">Personal Space</text>
+
+      <rect x="140" y="18" width="120" height="36" rx="6" fill="#fef9ee" stroke="#e8d5a3"/>
+      <text x="200" y="35" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#b8860b">Source Dir</text>
+      <text x="200" y="48" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#b5aea4">manifest.json</text>
+
+      <line x1="260" y1="36" x2="286" y2="36" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#ar)"/>
+
+      <rect x="288" y="14" width="160" height="44" rx="6" fill="#fef9ee" stroke="#e8d5a3" filter="url(#s)"/>
+      <text x="368" y="32" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="700" fill="#b8860b">ShallowCompile</text>
+      <text x="368" y="48" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#7a7369">source FS + create_wiki</text>
+
+      <line x1="448" y1="36" x2="474" y2="36" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#ar)"/>
+
+      <rect x="476" y="18" width="124" height="36" rx="6" fill="#f2f9f6" stroke="#b8dcd0"/>
+      <text x="538" y="35" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#3d9078">Wiki Pages</text>
+      <text x="538" y="48" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#3d9078">+ pgvector ✓</text>
+
+      <line x1="600" y1="36" x2="626" y2="36" stroke="#b8860b" stroke-width="1.5" marker-end="url(#ar-g)"/>
+
+      <rect x="628" y="14" width="150" height="44" rx="6" fill="#f2f9f6" stroke="#b8dcd0" filter="url(#s)"/>
+      <text x="703" y="32" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="700" fill="#3d9078">DeepIntegrate</text>
+      <text x="703" y="48" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#7a7369">C1: reorg → C2: graph</text>
+
+      <line x1="778" y1="36" x2="804" y2="36" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#ar)"/>
+
+      <rect x="806" y="18" width="130" height="36" rx="6" fill="#f5f6fc" stroke="#cdd4ee"/>
+      <text x="871" y="36" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#5b6fb0">Knowledge Graph</text>
+
+      <!-- Divider -->
+      <line x1="20" y1="82" x2="940" y2="82" stroke="#ede6db" stroke-width="1" stroke-dasharray="6,4"/>
+      <text x="470" y="76" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#b5aea4">─── Immediate. No review gate. ───</text>
+
+      <!-- == Team Space row == -->
+      <text x="20" y="112" font-family="Inter,sans-serif" font-size="11" font-weight="700" fill="#3d9078">Team Space</text>
+
+      <rect x="140" y="94" width="120" height="36" rx="6" fill="#fef9ee" stroke="#e8d5a3"/>
+      <text x="200" y="111" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#b8860b">Source Dir</text>
+      <text x="200" y="124" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#b5aea4">manifest.json</text>
+
+      <line x1="260" y1="112" x2="286" y2="112" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#ar)"/>
+
+      <rect x="288" y="94" width="160" height="36" rx="6" fill="#fef9ee" stroke="#e8d5a3" filter="url(#s)"/>
+      <text x="368" y="108" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="700" fill="#b8860b">ShallowCompile</text>
+      <text x="368" y="121" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#7a7369">source FS + create_wiki</text>
+
+      <line x1="448" y1="112" x2="474" y2="112" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#ar)"/>
+
+      <rect x="476" y="94" width="124" height="36" rx="6" fill="#fef7f5" stroke="#f0ccc4"/>
+      <text x="538" y="108" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#c06050">Wiki Pages</text>
+      <text x="538" y="121" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#c06050">NO pgvector</text>
+
+      <line x1="600" y1="112" x2="626" y2="112" stroke="#c06050" stroke-width="1.5" marker-end="url(#ar)"/>
+
+      <rect x="628" y="94" width="60" height="36" rx="6" fill="#fef7f5" stroke="#f0ccc4"/>
+      <text x="658" y="108" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#c06050">Submit</text>
+      <text x="658" y="121" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#7a7369">→ Review</text>
+
+      <line x1="688" y1="112" x2="714" y2="112" stroke="#c06050" stroke-width="1.5" marker-end="url(#ar)"/>
+
+      <rect x="716" y="94" width="62" height="36" rx="6" fill="#f2f9f6" stroke="#b8dcd0"/>
+      <text x="747" y="108" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#3d9078">Approve</text>
+      <text x="747" y="121" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#7a7369">✓</text>
+
+      <line x1="778" y1="112" x2="804" y2="112" stroke="#3d9078" stroke-width="1.5" marker-end="url(#ar-t)"/>
+
+      <rect x="806" y="90" width="130" height="44" rx="6" fill="#f5f6fc" stroke="#cdd4ee"/>
+      <text x="871" y="108" text-anchor="middle" font-family="Inter,sans-serif" font-size="9" font-weight="600" fill="#5b6fb0">pgvector insert</text>
+      <text x="871" y="123" text-anchor="middle" font-family="Inter,sans-serif" font-size="9" font-weight="600" fill="#5b6fb0">+ DeepIntegrate</text>
+
+      <line x1="20" y1="152" x2="940" y2="152" stroke="#ede6db" stroke-width="1" stroke-dasharray="6,4"/>
+      <text x="470" y="146" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#b5aea4">─── Gated by review. Drafts don&apos;t pollute search index. ───</text>
+
+      <!-- == Details panel == -->
+      <rect x="20" y="170" width="920" height="70" rx="6" fill="#f5fcf9" stroke="#b8dcd0" stroke-dasharray="5,3"/>
+      <text x="40" y="192" font-family="Inter,sans-serif" font-size="9" fill="#3d9078"><tspan font-weight="700">DeepIntegrate detail (under per-space mutex):</tspan></text>
+      <text x="40" y="210" font-family="Inter,sans-serif" font-size="9" fill="#3d9078">Acquire Mutex → <tspan font-weight="600">Call 1: Wiki Reorganization</tspan> (ls_wiki, read_wiki, mkdir_wiki, mv_wiki, edit_wiki, rm_wiki) → <tspan font-weight="600">Call 2: Knowledge Graph</tspan> (read_wiki + upsert_entity, upsert_fact, query_entity, link_page_entity, list_entities) → Release Mutex</text>
+      <text x="40" y="228" font-family="Inter,sans-serif" font-size="9" fill="#7a7369">Two serial calls guarantee stable page_path before graph extraction. Single per-space mutex prevents concurrent modification.</text>
+
+      <!-- == Source dir detail == -->
+      <rect x="20" y="250" width="920" height="54" rx="6" fill="#fef9ee" stroke="#e8d5a3" stroke-dasharray="5,3"/>
+      <text x="40" y="272" font-family="Inter,sans-serif" font-size="9" fill="#b8860b"><tspan font-weight="700">Source Directory:</tspan> identity_hash = SHA256(source_type + source_identity) → ingest-time dedup. manifest.json required.</text>
+      <text x="40" y="290" font-family="Inter,sans-serif" font-size="9" fill="#7a7369">Agent explores with ls/grep/read. Compile-time semantic dedup by agent comparing against existing wiki pages. Extensions via <tspan fill="#5b6fb0">#31</tspan>.</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 02 ═══════════════════════════ -->
+<section>
+  <div class="section-num">Section 02</div>
   <h2>System Architecture</h2>
 
   <div class="arch-diagram">
@@ -401,13 +190,13 @@
         <filter id="shadow" x="-3%" y="-3%" width="106%" height="120%">
           <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#00000010"/>
         </filter>
-        <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerW="6" markerH="6" orient="auto">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="#b5aea4"/>
         </marker>
-        <marker id="arrow-gold" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <marker id="arrow-gold" viewBox="0 0 10 10" refX="5" refY="5" markerW="6" markerH="6" orient="auto">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="#b8860b"/>
         </marker>
-        <marker id="arrow-teal" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <marker id="arrow-teal" viewBox="0 0 10 10" refX="5" refY="5" markerW="6" markerH="6" orient="auto">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="#3d9078"/>
         </marker>
       </defs>
@@ -426,17 +215,17 @@
 
       <!-- ShallowCompile box -->
       <rect x="60" y="110" width="430" height="245" rx="6" fill="#fef9ee" stroke="#e8d5a3" stroke-width="1"/>
-      <text x="80" y="132" font-family="Inter, sans-serif" font-size="12" font-weight="700" fill="#b8860b">ShallowCompile: SourceCompiler</text>
-      <rect x="290" y="120" width="72" height="16" rx="3" fill="#fef9ee" stroke="#e8d5a3"/>
-      <text x="326" y="132" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" font-weight="700" fill="#b8860b">SYNC · ∥</text>
+      <text x="80" y="132" font-family="Inter, sans-serif" font-size="12" font-weight="700" fill="#b8860b">ShallowCompile</text>
+      <rect x="220" y="120" width="72" height="16" rx="3" fill="#fef9ee" stroke="#e8d5a3"/>
+      <text x="256" y="132" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" font-weight="700" fill="#b8860b">SYNC · ∥</text>
 
       <!-- ShallowCompile flow -->
       <rect x="80" y="150" width="105" height="28" rx="4" fill="#ffffff" stroke="#e6dfd3"/>
-      <text x="132" y="168" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" fill="#3a3530">Hash Check</text>
+      <text x="132" y="168" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" fill="#3a3530">Identity Check</text>
       <line x1="185" y1="164" x2="203" y2="164" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
 
       <rect x="205" y="150" width="105" height="28" rx="4" fill="#ffffff" stroke="#e6dfd3"/>
-      <text x="257" y="168" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" fill="#3a3530">Dispatch</text>
+      <text x="257" y="168" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" fill="#3a3530">List Sources</text>
       <line x1="310" y1="164" x2="328" y2="164" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
 
       <rect x="330" y="150" width="145" height="28" rx="4" fill="#f5f6fc" stroke="#cdd4ee" stroke-width="1"/>
@@ -444,60 +233,64 @@
       <path d="M 402 178 L 402 194 L 132 194 L 132 202" stroke="#b5aea4" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
 
       <!-- Agent Pool box inside ShallowCompile -->
-      <rect x="80" y="206" width="395" height="40" rx="4" fill="#f5f6fc" stroke="#cdd4ee" stroke-width="1" stroke-dasharray="4,2"/>
-      <text x="100" y="222" font-family="Inter, sans-serif" font-size="9" font-weight="600" fill="#5b6fb0">Agent Pool (per-space)</text>
-      <text x="100" y="238" font-family="JetBrains Mono, monospace" font-size="8" fill="#7a7369">Personal: N=1 (branch: user/{uid}) &ensp;|&ensp; Team: N config (branch: main)</text>
+      <rect x="80" y="206" width="395" height="50" rx="4" fill="#f5f6fc" stroke="#cdd4ee" stroke-width="1" stroke-dasharray="4,2"/>
+      <text x="100" y="222" font-family="Inter, sans-serif" font-size="9" font-weight="600" fill="#5b6fb0">Agent Pool (per-space, tier-gated)</text>
+      <text x="100" y="238" font-family="JetBrains Mono,monospace" font-size="8" fill="#7a7369">Personal: N=1 (branch: user/{uid}) &ensp;|&ensp; Team: N config (branch: main) — tier: Free/Pro/Enterprise</text>
+      <text x="100" y="252" font-family="JetBrains Mono,monospace" font-size="7" fill="#7a7369">Tools: source FS (ls/grep/read) + wiki create (create_wiki, rm_wiki)</text>
 
-      <line x1="132" y1="246" x2="132" y2="262" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
+      <line x1="132" y1="256" x2="132" y2="272" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
 
       <!-- Persist -->
-      <rect x="80" y="266" width="395" height="40" rx="4" fill="#f2f9f6" stroke="#b8dcd0" stroke-width="1"/>
-      <text x="132" y="285" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" font-weight="600" fill="#3d9078">Agent writes wiki via tools</text>
-      <text x="132" y="299" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#7a7369">create_wiki · edit_wiki · mkdir_wiki · ls_wiki</text>
+      <rect x="80" y="276" width="395" height="36" rx="4" fill="#f2f9f6" stroke="#b8dcd0" stroke-width="1"/>
+      <text x="277" y="294" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" font-weight="600" fill="#3d9078">Persist wiki pages to git</text>
+      <text x="277" y="307" text-anchor="middle" font-family="JetBrains Mono, mono" font-size="7" fill="#7a7369">Personal: + pgvector immediately &ensp;|&ensp; Team: defer pgvector to review approve</text>
 
-      <line x1="132" y1="305" x2="132" y2="322" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
+      <line x1="277" y1="312" x2="277" y2="328" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
 
-      <rect x="80" y="326" width="395" height="22" rx="4" fill="#ffffff" stroke="#e6dfd3"/>
-      <text x="277" y="341" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" fill="#3a3530">RETURN [{pages}] + SSE stream to frontend</text>
+      <rect x="80" y="332" width="395" height="16" rx="4" fill="#ffffff" stroke="#e6dfd3"/>
+      <text x="277" y="344" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" fill="#3a3530">RETURN [{pages}] + SSE stream to frontend</text>
 
       <!-- Arrow P1 → P2 -->
       <line x1="490" y1="232" x2="506" y2="232" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#arrow)" stroke-dasharray="4,3"/>
 
       <!-- DeepIntegrate box -->
       <rect x="510" y="110" width="390" height="245" rx="6" fill="#f2f9f6" stroke="#b8dcd0" stroke-width="1"/>
-      <text x="530" y="132" font-family="Inter, sans-serif" font-size="12" font-weight="700" fill="#3d9078">DeepIntegrate: GraphBuilder</text>
-      <rect x="720" y="120" width="96" height="16" rx="3" fill="#f2f9f6" stroke="#b8dcd0"/>
-      <text x="768" y="132" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" font-weight="700" fill="#3d9078">ASYNC · MUTEX</text>
+      <text x="530" y="132" font-family="Inter, sans-serif" font-size="12" font-weight="700" fill="#3d9078">DeepIntegrate</text>
+      <rect x="660" y="120" width="96" height="16" rx="3" fill="#f2f9f6" stroke="#b8dcd0"/>
+      <text x="708" y="132" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" font-weight="700" fill="#3d9078">ASYNC · MUTEX</text>
 
       <!-- Trigger model -->
-      <rect x="530" y="150" width="355" height="24" rx="4" fill="#fef7f5" stroke="#f0ccc4" stroke-width="1"/>
-      <text x="707" y="166" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" fill="#c06050">Trigger: Personal → after P1 &ensp;|&ensp; Team → after review approve</text>
+      <rect x="530" y="152" width="355" height="20" rx="4" fill="#fef7f5" stroke="#f0ccc4" stroke-width="1"/>
+      <text x="707" y="166" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" fill="#c06050">Trigger: Personal → after ShallowCompile &ensp;|&ensp; Team → review approve</text>
 
-      <!-- DeepIntegrate flow -->
-      <rect x="530" y="184" width="100" height="28" rx="4" fill="#ffffff" stroke="#e6dfd3"/>
-      <text x="580" y="202" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" fill="#3a3530">Acquire Mutex</text>
-      <line x1="630" y1="198" x2="648" y2="198" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
+      <!-- DeepIntegrate flow — Call 1 -->
+      <rect x="530" y="182" width="88" height="24" rx="4" fill="#ffffff" stroke="#e6dfd3"/>
+      <text x="574" y="198" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" fill="#3a3530">Acquire Mutex</text>
+      <line x1="618" y1="194" x2="634" y2="194" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
 
-      <rect x="650" y="184" width="100" height="28" rx="4" fill="#ffffff" stroke="#e6dfd3"/>
-      <text x="700" y="202" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" fill="#3a3530">Load Pages</text>
-      <line x1="750" y1="198" x2="768" y2="198" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="636" y="178" width="128" height="32" rx="4" fill="#f2f9f6" stroke="#b8dcd0" stroke-width="1"/>
+      <text x="700" y="192" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" font-weight="600" fill="#3d9078">Call 1: Wiki Reorg</text>
+      <text x="700" y="205" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="6" fill="#7a7369">ls/read/mkdir/mv/edit/rm wiki</text>
+      <line x1="764" y1="194" x2="780" y2="194" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
 
-      <rect x="770" y="184" width="115" height="28" rx="4" fill="#f5f6fc" stroke="#cdd4ee" stroke-width="1"/>
-      <text x="827" y="202" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" fill="#5b6fb0">Agent Run</text>
-      <path d="M 827 212 L 827 228 L 580 228 L 580 236" stroke="#b5aea4" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
+      <rect x="782" y="178" width="102" height="32" rx="4" fill="#f5f6fc" stroke="#cdd4ee" stroke-width="1"/>
+      <text x="833" y="192" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" font-weight="600" fill="#5b6fb0">Call 2: Graph</text>
+      <text x="833" y="205" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="6" fill="#7a7369">read wiki + graph tools</text>
+
+      <path d="M 833 210 L 833 228 L 574 228 L 574 232" stroke="#b5aea4" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
 
       <!-- Store -->
-      <rect x="530" y="240" width="355" height="40" rx="4" fill="#f2f9f6" stroke="#b8dcd0" stroke-width="1"/>
-      <text x="707" y="258" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" font-weight="600" fill="#3d9078">GraphStore.upsert</text>
-      <text x="707" y="273" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#7a7369">entities · facts · page_entities</text>
+      <rect x="530" y="238" width="355" height="36" rx="4" fill="#f2f9f6" stroke="#b8dcd0" stroke-width="1"/>
+      <text x="707" y="256" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" font-weight="600" fill="#3d9078">GraphStore.upsert</text>
+      <text x="707" y="270" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" fill="#7a7369">entities · facts · page_entities</text>
 
-      <line x1="707" y1="280" x2="707" y2="298" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
+      <line x1="707" y1="274" x2="707" y2="292" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
 
-      <rect x="560" y="302" width="290" height="22" rx="4" fill="#ffffff" stroke="#e6dfd3"/>
-      <text x="705" y="317" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" fill="#3a3530">Orphan Cleanup (7-day grace)</text>
+      <rect x="560" y="296" width="290" height="18" rx="4" fill="#ffffff" stroke="#e6dfd3"/>
+      <text x="705" y="309" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" fill="#3a3530">Orphan Cleanup (7-day grace)</text>
 
-      <rect x="607" y="328" width="200" height="20" rx="4" fill="#fef7f5" stroke="#f0ccc4" stroke-width="1"/>
-      <text x="707" y="342" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" fill="#c06050">Release Mutex</text>
+      <rect x="620" y="320" width="170" height="18" rx="4" fill="#fef7f5" stroke="#f0ccc4" stroke-width="1"/>
+      <text x="705" y="333" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" fill="#c06050">Release Mutex</text>
 
       <!-- SSE arrow out -->
       <line x1="480" y1="372" x2="480" y2="392" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#arrow)"/>
@@ -510,18 +303,20 @@
       <text x="70" y="418" font-family="JetBrains Mono, monospace" font-size="11" font-weight="600" fill="#5b6fb0">crates/agents/</text>
       <text x="220" y="418" font-family="Inter, sans-serif" font-size="10" fill="#b5aea4">communication layer — protocol, dispatch, SSE events</text>
 
-      <rect x="60" y="434" width="150" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
-      <text x="135" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">protocol.rs</text>
-      <rect x="218" y="434" width="170" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
-      <text x="303" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">client.rs (HTTP/gRPC)</text>
-      <rect x="396" y="434" width="140" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
-      <text x="466" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">registry.rs</text>
-      <rect x="544" y="434" width="140" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
-      <text x="614" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">dispatch.rs</text>
-      <rect x="692" y="434" width="100" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
-      <text x="742" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">events.rs</text>
-      <rect x="800" y="434" width="105" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
-      <text x="852" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">error.rs</text>
+      <rect x="60" y="434" width="130" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
+      <text x="125" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">protocol.rs</text>
+      <rect x="198" y="434" width="150" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
+      <text x="273" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">client.rs (HTTP/gRPC)</text>
+      <rect x="356" y="434" width="120" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
+      <text x="416" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">registry.rs</text>
+      <rect x="484" y="434" width="120" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
+      <text x="544" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">dispatch.rs</text>
+      <rect x="612" y="434" width="90" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
+      <text x="657" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">events.rs</text>
+      <rect x="710" y="434" width="80" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
+      <text x="750" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">error.rs</text>
+      <rect x="798" y="434" width="108" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
+      <text x="852" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">pool.rs</text>
 
       <!-- Shared client -->
       <rect x="60" y="465" width="830" height="24" rx="4" fill="#f2f9f6" stroke="#b8dcd0" stroke-width="1"/>
@@ -539,177 +334,56 @@
       <!-- Harness boxes -->
       <rect x="70" y="522" width="260" height="82" rx="6" fill="#ffffff" stroke="#e6dfd3" filter="url(#shadow)"/>
       <text x="200" y="546" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" font-weight="600" fill="#3a3530">Python deepagents</text>
-      <text x="200" y="566" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#3d9078">compile-simple</text>
-      <text x="200" y="580" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#3d9078">compile-complex</text>
-      <text x="200" y="596" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#7a7369">tools: wiki ops via ApiClient</text>
+      <text x="200" y="566" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#3d9078">compile-simple / wiki-reorganize</text>
+      <text x="200" y="582" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#b5aea4">compile-complex (future)</text>
+      <text x="200" y="598" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" fill="#7a7369">tools: wiki ops via ApiClient</text>
 
       <rect x="350" y="522" width="260" height="82" rx="6" fill="#ffffff" stroke="#e6dfd3" filter="url(#shadow)"/>
       <text x="480" y="546" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" font-weight="600" fill="#3a3530">Rust agnt</text>
       <text x="480" y="566" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">entity-extract</text>
-      <text x="480" y="580" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#7a7369">(standalone HTTP binary)</text>
-      <text x="480" y="596" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#7a7369">tools: graph ops via ApiClient</text>
+      <text x="480" y="582" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#7a7369">(standalone HTTP binary)</text>
+      <text x="480" y="598" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" fill="#7a7369">tools: graph ops via ApiClient</text>
 
       <rect x="630" y="522" width="260" height="82" rx="6" fill="#ffffff" stroke="#e6dfd3" filter="url(#shadow)"/>
       <text x="760" y="546" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" font-weight="600" fill="#3a3530">Swink Agent</text>
       <text x="760" y="566" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#c06050">review</text>
-      <rect x="732" y="572" width="38" height="14" rx="3" fill="#fef7f5" stroke="#f0ccc4"/>
-      <text x="751" y="582" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" fill="#c06050">FUTURE</text>
-      <text x="760" y="596" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#7a7369">tools: review ops via ApiClient</text>
+      <rect x="735" y="572" width="32" height="12" rx="3" fill="#fef7f5" stroke="#f0ccc4"/>
+      <text x="751" y="581" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="6" fill="#c06050">FUT</text>
+      <text x="760" y="598" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" fill="#7a7369">tools: review ops via ApiClient</text>
 
       <!-- Independent modules -->
       <rect x="70" y="618" width="390" height="36" rx="6" fill="#f5f3f0" stroke="#e6dfd3" stroke-width="1" stroke-dasharray="5,3"/>
-      <text x="265" y="640" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#7a7369">cli/ — independent, own HTTP client, no crates dep</text>
+      <text x="265" y="638" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#7a7369">cli/ — independent, own HTTP client, no crates dep</text>
 
       <rect x="500" y="618" width="390" height="36" rx="6" fill="#f5f3f0" stroke="#e6dfd3" stroke-width="1" stroke-dasharray="5,3"/>
-      <text x="695" y="640" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#7a7369">cowiki-mcp-server/ — independent, own HTTP client, no crates dep</text>
+      <text x="695" y="638" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#7a7369">cowiki-mcp-server/ — independent, own HTTP client, no crates dep</text>
     </svg>
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════════════════ -->
-<section>
-  <div class="section-num">Section 02</div>
-  <h2>Two-Phase Trigger Model</h2>
-
-  <div class="grid-2">
-    <div class="card">
-      <div class="card-icon gold">P</div>
-      <h4>Personal Space</h4>
-      <div class="flow-row" style="font-size:0.72rem;">
-        <span class="flow-step gold">Compile</span>
-        <span class="flow-arrow">→</span>
-        <span class="flow-step gold">ShallowCompile</span>
-        <span class="flow-arrow">→</span>
-        <span class="flow-step teal">DeepIntegrate</span>
-      </div>
-      <p style="font-size:0.78rem;color:var(--text-dim);margin-top:0.8rem;">
-        DeepIntegrate fires <strong>immediately</strong> after ShallowCompile completes. No review gate. Single agent processes both phases sequentially.
-      </p>
-    </div>
-    <div class="card">
-      <div class="card-icon teal">T</div>
-      <h4>Team Space</h4>
-      <div class="flow-row" style="font-size:0.72rem;">
-        <span class="flow-step gold">Compile</span>
-        <span class="flow-arrow">→</span>
-        <span class="flow-step gold">ShallowCompile</span>
-        <span class="flow-arrow">→</span>
-        <span class="flow-step rose">Submit</span>
-        <span class="flow-arrow">→</span>
-        <span class="flow-step rose">Review</span>
-        <span class="flow-arrow">→</span>
-        <span class="flow-step teal">DeepIntegrate</span>
-      </div>
-      <p style="font-size:0.78rem;color:var(--text-dim);margin-top:0.8rem;">
-        DeepIntegrate fires <strong>after submission is approved</strong>. Shallow pages are reviewed before deep knowledge integration.
-      </p>
-    </div>
-  </div>
-
-  <div class="callout info">
-    <strong>Rationale:</strong> ShallowCompile produces shallow wiki pages for human review. DeepIntegrate performs deep knowledge integration (entity extraction, fact triples, cross-page linking) — this should only happen on reviewed, approved content in team spaces.
-  </div>
-</section>
-
-<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════ 03 ═══════════════════════════ -->
 <section>
   <div class="section-num">Section 03</div>
-  <h2>Concurrency Model</h2>
-
-  <div class="grid-2">
-    <div>
-      <h3>ShallowCompile — Parallel <span class="badge badge-sync">sync</span></h3>
-      <table>
-        <tbody>
-          <tr><td><strong>Parallelism</strong></td><td>Multiple compile requests run concurrently</td></tr>
-          <tr><td><strong>Locking</strong></td><td>No space-level lock needed — sources are independent</td></tr>
-          <tr><td><strong>Queuing</strong></td><td>If pool exhausted, queue; 503 if queue full</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <div>
-      <h3>DeepIntegrate — Per-Space Mutex <span class="badge badge-mutex">mutex</span></h3>
-      <table>
-        <tbody>
-          <tr><td><strong>Lock scope</strong></td><td>One graph build per space at a time</td></tr>
-          <tr><td><strong>Lock type</strong></td><td><code>tokio::sync::Mutex&lt;()&gt;</code> keyed by space</td></tr>
-          <tr><td><strong>Contention</strong></td><td>New request → 409 Conflict if already running</td></tr>
-          <tr><td><strong>Cross-space</strong></td><td>Different spaces can run DeepIntegrate concurrently</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <h3>Agent Pool Configuration</h3>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Space Type</th><th>Pool Size</th><th>Behavior</th></tr></thead>
-      <tbody>
-        <tr>
-          <td><strong>Personal Space</strong></td>
-          <td><code>N = 1</code> (fixed)</td>
-          <td>Single agent processes one task at a time. ShallowCompile and DeepIntegrate share the same agent.</td>
-        </tr>
-        <tr>
-          <td><strong>Team Space</strong></td>
-          <td><code>N</code> (dynamic, configurable)</td>
-          <td>Multiple agents for ShallowCompile concurrency. DeepIntegrate always uses exactly 1 agent. N configurable via frontend, gated by paid tier.</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-
-  <div class="code-block">
-<span class="cmt">// Team Space settings</span>
-{
-  <span class="key">"agent_pool"</span>: {
-    <span class="key">"compile_page"</span>: { <span class="key">"size"</span>: <span class="num">4</span>, <span class="key">"harness"</span>: <span class="str">"compile-simple"</span> },
-    <span class="key">"build_graph"</span>:   { <span class="key">"size"</span>: <span class="num">1</span>, <span class="key">"harness"</span>: <span class="str">"entity-extract"</span> }
-  }
-}
-  </div>
-
-  <h3>Tier Gating</h3>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Tier</th><th>Personal Space</th><th>Team Space</th></tr></thead>
-      <tbody>
-        <tr><td><strong>Free</strong></td><td>N=1 (fixed)</td><td>N=1 (fixed)</td></tr>
-        <tr><td><strong>Pro</strong></td><td>N=1 (fixed)</td><td>N=2–4 (configurable)</td></tr>
-        <tr><td><strong>Enterprise</strong></td><td>N=1 (fixed)</td><td>N=2–16 (configurable)</td></tr>
-      </tbody>
-    </table>
-  </div>
-  <p style="font-size:0.78rem;color:var(--text-dim);margin-top:0.3rem;">Frontend queries tier limits; pool size controls disabled above tier max. Paid upgrade unlocks higher N.</p>
-</section>
-
-<!-- ═══════════════════════════════════════════════════════════════ -->
-<section>
-  <div class="section-num">Section 04</div>
   <h2>ShallowCompile — Source → Wiki Pages <span class="badge badge-sync">sync</span></h2>
 
   <div class="grid-2">
     <div>
       <h3>Pipeline</h3>
       <div class="flow-row">
-        <span class="flow-step gold">1. Hash Check</span>
-        <span class="flow-arrow">→</span>
-        <span class="flow-step gold">2. Dispatch</span>
-        <span class="flow-arrow">→</span>
-        <span class="flow-step indigo">3. Acquire Agent</span>
-        <span class="flow-arrow">→</span>
-        <span class="flow-step teal">4. Agent Writes</span>
-        <span class="flow-arrow">→</span>
+        <span class="flow-step gold">1. Identity Check</span><span class="flow-arrow">→</span>
+        <span class="flow-step gold">2. List Sources</span><span class="flow-arrow">→</span>
+        <span class="flow-step indigo">3. Acquire Agent</span><span class="flow-arrow">→</span>
+        <span class="flow-step teal">4. Agent Creates</span><span class="flow-arrow">→</span>
         <span class="flow-step gold">5. Return + SSE</span>
       </div>
       <table>
         <thead><tr><th>Step</th><th>Action</th></tr></thead>
         <tbody>
-          <tr><td><strong>1.</strong> Hash</td><td>SHA-256 each source vs <code>.cowiki/state.json</code>; skip unchanged</td></tr>
-          <tr><td><strong>2.</strong> Dispatch</td><td>Route: .md/.txt → passthrough, URL → extractor, PDF <span class="badge badge-future">future</span></td></tr>
+          <tr><td><strong>1.</strong> Hash</td><td>Lookup identity hash in <code>.cowiki/state.json</code>; skip if compiled</td></tr>
+          <tr><td><strong>2.</strong> List</td><td>Enumerate source dirs in <code>sources/</code>; each has <code>manifest.json</code></td></tr>
           <tr><td><strong>3.</strong> Pool</td><td>Acquire agent from space pool; queue if busy; 503 if full</td></tr>
-          <tr><td><strong>4.</strong> Write</td><td>Agent autonomously organizes wiki pages using wiki tools</td></tr>
-          <tr><td><strong>5.</strong> Return</td><td>Return page list + stream SSE events to frontend</td></tr>
+          <tr><td><strong>4.</strong> Write</td><td>Agent explores with source FS tools, creates wiki pages</td></tr>
+          <tr><td><strong>5.</strong> Return</td><td>Return page list + SSE events. pgvector: Personal now, Team deferred.</td></tr>
         </tbody>
       </table>
     </div>
@@ -718,183 +392,187 @@
       <table>
         <thead><tr><th>Error</th><th>Strategy</th></tr></thead>
         <tbody>
-          <tr><td>LLM timeout</td><td>500; no partial writes; hash check protects retry</td></tr>
+          <tr><td>LLM timeout</td><td>500; no partial writes; identity check protects retry</td></tr>
           <tr><td>Invalid output</td><td>Agent self-corrects via tool feedback</td></tr>
-          <tr><td>Git write fail</td><td>Error to agent; can retry or report failure</td></tr>
-          <tr><td>Embedder fail</td><td>Page written; periodic backfill catches up</td></tr>
-          <tr><td>Pool exhausted</td><td>Queue; 503 if queue full</td></tr>
+          <tr><td>Git write fail</td><td>Error to agent; retry or report</td></tr>
+          <tr><td>Embedder fail</td><td>Page written; periodic backfill</td></tr>
+          <tr><td>Pool exhausted</td><td>Queue; 503 if full</td></tr>
         </tbody>
       </table>
+      <div class="callout" style="margin-top:1rem"><strong>Shallow:</strong> Agent <em>creates</em> wiki pages but does not extract concepts or entities. That deep work belongs to DeepIntegrate.</div>
+    </div>
+  </div>
 
-      <h3>Key Insight</h3>
-      <p style="font-size:0.82rem;color:var(--text-dim);">
-        ShallowCompile is <strong>shallow</strong> — the agent organizes sources into wiki pages with a self-determined directory structure. It does not extract entities or facts. That deep work belongs to DeepIntegrate.
-      </p>
+  <h3>Agent Tools</h3>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-icon gold">S</div>
+      <h4>Source FS (read-only)</h4>
+      <div class="table-wrap"><table class="tool-table">
+        <thead><tr><th>Tool</th><th>Params</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>ls</td><td><code>path?</code></td><td>List source directory</td></tr>
+          <tr><td>grep</td><td><code>pattern, path?</code></td><td>Search within source directory</td></tr>
+          <tr><td>read</td><td><code>path</code></td><td>Read a source file</td></tr>
+        </tbody>
+      </table></div>
+      <p style="font-size:.75rem;color:var(--text-dim);margin-top:.5rem">Scoped to source directory. Agent explores any structure.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon teal">W</div>
+      <h4>Wiki FS (create/delete only)</h4>
+      <div class="table-wrap"><table class="tool-table">
+        <thead><tr><th>Tool</th><th>Params</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>create_wiki</td><td><code>path, content</code></td><td>Create new wiki page</td></tr>
+          <tr><td>rm_wiki</td><td><code>path</code></td><td>Delete wiki page</td></tr>
+        </tbody>
+      </table></div>
+      <p style="font-size:.75rem;color:var(--text-dim);margin-top:.5rem">No edit, no mv, no mkdir. Agent creates pages with self-determined paths.</p>
     </div>
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════ 04 ═══════════════════════════ -->
+<section>
+  <div class="section-num">Section 04</div>
+  <h2>DeepIntegrate — Wiki Reorg + Knowledge Graph <span class="badge badge-async">async</span></h2>
+
+  <div class="grid-2">
+    <div>
+      <h3>Trigger & Pipeline</h3>
+      <table>
+        <thead><tr><th>Space</th><th>Trigger</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Personal</strong></td><td>Auto after ShallowCompile</td></tr>
+          <tr><td><strong>Team</strong></td><td>Review approve hook (+ pgvector insert)</td></tr>
+        </tbody>
+      </table>
+      <div class="flow-row" style="margin-top:.8rem">
+        <span class="flow-step rose">1. Acquire Mutex</span><span class="flow-arrow">→</span>
+        <span class="flow-step teal">C1: Wiki Reorg</span><span class="flow-arrow">→</span>
+        <span class="flow-step indigo">C2: Graph Build</span><span class="flow-arrow">→</span>
+        <span class="flow-step rose">4. Release</span>
+      </div>
+      <div class="callout warn"><strong>Why serial?</strong> Wiki reorg changes page_path. Two sequential calls under one mutex guarantees stable paths for graph extraction.</div>
+    </div>
+    <div>
+      <h3>Tools — Call 1 (Wiki Reorg)</h3>
+      <div class="table-wrap"><table class="tool-table">
+        <thead><tr><th>Tool</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>ls_wiki</td><td>List wiki directory</td></tr>
+          <tr><td>read_wiki</td><td>Read wiki page</td></tr>
+          <tr><td>mkdir_wiki</td><td>Create subdirectory</td></tr>
+          <tr><td>mv_wiki</td><td>Move/rename page</td></tr>
+          <tr><td>edit_wiki</td><td>Edit existing page</td></tr>
+          <tr><td>rm_wiki</td><td>Delete page</td></tr>
+        </tbody>
+      </table></div>
+      <p style="font-size:.75rem;color:var(--text-dim)">No <code>create_wiki</code>. Pages exist from ShallowCompile.</p>
+
+      <h3 style="margin-top:.8rem">Tools — Call 2 (Graph)</h3>
+      <div class="table-wrap"><table class="tool-table">
+        <thead><tr><th>Tool</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>read_wiki</td><td>Read wiki page</td></tr>
+          <tr><td>query_entity</td><td>Look up by name</td></tr>
+          <tr><td>find_similar</td><td>Similar entity search</td></tr>
+          <tr><td>upsert_entity</td><td>Create/update entity</td></tr>
+          <tr><td>upsert_fact</td><td>Create/update fact</td></tr>
+          <tr><td>link_page_entity</td><td>Link page to entity</td></tr>
+          <tr><td>list_entities</td><td>List entities</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 05 ═══════════════════════════ -->
 <section>
   <div class="section-num">Section 05</div>
-  <h2>DeepIntegrate — Knowledge Graph <span class="badge badge-async">async</span></h2>
+  <h2>Source Directory & Dedup</h2>
 
   <div class="grid-2">
     <div>
-      <h3>Pipeline</h3>
-      <div class="flow-row">
-        <span class="flow-step rose">1. Mutex</span>
-        <span class="flow-arrow">→</span>
-        <span class="flow-step teal">2. Load</span>
-        <span class="flow-arrow">→</span>
-        <span class="flow-step indigo">3. Agent</span>
-        <span class="flow-arrow">→</span>
-        <span class="flow-step teal">4. Store</span>
-        <span class="flow-arrow">→</span>
-        <span class="flow-step rose">5. Release</span>
+      <h3>Identity Hash (ingest dedup)</h3>
+      <div class="code-block">
+<span class="cmt">// Ingest-time: reject if already exists</span>
+<span class="key">identity_hash</span> = <span class="kw">SHA256</span>(
+  <span class="str">source_type</span> + <span class="str">source_identity</span>
+)
+
+<span class="cmt">// Examples</span>
+<span class="str">"url"</span>     + <span class="str">"https://example.com/article"</span>
+<span class="str">"pdf"</span>     + <span class="str">"arxiv-1706.03762.pdf"</span>
+<span class="str">"github"</span>  + <span class="str">"wfnuser/cowiki"</span>
+
+<span class="cmt">// Compile-time: semantic dedup by agent</span>
+<span class="cmt">// Agent compares source content against</span>
+<span class="cmt">// existing wiki pages, decides to skip or create</span>
       </div>
-      <table>
-        <thead><tr><th>Step</th><th>Action</th></tr></thead>
-        <tbody>
-          <tr><td><strong>1.</strong> Mutex</td><td>Per-space lock; 409 Conflict if already running</td></tr>
-          <tr><td><strong>2.</strong> Load</td><td>Read all wiki pages in space from git (full pass)</td></tr>
-          <tr><td><strong>3.</strong> Agent</td><td>Agent reads pages, autonomously extracts entities + facts</td></tr>
-          <tr><td><strong>4.</strong> Store</td><td>GraphStore → entities + facts + page_entities</td></tr>
-          <tr><td><strong>5.</strong> Release</td><td>Release mutex; orphan cleanup (7-day grace → purge)</td></tr>
-        </tbody>
-      </table>
     </div>
     <div>
-      <h3>Fact = Triple</h3>
+      <h3>Example Structures</h3>
       <div class="code-block">
-{
-  <span class="key">"subject"</span>:     <span class="str">"Docker"</span>,
-  <span class="key">"predicate"</span>:   <span class="str">"is-a"</span>,
-  <span class="key">"object"</span>:      <span class="str">"container-runtime"</span>,
-  <span class="key">"page_path"</span>:   <span class="str">"infra/docker-networking.md"</span>,
-  <span class="key">"source_name"</span>: <span class="str">"article-1.md"</span>,
-  <span class="key">"confidence"</span>:  <span class="num">0.95</span>
-}
+<span class="cmt">// URL article</span>
+sources/sha256_abc123/
+├── <span class="key">manifest.json</span>
+├── content.md
+├── metadata.json
+├── headings.json
+└── attachments/
+    └── figure_01.png
+
+<span class="cmt">// GitHub repo</span>
+sources/sha256_def456/
+├── <span class="key">manifest.json</span>
+├── README.md
+├── issues.json
+└── code/
       </div>
-      <div class="callout warn">
-        <strong>Deep integration:</strong> DeepIntegrate is where cross-page relationships, entity resolution, and fact extraction happen. Team spaces gate this behind review approval.
-      </div>
+      <p style="font-size:.78rem;color:var(--text-dim)">Agent explores with <code>ls</code>/<code>grep</code>/<code>read</code>. No fixed schema beyond <code>manifest.json</code>. <code>.cowiki/state.json</code> tracks identity hashes and source→page mappings.</p>
     </div>
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════ 06 ═══════════════════════════ -->
 <section>
   <div class="section-num">Section 06</div>
-  <h2>Agent Tools — Wiki Operations</h2>
+  <h2>Concurrency & Agent Pool</h2>
 
-  <p style="font-size:0.85rem;color:var(--text-dim);margin-bottom:1rem;">
-    Agents for <strong>ShallowCompile</strong> receive these tools. All operations call the HTTP API → server (libgit2). Agents are separate processes deployed remotely; they never touch the filesystem directly.
-  </p>
-
-  <div class="table-wrap">
-    <table class="tool-table">
-      <thead><tr><th>Tool</th><th>Parameters</th><th>Description</th></tr></thead>
-      <tbody>
-        <tr><td>ls_wiki</td><td><code>path?</code></td><td>List wiki directory contents</td></tr>
-        <tr><td>mkdir_wiki</td><td><code>path</code></td><td>Create a wiki subdirectory</td></tr>
-        <tr><td>create_wiki</td><td><code>path, content</code></td><td>Create a new wiki page at path</td></tr>
-        <tr><td>edit_wiki</td><td><code>path, content</code></td><td>Edit an existing wiki page</td></tr>
-        <tr><td>read_wiki</td><td><code>path</code></td><td>Read a wiki page's content</td></tr>
-        <tr><td>rm_wiki</td><td><code>path</code></td><td>Delete a wiki page or empty directory</td></tr>
-      </tbody>
-    </table>
+  <div class="grid-3">
+    <div class="card">
+      <div class="card-icon gold">S</div>
+      <h4>ShallowCompile</h4>
+      <p style="font-size:.82rem;color:var(--text-dim)">Parallel. Multiple requests concurrent. Queue if pool full. 503 if queue full.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon rose">D</div>
+      <h4>DeepIntegrate</h4>
+      <p style="font-size:.82rem;color:var(--text-dim)">Per-space mutex. 409 if running. Two serial agent calls inside lock.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon indigo">P</div>
+      <h4>Agent Pool</h4>
+      <p style="font-size:.82rem;color:var(--text-dim)">Per-space, frontend-configurable, tier-gated. DeepIntegrate always 1 agent.</p>
+    </div>
   </div>
 
-  <div class="callout">
-    <strong>Agent autonomy:</strong> The agent decides its own directory structure and file naming. The compiler does not impose a fixed <code>wiki/{slug}.md</code> convention. Agents can create nested directories, use semantic file names, and organize pages around themes.
-  </div>
-
-  <h3>Agent Tools — Graph Operations (DeepIntegrate)</h3>
-
-  <p style="font-size:0.85rem;color:var(--text-dim);margin-bottom:0.6rem;">
-    Agents for <strong>DeepIntegrate</strong> also receive these tools. Agents autonomously decide what entities and facts to extract — no extraction-specific tools needed.
-  </p>
-
-  <div class="table-wrap">
-    <table class="tool-table">
-      <thead><tr><th>Tool</th><th>Parameters</th><th>Description</th></tr></thead>
-      <tbody>
-        <tr><td>query_entity</td><td><code>name, space?</code></td><td>Look up entity by name (for disambiguation)</td></tr>
-        <tr><td>find_similar</td><td><code>embedding, threshold?</code></td><td>Find similar entities by embedding similarity</td></tr>
-        <tr><td>upsert_entity</td><td><code>name, type, aliases?, description?</code></td><td>Create or update an entity node</td></tr>
-        <tr><td>upsert_fact</td><td><code>subject, predicate, object, confidence?</code></td><td>Create or update a fact triple</td></tr>
-        <tr><td>link_page_entity</td><td><code>page_path, entity_name, relevance?</code></td><td>Associate a wiki page with an entity</td></tr>
-        <tr><td>list_entities</td><td><code>page_path?</code></td><td>List entities, optionally filtered by page</td></tr>
-      </tbody>
-    </table>
-  </div>
+  <h3>Tier Gating</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Tier</th><th>Personal</th><th>Team</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Free</strong></td><td>N=1</td><td>N=1</td></tr>
+      <tr><td><strong>Pro</strong></td><td>N=1</td><td>N=2–4</td></tr>
+      <tr><td><strong>Enterprise</strong></td><td>N=1</td><td>N=2–16</td></tr>
+    </tbody>
+  </table></div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════ 07 ═══════════════════════════ -->
 <section>
   <div class="section-num">Section 07</div>
-  <h2>SSE Observability</h2>
-
-  <p style="font-size:0.85rem;color:var(--text-dim);margin-bottom:1rem;">
-    Full agent conversation visibility streamed to the frontend via <strong>Server-Sent Events</strong>. Users see every LLM round, tool call, and result — like CI/CD live logs.
-  </p>
-
-  <div class="grid-2">
-    <div>
-      <h3>Event Stream</h3>
-      <div class="code-block">
-<span class="evt">event:</span> <span class="prop">phase</span>
-<span class="key">data:</span> {<span class="key">"phase"</span>:<span class="str">"shallow"</span>, <span class="key">"status"</span>:<span class="str">"started"</span>}
-
-<span class="evt">event:</span> <span class="prop">agent-start</span>
-<span class="key">data:</span> {<span class="key">"agent_id"</span>:<span class="str">"agent-3"</span>, <span class="key">"harness"</span>:<span class="str">"compile-simple"</span>}
-
-<span class="evt">event:</span> <span class="prop">llm-round</span>
-<span class="key">data:</span> {<span class="key">"round"</span>:<span class="num">1</span>, <span class="key">"tokens"</span>:<span class="num">5000</span>}
-
-<span class="evt">event:</span> <span class="prop">tool-call</span>
-<span class="key">data:</span> {<span class="key">"tool"</span>:<span class="str">"create_wiki"</span>,
-       <span class="key">"args"</span>:{<span class="key">"path"</span>:<span class="str">"infra/docker.md"</span>}}
-
-<span class="evt">event:</span> <span class="prop">tool-result</span>
-<span class="key">data:</span> {<span class="key">"tool"</span>:<span class="str">"create_wiki"</span>, <span class="key">"success"</span>:<span class="kw">true</span>}
-
-<span class="evt">event:</span> <span class="prop">entity</span>
-<span class="key">data:</span> {<span class="key">"entity"</span>:<span class="str">"Docker"</span>, <span class="key">"type"</span>:<span class="str">"Technology"</span>}
-
-<span class="evt">event:</span> <span class="prop">phase</span>
-<span class="key">data:</span> {<span class="key">"phase"</span>:<span class="str">"shallow"</span>, <span class="key">"status"</span>:<span class="str">"completed"</span>,
-       <span class="key">"pages_count"</span>:<span class="num">5</span>}
-      </div>
-    </div>
-    <div>
-      <h3>Event Types</h3>
-      <table>
-        <thead><tr><th>Event</th><th>When</th></tr></thead>
-        <tbody>
-          <tr><td><code>phase</code></td><td>Phase transitions (start/completed/error)</td></tr>
-          <tr><td><code>agent-start</code></td><td>Agent acquired from pool</td></tr>
-          <tr><td><code>llm-round</code></td><td>Each LLM conversation round</td></tr>
-          <tr><td><code>tool-call</code></td><td>Agent invokes a tool</td></tr>
-          <tr><td><code>tool-result</code></td><td>Tool execution result</td></tr>
-          <tr><td><code>entity</code></td><td>Entity extracted (DeepIntegrate)</td></tr>
-          <tr><td><code>fact</code></td><td>Fact triple extracted (DeepIntegrate)</td></tr>
-          <tr><td><code>error</code></td><td>Recoverable error</td></tr>
-        </tbody>
-      </table>
-      <h3>API</h3>
-      <p style="font-size:0.85rem;color:var(--text-dim);">
-        <code>GET /api/compile/:id/events</code> → SSE stream<br>
-        Frontend renders as expandable live log with full LLM conversation visibility.
-      </p>
-    </div>
-  </div>
-</section>
-
-<!-- ═══════════════════════════════════════════════════════════════ -->
-<section>
-  <div class="section-num">Section 08</div>
   <h2>Data Model</h2>
 
   <div class="card-grid">
@@ -919,9 +597,9 @@
         <span class="fname">subject_id</span> <span class="ftype">FK → entities</span><br>
         <span class="fname">predicate</span> <span class="ftype">TEXT</span><br>
         <span class="fname">object_id</span> <span class="ftype">FK → entities</span> <span class="fnote">nullable</span><br>
-        <span class="fname">object_lit</span> <span class="ftype">TEXT</span> <span class="fnote">literal value</span><br>
+        <span class="fname">object_lit</span> <span class="ftype">TEXT</span><br>
         <span class="fname">page_path</span> <span class="ftype">TEXT</span> <span class="fnote">provenance</span><br>
-        <span class="fname">confidence</span> <span class="ftype">REAL</span> <span class="fnote">0 – 1</span>
+        <span class="fname">confidence</span> <span class="ftype">REAL</span> <span class="fnote">0–1</span>
       </div>
     </div>
     <div class="card">
@@ -930,89 +608,38 @@
       <div class="field-list">
         <span class="fname">page_path</span> <span class="ftype">TEXT</span> <span class="fnote">PK</span><br>
         <span class="fname">entity_id</span> <span class="ftype">UUID</span> <span class="fnote">PK · FK → entities</span><br>
-        <span class="fname">relevance</span> <span class="ftype">REAL</span> <span class="fnote">0 – 1</span><br>
-        <span class="fname">space</span> <span class="ftype">TEXT</span><br>
-        <br><span class="fnote">FK cascade: delete entity →<br>facts + page_entities auto-cleaned</span>
+        <span class="fname">relevance</span> <span class="ftype">REAL</span> <span class="fnote">0–1</span><br>
+        <span class="fname">space</span> <span class="ftype">TEXT</span><br><br>
+        <span class="fnote">Many-to-many junction</span>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════ 08 ═══════════════════════════ -->
 <section>
-  <div class="section-num">Section 09</div>
-  <h2>Module Map</h2>
-
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Crate</th><th>Contains</th><th>Depends On</th></tr></thead>
-      <tbody>
-        <tr>
-          <td><code>crates/core/src/client/</code></td>
-          <td>ApiClient — server-internal HTTP client: pages, compile, ingest, search, graph</td>
-          <td>reqwest · core/models</td>
-        </tr>
-        <tr>
-          <td><code>crates/core/src/compiler/</code></td>
-          <td>Phase1::compile() · Phase2::build_graph() · SourceDispatch · AgentPool</td>
-          <td>agents · core/models · core/client · db</td>
-        </tr>
-        <tr>
-          <td><code>crates/agents/</code></td>
-          <td>protocol · AgentClient (HTTP/gRPC) · HarnessRegistry · DispatchPolicy · SSE events</td>
-          <td>core/client</td>
-        </tr>
-        <tr>
-          <td><code>crates/db/</code></td>
-          <td>pages · entities · facts · page_entities tables + queries</td>
-          <td>sqlx · pgvector</td>
-        </tr>
-        <tr style="border-top:2px solid var(--border);">
-          <td colspan="3" style="text-align:center;color:var(--text-dim);font-size:0.75rem;padding:0.5rem;"><em>Independent modules — do not depend on crates/</em></td>
-        </tr>
-        <tr>
-          <td><code>cli/</code></td>
-          <td>CLI tool — own thin HTTP client, standalone binary</td>
-          <td>reqwest · clap</td>
-        </tr>
-        <tr>
-          <td><code>cowiki-mcp-server/</code></td>
-          <td>MCP server — own thin HTTP client, standalone process</td>
-          <td>reqwest · rmcp</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-
-  <div class="callout">
-    <strong>Server-internal client:</strong> <code>crates/core/src/client/</code> is used by compiler and agents. CLI and MCP server are <strong>independent modules</strong> — each implements its own thin HTTP client. They communicate with the wiki server purely via HTTP and can be implemented in any language. No <code>crates/</code> dependency.
-  </div>
-</section>
-
-<!-- ═══════════════════════════════════════════════════════════════ -->
-<section>
-  <div class="section-num">Section 10</div>
+  <div class="section-num">Section 08</div>
   <h2>Key Design Decisions</h2>
 
   <ol class="decisions">
-    <li><strong>Two-phase with review gate</strong> — Team Space: ShallowCompile (shallow) → review approve → DeepIntegrate (deep). Personal Space: ShallowCompile → DeepIntegrate immediately.</li>
-    <li><strong>Server-internal API client</strong> — <code>crates/core/src/client/</code> for compiler and agents. CLI and MCP are independent modules with their own thin HTTP clients.</li>
-    <li><strong>Per-space mutex for DeepIntegrate</strong> — only one graph build per space at a time; different spaces run concurrently.</li>
-    <li><strong>Agent pool (static, N configurable)</strong> — Personal Space N=1. Team Space N is dynamic per space settings. Enterprise: scale N.</li>
-    <li><strong>Full SSE observability</strong> — every LLM round, tool call, entity, and fact extraction streamed to the frontend as live events.</li>
-    <li><strong>Agent-driven file organization</strong> — tools like <code>create_wiki</code>, <code>mkdir_wiki</code>, <code>ls_wiki</code> let the agent decide its own directory structure. No fixed <code>wiki/{slug}.md</code> convention.</li>
-    <li><strong>No extraction-specific tools</strong> — agents autonomously extract entities and facts. Graph tools are primitive read/write ops (<code>upsert_entity</code>, <code>upsert_fact</code>, <code>query_entity</code>…).</li>
-    <li><strong>Git = source of truth</strong> — all page and graph data is derivable; eventual consistency via periodic rebuild.</li>
-    <li><strong>GraphStore trait</strong> — PostgreSQL for MVP; Neo4j migration path via trait swap.</li>
-    <li><strong>Cascade on delete</strong> — delete page → clean git + pgvector + graph; orphan entities auto-pruned after 7 days.</li>
+    <li><strong>Two-stage with review gate</strong> — Team: ShallowCompile → review approve → pgvector + DeepIntegrate. Personal: immediate.</li>
+    <li><strong>Source directories</strong> — extractor builds per-source dirs with <code>manifest.json</code>. Identity hash (SHA of type+identity) for ingest dedup. Semantic dedup by agent at compile time.</li>
+    <li><strong>Tool separation by stage</strong> — Shallow: source FS (<code>ls/grep/read</code>) + wiki create only. Deep: full wiki FS (no <code>create_wiki</code>) + graph tools.</li>
+    <li><strong>DeepIntegrate as two serial calls</strong> — Wiki reorg first (stabilizes page_path), then graph extraction. Prevents stale fact paths.</li>
+    <li><strong>Per-space mutex</strong> — one DeepIntegrate per space. 409 if busy. Cross-space parallel.</li>
+    <li><strong>pgvector timing</strong> — Personal: immediately. Team: deferred to review approve (drafts don't pollute search).</li>
+    <li><strong>Agent pool tier-gated</strong> — Personal N=1. Team N configurable per tier (Free/Pro/Enterprise).</li>
+    <li><strong>HTTP/gRPC only</strong> — all harnesses are separate processes. No embedded mode.</li>
+    <li><strong>Git source of truth</strong> — PG derived. Eventual consistency via periodic rebuild. Orphans: 7-day grace.</li>
+    <li><strong>SSE full observability</strong> — every LLM round, tool call, entity, and fact streamed live.</li>
   </ol>
 </section>
 
-</div><!-- /container -->
+</div>
 
 <footer>
-  <p>cowiki Compile System Design v2 &ensp;·&ensp; <a href="https://github.com/wfnuser/cowiki/issues/15">Issue #15</a> &ensp;·&ensp; Related: <a href="https://github.com/wfnuser/cowiki/issues/14">Issue #14</a></p>
-  <p style="margin-top:0.3rem;">Design spec: <code>docs/compile-system-design.md</code> &ensp;·&ensp; Architecture: <code>docs/compile-system-architecture.html</code></p>
+  <p>cowiki Compile System Design v3 &ensp;&middot;&ensp; <a href="https://github.com/wfnuser/cowiki/issues/15">#15</a> &ensp;&middot;&ensp; <a href="https://github.com/wfnuser/cowiki/issues/14">#14</a> &ensp;&middot;&ensp; <a href="https://github.com/wfnuser/cowiki/issues/31">#31</a> &ensp;&middot;&ensp; <a href="https://github.com/wfnuser/cowiki/issues/44">#44</a></p>
+  <p style="margin-top:.3rem"><code>docs/compile-system-design.md</code> &ensp;&middot;&ensp; <code>docs/compile-system-architecture.html</code></p>
 </footer>
 
 </body>
