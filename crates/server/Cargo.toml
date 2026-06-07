@@ -7,6 +7,7 @@ edition = "2021"
 cowiki-core = { path = "../core" }
 cowiki-db = { path = "../db" }
 cowiki-utils = { path = "../utils" }
+cowiki-extractor = { path = "../extractor" }
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
@@ -19,6 +20,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 sha2 = "0.10"
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono"] }
 reqwest = { version = "0.12", features = ["json"] }
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 git2 = "0.20"
 urlencoding = "2"

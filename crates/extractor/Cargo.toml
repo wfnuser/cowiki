@@ -1,0 +1,56 @@
+[package]
+name = "cowiki-extractor"
+version = "0.1.0"
+edition = "2021"
+description = "Multi-format source extractor for cowiki — produces clean Markdown from PDF, DOCX, PPTX, XLSX, CSV, Markdown, URLs, GitHub repos/issues, and RSS feeds."
+
+[dependencies]
+# Core
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+base64 = "0.22"
+sha2 = "0.10"
+
+# HTTP
+reqwest = { version = "0.12", features = ["json"] }
+
+# URL → Markdown + content extraction
+html2md = "0.2"
+scraper = "0.22"
+
+# CSV
+csv = "1"
+
+# PDF
+pdf-extract = "0.7"
+
+# DOCX
+docx-rs = "0.4"
+
+# XLSX
+calamine = "0.26"
+
+# XML parsing (YouTube captions)
+quick-xml = "0.37"
+roxmltree = "0.20"
+
+# GitHub API
+octocrab = "0.42"
+
+# RSS/Atom
+feed-rs = "2"
+
+# Regex (for URL image extraction)
+regex = "1"
+
+# File type detection
+infer = "0.16"
+
+# ZIP (PPTX is a ZIP archive)
+zip = "2"
+
+# Date/time
+chrono = "0.4"

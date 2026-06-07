@@ -20,6 +20,7 @@ pub struct AppState {
     pub wiki_repo: cowiki_core::git::WikiRepo,       // default repo (backward compat)
     pub repo_manager: cowiki_core::git::WikiRepoManager, // per-workspace repos
     pub compiler: Compiler,
+    pub extractor_registry: cowiki_extractor::ExtractorRegistry,
 }
 
 // ── Usage endpoint response ──
@@ -88,6 +89,10 @@ async fn main() {
     // Compiler
     let compiler = Compiler::new(llm, None, embedder);
 
+    // Extractor registry
+    let extractor_registry = cowiki_extractor::create_default_registry();
+    tracing::info!("extractor registry initialized with {} extractors", 10);
+
     let port = config.server.port.to_string();
 
     let state = Arc::new(AppState {
@@ -96,6 +101,7 @@ async fn main() {
         wiki_repo,
         repo_manager,
         compiler,
+        extractor_registry,
     });
 
     let app = Router::new()
