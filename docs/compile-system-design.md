@@ -7,7 +7,7 @@
 A **two-stage compile pipeline** with **wiki-page-centric knowledge architecture** and **decoupled agent communication**.
 
 - **ShallowCompile (sync)**: Agent explores source directories, produces wiki pages + entity pages + concept pages in markdown. Deduplicates and merges against existing content. Inserts metadata into PSQL indices.
-- **Lint (async, human-triggered)**: Agent health-checks the wiki — detects contradictions, duplicates, orphan nodes, broken wikilinks. Personal Space: manual trigger. Team Space: post-review-approve hook.
+- **DeepCompile (async, human-triggered)**: Agent health-checks the wiki — detects contradictions, duplicates, orphan nodes, broken wikilinks. Personal Space: manual trigger. Team Space: post-review-approve hook.
 
 **Core principle:** Wiki pages are the center. Entities are navigation bridges between wiki pages. Entities and concepts live as markdown files (FS source of truth) with PSQL metadata tables for search and dedup.
 
@@ -209,9 +209,9 @@ During ShallowCompile, the agent:
 | Personal Space | Immediately after ShallowCompile |
 | Team Space | On review approve |
 
-## Lint: Wiki Health Check (Async, Human-Triggered)
+## DeepCompile: Wiki Health Check (Async, Human-Triggered)
 
-Replaces the previous "DeepIntegrate" concept. No more knowledge graph extraction — entities and concepts are already created during ShallowCompile. Lint verifies quality.
+Replaces the previous "DeepIntegrate" concept. No more knowledge graph extraction — entities and concepts are already created during ShallowCompile. DeepCompile verifies quality.
 
 ### Trigger
 
@@ -219,7 +219,7 @@ Replaces the previous "DeepIntegrate" concept. No more knowledge graph extractio
 - **Team Space**: Post-review-approve hook (after pgvector insert)
 - No automatic cron in current version
 
-### What Lint Checks
+### What DeepCompile Checks
 
 | Issue | Detection | Agent Action |
 |-------|-----------|-------------|
@@ -230,7 +230,7 @@ Replaces the previous "DeepIntegrate" concept. No more knowledge graph extractio
 | **Missing backlink** | Wiki page mentions entity but entity doesn't link back | Auto-fix |
 | **Stale content** | Page hasn't been updated after newer sources ingested | Flag |
 
-### Agent Tools — Lint
+### Agent Tools — DeepCompile
 
 | Tool | Description |
 |------|-------------|
@@ -246,7 +246,7 @@ Replaces the previous "DeepIntegrate" concept. No more knowledge graph extractio
 
 ### Output
 
-Lint produces `ReviewItem` entries (contradiction, duplicate, orphan, etc.) streamed via SSE. Human reviews and resolves each item — accept fix, dismiss, or manually address.
+DeepCompile produces `ReviewItem` entries (contradiction, duplicate, orphan, etc.) streamed via SSE. Human reviews and resolves each item — accept fix, dismiss, or manually address.
 
 ## Review: Two-Stage
 
@@ -257,9 +257,9 @@ Lint produces `ReviewItem` entries (contradiction, duplicate, orphan, etc.) stre
 - Human inspects each page (content, structure, wikilinks)
 - Approve → page published. Reject → page removed.
 
-### Stage 2: Lint Review
+### Stage 2: DeepCompile Review
 
-- After Lint produces review items
+- After DeepCompile produces review items
 - **Cross-page** — contradictions, duplicates span multiple pages
 - Human inspects each issue and decides: merge, fix, dismiss
 - Periodic — human-triggered, not automatic
@@ -302,7 +302,7 @@ RAG retrieves chunks and the LLM re-derives knowledge on every query. Agentic se
 
 - Multiple requests concurrent. Queue if pool full. 503 if full.
 
-### Lint — Per-Space Mutex
+### DeepCompile — Per-Space Mutex
 
 - One lint run per space at a time. 409 if running.
 - Different spaces run concurrently.
@@ -395,7 +395,7 @@ Sequential cleanup:
 ## What This Design Does NOT Include
 
 - PostgreSQL knowledge graph (facts table, page_entities junction) — replaced by wikilinks + FS
-- DeepIntegrate as entity extraction — replaced by ShallowCompile entity creation + Lint health-check
+- DeepIntegrate as entity extraction — replaced by ShallowCompile entity creation + DeepCompile health-check
 - Neo4j migration — no graph DB needed
 - Auto-scaling agent pools
 - Agent harness implementations (existing projects)

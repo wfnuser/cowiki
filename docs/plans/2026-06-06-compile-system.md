@@ -2,9 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a two-phase compile pipeline with decoupled agent harnesses, SSE observability, per-space agent pools, and knowledge graph storage.
+**Goal:** Build a two-stage compile pipeline with decoupled agent harnesses, SSE observability, per-space agent pools, and wikilink-based navigation.
 
-**Architecture:** ShallowCompile (sync) dispatches sources to remote agent processes, which autonomously organize wiki pages via HTTP tools. DeepIntegrate (async, per-space mutex) triggers on space-specific events (Personal: auto; Team: post-review-approve), extracting entities and fact triples into PostgreSQL-backed knowledge graph. A shared `ApiClient` in `crates/core/src/client/` provides HTTP endpoints; `crates/agents/` handles protocol, registry, dispatch, and SSE events.
+**Architecture:** ShallowCompile (sync) dispatches sources to remote agents, producing wiki/ + entities/ + concepts/ markdown with `[[wikilinks]]`. PSQL tables index metadata for search/dedup. DeepCompile (async, human-triggered, per-space mutex) health-checks contradictions, duplicates, orphans, broken links. FS is source of truth. `crates/core/src/client/` is shared API client; `crates/agents/` handles protocol, registry, dispatch, SSE. Agentic search (future consumer) does vector topK → wikilink exploration.
+
+**Tech Stack:** Rust + axum + sqlx + pgvector + tokio, PostgreSQL, Git (libgit2), HTTP/gRPC agent communication
 
 **Tech Stack:** Rust + axum + sqlx + pgvector + tokio, PostgreSQL, Git (libgit2), HTTP/gRPC agent communication
 
@@ -16,16 +18,16 @@
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `crates/db/src/migrations/009_graph.sql` | Create | DDL for entities, facts, page_entities |
-| `crates/db/src/graph.rs` | Create | PgGraphStore: GraphStore trait impl |
-| `crates/core/src/models.rs` | Modify | Entity, Fact, PageEntity structs |
+| `crates/db/src/migrations/009_wiki_index.sql` | Create | DDL for wiki_pages, entities, concepts |
+| `crates/db/src/wiki_index.rs` | Create | PgWikiIndex: WikiIndex trait impl |
+| `crates/core/src/models.rs` | Modify | WikiPage, Entity, Concept structs |
 | `crates/core/src/client/mod.rs` | Create | ApiClient struct |
 | `crates/core/src/client/pages.rs` | Create | Wiki CRUD HTTP client |
-| `crates/core/src/client/graph.rs` | Create | Graph HTTP client |
+| `crates/core/src/client/index.rs` | Create | WikiIndex HTTP client |
 | `crates/core/src/client/compile.rs` | Create | Compile HTTP client |
-| `crates/core/src/compiler/mod.rs` | Modify | ShallowCompile + DeepIntegrate orchestration |
+| `crates/core/src/compiler/mod.rs` | Modify | ShallowCompile + DeepCompile orchestration |
 | `crates/core/src/compiler/shallow.rs` | Create | SourceCompiler |
-| `crates/core/src/compiler/deep.rs` | Create | GraphBuilder |
+| `crates/core/src/compiler/lint.rs` | Create | LintRunner |
 | `crates/core/src/compiler/pool.rs` | Create | AgentPool manager |
 | `crates/core/src/compiler/dispatch.rs` | Create | Source dispatch to harness |
 | `crates/agents/Cargo.toml` | Create | New crate |
@@ -37,22 +39,22 @@
 | `crates/agents/src/events.rs` | Create | SSE event types |
 | `crates/agents/src/error.rs` | Create | AgentError |
 | `crates/server/src/routes/compile.rs` | Modify | Wire ShallowCompile + SSE endpoint |
-| `crates/server/src/routes/review.rs` | Modify | Wire DeepIntegrate trigger on approve |
-| `crates/server/src/routes/graph.rs` | Create | Graph query endpoints |
+| `crates/server/src/routes/review.rs` | Modify | Wire DeepCompile trigger on approve |
+| `crates/server/src/routes/lint.rs` | Create | DeepCompile trigger and results endpoints |
 
 ---
 
 ### Task 1: Database — Graph Tables & Migration
 
 **Files:**
-- Create: `crates/db/src/migrations/009_graph.sql`
-- Create: `crates/db/src/graph.rs`
+- Create: `crates/db/src/migrations/009_wiki_index.sql`
+- Create: `crates/db/src/lint.rs`
 - Modify: `crates/db/src/lib.rs`
 
 - [ ] **Step 1: Write migration SQL**
 
 ```sql
--- crates/db/src/migrations/009_graph.sql
+-- crates/db/src/migrations/009_wiki_index.sql
 CREATE TABLE IF NOT EXISTS entities (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name        TEXT NOT NULL,
@@ -104,15 +106,15 @@ CREATE INDEX IF NOT EXISTS idx_page_entities_entity ON page_entities(entity_id);
 
 ```rust
 // crates/db/src/lib.rs — add after existing migrations:
-let sql9 = include_str!("migrations/009_graph.sql")
+let sql9 = include_str!("migrations/009_wiki_index.sql")
     .replace("__EMBEDDING_DIM__", &embedding_dim.to_string());
 sqlx::raw_sql(&sql9).execute(pool).await.map_err(|e| { tracing::error!("DB error: {e}"); e })?;
 ```
 
-- [ ] **Step 3: Write GraphStore trait and PgGraphStore**
+- [ ] **Step 3: Write WikiIndex trait and PgWikiIndex**
 
 ```rust
-// crates/db/src/graph.rs
+// crates/db/src/lint.rs
 use async_trait::async_trait;
 use pgvector::Vector;
 use sqlx::PgPool;
@@ -121,7 +123,7 @@ use uuid::Uuid;
 use cowiki_core::models::{Entity, Fact, EntityType};
 
 #[async_trait]
-pub trait GraphStore {
+pub trait WikiIndex {
     async fn query_entity(&self, name: &str, space: &str) -> sqlx::Result<Option<Entity>>;
     async fn find_similar(&self, embedding: &[f32], threshold: f32, space: &str) -> sqlx::Result<Vec<Entity>>;
     async fn upsert_entity(&self, entity: &Entity) -> sqlx::Result<Entity>;
@@ -133,18 +135,18 @@ pub trait GraphStore {
     async fn delete_orphan_entities(&self, space: &str, older_than_days: i32) -> sqlx::Result<u64>;
 }
 
-pub struct PgGraphStore {
+pub struct PgWikiIndex {
     pool: PgPool,
 }
 
-impl PgGraphStore {
+impl PgWikiIndex {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
 
 #[async_trait]
-impl GraphStore for PgGraphStore {
+impl WikiIndex for PgWikiIndex {
     async fn query_entity(&self, name: &str, space: &str) -> sqlx::Result<Option<Entity>> {
         sqlx::query_as::<_, Entity>(
             "SELECT id, name, type, aliases, description, embedding, space, is_orphaned, created_at, updated_at
@@ -367,11 +369,11 @@ pub mod graph;
 - [ ] **Step 6: Commit**
 
 ```bash
-git add crates/db/src/migrations/009_graph.sql crates/db/src/graph.rs crates/db/src/lib.rs crates/core/src/models.rs
-git commit -m "feat: add graph data model — entities, facts, page_entities tables with GraphStore trait
+git add crates/db/src/migrations/009_wiki_index.sql crates/db/src/lint.rs crates/db/src/lib.rs crates/core/src/models.rs
+git commit -m "feat: add graph data model — entities, facts, page_entities tables with WikiIndex trait
 
-- 009_graph.sql: DDL for entities (with pgvector embedding), facts (triples), page_entities (junction)
-- graph.rs: GraphStore trait + PgGraphStore impl with all CRUD operations
+- 009_wiki_index.sql: DDL for entities (with pgvector embedding), facts (triples), page_entities (junction)
+- lint.rs: WikiIndex trait + PgWikiIndex impl with all CRUD operations
 - models.rs: Entity, Fact, EntityType structs
 
 Refs: #15"
@@ -384,7 +386,7 @@ Refs: #15"
 **Files:**
 - Create: `crates/core/src/client/mod.rs`
 - Create: `crates/core/src/client/pages.rs`
-- Create: `crates/core/src/client/graph.rs`
+- Create: `crates/core/src/client/lint.rs`
 - Create: `crates/core/src/client/compile.rs`
 - Modify: `crates/core/src/lib.rs`
 
@@ -556,7 +558,7 @@ impl<'a> PagesClient<'a> {
 - [ ] **Step 3: Create graph client**
 
 ```rust
-// crates/core/src/client/graph.rs
+// crates/core/src/client/lint.rs
 use serde_json::Value;
 
 use super::ApiClient;
@@ -686,9 +688,9 @@ impl<'a> CompileClient<'a> {
         resp.json().await.map_err(|e| e.to_string())
     }
 
-    pub async fn rebuild_graph(&self, space: &str) -> Result<Value, String> {
+    pub async fn relint_wiki(&self, space: &str) -> Result<Value, String> {
         let resp = self.parent.http
-            .post(self.parent.url("/api/compile/graph/rebuild"))
+            .post(self.parent.url("/api/compile/lint/run"))
             .header("Authorization", self.parent.auth_header())
             .json(&serde_json::json!({ "space": space }))
             .send()
@@ -714,8 +716,8 @@ git commit -m "feat: add server-internal API client (crates/core/src/client/)
 
 - mod.rs: ApiClient struct with HTTP client, auth, URL builder
 - pages.rs: create_wiki, read_wiki, edit_wiki, ls_wiki, mkdir_wiki, rm_wiki
-- graph.rs: query_entity, find_similar, upsert_entity, upsert_fact, link_page_entity, list_entities
-- compile.rs: run compile, rebuild_graph
+- lint.rs: query_entity, find_similar, upsert_entity, upsert_fact, link_page_entity, list_entities
+- compile.rs: run compile, relint_wiki
 
 Refs: #15"
 ```
@@ -763,7 +765,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRequest {
-    pub task_type: String,       // "compile_page" | "build_graph" | "review_submission"
+    pub task_type: String,       // "compile_page" | "lint_wiki" | "review_submission"
     pub system_prompt: String,
     pub user_input: String,
     pub workspace_path: String,
@@ -824,7 +826,7 @@ pub enum TransportType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolConfig {
     pub compile_page: PoolEntry,
-    pub build_graph: PoolEntry,
+    pub lint_wiki: PoolEntry,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -942,8 +944,8 @@ impl HarnessRegistry {
             max_concurrency: 4,
         });
         registry.register(HarnessRegistration {
-            name: "entity-extract".into(),
-            task_type: "build_graph".into(),
+            name: "lint-wiki".into(),
+            task_type: "lint_wiki".into(),
             endpoint: "http://localhost:9101/agent/run".into(),
             transport: crate::protocol::TransportType::Http,
             max_concurrency: 1,
@@ -1172,12 +1174,12 @@ pub mod error;
 ```rust
 // crates/core/src/compiler/mod.rs
 pub mod shallow;
-pub mod deep;
+pub mod lint;
 pub mod pool;
 pub mod dispatch;
 
 pub use shallow::SourceCompiler;
-pub use deep::GraphBuilder;
+pub use lint::LintRunner;
 pub use pool::AgentPool;
 ```
 
@@ -1357,15 +1359,15 @@ pub enum CompileError {
 
 ---
 
-### Task 5: DeepIntegrate — GraphBuilder
+### Task 5: DeepCompile — LintRunner
 
 **Files:**
-- Create: `crates/core/src/compiler/deep.rs`
+- Create: `crates/core/src/compiler/lint.rs`
 
-- [ ] **Step 1: Write GraphBuilder**
+- [ ] **Step 1: Write LintRunner**
 
 ```rust
-// crates/core/src/compiler/deep.rs
+// crates/core/src/compiler/lint.rs
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, broadcast};
@@ -1379,13 +1381,13 @@ use crate::compiler::pool::AgentPool;
 /// Per-space mutex map. Only one graph build per space at a time.
 pub type SpaceMutexes = Arc<Mutex<HashMap<String, ()>>>;
 
-pub struct GraphBuilder {
+pub struct LintRunner {
     agent_pool: AgentPool,
     space_mutexes: SpaceMutexes,
     event_tx: broadcast::Sender<CompileEvent>,
 }
 
-impl GraphBuilder {
+impl LintRunner {
     pub fn new(
         agent_pool: AgentPool,
         event_tx: broadcast::Sender<CompileEvent>,
@@ -1410,7 +1412,7 @@ impl GraphBuilder {
         })
     }
 
-    pub async fn build_graph(
+    pub async fn lint_wiki(
         &self,
         pages: &[(String, String)],  // (path, content)
         space: &str,
@@ -1419,7 +1421,7 @@ impl GraphBuilder {
         let _ = self.event_tx.send(CompileEvent::phase_started("deep"));
 
         let agent = self.agent_pool
-            .acquire(space, "build_graph")
+            .acquire(space, "lint_wiki")
             .await
             .map_err(|_| GraphError::PoolExhausted)?;
 
@@ -1507,7 +1509,7 @@ impl GraphBuilder {
             .join("\n\n---\n\n");
 
         let request = AgentRequest {
-            task_type: "build_graph".into(),
+            task_type: "lint_wiki".into(),
             system_prompt: GRAPH_SYSTEM_PROMPT.into(),
             user_input: pages_text,
             workspace_path: format!("{}/wiki/", space),
@@ -1623,10 +1625,10 @@ impl AgentPool {
                 config.compile_page.size, limit.max_compile_agents
             ));
         }
-        if config.build_graph.size > limit.max_graph_agents {
+        if config.lint_wiki.size > limit.max_graph_agents {
             return Err(format!(
-                "build_graph pool size {} exceeds tier max {}",
-                config.build_graph.size, limit.max_graph_agents
+                "lint_wiki pool size {} exceeds tier max {}",
+                config.lint_wiki.size, limit.max_graph_agents
             ));
         }
 
@@ -1637,8 +1639,8 @@ impl AgentPool {
             Arc::new(Semaphore::new(config.compile_page.size as usize)),
         );
         sem_map.insert(
-            sem_key(space, "build_graph"),
-            Arc::new(Semaphore::new(config.build_graph.size as usize)),
+            sem_key(space, "lint_wiki"),
+            Arc::new(Semaphore::new(config.lint_wiki.size as usize)),
         );
 
         self.configs.lock().await.insert(space.to_string(), config);
@@ -1665,14 +1667,14 @@ impl AgentPool {
                     if task_type == "compile_page" {
                         Some(c.compile_page.harness.clone())
                     } else {
-                        Some(c.build_graph.harness.clone())
+                        Some(c.lint_wiki.harness.clone())
                     }
                 })
                 .unwrap_or_else(|| {
                     if task_type == "compile_page" {
                         "compile-simple".into()
                     } else {
-                        "entity-extract".into()
+                        "lint-wiki".into()
                     }
                 })
         };
@@ -1719,7 +1721,7 @@ pub enum PoolError {
 **Files:**
 - Modify: `crates/server/src/routes/compile.rs`
 - Modify: `crates/server/src/routes/review.rs`
-- Create: `crates/server/src/routes/graph.rs`
+- Create: `crates/server/src/routes/lint.rs`
 - Modify: `crates/server/src/routes/mod.rs`
 
 - [ ] **Step 1: Update AppState to hold pool and event channel**
@@ -1727,7 +1729,7 @@ pub enum PoolError {
 ```rust
 // In crates/server/src/main.rs (or wherever AppState is defined):
 use cowiki_core::compiler::AgentPool;
-use cowiki_core::compiler::GraphBuilder;
+use cowiki_core::compiler::LintRunner;
 use cowiki_core::compiler::SourceCompiler;
 use cowiki_agents::events::CompileEvent;
 use cowiki_agents::registry::HarnessRegistry;
@@ -1738,7 +1740,7 @@ pub struct AppState {
     // ... existing fields ...
     pub agent_pool: AgentPool,
     pub source_compiler: SourceCompiler,
-    pub graph_builder: GraphBuilder,
+    pub graph_builder: LintRunner,
     pub event_tx: broadcast::Sender<CompileEvent>,
 }
 ```
@@ -1790,7 +1792,7 @@ async fn do_compile(
     // 5. Save state
     save_state(repo, branch, &compile_state);
 
-    // 6. Fire DeepIntegrate based on space type
+    // 6. Fire DeepCompile based on space type
     let is_personal = space.starts_with("personal:");
     if is_personal {
         let graph = state.graph_builder.clone();
@@ -1801,7 +1803,7 @@ async fn do_compile(
         tokio::spawn(async move {
             match graph.try_acquire_space(&space).await {
                 Ok(guard) => {
-                    let _ = graph.build_graph(&pages_for_graph, &space, guard).await;
+                    let _ = graph.lint_wiki(&pages_for_graph, &space, guard).await;
                 }
                 Err(_) => {
                     tracing::warn!("graph build already running for space {}", space);
@@ -1827,11 +1829,11 @@ fn dispatch_sources(sources: &[(String, String)]) -> Vec<(String, String)> {
 }
 ```
 
-- [ ] **Step 3: Wire DeepIntegrate trigger in review approve**
+- [ ] **Step 3: Wire DeepCompile trigger in review approve**
 
 ```rust
 // crates/server/src/routes/review.rs — add after merge_to_main in "approve" branch:
-// Fire DeepIntegrate graph build (team space)
+// Fire DeepCompile graph build (team space)
 let graph_builder = state.graph_builder.clone();
 let space = ws_slug.clone();
 // Gather page paths from submission
@@ -1849,7 +1851,7 @@ let pages: Vec<(String, String)> = page_slugs.iter()
 tokio::spawn(async move {
     match graph_builder.try_acquire_space(&space).await {
         Ok(guard) => {
-            let _ = graph_builder.build_graph(&pages, &space, guard).await;
+            let _ = graph_builder.lint_wiki(&pages, &space, guard).await;
         }
         Err(_) => {
             tracing::warn!("graph build already running for space {}", space);
@@ -1903,14 +1905,14 @@ pub fn compile_routes() -> axum::Router<Arc<AppState>> {
     axum::Router::new()
         .route("/api/compile", axum::routing::post(compile_ws))
         .route("/api/compile/events", axum::routing::get(compile_events))
-        .route("/api/compile/graph/rebuild", axum::routing::post(graph_rebuild))
+        .route("/api/compile/lint/run", axum::routing::post(graph_rebuild))
 }
 ```
 
 - [ ] **Step 6: Create graph query routes**
 
 ```rust
-// crates/server/src/routes/graph.rs
+// crates/server/src/routes/lint.rs
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::Deserialize;
@@ -1966,7 +1968,7 @@ pub async fn graph_rebuild(
     let pages = load_all_pages(&repo, space)?;
 
     tokio::spawn(async move {
-        let _ = state.graph_builder.build_graph(&pages, space, guard).await;
+        let _ = state.graph_builder.lint_wiki(&pages, space, guard).await;
     });
 
     Ok(Json(serde_json::json!({ "status": "started" })))
@@ -2029,7 +2031,7 @@ struct DeletePageParams {
 
 ```rust
 // Add periodic orphan cleanup (can be called by a cron route or background task):
-pub async fn cleanup_orphans(graph_store: &dyn GraphStore, space: &str) {
+pub async fn cleanup_orphans(graph_store: &dyn WikiIndex, space: &str) {
     match graph_store.delete_orphan_entities(space, 7).await {
         Ok(count) => tracing::info!("cleaned {} orphan entities from space {}", count, space),
         Err(e) => tracing::error!("orphan cleanup failed: {}", e),
@@ -2070,24 +2072,24 @@ async fn test_shallow_hash_skip_unchanged_sources() {
 #[tokio::test]
 async fn test_deep_personal_space_auto_trigger() {
     // Setup: compile in personal space
-    // Assert: DeepIntegrate fires automatically
+    // Assert: DeepCompile fires automatically
     // Assert: entities created in DB
 }
 
 #[tokio::test]
 async fn test_deep_team_space_review_trigger() {
     // Setup: compile in team space
-    // Assert: DeepIntegrate does NOT fire immediately
+    // Assert: DeepCompile does NOT fire immediately
     // Review approve
-    // Assert: DeepIntegrate fires after approve
+    // Assert: DeepCompile fires after approve
 }
 
 #[tokio::test]
 async fn test_deep_mutex_per_space() {
-    // Setup: start DeepIntegrate for space A
-    // Call: try to start another DeepIntegrate for space A
+    // Setup: start DeepCompile for space A
+    // Call: try to start another DeepCompile for space A
     // Assert: 409 Conflict
-    // Call: start DeepIntegrate for space B
+    // Call: start DeepCompile for space B
     // Assert: succeeds (different space)
 }
 
@@ -2168,10 +2170,10 @@ git add -A
 git commit -m "feat: two-phase compile system with agent pools and knowledge graph
 
 - ShallowCompile (sync): SourceCompiler dispatches to remote agents via HTTP
-- DeepIntegrate (async): GraphBuilder extracts entities + facts (per-space mutex)
+- DeepCompile (async): LintRunner extracts entities + facts (per-space mutex)
 - Agent pool: per-space configurable size, tier-gated (free/pro/enterprise)
 - SSE events: full agent conversation observability
-- GraphStore: PgGraphStore with entities, facts, page_entities tables
+- WikiIndex: PgWikiIndex with entities, facts, page_entities tables
 - ApiClient: shared HTTP client in crates/core/src/client/
 - agents crate: protocol, registry, dispatch, events
 - Deletion cascade: git + pgvector + knowledge graph
@@ -2188,7 +2190,7 @@ Refs: #15"
 3. **Task 3** (Agent protocol) — agents crate
 4. **Task 6** (Agent pool) — pool logic (needed by phases)
 5. **Task 4** (ShallowCompile) — source compiler
-6. **Task 5** (DeepIntegrate) — graph builder
+6. **Task 5** (DeepCompile) — graph builder
 7. **Task 7** (Routes + SSE) — wire everything
 8. **Task 8** (Deletion) — consistency
 9. **Task 9** (Tests) — validation

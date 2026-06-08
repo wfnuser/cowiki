@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>cowiki Compile System — Architecture v3</title>
+<title>cowiki Compile System — Architecture v4</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -22,7 +22,7 @@
   section h2{font-family:'EB Garamond',serif;font-size:1.75rem;font-weight:600;color:#2a2520;margin-bottom:1.2rem;letter-spacing:-.005em}
   section h2::after{content:'';display:block;width:36px;height:1.5px;background:var(--gold);margin-top:.35rem}
   section h3{font-family:'Inter',sans-serif;font-size:.95rem;font-weight:600;color:var(--text);margin:1.4rem 0 .6rem}
-  .arch-diagram{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow-x:auto;box-shadow:var(--shadow-sm)}
+  .arch-diagram{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow-x:auto;box-shadow:var(--shadow-sm);padding:.25rem 0}
   .arch-diagram svg{display:block;width:100%;min-width:800px}
   .flow-row{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;padding:.5rem 0;font-size:.8rem;font-family:'JetBrains Mono',monospace}
   .flow-step{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:.4rem .75rem;color:var(--text);font-weight:500;box-shadow:var(--shadow-sm);white-space:nowrap}
@@ -71,134 +71,153 @@
 
 <header class="masthead">
   <h1>cowiki <span>Compile System</span></h1>
-  <p class="subtitle">Source directories &middot; Two-stage pipeline &middot; Split agent tools &middot; SSE observability</p>
-  <p class="meta">Design v3 &ensp;&middot;&ensp; 2026-06-07 &ensp;&middot;&ensp; Issue #15</p>
+  <p class="subtitle">Wikilink-centered &middot; FS source of truth &middot; Entity-as-bridge &middot; Two-stage review</p>
+  <p class="meta">Design v4 &ensp;&middot;&ensp; 2026-06-07 &ensp;&middot;&ensp; Issue #15</p>
 </header>
 
 <div class="container">
 
-<!-- ═══════════════════════════ 01 ═══════════════════════════ -->
+<!-- ═══════════════ 01: Navigation Model ═══════════════ -->
 <section>
   <div class="section-num">Section 01</div>
-  <h2>Data Flow — Personal vs Team Space</h2>
+  <h2>Navigation Model — Wiki Pages, Entities &amp; Concepts</h2>
 
   <div class="arch-diagram">
-    <svg viewBox="0 0 960 330" xmlns="http://www.w3.org/2000/svg">
+    <svg viewBox="0 0 960 240" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <filter id="s"><feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#00000010"/></filter>
-        <marker id="ar" viewBox="0 0 10 10" refX="5" refY="5" markerW="6" markerH="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#b5aea4"/></marker>
-        <marker id="ar-g" viewBox="0 0 10 10" refX="5" refY="5" markerW="6" markerH="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#b8860b"/></marker>
-        <marker id="ar-t" viewBox="0 0 10 10" refX="5" refY="5" markerW="6" markerH="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#3d9078"/></marker>
+        <filter id="s1"><feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#00000010"/></filter>
+        <marker id="m1" viewBox="0 0 10 10" refX="5" refY="5" markerW="5" markerH="5" orient="auto"><path d="M0 0L10 5L0 10z" fill="#b5aea4"/></marker>
       </defs>
 
-      <!-- == Personal Space row == -->
-      <text x="20" y="36" font-family="Inter,sans-serif" font-size="11" font-weight="700" fill="#b8860b">Personal Space</text>
+      <!-- Wiki pages (center) -->
+      <rect x="360" y="15" width="240" height="60" rx="8" fill="#fef9ee" stroke="#e8d5a3" stroke-width="2" filter="url(#s1)"/>
+      <text x="480" y="38" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" font-weight="700" fill="#b8860b">Wiki Pages</text>
+      <text x="480" y="54" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="8" fill="#7a7369">wiki/infra/docker-networking.md</text>
+      <text x="480" y="68" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="8" fill="#7a7369">wiki/guides/deployment.md</text>
 
-      <rect x="140" y="18" width="120" height="36" rx="6" fill="#fef9ee" stroke="#e8d5a3"/>
-      <text x="200" y="35" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#b8860b">Source Dir</text>
-      <text x="200" y="48" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#b5aea4">manifest.json</text>
+      <!-- Entities (left) -->
+      <rect x="30" y="100" width="240" height="60" rx="8" fill="#f5f6fc" stroke="#cdd4ee" stroke-width="2" filter="url(#s1)"/>
+      <text x="150" y="123" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" font-weight="700" fill="#5b6fb0">Entities</text>
+      <text x="150" y="139" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="8" fill="#7a7369">entities/docker.md</text>
+      <text x="150" y="153" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="8" fill="#7a7369">entities/kubernetes.md</text>
 
-      <line x1="260" y1="36" x2="286" y2="36" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#ar)"/>
+      <!-- Concepts (right) -->
+      <rect x="690" y="100" width="240" height="60" rx="8" fill="#f2f9f6" stroke="#b8dcd0" stroke-width="2" filter="url(#s1)"/>
+      <text x="810" y="123" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" font-weight="700" fill="#3d9078">Concepts</text>
+      <text x="810" y="139" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="8" fill="#7a7369">concepts/containerization.md</text>
+      <text x="810" y="153" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="8" fill="#7a7369">concepts/microservices.md</text>
 
-      <rect x="288" y="14" width="160" height="44" rx="6" fill="#fef9ee" stroke="#e8d5a3" filter="url(#s)"/>
-      <text x="368" y="32" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="700" fill="#b8860b">ShallowCompile</text>
-      <text x="368" y="48" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#7a7369">source FS + create_wiki</text>
+      <!-- Wiki → Entity wikilinks -->
+      <line x1="420" y1="76" x2="220" y2="98" stroke="#b8860b" stroke-width="1.5" marker-end="url(#m1)"/>
+      <text x="300" y="84" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#b8860b">[[docker]]</text>
+      <line x1="540" y1="76" x2="740" y2="98" stroke="#b8860b" stroke-width="1.5" marker-end="url(#m1)"/>
+      <text x="660" y="84" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#b8860b">[[containerization]]</text>
 
-      <line x1="448" y1="36" x2="474" y2="36" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#ar)"/>
+      <!-- Entity backlinks -->
+      <line x1="210" y1="130" x2="390" y2="55" stroke="#5b6fb0" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#m1)"/>
+      <text x="268" y="76" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="6" fill="#5b6fb0">## Mentioned In</text>
 
-      <rect x="476" y="18" width="124" height="36" rx="6" fill="#f2f9f6" stroke="#b8dcd0"/>
-      <text x="538" y="35" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#3d9078">Wiki Pages</text>
-      <text x="538" y="48" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#3d9078">+ pgvector ✓</text>
+      <!-- Entity ↔ Entity wikilinks -->
+      <line x1="270" y1="130" x2="690" y2="130" stroke="#5b6fb0" stroke-width="1" stroke-dasharray="3,3" marker-end="url(#m1)"/>
+      <text x="480" y="126" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#5b6fb0">[[kubernetes]]</text>
 
-      <line x1="600" y1="36" x2="626" y2="36" stroke="#b8860b" stroke-width="1.5" marker-end="url(#ar-g)"/>
+      <!-- Concept connections -->
+      <line x1="810" y1="160" x2="810" y2="178" stroke="#3d9078" stroke-width="1.5" marker-end="url(#m1)"/>
 
-      <rect x="628" y="14" width="150" height="44" rx="6" fill="#f2f9f6" stroke="#b8dcd0" filter="url(#s)"/>
-      <text x="703" y="32" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="700" fill="#3d9078">DeepIntegrate</text>
-      <text x="703" y="48" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#7a7369">C1: reorg → C2: graph</text>
-
-      <line x1="778" y1="36" x2="804" y2="36" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#ar)"/>
-
-      <rect x="806" y="18" width="130" height="36" rx="6" fill="#f5f6fc" stroke="#cdd4ee"/>
-      <text x="871" y="36" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#5b6fb0">Knowledge Graph</text>
-
-      <!-- Divider -->
-      <line x1="20" y1="82" x2="940" y2="82" stroke="#ede6db" stroke-width="1" stroke-dasharray="6,4"/>
-      <text x="470" y="76" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#b5aea4">─── Immediate. No review gate. ───</text>
-
-      <!-- == Team Space row == -->
-      <text x="20" y="112" font-family="Inter,sans-serif" font-size="11" font-weight="700" fill="#3d9078">Team Space</text>
-
-      <rect x="140" y="94" width="120" height="36" rx="6" fill="#fef9ee" stroke="#e8d5a3"/>
-      <text x="200" y="111" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#b8860b">Source Dir</text>
-      <text x="200" y="124" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#b5aea4">manifest.json</text>
-
-      <line x1="260" y1="112" x2="286" y2="112" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#ar)"/>
-
-      <rect x="288" y="94" width="160" height="36" rx="6" fill="#fef9ee" stroke="#e8d5a3" filter="url(#s)"/>
-      <text x="368" y="108" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="700" fill="#b8860b">ShallowCompile</text>
-      <text x="368" y="121" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#7a7369">source FS + create_wiki</text>
-
-      <line x1="448" y1="112" x2="474" y2="112" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#ar)"/>
-
-      <rect x="476" y="94" width="124" height="36" rx="6" fill="#fef7f5" stroke="#f0ccc4"/>
-      <text x="538" y="108" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#c06050">Wiki Pages</text>
-      <text x="538" y="121" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#c06050">NO pgvector</text>
-
-      <line x1="600" y1="112" x2="626" y2="112" stroke="#c06050" stroke-width="1.5" marker-end="url(#ar)"/>
-
-      <rect x="628" y="94" width="60" height="36" rx="6" fill="#fef7f5" stroke="#f0ccc4"/>
-      <text x="658" y="108" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#c06050">Submit</text>
-      <text x="658" y="121" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#7a7369">→ Review</text>
-
-      <line x1="688" y1="112" x2="714" y2="112" stroke="#c06050" stroke-width="1.5" marker-end="url(#ar)"/>
-
-      <rect x="716" y="94" width="62" height="36" rx="6" fill="#f2f9f6" stroke="#b8dcd0"/>
-      <text x="747" y="108" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#3d9078">Approve</text>
-      <text x="747" y="121" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#7a7369">✓</text>
-
-      <line x1="778" y1="112" x2="804" y2="112" stroke="#3d9078" stroke-width="1.5" marker-end="url(#ar-t)"/>
-
-      <rect x="806" y="90" width="130" height="44" rx="6" fill="#f5f6fc" stroke="#cdd4ee"/>
-      <text x="871" y="108" text-anchor="middle" font-family="Inter,sans-serif" font-size="9" font-weight="600" fill="#5b6fb0">pgvector insert</text>
-      <text x="871" y="123" text-anchor="middle" font-family="Inter,sans-serif" font-size="9" font-weight="600" fill="#5b6fb0">+ DeepIntegrate</text>
-
-      <line x1="20" y1="152" x2="940" y2="152" stroke="#ede6db" stroke-width="1" stroke-dasharray="6,4"/>
-      <text x="470" y="146" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#b5aea4">─── Gated by review. Drafts don&apos;t pollute search index. ───</text>
-
-      <!-- == Details panel == -->
-      <rect x="20" y="170" width="920" height="70" rx="6" fill="#f5fcf9" stroke="#b8dcd0" stroke-dasharray="5,3"/>
-      <text x="40" y="192" font-family="Inter,sans-serif" font-size="9" fill="#3d9078"><tspan font-weight="700">DeepIntegrate detail (under per-space mutex):</tspan></text>
-      <text x="40" y="210" font-family="Inter,sans-serif" font-size="9" fill="#3d9078">Acquire Mutex → <tspan font-weight="600">Call 1: Wiki Reorganization</tspan> (ls_wiki, read_wiki, mkdir_wiki, mv_wiki, edit_wiki, rm_wiki) → <tspan font-weight="600">Call 2: Knowledge Graph</tspan> (read_wiki + upsert_entity, upsert_fact, query_entity, link_page_entity, list_entities) → Release Mutex</text>
-      <text x="40" y="228" font-family="Inter,sans-serif" font-size="9" fill="#7a7369">Two serial calls guarantee stable page_path before graph extraction. Single per-space mutex prevents concurrent modification.</text>
-
-      <!-- == Source dir detail == -->
-      <rect x="20" y="250" width="920" height="54" rx="6" fill="#fef9ee" stroke="#e8d5a3" stroke-dasharray="5,3"/>
-      <text x="40" y="272" font-family="Inter,sans-serif" font-size="9" fill="#b8860b"><tspan font-weight="700">Source Directory:</tspan> identity_hash = SHA256(source_type + source_identity) → ingest-time dedup. manifest.json required.</text>
-      <text x="40" y="290" font-family="Inter,sans-serif" font-size="9" fill="#7a7369">Agent explores with ls/grep/read. Compile-time semantic dedup by agent comparing against existing wiki pages. Extensions via <tspan fill="#5b6fb0">#31</tspan>.</text>
+      <!-- Legend -->
+      <rect x="30" y="185" width="900" height="42" rx="6" fill="#faf7f2" stroke="#ede6db" stroke-dasharray="5,3"/>
+      <text x="50" y="205" font-family="Inter,sans-serif" font-size="9" fill="#7a7369"><tspan font-weight="700" fill="#3a3530">FS is source of truth.</tspan> wiki/ · entities/ · concepts/ are markdown directories with frontmatter (<tspan font-family="JetBrains Mono,monospace">title, type, aliases, tags</tspan>). PSQL tables index metadata + embeddings for search &amp; dedup. <tspan font-family="JetBrains Mono,monospace">[[wikilinks]]</tspan> connect everything. Entities are <tspan font-weight="600" fill="#b8860b">navigation bridges</tspan> — each auto-maintains <tspan font-family="JetBrains Mono,monospace" fill="#5b6fb0">## Mentioned In</tspan> backlinks.</text>
+      <text x="50" y="222" font-family="Inter,sans-serif" font-size="8" fill="#b5aea4">Page types from llm_wiki frontmatter: entity, concept, query, thesis, finding, methodology, event, overview — extensible.</text>
     </svg>
   </div>
 </section>
 
-<!-- ═══════════════════════════ 02 ═══════════════════════════ -->
+<!-- ═══════════════ 02: Data Flow ═══════════════ -->
 <section>
   <div class="section-num">Section 02</div>
+  <h2>Data Flow — Personal vs Team Space</h2>
+
+  <div class="arch-diagram">
+    <svg viewBox="0 0 960 310" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="s2"><feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#00000010"/></filter>
+        <marker id="m2" viewBox="0 0 10 10" refX="5" refY="5" markerW="5" markerH="5" orient="auto"><path d="M0 0L10 5L0 10z" fill="#b5aea4"/></marker>
+      </defs>
+
+      <!-- Personal -->
+      <text x="20" y="30" font-family="Inter,sans-serif" font-size="10" font-weight="700" fill="#b8860b">Personal</text>
+      <rect x="100" y="12" width="130" height="34" rx="6" fill="#fef9ee" stroke="#e8d5a3"/>
+      <text x="165" y="33" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#b8860b">ShallowCompile</text>
+      <line x1="230" y1="29" x2="254" y2="29" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#m2)"/>
+      <rect x="256" y="8" width="142" height="42" rx="6" fill="#f2f9f6" stroke="#b8dcd0"/>
+      <text x="327" y="27" text-anchor="middle" font-family="Inter,sans-serif" font-size="9" font-weight="600" fill="#3d9078">wiki/ + entities/ + concepts/</text>
+      <text x="327" y="41" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="6" fill="#7a7369">+ pgvector ✓</text>
+      <line x1="398" y1="29" x2="422" y2="29" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#m2)"/>
+      <rect x="424" y="12" width="100" height="34" rx="6" fill="#f2f9f6" stroke="#b8dcd0"/>
+      <text x="474" y="33" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#3d9078">Shallow Review</text>
+      <line x1="524" y1="29" x2="548" y2="29" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#m2)"/>
+      <rect x="550" y="8" width="120" height="42" rx="6" fill="#f2f9f6" stroke="#b8dcd0" filter="url(#s2)"/>
+      <text x="610" y="25" text-anchor="middle" font-family="Inter,sans-serif" font-size="9" font-weight="600" fill="#3d9078">DeepCompile</text>
+      <text x="610" y="40" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="6" fill="#7a7369">manual trigger</text>
+      <line x1="670" y1="29" x2="694" y2="29" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#m2)"/>
+      <rect x="696" y="12" width="100" height="34" rx="6" fill="#fef7f5" stroke="#f0ccc4"/>
+      <text x="746" y="33" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#c06050">DeepCompile Review</text>
+      <text x="830" y="33" font-family="JetBrains Mono,monospace" font-size="8" fill="#b5aea4">→ Done ✓</text>
+
+      <line x1="20" y1="70" x2="940" y2="70" stroke="#ede6db" stroke-width="1" stroke-dasharray="6,4"/>
+      <text x="470" y="64" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#b5aea4">─── Immediate. No gate. pgvector inserted at ShallowCompile. ───</text>
+
+      <!-- Team -->
+      <text x="20" y="102" font-family="Inter,sans-serif" font-size="10" font-weight="700" fill="#3d9078">Team</text>
+      <rect x="100" y="84" width="130" height="34" rx="6" fill="#fef9ee" stroke="#e8d5a3"/>
+      <text x="165" y="105" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#b8860b">ShallowCompile</text>
+      <line x1="230" y1="101" x2="254" y2="101" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#m2)"/>
+      <rect x="256" y="84" width="142" height="34" rx="6" fill="#fef7f5" stroke="#f0ccc4"/>
+      <text x="327" y="105" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#c06050">wiki/ + entities/ + concepts/</text>
+      <line x1="398" y1="101" x2="422" y2="101" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#m2)"/>
+      <rect x="424" y="84" width="100" height="34" rx="6" fill="#fef7f5" stroke="#f0ccc4"/>
+      <text x="474" y="105" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#c06050">Shallow Review</text>
+      <line x1="524" y1="101" x2="548" y2="101" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#m2)"/>
+      <rect x="550" y="84" width="60" height="34" rx="6" fill="#fef7f5" stroke="#f0ccc4"/>
+      <text x="580" y="105" text-anchor="middle" font-family="Inter,sans-serif" font-size="8" font-weight="600" fill="#c06050">Submit →</text>
+      <line x1="610" y1="101" x2="634" y2="101" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#m2)"/>
+      <rect x="636" y="84" width="54" height="34" rx="6" fill="#f2f9f6" stroke="#b8dcd0"/>
+      <text x="663" y="105" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="600" fill="#3d9078">Approve</text>
+      <line x1="690" y1="101" x2="714" y2="101" stroke="#3d9078" stroke-width="1.5" marker-end="url(#m2)"/>
+      <rect x="716" y="80" width="100" height="42" rx="6" fill="#f5f6fc" stroke="#cdd4ee" filter="url(#s2)"/>
+      <text x="766" y="98" text-anchor="middle" font-family="Inter,sans-serif" font-size="9" font-weight="600" fill="#5b6fb0">pgvector +</text>
+      <text x="766" y="113" text-anchor="middle" font-family="Inter,sans-serif" font-size="9" font-weight="600" fill="#5b6fb0">DeepCompile (auto)</text>
+      <line x1="816" y1="101" x2="840" y2="101" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#m2)"/>
+      <rect x="842" y="84" width="70" height="34" rx="6" fill="#fef7f5" stroke="#f0ccc4"/>
+      <text x="877" y="105" text-anchor="middle" font-family="Inter,sans-serif" font-size="8" font-weight="600" fill="#c06050">DeepCompile Review</text>
+
+      <line x1="20" y1="144" x2="940" y2="144" stroke="#ede6db" stroke-width="1" stroke-dasharray="6,4"/>
+      <text x="470" y="138" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#b5aea4">─── Gated. Drafts don't pollute search index. pgvector + DeepCompile after approve. ───</text>
+
+      <!-- Detail panels -->
+      <rect x="20" y="160" width="920" height="48" rx="6" fill="#f5fcf9" stroke="#b8dcd0" stroke-dasharray="5,3"/>
+      <text x="40" y="182" font-family="Inter,sans-serif" font-size="9" fill="#3d9078"><tspan font-weight="700">ShallowCompile:</tspan> Agent explores source dirs (ls/grep/read), deduplicates against existing entities/concepts, creates wiki/entities/concepts/ markdown with [[wikilinks]], upserts PSQL metadata indices.</text>
+      <text x="40" y="198" font-family="Inter,sans-serif" font-size="9" fill="#3d9078"><tspan font-weight="700">DeepCompile:</tspan> Health-checks contradictions, duplicates, orphans, broken links, missing backlinks. DeepCompile Review items streamed via SSE → human resolves.</text>
+
+      <rect x="20" y="218" width="920" height="48" rx="6" fill="#fef9ee" stroke="#e8d5a3" stroke-dasharray="5,3"/>
+      <text x="40" y="240" font-family="Inter,sans-serif" font-size="9" fill="#b8860b"><tspan font-weight="700">Review (two-stage):</tspan> Shallow Review (per-page, after ShallowCompile) → DeepCompile Review (cross-page, after DeepCompile). FS is source of truth. PSQL tables are derived indices — delete+rebuild from FS content.</text>
+      <text x="40" y="256" font-family="Inter,sans-serif" font-size="9" fill="#7a7369"><tspan font-weight="600">Agentic Search</tspan> (future consumer): vector topK wiki pages → agent follows [[wikilinks]] → synthesizes answer → optionally files into queries/.</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ═══════════════ 03: System Architecture ═══════════════ -->
+<section>
+  <div class="section-num">Section 03</div>
   <h2>System Architecture</h2>
 
   <div class="arch-diagram">
     <svg viewBox="0 0 960 680" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <filter id="shadow" x="-3%" y="-3%" width="106%" height="120%">
-          <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#00000010"/>
-        </filter>
-        <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerW="6" markerH="6" orient="auto">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#b5aea4"/>
-        </marker>
-        <marker id="arrow-gold" viewBox="0 0 10 10" refX="5" refY="5" markerW="6" markerH="6" orient="auto">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#b8860b"/>
-        </marker>
-        <marker id="arrow-teal" viewBox="0 0 10 10" refX="5" refY="5" markerW="6" markerH="6" orient="auto">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#3d9078"/>
-        </marker>
+        <filter id="shadow" x="-3%" y="-3%" width="106%" height="120%"><feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#00000010"/></filter>
+        <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerW="6" markerH="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#b5aea4"/></marker>
+        <marker id="arrow-gold" viewBox="0 0 10 10" refX="5" refY="5" markerW="6" markerH="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#b8860b"/></marker>
+        <marker id="arrow-teal" viewBox="0 0 10 10" refX="5" refY="5" markerW="6" markerH="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#3d9078"/></marker>
       </defs>
 
       <!-- API trigger -->
@@ -216,83 +235,76 @@
       <!-- ShallowCompile box -->
       <rect x="60" y="110" width="430" height="245" rx="6" fill="#fef9ee" stroke="#e8d5a3" stroke-width="1"/>
       <text x="80" y="132" font-family="Inter, sans-serif" font-size="12" font-weight="700" fill="#b8860b">ShallowCompile</text>
-      <rect x="220" y="120" width="72" height="16" rx="3" fill="#fef9ee" stroke="#e8d5a3"/>
-      <text x="256" y="132" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" font-weight="700" fill="#b8860b">SYNC · ∥</text>
+      <rect x="240" y="120" width="72" height="16" rx="3" fill="#fef9ee" stroke="#e8d5a3"/>
+      <text x="276" y="132" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" font-weight="700" fill="#b8860b">SYNC · ∥</text>
 
-      <!-- ShallowCompile flow -->
+      <!-- Flow -->
       <rect x="80" y="150" width="105" height="28" rx="4" fill="#ffffff" stroke="#e6dfd3"/>
       <text x="132" y="168" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" fill="#3a3530">Identity Check</text>
       <line x1="185" y1="164" x2="203" y2="164" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
-
       <rect x="205" y="150" width="105" height="28" rx="4" fill="#ffffff" stroke="#e6dfd3"/>
       <text x="257" y="168" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" fill="#3a3530">List Sources</text>
       <line x1="310" y1="164" x2="328" y2="164" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
-
       <rect x="330" y="150" width="145" height="28" rx="4" fill="#f5f6fc" stroke="#cdd4ee" stroke-width="1"/>
       <text x="402" y="168" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" fill="#5b6fb0">Acquire Agent</text>
       <path d="M 402 178 L 402 194 L 132 194 L 132 202" stroke="#b5aea4" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
 
-      <!-- Agent Pool box inside ShallowCompile -->
+      <!-- Agent Pool -->
       <rect x="80" y="206" width="395" height="50" rx="4" fill="#f5f6fc" stroke="#cdd4ee" stroke-width="1" stroke-dasharray="4,2"/>
       <text x="100" y="222" font-family="Inter, sans-serif" font-size="9" font-weight="600" fill="#5b6fb0">Agent Pool (per-space, tier-gated)</text>
-      <text x="100" y="238" font-family="JetBrains Mono,monospace" font-size="8" fill="#7a7369">Personal: N=1 (branch: user/{uid}) &ensp;|&ensp; Team: N config (branch: main) — tier: Free/Pro/Enterprise</text>
-      <text x="100" y="252" font-family="JetBrains Mono,monospace" font-size="7" fill="#7a7369">Tools: source FS (ls/grep/read) + wiki create (create_wiki, rm_wiki)</text>
+      <text x="100" y="238" font-family="JetBrains Mono,monospace" font-size="8" fill="#7a7369">Personal: N=1 (branch: user/{uid}) &ensp;|&ensp; Team: N config (branch: main) — Free/Pro/Enterprise</text>
+      <text x="100" y="252" font-family="JetBrains Mono,monospace" font-size="7" fill="#7a7369">Tools: source FS + wiki create/edit/read/rm + entity create/edit/read/rm + concept create/edit/read/rm</text>
 
       <line x1="132" y1="256" x2="132" y2="272" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
 
-      <!-- Persist -->
       <rect x="80" y="276" width="395" height="36" rx="4" fill="#f2f9f6" stroke="#b8dcd0" stroke-width="1"/>
-      <text x="277" y="294" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" font-weight="600" fill="#3d9078">Persist wiki pages to git</text>
+      <text x="277" y="294" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" font-weight="600" fill="#3d9078">Persist wiki/ + entities/ + concepts/ to git</text>
       <text x="277" y="307" text-anchor="middle" font-family="JetBrains Mono, mono" font-size="7" fill="#7a7369">Personal: + pgvector immediately &ensp;|&ensp; Team: defer pgvector to review approve</text>
 
       <line x1="277" y1="312" x2="277" y2="328" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
-
       <rect x="80" y="332" width="395" height="16" rx="4" fill="#ffffff" stroke="#e6dfd3"/>
       <text x="277" y="344" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" fill="#3a3530">RETURN [{pages}] + SSE stream to frontend</text>
 
       <!-- Arrow P1 → P2 -->
       <line x1="490" y1="232" x2="506" y2="232" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#arrow)" stroke-dasharray="4,3"/>
 
-      <!-- DeepIntegrate box -->
+      <!-- DeepCompile box -->
       <rect x="510" y="110" width="390" height="245" rx="6" fill="#f2f9f6" stroke="#b8dcd0" stroke-width="1"/>
-      <text x="530" y="132" font-family="Inter, sans-serif" font-size="12" font-weight="700" fill="#3d9078">DeepIntegrate</text>
-      <rect x="660" y="120" width="96" height="16" rx="3" fill="#f2f9f6" stroke="#b8dcd0"/>
-      <text x="708" y="132" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" font-weight="700" fill="#3d9078">ASYNC · MUTEX</text>
+      <text x="530" y="132" font-family="Inter, sans-serif" font-size="12" font-weight="700" fill="#3d9078">DeepCompile — Wiki Health Check</text>
+      <rect x="710" y="120" width="96" height="16" rx="3" fill="#f2f9f6" stroke="#b8dcd0"/>
+      <text x="758" y="132" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" font-weight="700" fill="#3d9078">ASYNC · MUTEX</text>
 
-      <!-- Trigger model -->
       <rect x="530" y="152" width="355" height="20" rx="4" fill="#fef7f5" stroke="#f0ccc4" stroke-width="1"/>
-      <text x="707" y="166" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" fill="#c06050">Trigger: Personal → after ShallowCompile &ensp;|&ensp; Team → review approve</text>
+      <text x="707" y="166" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" fill="#c06050">Trigger: Personal → manual &ensp;|&ensp; Team → review approve hook</text>
 
-      <!-- DeepIntegrate flow — Call 1 -->
-      <rect x="530" y="182" width="88" height="24" rx="4" fill="#ffffff" stroke="#e6dfd3"/>
-      <text x="574" y="198" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" fill="#3a3530">Acquire Mutex</text>
-      <line x1="618" y1="194" x2="634" y2="194" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="530" y="182" width="115" height="24" rx="4" fill="#ffffff" stroke="#e6dfd3"/>
+      <text x="587" y="198" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" fill="#3a3530">Acquire Mutex</text>
+      <line x1="645" y1="194" x2="661" y2="194" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
 
-      <rect x="636" y="178" width="128" height="32" rx="4" fill="#f2f9f6" stroke="#b8dcd0" stroke-width="1"/>
-      <text x="700" y="192" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" font-weight="600" fill="#3d9078">Call 1: Wiki Reorg</text>
-      <text x="700" y="205" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="6" fill="#7a7369">ls/read/mkdir/mv/edit/rm wiki</text>
-      <line x1="764" y1="194" x2="780" y2="194" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="663" y="178" width="108" height="32" rx="4" fill="#fef7f5" stroke="#f0ccc4" stroke-width="1"/>
+      <text x="717" y="192" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" font-weight="600" fill="#c06050">Detect Issues</text>
+      <text x="717" y="205" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="6" fill="#7a7369">read wiki + entity + concept</text>
+      <line x1="771" y1="194" x2="787" y2="194" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
 
-      <rect x="782" y="178" width="102" height="32" rx="4" fill="#f5f6fc" stroke="#cdd4ee" stroke-width="1"/>
-      <text x="833" y="192" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" font-weight="600" fill="#5b6fb0">Call 2: Graph</text>
-      <text x="833" y="205" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="6" fill="#7a7369">read wiki + graph tools</text>
+      <rect x="789" y="178" width="96" height="32" rx="4" fill="#f5f6fc" stroke="#cdd4ee" stroke-width="1"/>
+      <text x="837" y="192" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" font-weight="600" fill="#5b6fb0">Auto-Fix / Flag</text>
+      <text x="837" y="205" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="6" fill="#7a7369">edit + rm wiki/entity</text>
 
-      <path d="M 833 210 L 833 228 L 574 228 L 574 232" stroke="#b5aea4" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
+      <path d="M 837 210 L 837 228 L 587 228 L 587 232" stroke="#b5aea4" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
 
-      <!-- Store -->
       <rect x="530" y="238" width="355" height="36" rx="4" fill="#f2f9f6" stroke="#b8dcd0" stroke-width="1"/>
-      <text x="707" y="256" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" font-weight="600" fill="#3d9078">GraphStore.upsert</text>
-      <text x="707" y="270" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" fill="#7a7369">entities · facts · page_entities</text>
+      <text x="707" y="256" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" font-weight="600" fill="#3d9078">Produce ReviewItem entries</text>
+      <text x="707" y="270" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" fill="#7a7369">contradictions · duplicates · orphans · broken links · missing backlinks</text>
 
       <line x1="707" y1="274" x2="707" y2="292" stroke="#b5aea4" stroke-width="1" marker-end="url(#arrow)"/>
 
       <rect x="560" y="296" width="290" height="18" rx="4" fill="#ffffff" stroke="#e6dfd3"/>
-      <text x="705" y="309" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" fill="#3a3530">Orphan Cleanup (7-day grace)</text>
+      <text x="705" y="309" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" fill="#3a3530">Stream via SSE → human DeepCompile Review</text>
 
       <rect x="620" y="320" width="170" height="18" rx="4" fill="#fef7f5" stroke="#f0ccc4" stroke-width="1"/>
       <text x="705" y="333" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" fill="#c06050">Release Mutex</text>
 
-      <!-- SSE arrow out -->
+      <!-- SSE arrow -->
       <line x1="480" y1="372" x2="480" y2="392" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#arrow)"/>
       <text x="490" y="388" font-family="Inter, sans-serif" font-size="9" fill="#b5aea4">SSE event stream to frontend</text>
 
@@ -303,68 +315,57 @@
       <text x="70" y="418" font-family="JetBrains Mono, monospace" font-size="11" font-weight="600" fill="#5b6fb0">crates/agents/</text>
       <text x="220" y="418" font-family="Inter, sans-serif" font-size="10" fill="#b5aea4">communication layer — protocol, dispatch, SSE events</text>
 
-      <rect x="60" y="434" width="130" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
-      <text x="125" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">protocol.rs</text>
-      <rect x="198" y="434" width="150" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
-      <text x="273" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">client.rs (HTTP/gRPC)</text>
-      <rect x="356" y="434" width="120" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
-      <text x="416" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">registry.rs</text>
-      <rect x="484" y="434" width="120" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
-      <text x="544" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">dispatch.rs</text>
-      <rect x="612" y="434" width="90" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
-      <text x="657" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">events.rs</text>
-      <rect x="710" y="434" width="80" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
-      <text x="750" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">error.rs</text>
-      <rect x="798" y="434" width="108" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/>
-      <text x="852" y="450" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">pool.rs</text>
+      <rect x="60" y="434" width="130" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/><text x="125" y="450" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#5b6fb0">protocol.rs</text>
+      <rect x="198" y="434" width="150" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/><text x="273" y="450" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#5b6fb0">client.rs (HTTP/gRPC)</text>
+      <rect x="356" y="434" width="120" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/><text x="416" y="450" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#5b6fb0">registry.rs</text>
+      <rect x="484" y="434" width="120" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/><text x="544" y="450" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#5b6fb0">dispatch.rs</text>
+      <rect x="612" y="434" width="90" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/><text x="657" y="450" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#5b6fb0">events.rs</text>
+      <rect x="710" y="434" width="80" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/><text x="750" y="450" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#5b6fb0">error.rs</text>
+      <rect x="798" y="434" width="108" height="24" rx="4" fill="#ffffff" stroke="#cdd4ee"/><text x="852" y="450" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#5b6fb0">pool.rs</text>
 
-      <!-- Shared client -->
+      <!-- Client -->
       <rect x="60" y="465" width="830" height="24" rx="4" fill="#f2f9f6" stroke="#b8dcd0" stroke-width="1"/>
       <text x="475" y="481" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#3d9078">crates/core/src/client/ — server-internal API client (compiler &amp; agents)</text>
 
-      <!-- Lines to harnesses -->
+      <!-- Harness lines -->
       <line x1="210" y1="496" x2="210" y2="516" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#arrow)"/>
       <line x1="480" y1="496" x2="480" y2="516" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#arrow)"/>
       <line x1="750" y1="496" x2="750" y2="516" stroke="#b5aea4" stroke-width="1.5" marker-end="url(#arrow)"/>
-
-      <text x="220" y="514" font-family="Inter, sans-serif" font-size="8" fill="#b5aea4">HTTP</text>
-      <text x="492" y="514" font-family="Inter, sans-serif" font-size="8" fill="#b5aea4">HTTP</text>
-      <text x="760" y="514" font-family="Inter, sans-serif" font-size="8" fill="#b5aea4">gRPC</text>
+      <text x="220" y="514" font-family="Inter,sans-serif" font-size="8" fill="#b5aea4">HTTP</text>
+      <text x="492" y="514" font-family="Inter,sans-serif" font-size="8" fill="#b5aea4">HTTP</text>
+      <text x="760" y="514" font-family="Inter,sans-serif" font-size="8" fill="#b5aea4">gRPC</text>
 
       <!-- Harness boxes -->
-      <rect x="70" y="522" width="260" height="82" rx="6" fill="#ffffff" stroke="#e6dfd3" filter="url(#shadow)"/>
-      <text x="200" y="546" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" font-weight="600" fill="#3a3530">Python deepagents</text>
-      <text x="200" y="566" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#3d9078">compile-simple / wiki-reorganize</text>
-      <text x="200" y="582" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#b5aea4">compile-complex (future)</text>
-      <text x="200" y="598" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" fill="#7a7369">tools: wiki ops via ApiClient</text>
+      <rect x="50" y="522" width="280" height="82" rx="6" fill="#ffffff" stroke="#e6dfd3" filter="url(#shadow)"/>
+      <text x="190" y="546" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" font-weight="600" fill="#3a3530">Python deepagents</text>
+      <text x="190" y="566" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#3d9078">compile-simple / lint-wiki</text>
+      <text x="190" y="580" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#7a7369">agentic-search (future)</text>
+      <text x="190" y="596" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="#7a7369">tools: wiki + entity + concept FS ops</text>
 
       <rect x="350" y="522" width="260" height="82" rx="6" fill="#ffffff" stroke="#e6dfd3" filter="url(#shadow)"/>
-      <text x="480" y="546" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" font-weight="600" fill="#3a3530">Rust agnt</text>
-      <text x="480" y="566" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5b6fb0">entity-extract</text>
-      <text x="480" y="582" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#7a7369">(standalone HTTP binary)</text>
-      <text x="480" y="598" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" fill="#7a7369">tools: graph ops via ApiClient</text>
+      <text x="480" y="546" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" font-weight="600" fill="#3a3530">Rust agnt / Swink Agent</text>
+      <text x="480" y="566" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#5b6fb0">lint-wiki / review</text>
+      <text x="480" y="580" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#7a7369">(standalone HTTP binary / gRPC)</text>
+      <text x="480" y="596" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="#7a7369">tools: wiki index + review ops</text>
 
-      <rect x="630" y="522" width="260" height="82" rx="6" fill="#ffffff" stroke="#e6dfd3" filter="url(#shadow)"/>
-      <text x="760" y="546" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" font-weight="600" fill="#3a3530">Swink Agent</text>
-      <text x="760" y="566" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#c06050">review</text>
-      <rect x="735" y="572" width="32" height="12" rx="3" fill="#fef7f5" stroke="#f0ccc4"/>
-      <text x="751" y="581" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="6" fill="#c06050">FUT</text>
-      <text x="760" y="598" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" fill="#7a7369">tools: review ops via ApiClient</text>
+      <rect x="630" y="522" width="280" height="82" rx="6" fill="#ffffff" stroke="#e6dfd3" filter="url(#shadow)"/>
+      <text x="770" y="546" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" font-weight="600" fill="#3a3530">Future Harnesses</text>
+      <text x="770" y="566" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#7a7369">agentic-search, review</text>
+      <text x="770" y="580" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#b5aea4">(extensible)</text>
 
       <!-- Independent modules -->
       <rect x="70" y="618" width="390" height="36" rx="6" fill="#f5f3f0" stroke="#e6dfd3" stroke-width="1" stroke-dasharray="5,3"/>
-      <text x="265" y="638" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#7a7369">cli/ — independent, own HTTP client, no crates dep</text>
-
+      <text x="265" y="638" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#7a7369">cli/ — independent, own HTTP client, no crates dep</text>
       <rect x="500" y="618" width="390" height="36" rx="6" fill="#f5f3f0" stroke="#e6dfd3" stroke-width="1" stroke-dasharray="5,3"/>
-      <text x="695" y="638" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#7a7369">cowiki-mcp-server/ — independent, own HTTP client, no crates dep</text>
+      <text x="695" y="638" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#7a7369">cowiki-mcp-server/ — independent, own HTTP client, no crates dep</text>
     </svg>
   </div>
 </section>
 
-<!-- ═══════════════════════════ 03 ═══════════════════════════ -->
+<!-- ═══════════════ 04: ShallowCompile ═══════════ -->
 <section>
-  <div class="section-num">Section 03</div>
-  <h2>ShallowCompile — Source → Wiki Pages <span class="badge badge-sync">sync</span></h2>
+  <div class="section-num">Section 04</div>
+  <h2>ShallowCompile — Source → Wiki + Entities + Concepts <span class="badge badge-sync">sync</span></h2>
 
   <div class="grid-2">
     <div>
@@ -373,190 +374,152 @@
         <span class="flow-step gold">1. Identity Check</span><span class="flow-arrow">→</span>
         <span class="flow-step gold">2. List Sources</span><span class="flow-arrow">→</span>
         <span class="flow-step indigo">3. Acquire Agent</span><span class="flow-arrow">→</span>
-        <span class="flow-step teal">4. Agent Creates</span><span class="flow-arrow">→</span>
-        <span class="flow-step gold">5. Return + SSE</span>
+        <span class="flow-step teal">4. Create Pages</span><span class="flow-arrow">→</span>
+        <span class="flow-step gold">5. PSQL + Return</span>
       </div>
       <table>
-        <thead><tr><th>Step</th><th>Action</th></tr></thead>
-        <tbody>
-          <tr><td><strong>1.</strong> Hash</td><td>Lookup identity hash in <code>.cowiki/state.json</code>; skip if compiled</td></tr>
-          <tr><td><strong>2.</strong> List</td><td>Enumerate source dirs in <code>sources/</code>; each has <code>manifest.json</code></td></tr>
-          <tr><td><strong>3.</strong> Pool</td><td>Acquire agent from space pool; queue if busy; 503 if full</td></tr>
-          <tr><td><strong>4.</strong> Write</td><td>Agent explores with source FS tools, creates wiki pages</td></tr>
-          <tr><td><strong>5.</strong> Return</td><td>Return page list + SSE events. pgvector: Personal now, Team deferred.</td></tr>
-        </tbody>
+        <tr><td><strong>1.</strong> Hash</td><td>Identity hash lookup in <code>.cowiki/state.json</code>; skip if compiled</td></tr>
+        <tr><td><strong>2.</strong> List</td><td>Enumerate source dirs in <code>sources/</code></td></tr>
+        <tr><td><strong>3.</strong> Pool</td><td>Acquire agent; queue if busy; 503 if full</td></tr>
+        <tr><td><strong>4.</strong> Create</td><td>Agent reads sources, deduplicates, writes wiki/entities/concepts/</td></tr>
+        <tr><td><strong>5.</strong> Return</td><td>PSQL upsert + pgvector* + SSE. *Personal: now; Team: defer.</td></tr>
       </table>
     </div>
     <div>
-      <h3>Error Handling</h3>
-      <table>
-        <thead><tr><th>Error</th><th>Strategy</th></tr></thead>
-        <tbody>
-          <tr><td>LLM timeout</td><td>500; no partial writes; identity check protects retry</td></tr>
-          <tr><td>Invalid output</td><td>Agent self-corrects via tool feedback</td></tr>
-          <tr><td>Git write fail</td><td>Error to agent; retry or report</td></tr>
-          <tr><td>Embedder fail</td><td>Page written; periodic backfill</td></tr>
-          <tr><td>Pool exhausted</td><td>Queue; 503 if full</td></tr>
-        </tbody>
-      </table>
-      <div class="callout" style="margin-top:1rem"><strong>Shallow:</strong> Agent <em>creates</em> wiki pages but does not extract concepts or entities. That deep work belongs to DeepIntegrate.</div>
-    </div>
-  </div>
-
-  <h3>Agent Tools</h3>
-  <div class="grid-2">
-    <div class="card">
-      <div class="card-icon gold">S</div>
-      <h4>Source FS (read-only)</h4>
+      <h3>Agent Tools</h3>
       <div class="table-wrap"><table class="tool-table">
-        <thead><tr><th>Tool</th><th>Params</th><th>Description</th></tr></thead>
+        <thead><tr><th>Category</th><th>Tools</th><th>Access</th></tr></thead>
         <tbody>
-          <tr><td>ls</td><td><code>path?</code></td><td>List source directory</td></tr>
-          <tr><td>grep</td><td><code>pattern, path?</code></td><td>Search within source directory</td></tr>
-          <tr><td>read</td><td><code>path</code></td><td>Read a source file</td></tr>
+          <tr><td><strong>Source FS</strong></td><td><code>ls</code>, <code>grep</code>, <code>read</code></td><td>Read-only</td></tr>
+          <tr><td><strong>Wiki</strong></td><td><code>create_wiki</code>, <code>edit_wiki</code>, <code>read_wiki</code>, <code>rm_wiki</code></td><td>Read/Write</td></tr>
+          <tr><td><strong>Entity</strong></td><td><code>create_entity</code>, <code>edit_entity</code>, <code>read_entity</code>, <code>rm_entity</code></td><td>Read/Write</td></tr>
+          <tr><td><strong>Concept</strong></td><td><code>create_concept</code>, <code>edit_concept</code>, <code>read_concept</code>, <code>rm_concept</code></td><td>Read/Write</td></tr>
         </tbody>
       </table></div>
-      <p style="font-size:.75rem;color:var(--text-dim);margin-top:.5rem">Scoped to source directory. Agent explores any structure.</p>
-    </div>
-    <div class="card">
-      <div class="card-icon teal">W</div>
-      <h4>Wiki FS (create/delete only)</h4>
-      <div class="table-wrap"><table class="tool-table">
-        <thead><tr><th>Tool</th><th>Params</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>create_wiki</td><td><code>path, content</code></td><td>Create new wiki page</td></tr>
-          <tr><td>rm_wiki</td><td><code>path</code></td><td>Delete wiki page</td></tr>
-        </tbody>
-      </table></div>
-      <p style="font-size:.75rem;color:var(--text-dim);margin-top:.5rem">No edit, no mv, no mkdir. Agent creates pages with self-determined paths.</p>
+      <div class="callout" style="margin-top:.8rem"><strong>Dedup during compile:</strong> Agent reads existing entities/concepts. If similar → merges aliases, appends to <code>## Mentioned In</code>. Wiki page dedup: skips if content already covered.</div>
     </div>
   </div>
 </section>
 
-<!-- ═══════════════════════════ 04 ═══════════════════════════ -->
-<section>
-  <div class="section-num">Section 04</div>
-  <h2>DeepIntegrate — Wiki Reorg + Knowledge Graph <span class="badge badge-async">async</span></h2>
-
-  <div class="grid-2">
-    <div>
-      <h3>Trigger & Pipeline</h3>
-      <table>
-        <thead><tr><th>Space</th><th>Trigger</th></tr></thead>
-        <tbody>
-          <tr><td><strong>Personal</strong></td><td>Auto after ShallowCompile</td></tr>
-          <tr><td><strong>Team</strong></td><td>Review approve hook (+ pgvector insert)</td></tr>
-        </tbody>
-      </table>
-      <div class="flow-row" style="margin-top:.8rem">
-        <span class="flow-step rose">1. Acquire Mutex</span><span class="flow-arrow">→</span>
-        <span class="flow-step teal">C1: Wiki Reorg</span><span class="flow-arrow">→</span>
-        <span class="flow-step indigo">C2: Graph Build</span><span class="flow-arrow">→</span>
-        <span class="flow-step rose">4. Release</span>
-      </div>
-      <div class="callout warn"><strong>Why serial?</strong> Wiki reorg changes page_path. Two sequential calls under one mutex guarantees stable paths for graph extraction.</div>
-    </div>
-    <div>
-      <h3>Tools — Call 1 (Wiki Reorg)</h3>
-      <div class="table-wrap"><table class="tool-table">
-        <thead><tr><th>Tool</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>ls_wiki</td><td>List wiki directory</td></tr>
-          <tr><td>read_wiki</td><td>Read wiki page</td></tr>
-          <tr><td>mkdir_wiki</td><td>Create subdirectory</td></tr>
-          <tr><td>mv_wiki</td><td>Move/rename page</td></tr>
-          <tr><td>edit_wiki</td><td>Edit existing page</td></tr>
-          <tr><td>rm_wiki</td><td>Delete page</td></tr>
-        </tbody>
-      </table></div>
-      <p style="font-size:.75rem;color:var(--text-dim)">No <code>create_wiki</code>. Pages exist from ShallowCompile.</p>
-
-      <h3 style="margin-top:.8rem">Tools — Call 2 (Graph)</h3>
-      <div class="table-wrap"><table class="tool-table">
-        <thead><tr><th>Tool</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>read_wiki</td><td>Read wiki page</td></tr>
-          <tr><td>query_entity</td><td>Look up by name</td></tr>
-          <tr><td>find_similar</td><td>Similar entity search</td></tr>
-          <tr><td>upsert_entity</td><td>Create/update entity</td></tr>
-          <tr><td>upsert_fact</td><td>Create/update fact</td></tr>
-          <tr><td>link_page_entity</td><td>Link page to entity</td></tr>
-          <tr><td>list_entities</td><td>List entities</td></tr>
-        </tbody>
-      </table></div>
-    </div>
-  </div>
-</section>
-
-<!-- ═══════════════════════════ 05 ═══════════════════════════ -->
+<!-- ═══════════════ 05: DeepCompile ═══════════ -->
 <section>
   <div class="section-num">Section 05</div>
-  <h2>Source Directory & Dedup</h2>
+  <h2>DeepCompile — Wiki Health Check <span class="badge badge-async">async</span></h2>
 
   <div class="grid-2">
     <div>
-      <h3>Identity Hash (ingest dedup)</h3>
-      <div class="code-block">
-<span class="cmt">// Ingest-time: reject if already exists</span>
-<span class="key">identity_hash</span> = <span class="kw">SHA256</span>(
-  <span class="str">source_type</span> + <span class="str">source_identity</span>
-)
-
-<span class="cmt">// Examples</span>
-<span class="str">"url"</span>     + <span class="str">"https://example.com/article"</span>
-<span class="str">"pdf"</span>     + <span class="str">"arxiv-1706.03762.pdf"</span>
-<span class="str">"github"</span>  + <span class="str">"wfnuser/cowiki"</span>
-
-<span class="cmt">// Compile-time: semantic dedup by agent</span>
-<span class="cmt">// Agent compares source content against</span>
-<span class="cmt">// existing wiki pages, decides to skip or create</span>
-      </div>
+      <h3>Trigger</h3>
+      <table>
+        <tr><td><strong>Personal</strong></td><td>Manual — <code>POST /api/lint</code></td></tr>
+        <tr><td><strong>Team</strong></td><td>Post-review-approve hook (after pgvector insert)</td></tr>
+        <tr><td><strong>Lock</strong></td><td>Per-space mutex. 409 if running.</td></tr>
+      </table>
+      <h3 style="margin-top:.8rem">Tools</h3>
+      <div class="table-wrap"><table class="tool-table">
+        <thead><tr><th>Tool</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>read_wiki, read_entity, read_concept</td><td>Read pages</td></tr>
+          <tr><td>ls_wiki, ls_entities, ls_concepts</td><td>List directories</td></tr>
+          <tr><td>edit_wiki, edit_entity</td><td>Fix links / backlinks</td></tr>
+          <tr><td>rm_wiki, rm_entity, rm_concept</td><td>Remove orphans</td></tr>
+        </tbody>
+      </table></div>
     </div>
     <div>
-      <h3>Example Structures</h3>
-      <div class="code-block">
-<span class="cmt">// URL article</span>
-sources/sha256_abc123/
-├── <span class="key">manifest.json</span>
-├── content.md
-├── metadata.json
-├── headings.json
-└── attachments/
-    └── figure_01.png
-
-<span class="cmt">// GitHub repo</span>
-sources/sha256_def456/
-├── <span class="key">manifest.json</span>
-├── README.md
-├── issues.json
-└── code/
-      </div>
-      <p style="font-size:.78rem;color:var(--text-dim)">Agent explores with <code>ls</code>/<code>grep</code>/<code>read</code>. No fixed schema beyond <code>manifest.json</code>. <code>.cowiki/state.json</code> tracks identity hashes and source→page mappings.</p>
+      <h3>What DeepCompile Detects</h3>
+      <table>
+        <thead><tr><th>Issue</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Contradiction</strong></td><td>Conflicting claims → flag for review</td></tr>
+          <tr><td><strong>Duplicate</strong></td><td>High overlap → suggest merge</td></tr>
+          <tr><td><strong>Orphan</strong></td><td>Entity with zero <code>## Mentioned In</code> → flag</td></tr>
+          <tr><td><strong>Broken link</strong></td><td><code>[[wikilink]]</code> to non-existent page → fix</td></tr>
+          <tr><td><strong>Missing backlink</strong></td><td>Wiki mentions entity, entity doesn't link → auto-fix</td></tr>
+          <tr><td><strong>Stale</strong></td><td>Not updated after newer sources → flag</td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn" style="margin-top:.8rem">ReviewItem entries streamed via SSE. Human resolves: accept fix, dismiss, or manually address.</div>
     </div>
   </div>
 </section>
 
-<!-- ═══════════════════════════ 06 ═══════════════════════════ -->
+<!-- ═══════════════ 06: Review ═══════════ -->
 <section>
   <div class="section-num">Section 06</div>
-  <h2>Concurrency & Agent Pool</h2>
+  <h2>Review — Two-Stage</h2>
+
+  <div class="grid-2">
+    <div class="card"><div class="card-icon gold">1</div>
+      <h4>Stage 1: Shallow Review</h4>
+      <ul style="font-size:.82rem;color:var(--text-dim);margin-left:1.2rem;line-height:1.7">
+        <li>After ShallowCompile, pages listed for review</li>
+        <li><strong>Per-page, independent</strong></li>
+        <li>Inspect content, structure, [[wikilinks]]</li>
+        <li>Approve → published. Reject → removed.</li>
+      </ul>
+    </div>
+    <div class="card"><div class="card-icon rose">2</div>
+      <h4>Stage 2: DeepCompile Review</h4>
+      <ul style="font-size:.82rem;color:var(--text-dim);margin-left:1.2rem;line-height:1.7">
+        <li>After DeepCompile produces ReviewItem entries</li>
+        <li><strong>Cross-page</strong> — contradictions span pages</li>
+        <li>Inspect: merge, fix, dismiss</li>
+        <li>Human-triggered, not automatic</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ 07: PSQL Index Tables ═══════════ -->
+<section>
+  <div class="section-num">Section 07</div>
+  <h2>PSQL Metadata Indices</h2>
+
+  <div class="card-grid">
+    <div class="card"><div class="card-icon gold">W</div><h4>wiki_pages</h4>
+      <div class="field-list">
+        <span class="fname">path</span> <span class="ftype">TEXT</span> <span class="fnote">→ FS file</span><br>
+        <span class="fname">title</span> <span class="ftype">TEXT</span><br>
+        <span class="fname">summary</span> <span class="ftype">TEXT</span><br>
+        <span class="fname">embedding</span> <span class="ftype">vector(1536)</span><br>
+        <span class="fname">space</span> <span class="ftype">TEXT</span><br>
+        <span class="fname">branch</span> <span class="ftype">TEXT</span>
+      </div>
+    </div>
+    <div class="card"><div class="card-icon indigo">E</div><h4>entities</h4>
+      <div class="field-list">
+        <span class="fname">path</span> <span class="ftype">TEXT</span> <span class="fnote">→ FS file</span><br>
+        <span class="fname">name</span> <span class="ftype">TEXT</span><br>
+        <span class="fname">type</span> <span class="ftype">TEXT</span> <span class="fnote">Technology · Person · Event…</span><br>
+        <span class="fname">aliases</span> <span class="ftype">TEXT[]</span><br>
+        <span class="fname">summary</span> <span class="ftype">TEXT</span><br>
+        <span class="fname">embedding</span> <span class="ftype">vector(1536)</span><br>
+        <span class="fname">space</span> <span class="ftype">TEXT</span>
+      </div>
+    </div>
+    <div class="card"><div class="card-icon teal">C</div><h4>concepts</h4>
+      <div class="field-list">
+        <span class="fname">path</span> <span class="ftype">TEXT</span> <span class="fnote">→ FS file</span><br>
+        <span class="fname">name</span> <span class="ftype">TEXT</span><br>
+        <span class="fname">aliases</span> <span class="ftype">TEXT[]</span><br>
+        <span class="fname">summary</span> <span class="ftype">TEXT</span><br>
+        <span class="fname">embedding</span> <span class="ftype">vector(1536)</span><br>
+        <span class="fname">space</span> <span class="ftype">TEXT</span>
+      </div>
+    </div>
+  </div>
+  <div class="callout"><strong>FS is source of truth.</strong> PSQL derived indices — drop + rebuild from FS markdown frontmatter. All pages use YAML frontmatter (<code>title, type, aliases, tags, created</code>) from llm_wiki pattern.</div>
+</section>
+
+<!-- ═══════════════ 08: Concurrency ═══════════ -->
+<section>
+  <div class="section-num">Section 08</div>
+  <h2>Concurrency &amp; Agent Pool</h2>
 
   <div class="grid-3">
-    <div class="card">
-      <div class="card-icon gold">S</div>
-      <h4>ShallowCompile</h4>
-      <p style="font-size:.82rem;color:var(--text-dim)">Parallel. Multiple requests concurrent. Queue if pool full. 503 if queue full.</p>
-    </div>
-    <div class="card">
-      <div class="card-icon rose">D</div>
-      <h4>DeepIntegrate</h4>
-      <p style="font-size:.82rem;color:var(--text-dim)">Per-space mutex. 409 if running. Two serial agent calls inside lock.</p>
-    </div>
-    <div class="card">
-      <div class="card-icon indigo">P</div>
-      <h4>Agent Pool</h4>
-      <p style="font-size:.82rem;color:var(--text-dim)">Per-space, frontend-configurable, tier-gated. DeepIntegrate always 1 agent.</p>
-    </div>
+    <div class="card"><div class="card-icon gold">S</div><h4>ShallowCompile</h4><p style="font-size:.82rem;color:var(--text-dim)">Parallel. Queue if pool full. 503 if queue full.</p></div>
+    <div class="card"><div class="card-icon rose">L</div><h4>DeepCompile</h4><p style="font-size:.82rem;color:var(--text-dim)">Per-space mutex. 409 if running. Cross-space parallel.</p></div>
+    <div class="card"><div class="card-icon indigo">P</div><h4>Agent Pool</h4><p style="font-size:.82rem;color:var(--text-dim)">Personal N=1. Team N configurable, tier-gated.</p></div>
   </div>
 
   <h3>Tier Gating</h3>
@@ -570,76 +533,29 @@ sources/sha256_def456/
   </table></div>
 </section>
 
-<!-- ═══════════════════════════ 07 ═══════════════════════════ -->
+<!-- ═══════════════ 09: Key Decisions ═══════════ -->
 <section>
-  <div class="section-num">Section 07</div>
-  <h2>Data Model</h2>
-
-  <div class="card-grid">
-    <div class="card">
-      <div class="card-icon gold">E</div>
-      <h4>entities</h4>
-      <div class="field-list">
-        <span class="fname">id</span> <span class="ftype">UUID</span> <span class="fnote">PK</span><br>
-        <span class="fname">name</span> <span class="ftype">TEXT</span> <span class="fnote">canonical label</span><br>
-        <span class="fname">type</span> <span class="ftype">TEXT</span> <span class="fnote">Person · Technology · Concept · Event</span><br>
-        <span class="fname">aliases</span> <span class="ftype">TEXT[]</span><br>
-        <span class="fname">embedding</span> <span class="ftype">vector(1536)</span><br>
-        <span class="fname">space</span> <span class="ftype">TEXT</span> <span class="fnote">personal:{uid} · shared</span><br>
-        <span class="fname">is_orphaned</span> <span class="ftype">BOOLEAN</span>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-icon teal">F</div>
-      <h4>facts</h4>
-      <div class="field-list">
-        <span class="fname">id</span> <span class="ftype">UUID</span> <span class="fnote">PK</span><br>
-        <span class="fname">subject_id</span> <span class="ftype">FK → entities</span><br>
-        <span class="fname">predicate</span> <span class="ftype">TEXT</span><br>
-        <span class="fname">object_id</span> <span class="ftype">FK → entities</span> <span class="fnote">nullable</span><br>
-        <span class="fname">object_lit</span> <span class="ftype">TEXT</span><br>
-        <span class="fname">page_path</span> <span class="ftype">TEXT</span> <span class="fnote">provenance</span><br>
-        <span class="fname">confidence</span> <span class="ftype">REAL</span> <span class="fnote">0–1</span>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-icon indigo">P</div>
-      <h4>page_entities</h4>
-      <div class="field-list">
-        <span class="fname">page_path</span> <span class="ftype">TEXT</span> <span class="fnote">PK</span><br>
-        <span class="fname">entity_id</span> <span class="ftype">UUID</span> <span class="fnote">PK · FK → entities</span><br>
-        <span class="fname">relevance</span> <span class="ftype">REAL</span> <span class="fnote">0–1</span><br>
-        <span class="fname">space</span> <span class="ftype">TEXT</span><br><br>
-        <span class="fnote">Many-to-many junction</span>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ═══════════════════════════ 08 ═══════════════════════════ -->
-<section>
-  <div class="section-num">Section 08</div>
-  <h2>Key Design Decisions</h2>
+  <div class="section-num">Section 09</div>
+  <h2>Key Design Decisions — v4</h2>
 
   <ol class="decisions">
-    <li><strong>Two-stage with review gate</strong> — Team: ShallowCompile → review approve → pgvector + DeepIntegrate. Personal: immediate.</li>
-    <li><strong>Source directories</strong> — extractor builds per-source dirs with <code>manifest.json</code>. Identity hash (SHA of type+identity) for ingest dedup. Semantic dedup by agent at compile time.</li>
-    <li><strong>Tool separation by stage</strong> — Shallow: source FS (<code>ls/grep/read</code>) + wiki create only. Deep: full wiki FS (no <code>create_wiki</code>) + graph tools.</li>
-    <li><strong>DeepIntegrate as two serial calls</strong> — Wiki reorg first (stabilizes page_path), then graph extraction. Prevents stale fact paths.</li>
-    <li><strong>Per-space mutex</strong> — one DeepIntegrate per space. 409 if busy. Cross-space parallel.</li>
+    <li><strong>Wikilink-centered, not KG</strong> — No PostgreSQL knowledge graph. Knowledge linked via <code>[[wikilinks]]</code> in markdown. Entity pages are navigation bridges with <code>## Mentioned In</code> backlinks.</li>
+    <li><strong>FS source of truth</strong> — <code>wiki/</code>, <code>entities/</code>, <code>concepts/</code> are markdown directories. PSQL tables are derived metadata indices — delete + rebuild from FS.</li>
+    <li><strong>ShallowCompile does it all</strong> — Agent reads source dirs → creates wiki + entity + concept pages with [[wikilinks]], deduplicates and merges in one pass.</li>
+    <li><strong>DeepCompile replaces DeepIntegrate</strong> — No graph extraction. DeepCompile health-checks: contradictions, duplicates, orphans, broken links. Human-triggered (Personal) or post-approve hook (Team).</li>
+    <li><strong>Two-stage review</strong> — Shallow Review (per-page, post-compile) + DeepCompile Review (cross-page, post-lint).</li>
     <li><strong>pgvector timing</strong> — Personal: immediately. Team: deferred to review approve (drafts don't pollute search).</li>
-    <li><strong>Agent pool tier-gated</strong> — Personal N=1. Team N configurable per tier (Free/Pro/Enterprise).</li>
-    <li><strong>HTTP/gRPC only</strong> — all harnesses are separate processes. No embedded mode.</li>
-    <li><strong>Git source of truth</strong> — PG derived. Eventual consistency via periodic rebuild. Orphans: 7-day grace.</li>
-    <li><strong>SSE full observability</strong> — every LLM round, tool call, entity, and fact streamed live.</li>
+    <li><strong>Agentic Search</strong> — Vector topK wiki pages → agent explores [[wikilinks]] → synthesizes answer → files into <code>queries/</code>. Future consumer.</li>
+    <li><strong>Agent pool tier-gated</strong> — Personal N=1. Team N configurable (Free=1, Pro=2–4, Enterprise=2–16). All HTTP/gRPC — no embedded.</li>
+    <li><strong>No snapshots</strong> — PSQL derived from FS. Git is the best snapshot. Reset = git reset + delete PSQL + rebuild. (#48)</li>
+    <li><strong>llm_wiki compatible</strong> — Frontmatter types (entity, concept, query, thesis…), Obsidian-compatible markdown, CLI/MCP as independent modules.</li>
   </ol>
 </section>
 
 </div>
 
 <footer>
-  <p>cowiki Compile System Design v3 &ensp;&middot;&ensp; <a href="https://github.com/wfnuser/cowiki/issues/15">#15</a> &ensp;&middot;&ensp; <a href="https://github.com/wfnuser/cowiki/issues/14">#14</a> &ensp;&middot;&ensp; <a href="https://github.com/wfnuser/cowiki/issues/31">#31</a> &ensp;&middot;&ensp; <a href="https://github.com/wfnuser/cowiki/issues/44">#44</a></p>
-  <p style="margin-top:.3rem"><code>docs/compile-system-design.md</code> &ensp;&middot;&ensp; <code>docs/compile-system-architecture.html</code></p>
+  <p>cowiki Compile System v4 &ensp;&middot;&ensp; <a href="https://github.com/wfnuser/cowiki/issues/15">#15</a> &ensp;&middot;&ensp; <a href="https://github.com/wfnuser/cowiki/issues/14">#14</a> &ensp;&middot;&ensp; <a href="https://github.com/wfnuser/cowiki/issues/31">#31</a> &ensp;&middot;&ensp; <a href="https://github.com/wfnuser/cowiki/issues/44">#44</a> &ensp;&middot;&ensp; <a href="https://github.com/wfnuser/cowiki/issues/48">#48</a></p>
 </footer>
 
 </body>
