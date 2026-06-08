@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use crate::error::{AppError, Result};
 use crate::routes::auth::extract_user;
+use crate::routes::guard::{self, Permission};
 use crate::AppState;
 
 pub async fn list_reviews(
@@ -53,8 +54,6 @@ pub async fn review_action(
     headers: axum::http::HeaderMap,
     Json(input): Json<ReviewAction>,
 ) -> Result<Json<serde_json::Value>> {
-    let reviewer = extract_user(&state.db, &headers).await?;
-
     let submission = cowiki_db::submissions::find_by_id(&state.db, id)
         .await?
         .ok_or_else(|| AppError::NotFound("submission not found".into()))?;
@@ -62,19 +61,9 @@ pub async fn review_action(
         return Err(AppError::NotFound("submission not found in this workspace".into()));
     }
 
-    // Authorization: reviewer must be a writer/owner of the workspace.
-    let ws = cowiki_db::workspaces::find_by_slug(&state.db, &ws_slug)
-        .await?
-        .ok_or_else(|| AppError::NotFound("workspace not found".into()))?;
-    let role = cowiki_db::workspaces::get_member_role(&state.db, ws.id, reviewer.id)
-        .await?
-        .unwrap_or_default();
-    let role_enum: cowiki_db::workspaces::Role = role.parse().map_err(|_| AppError::Forbidden("invalid role".into()))?;
-    if !role_enum.can_edit() {
-        return Err(AppError::Forbidden(
-            "only workspace editors, managers, or owners can review".into(),
-        ));
-    }
+    // Authorization: reviewer must have EditContent permission
+    let guard = guard::require_membership(&state, &headers, &ws_slug).await?;
+    guard::require(&guard, Permission::EditContent)?;
 
     let repo = state.repo_manager.get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
@@ -91,7 +80,7 @@ pub async fn review_action(
                 .merge_to_main(
                     &submission.source_branch,
                     &file_paths,
-                    &reviewer.name,
+                    &guard.user.name,
                     &format!("approve: {}", submission.summary),
                 )
                 .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -114,7 +103,7 @@ pub async fn review_action(
                             "main",
                             &hash,
                             Some(&emb),
-                            reviewer.id,
+                            guard.user.id,
                         )
                         .await
                         .ok();
@@ -122,10 +111,10 @@ pub async fn review_action(
                 }
             }
 
-            cowiki_db::submissions::update_status(&state.db, id, "approved", reviewer.id).await?;
+            cowiki_db::submissions::update_status(&state.db, id, "approved", guard.user.id).await?;
         }
         "reject" => {
-            cowiki_db::submissions::update_status(&state.db, id, "rejected", reviewer.id).await?;
+            cowiki_db::submissions::update_status(&state.db, id, "rejected", guard.user.id).await?;
         }
         _ => return Err(AppError::BadRequest("invalid action".into())),
     }
