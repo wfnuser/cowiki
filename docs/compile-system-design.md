@@ -7,8 +7,7 @@
 A **two-stage compile pipeline** with **wiki-page-centric knowledge architecture** and **decoupled agent communication**.
 
 - **ShallowCompile (sync)**: Agent explores source directories, produces wiki pages + entity pages + concept pages in markdown. Deduplicates and merges against existing content. Inserts metadata into PSQL indices.
-- **Lint (async, periodic)**: Agent health-checks the wiki — detects contradictions, duplicates, orphan nodes, broken wikilinks. Human-triggered, not automatic.
-- **Search (agentic)**: Vector search finds top-K wiki pages; agent explores `[[wikilinks]]` to synthesize answers.
+- **Lint (async, human-triggered)**: Agent health-checks the wiki — detects contradictions, duplicates, orphan nodes, broken wikilinks. Personal Space: manual trigger. Team Space: post-review-approve hook.
 
 **Core principle:** Wiki pages are the center. Entities are navigation bridges between wiki pages. Entities and concepts live as markdown files (FS source of truth) with PSQL metadata tables for search and dedup.
 
@@ -102,7 +101,8 @@ CREATE TABLE entities (
 CREATE TABLE concepts (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     path        TEXT NOT NULL,              -- relative FS path, e.g. concepts/containerization.md
-    name        TEXT NOT NULL,
+    name        TEXT NOT NULL,              -- canonical label
+    aliases     TEXT[] DEFAULT '{}',
     summary     TEXT,
     embedding   vector(1536),
     space       TEXT NOT NULL,
@@ -110,6 +110,30 @@ CREATE TABLE concepts (
     updated_at  TIMESTAMPTZ DEFAULT now(),
     UNIQUE (path, space)
 );
+```
+
+All page types (wiki, entity, concept) use YAML frontmatter to store metadata inline in the markdown file. The PSQL tables index a subset of frontmatter fields for search and dedup. Full frontmatter stays in FS markdown — PSQL is a fast-lookup cache, not the canonical record.
+
+**Entity frontmatter example** (`entities/docker.md`):
+```yaml
+---
+title: "Docker"
+type: entity
+aliases: [docker-engine, Docker CE]
+created: 2026-01-15
+tags: [infrastructure, containers]
+---
+```
+
+**Concept frontmatter example** (`concepts/containerization.md`):
+```yaml
+---
+title: "Containerization"
+type: concept
+aliases: [container technology]
+created: 2026-01-15
+tags: [infrastructure, architecture]
+---
 ```
 
 ## ShallowCompile: Source → Wiki + Entities + Concepts (Sync)
@@ -185,15 +209,15 @@ During ShallowCompile, the agent:
 | Personal Space | Immediately after ShallowCompile |
 | Team Space | On review approve |
 
-## Lint: Wiki Health Check (Async, Periodic)
+## Lint: Wiki Health Check (Async, Human-Triggered)
 
 Replaces the previous "DeepIntegrate" concept. No more knowledge graph extraction — entities and concepts are already created during ShallowCompile. Lint verifies quality.
 
 ### Trigger
 
-- Manually triggered by user (`POST /api/lint`)
-- Periodic cron (configurable, default: daily)
-- Team Space: post-approve hook (after pgvector insert)
+- **Personal Space**: Manually triggered by user (`POST /api/lint`)
+- **Team Space**: Post-review-approve hook (after pgvector insert)
+- No automatic cron in current version
 
 ### What Lint Checks
 
@@ -338,7 +362,7 @@ All agents are separate HTTP/gRPC processes.
 
 ## State Persistence
 
-`.cowiki/state.json` in git:
+`.cowiki/state.json` in git. Tracks identity hashes and all outputs per source for cascade-on-delete:
 
 ```json
 {
@@ -350,7 +374,11 @@ All agents are separate HTTP/gRPC processes.
     }
   },
   "source_pages": {
-    "sha256_abc123": ["infra/docker-networking.md"]
+    "sha256_abc123": {
+      "wiki": ["infra/docker-networking.md"],
+      "entities": ["entities/docker.md"],
+      "concepts": ["concepts/containerization.md"]
+    }
   }
 }
 ```
