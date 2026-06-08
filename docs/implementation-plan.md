@@ -213,100 +213,35 @@
 
 ---
 
-## Phase 6: 前端重构
+## Phase 6: MemberResponse 增加 last_active_at
 
-**目标**: ShareDialog 三 Tab、JoinViaLinkPage、侧边栏 badge+popover、权限驱动 UI
+**目标**: API 返回成员最后活跃时间
 
-### 6.1 新增 API 函数
-| 操作 | 文件 | 改动 |
-|------|------|------|
-| 修改 | `web/src/api.ts` | 新增 TypeScript 类型: `ShareLink`, `OwnershipTransfer` |
-| 修改 | `web/src/api.ts` | 新增函数: `createShareLink()`, `listShareLinks()`, `updateShareLink()`, `deleteShareLink()`, `joinViaLink()`, `getLinkInfo()` |
-| 修改 | `web/src/api.ts` | 新增函数: `initiateTransfer()`, `listPendingTransfers()`, `acceptTransfer()`, `rejectTransfer()`, `cancelTransfer()` |
-| 修改 | `web/src/api.ts` | 更新函数: `inviteToWorkspace()` 改为批量接口 |
-| 修改 | `web/src/api.ts` | 新增函数: `resendInvitation()`, `revokeInvitation()`, `listInvitations()` |
-| 修改 | `web/src/api.ts` | 新增函数: `addMemberDirect()` — `POST /workspaces/{slug}/members` |
-
-### 6.2 创建新组件
-| 操作 | 文件 | 用途 |
-|------|------|------|
-| 创建 | `web/src/components/share/ShareDialog.tsx` | 三 Tab 容器弹窗 |
-| 创建 | `web/src/components/share/InviteMembersTab.tsx` | 批量邮箱输入 + 角色下拉 + message + 发送按钮 + 待处理邀请列表（撤回/重发） |
-| 创建 | `web/src/components/share/ShareLinksTab.tsx` | 创建链接按钮 + 活跃链接卡片列表 |
-| 创建 | `web/src/components/share/CreateShareLinkDialog.tsx` | 链接创建表单（label/role/password/expires_at） |
-| 创建 | `web/src/components/share/ShareLinkCard.tsx` | 单个链接卡片（label/role/已用人数/过期状态/复制/设置/失效按钮） |
-| 创建 | `web/src/components/share/MembersTab.tsx` | 搜索/筛选 + 成员列表 + 角色修改 + 移除 + 转让按钮 |
-| 创建 | `web/src/components/workspace/JoinViaLinkPage.tsx` | `/join/:slug?token=xxx` 路由页面 |
-| 创建 | `web/src/components/workspace/PendingInvitationsPopover.tsx` | 侧边栏 badge 点击弹窗 |
-| 创建 | `web/src/components/workspace/TransferOwnershipDialog.tsx` | 转让确认弹窗（选新 Owner + 选降级角色） |
-
-### 6.3 创建 hooks
-| 操作 | 文件 | 用途 |
-|------|------|------|
-| 创建 | `web/src/hooks/useShareLinks.ts` | 分享链接 CRUD + 加载状态 |
-| 创建 | `web/src/hooks/useInvitations.ts` | 邀请管理（批量发送/撤回/重发）|
-| 创建 | `web/src/hooks/useMembers.ts` | 成员管理（列表/角色修改/移除/转让）|
-
-### 6.4 修改 MainLayout
-| 操作 | 文件 | 改动 |
-|------|------|------|
-| 修改 | `web/src/pages/MainLayout.tsx` | 替换旧的 invite dialog 为 `<ShareDialog>`（三 Tab） |
-| 修改 | `web/src/pages/MainLayout.tsx` | 替换旧成员管理 dialog 为 ShareDialog 的 MembersTab |
-| 修改 | `web/src/pages/MainLayout.tsx` | 侧边栏 pending invitations badge → 改用 `<PendingInvitationsPopover>` |
-| 修改 | `web/src/pages/MainLayout.tsx` | `SpaceTreeItem` 右键菜单: `role === 'owner' \|\| role === 'manager'` 时显示管理选项 |
-| 修改 | `web/src/pages/MainLayout.tsx` | 角色下拉选项: Owner/Manager/Editor/Viewer（替换旧 writer/reader） |
-| 修改 | `web/src/pages/MainLayout.tsx` | Manager 角色不显示 Delete 选项 |
-| 修改 | `web/src/pages/MainLayout.tsx` | Owner 角色增加 "Transfer Ownership" 选项 |
-| 修改 | `web/src/pages/MainLayout.tsx` | Workspace 设置中增加 visibility toggle (private ↔ public) — 仅 Owner/Manager 可见 |
-
-### 6.5 MemberResponse 增加 last_active_at
 | 操作 | 文件 | 改动 |
 |------|------|------|
 | 修改 | `crates/server/src/routes/workspace.rs` | `MemberResponse` struct 增加 `last_active_at: Option<String>` 字段 |
-| 修改 | `web/src/api.ts` | `MemberInfo` interface 增加 `last_active_at?: string` |
-| 修改 | `web/src/components/share/MembersTab.tsx` | 成员列表展示最后活跃时间 |
+| 修改 | `crates/server/src/routes/workspace.rs` | `PermissionGuard` 中间件在每次请求时调用 `touch_last_active()` |
 
-### 6.6 路由
-| 操作 | 文件 | 改动 |
-|------|------|------|
-| 修改 | `web/src/App.tsx` | 添加 `/join/:slug` 路由 → `<JoinViaLinkPage>` |
-
-### 6.7 E2E 测试
-| 操作 | 文件 | 改动 |
-|------|------|------|
-| 创建 | `web/e2e/role-management.spec.ts` | 完整流程: Manager+Owner 创建链接 → 另一用户通过链接加入 → 验证角色 → 邀请流程 → 角色修改 → 管理选项显隐 |
+> **前端重构** 将在后端完成后的后续设计文档中统一规划。
 
 ---
 
 ## 文件变更总览
 
 ```
-创建 (22):
+创建 (10):
   crates/db/src/migrations/009_role_management.sql
+  crates/db/src/share_links.rs
+  crates/db/src/transfers.rs
   crates/server/src/routes/guard.rs
   crates/server/src/routes/share_links.rs
   crates/server/src/routes/transfers.rs
   crates/server/src/middleware/rate_limiter.rs
-  crates/db/src/share_links.rs
-  crates/db/src/transfers.rs
   crates/server/tests/guard_tests.rs
   crates/server/tests/share_link_tests.rs
   crates/server/tests/transfer_tests.rs
-  web/src/components/share/ShareDialog.tsx
-  web/src/components/share/InviteMembersTab.tsx
-  web/src/components/share/ShareLinksTab.tsx
-  web/src/components/share/CreateShareLinkDialog.tsx
-  web/src/components/share/ShareLinkCard.tsx
-  web/src/components/share/MembersTab.tsx
-  web/src/components/workspace/JoinViaLinkPage.tsx
-  web/src/components/workspace/PendingInvitationsPopover.tsx
-  web/src/components/workspace/TransferOwnershipDialog.tsx
-  web/src/hooks/useShareLinks.ts
-  web/src/hooks/useInvitations.ts
-  web/src/hooks/useMembers.ts
-  web/e2e/role-management.spec.ts
 
-修改 (14):
+修改 (9):
   crates/db/src/lib.rs
   crates/db/src/workspaces.rs
   crates/server/src/routes/mod.rs
@@ -315,9 +250,8 @@
   crates/server/src/routes/review.rs
   crates/server/src/main.rs
   crates/server/tests/permission_api_tests.rs
-  web/src/api.ts
-  web/src/App.tsx
-  web/src/pages/MainLayout.tsx
 ```
+
+> **前端文件** (web/src/*) 将在后续前端设计文档中统一规划。
 
 > **下一步**: 确认此计划后开始 Phase 1 实现。
