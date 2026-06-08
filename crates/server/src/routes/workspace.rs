@@ -130,8 +130,8 @@ pub async fn join_workspace(
 
 #[derive(Deserialize)]
 pub struct InviteWithRoleRequest {
-    pub email: String,
-    pub role: Option<String>, // defaults to "writer"
+    pub user: String,                     // id (UUID), email, or username
+    pub role: Option<String>,             // defaults to "viewer"
 }
 
 #[derive(Serialize)]
@@ -152,10 +152,10 @@ pub async fn invite(
     let user = extract_user(&state.db, &headers).await?;
 
     // Validate role
-    let role = input.role.as_deref().unwrap_or("writer");
-    if !cowiki_db::workspaces::Role::ALL.contains(&role) {
+    let role = input.role.as_deref().unwrap_or("viewer");
+    if role.parse::<cowiki_db::workspaces::Role>().is_err() {
         return Err(AppError::BadRequest(
-            format!("invalid role '{role}': must be one of: owner, writer, reader")
+            format!("invalid role '{role}': must be one of: owner, manager, editor, viewer")
         ));
     }
 
@@ -171,21 +171,38 @@ pub async fn invite(
         return Err(AppError::Forbidden("only the workspace owner can invite members".into()));
     }
 
+    // Resolve user identifier to a user ID
+    let invited_user = cowiki_db::workspaces::resolve_user_identifier(&state.db, &input.user)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("user '{}' not found", input.user)))?;
+
+    // Cannot invite self
+    if invited_user == user.id {
+        return Err(AppError::BadRequest("cannot invite yourself".into()));
+    }
+
+    // Cannot invite existing member
+    if cowiki_db::workspaces::is_member(&state.db, ws.id, invited_user).await? {
+        return Err(AppError::BadRequest("user is already a member".into()));
+    }
+
     // Create invitation (no auto-add — invitee must accept)
+    // Use the user's email for display/reference
+    let email_display = input.user.clone();
     let invitation = cowiki_db::workspaces::create_invitation(
-        &state.db, ws.id, &input.email, role, user.id,
+        &state.db, ws.id, &email_display, role, user.id, invited_user,
     ).await?;
 
     // Audit log
     cowiki_db::audit::log(
         &state.db, ws.id, user.id,
         "invite_member", Some("invitation"), Some(invitation.id),
-        Some(serde_json::json!({"email": input.email, "role": role})),
+        Some(serde_json::json!({"email": input.user, "role": role})),
     ).await?;
 
     Ok(Json(InviteResponse {
         invitation_id: invitation.id.to_string(),
-        email: input.email,
+        email: input.user,
         workspace: ws.slug,
     }))
 }
@@ -486,9 +503,9 @@ pub async fn change_member_role(
     }
 
     // Validate target role
-    if !cowiki_db::workspaces::Role::ALL.contains(&input.role.as_str()) {
+    if input.role.parse::<cowiki_db::workspaces::Role>().is_err() {
         return Err(AppError::BadRequest(
-            format!("invalid role '{}': must be owner, writer, or reader", input.role)
+            format!("invalid role '{}': must be owner, manager, editor, or viewer", input.role)
         ));
     }
 

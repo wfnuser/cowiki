@@ -69,9 +69,10 @@ pub async fn review_action(
     let role = cowiki_db::workspaces::get_member_role(&state.db, ws.id, reviewer.id)
         .await?
         .unwrap_or_default();
-    if role != "owner" && role != "writer" {
+    let role_enum: cowiki_db::workspaces::Role = role.parse().map_err(|_| AppError::Forbidden("invalid role".into()))?;
+    if !role_enum.can_edit() {
         return Err(AppError::Forbidden(
-            "only workspace owners or writers can review".into(),
+            "only workspace editors, managers, or owners can review".into(),
         ));
     }
 
