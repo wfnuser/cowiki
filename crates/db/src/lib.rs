@@ -6,6 +6,7 @@ pub mod submissions;
 pub mod workspaces;
 pub mod api_keys;
 pub mod audit;
+pub mod transfers;
 
 pub async fn create_pool(database_url: &str) -> sqlx::Result<PgPool> {
     PgPool::connect(database_url).await
