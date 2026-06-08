@@ -36,8 +36,8 @@
 ### 1.4 更新 DB 函数签名
 | 操作 | 文件 | 改动 |
 |------|------|------|
-| 修改 | `crates/db/src/workspaces.rs` | `add_member()` 增加 `joined_via` 和 `share_link_id` 参数 |
-| 修改 | `crates/db/src/workspaces.rs` | `WorkspaceMember` struct 增加 `invited_by`/`joined_via`/`share_link_id`/`last_active_at` 字段 |
+| 修改 | `crates/db/src/workspaces.rs` | `add_member()` 增加 `joined_via` 参数 |
+| 修改 | `crates/db/src/workspaces.rs` | `WorkspaceMember` struct 增加 `invited_by`/`joined_via`/`last_active_at` 字段 |
 | 修改 | `crates/db/src/workspaces.rs` | 新增 `touch_last_active()` — 更新 workspace_members.last_active_at |
 | 修改 | `crates/db/src/workspaces.rs` | `Invitation` struct 增加 `message`/`expires_at`/`resent_count`/`last_resent_at` 字段 |
 | 修改 | `crates/db/src/workspaces.rs` | `remove_member()` 不再硬编码 `role != 'owner'`，改为接受调用者 role，用 `can_manage_role()` 判断 |
@@ -93,25 +93,25 @@
 
 ## Phase 3: 邀请系统增强
 
-**目标**: 批量邀请、撤回、重发、过期管理
+**目标**: User Account 批量邀请 (id/email/username)、撤回、重发、过期管理
 
 ### 3.1 DB 层
 | 操作 | 文件 | 改动 |
 |------|------|------|
-| 修改 | `crates/db/src/workspaces.rs` | `create_invitation()` 改为接受 `Option<&str>` message |
-| 创建 | `crates/db/src/workspaces.rs` | `create_invitations_batch()` — 事务内批量创建多条 invitation |
-| 创建 | `crates/db/src/workspaces.rs` | `find_invitations_by_workspace()` — 列出 workspace 所有 invitation（含非 pending） |
-| 创建 | `crates/db/src/workspaces.rs` | `resend_invitation()` — 更新 `resent_count` + `last_resent_at` + 重置 `expires_at` |
-| 创建 | `crates/db/src/workspaces.rs` | `revoke_invitation()` — 设置 `status = 'expired'`（区别于 accepted/rejected） |
-| 创建 | `crates/db/src/workspaces.rs` | `expire_stale_invitations()` — 批量标记过期 |
+| 修改 | `crates/db/src/workspaces.rs` | `create_invitation()` 改为接受 `invited_user_id: Uuid` + 可选 `message` |
+| 创建 | `crates/db/src/workspaces.rs` | `resolve_user_identifier()` — 按 UUID/email/username 查找用户 |
+| 创建 | `crates/db/src/workspaces.rs` | `create_invitations_batch()` — 事务内批量 resolve + 创建多条 invitation |
+| 创建 | `crates/db/src/workspaces.rs` | `find_invitations_by_workspace()` — 列出 workspace 所有 invitation |
+| 创建 | `crates/db/src/workspaces.rs` | `find_pending_invitations_for_user()` — 改用 `invited_user_id` 匹配，不再用 email |
+| 创建 | `crates/db/src/workspaces.rs` | `resend_invitation()` / `revoke_invitation()` / `expire_stale_invitations()` |
 
 ### 3.2 API 路由
 | 操作 | 文件 | 改动 |
 |------|------|------|
-| 修改 | `crates/server/src/routes/workspace.rs` | `invite()` — 支持批量 body（`invitations: [{email, role, message}]`），逐个创建，返回 `{sent, failed, results}` |
-| 创建 | `crates/server/src/routes/workspace.rs` | `list_invitations()` — `GET /workspaces/{slug}/invitations`，返回所有 invitation 列表 |
-| 创建 | `crates/server/src/routes/workspace.rs` | `resend_invitation()` — `POST /workspaces/{slug}/invitations/{id}/resend` |
-| 创建 | `crates/server/src/routes/workspace.rs` | `revoke_invitation()` — `DELETE /workspaces/{slug}/invitations/{id}` |
+| 修改 | `crates/server/src/routes/workspace.rs` | `invite()` — 支持批量 body（`invitations: [{user: "id|email|name", role, message}]`），逐个 resolve + 创建 |
+| 创建 | `crates/server/src/routes/workspace.rs` | `list_invitations()` / `resend_invitation()` / `revoke_invitation()` |
+| 修改 | `crates/server/src/routes/workspace.rs` | `accept_invitation()` — 改用 `invited_user_id` 匹配，移除 email 比对 |
+| 修改 | `crates/server/src/routes/workspace.rs` | `list_pending_invitations()` — 按 `invited_user_id` 查询 |
 
 ### 3.3 路由注册
 | 操作 | 文件 | 改动 |
@@ -130,57 +130,11 @@
 
 ---
 
-## Phase 4: 分享链接系统
-
-**目标**: ShareLink CRUD + Join via link + 密码/过期验证
-
-### 4.1 DB 层
-| 操作 | 文件 | 改动 |
-|------|------|------|
-| 创建 | `crates/db/src/share_links.rs` | `ShareLink` struct (sqlx::FromRow) |
-| 创建 | `crates/db/src/share_links.rs` | `create_share_link()` — 生成 64-char random token (URL-safe base64)，bcrypt password hash |
-| 创建 | `crates/db/src/share_links.rs` | `find_by_token()` — 按 token 查找活跃链接 |
-| 创建 | `crates/db/src/share_links.rs` | `list_by_workspace()` — workspace 所有链接 |
-| 创建 | `crates/db/src/share_links.rs` | `update_share_link()` — 更新 label/password/expires_at/is_active |
-| 创建 | `crates/db/src/share_links.rs` | `deactivate_share_link()` — 设置 is_active=false |
-| 创建 | `crates/db/src/share_links.rs` | `record_join()` — 写入 share_link_joins |
-| 创建 | `crates/db/src/share_links.rs` | `get_join_count()` — 统计链接使用人数 |
-| 修改 | `crates/db/src/lib.rs` | 添加 `pub mod share_links;` |
-
-### 4.2 API 路由
-| 操作 | 文件 | 改动 |
-|------|------|------|
-| 创建 | `crates/server/src/routes/share_links.rs` | `create_share_link()` — `POST /workspaces/{slug}/share-links`，validate role ≤ Editor |
-| 创建 | `crates/server/src/routes/share_links.rs` | `list_share_links()` — `GET /workspaces/{slug}/share-links` |
-| 创建 | `crates/server/src/routes/share_links.rs` | `update_share_link()` — `PATCH /workspaces/{slug}/share-links/{id}` |
-| 创建 | `crates/server/src/routes/share_links.rs` | `delete_share_link()` — `DELETE /workspaces/{slug}/share-links/{id}` → 设置 is_active=false |
-| 创建 | `crates/server/src/routes/share_links.rs` | `join_via_link()` — `POST /share/{token}/join`。验证 token 有效性 + 过期 + 密码 + 速率限制，事务内 insert member + record join |
-| 创建 | `crates/server/src/routes/share_links.rs` | `get_link_info()` — `GET /share/{token}/info`，无需认证，返回 workspace 基本信息 + role + 是否需要密码 |
-
-### 4.3 路由注册
-| 操作 | 文件 | 改动 |
-|------|------|------|
-| 修改 | `crates/server/src/routes/mod.rs` | 添加 `pub mod share_links;` |
-| 修改 | `crates/server/src/main.rs` | 注册 share_links 路由 + share 公开路由 |
-
-### 4.4 安全措施
-| 操作 | 文件 | 改动 |
-|------|------|------|
-| 创建 | `crates/server/src/middleware/rate_limiter.rs` | 简单 IP-based 速率限制中间件，join 端点 10 req/hour |
-| 修改 | `crates/server/src/routes/share_links.rs` | join 路由集成速率限制 |
-
-### 4.5 测试
-| 操作 | 文件 | 改动 |
-|------|------|------|
-| 创建 | `crates/server/tests/share_link_tests.rs` | CRUD 测试、过期测试、密码测试、角色天花板测试（不能创建 Manager/Owner 链接）、速率限制测试 |
-
----
-
-## Phase 5: 转让 Ownership
+## Phase 4: 转让 Ownership
 
 **目标**: 发起转让 → 新 Owner 确认 → 事务执行
 
-### 5.1 DB 层
+### 4.1 DB 层
 | 操作 | 文件 | 改动 |
 |------|------|------|
 | 创建 | `crates/db/src/transfers.rs` | `OwnershipTransfer` struct (sqlx::FromRow) |
@@ -191,7 +145,7 @@
 | 创建 | `crates/db/src/transfers.rs` | `reject_transfer()` / `cancel_transfer()` — 更新 status |
 | 修改 | `crates/db/src/lib.rs` | 添加 `pub mod transfers;` |
 
-### 5.2 API 路由
+### 4.2 API 路由
 | 操作 | 文件 | 改动 |
 |------|------|------|
 | 创建 | `crates/server/src/routes/transfers.rs` | `initiate_transfer()` — `POST /workspaces/{slug}/transfer-ownership` |
@@ -200,13 +154,13 @@
 | 创建 | `crates/server/src/routes/transfers.rs` | `reject_transfer()` — `POST /transfers/{id}/reject` |
 | 创建 | `crates/server/src/routes/transfers.rs` | `cancel_transfer()` — `DELETE /transfers/{id}` |
 
-### 5.3 路由注册
+### 4.3 路由注册
 | 操作 | 文件 | 改动 |
 |------|------|------|
 | 修改 | `crates/server/src/routes/mod.rs` | 添加 `pub mod transfers;` |
 | 修改 | `crates/server/src/main.rs` | 注册 transfer 路由 |
 
-### 5.4 测试
+### 4.4 测试
 | 操作 | 文件 | 改动 |
 |------|------|------|
 | 创建 | `crates/server/tests/transfer_tests.rs` | 正常转让流程、非 member 不能接收、已不在 workspace 时转让驳回、Manager 不能发起转让 |
@@ -229,19 +183,15 @@
 ## 文件变更总览
 
 ```
-创建 (10):
+创建 (7):
   crates/db/src/migrations/009_role_management.sql
-  crates/db/src/share_links.rs
   crates/db/src/transfers.rs
   crates/server/src/routes/guard.rs
-  crates/server/src/routes/share_links.rs
   crates/server/src/routes/transfers.rs
-  crates/server/src/middleware/rate_limiter.rs
   crates/server/tests/guard_tests.rs
-  crates/server/tests/share_link_tests.rs
   crates/server/tests/transfer_tests.rs
 
-修改 (9):
+修改 (8):
   crates/db/src/lib.rs
   crates/db/src/workspaces.rs
   crates/server/src/routes/mod.rs

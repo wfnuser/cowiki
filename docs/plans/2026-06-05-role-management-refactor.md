@@ -15,7 +15,7 @@
 │  │                                                                        │  │
 │  │   Owner ──── 完全控制，唯一，可删除/转让                               │  │
 │  │    │                                                                    │  │
-│  │   Manager ── 管理成员+设置+邀请+分享链接，不可删除/转让                │  │
+│  │   Manager ── 管理成员+设置+邀请，不可删除/转让                         │  │
 │  │    │                                                                    │  │
 │  │   Editor ─── 创建/编辑/删除页面，提交/审核                             │  │
 │  │    │                                                                    │  │
@@ -27,26 +27,25 @@
 │  │                                                                        │  │
 │  │   保留 001–008 migration，新增 009:                                    │  │
 │  │   workspace_members ─ 角色扩展 + 来源追踪 + last_active_at             │  │
-│  │   invitations ─────── 角色扩展 + message/过期/重发字段                 │  │
-│  │   share_links ─────── 分享链接表 (token + role + password + expiry)    │  │
-│  │   share_link_joins ── 链接使用记录表                                   │  │
+│  │   invitations ─────── 角色扩展 + invited_user_id + message/过期/重发   │  │
 │  │   ownership_transfers  转让记录表                                      │  │
 │  │   向后兼容 ─────────── writer→editor, reader→viewer                    │  │
 │  │                                                                        │  │
 │  └────────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
-│  ┌─ 邀请体系 (两套独立) ────────────────────────────────────────────────┐  │
+│  ┌─ 邀请体系 ────────────────────────────────────────────────────────────┐  │
 │  │                                                                        │  │
-│  │   邮箱邀请                        分享链接                             │  │
-│  │   ┌────────────────────┐         ┌────────────────────┐               │  │
-│  │   │ invitations 表      │         │ share_links 表      │               │  │
-│  │   │ · email + role      │         │ · token + role      │               │  │
-│  │   │ · message (可选)    │         │ · password (可选)   │               │  │
-│  │   │ · expires_at (7天)  │         │ · expires_at (可选) │               │  │
-│  │   │ · resent_count      │         │ · label (可选)      │               │  │
-│  │   │ · 撤回/重发          │         │ · 角色天花板: Editor│               │  │
-│  │   │ · 批量发送           │         │ · 链接失效=全部失效 │               │  │
-│  │   └────────────────────┘         └────────────────────┘               │  │
+│  │   User Account 邀请 (id / email / username)                            │  │
+│  │   ┌────────────────────────────────────────────────────────────────┐  │  │
+│  │   │ invitations 表                                                  │  │  │
+│  │   │ · invited_user_id + email + role                                │  │  │
+│  │   │ · message (可选)                                                 │  │  │
+│  │   │ · expires_at (默认 7 天)                                        │  │  │
+│  │   │ · resent_count / last_resent_at                                 │  │  │
+│  │   │ · 撤回 / 重发                                                    │  │  │
+│  │   │ · 批量发送                                                       │  │  │
+│  │   │ · pending 列表按 user_id 匹配，无需 email 比对                    │  │  │
+│  │   └────────────────────────────────────────────────────────────────┘  │  │
 │  │                                                                        │  │
 │  └────────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
@@ -61,13 +60,13 @@
 │                                                                              │
 │  ┌─ API 路由 ───────────────────────────────────────────────────────────┐  │
 │  │                                                                        │  │
-│  │   Workspace CRUD     成员管理         邀请            分享链接         │  │
-│  │   POST /workspaces    GET members     POST   inv     POST share-links  │  │
-│  │   GET  /workspaces    POST members    GET    inv     GET  share-links  │  │
-│  │   GET  /:slug         PATCH role      DELETE inv     PATCH share-links │  │
-│  │   PATCH /:slug        DELETE member   POST  resend   DELETE share-links│  │
-│  │   DELETE /:slug       POST join       POST  accept   POST /share/join  │  │
-│  │   POST transfer       POST add-direct POST  reject   GET  /share/info  │  │
+│  │   Workspace CRUD     成员管理         邀请                           │  │
+│  │   POST /workspaces    GET members     POST   inv                     │  │
+│  │   GET  /workspaces    POST members    GET    inv                     │  │
+│  │   GET  /:slug         PATCH role      DELETE inv                     │  │
+│  │   PATCH /:slug        DELETE member   POST  resend                   │  │
+│  │   DELETE /:slug       POST join       POST  accept                   │  │
+│  │   POST transfer       POST add-direct POST  reject                   │  │
 │  │                                                                        │  │
 │  └────────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
@@ -96,7 +95,7 @@
 3. [数据库 Schema](#3-数据库-schema)
 4. [权限控制](#4-权限控制)
 5. [后端 API](#5-后端-api)
-6. [前端设计](#6-前端设计)
+6. [前端设计](#6-前端设计) *(后续)*
 7. [安全设计](#7-安全设计)
 8. [实施计划](#8-实施计划)
 
@@ -109,8 +108,8 @@
 | 兼容旧数据库 | 增量 migration 009 + 兼容转换 | 保留 001–008，只新增 009，writer→editor, reader→viewer |
 | migration 策略 | 新建 009，在现有基础上叠加 | 最小改动，已有数据库平滑升级 |
 | 角色数量 | 4 级 (Owner/Manager/Editor/Viewer) | Reviewer 评论功能未排期，未来再加 |
-| 邀请体系 | email 邀请 + 分享链接两套独立表 | 不同实体、不同字段、不同生命周期，不应合并 |
-| 分享链接次数限制 | 去掉 max_uses/use_count | 减少复杂度，密码+过期已够用 |
+| 邀请方式 | User Account 邀请 (id/email/username) | 基于已有用户账号，无需分享链接，简化设计 |
+| 分享链接 | 不做 | 功能复杂，需求不明确，后续按需添加 |
 | 权限检查 | 声明式 PermissionGuard (axum extractor) | Handler 不再含角色判断，权限集中管理 |
 | 转让 ownership | 需新 Owner 确认 + 原 Owner 可选降级角色 | 安全，符合 GitHub 惯例 |
 | 邀请提醒 UI | 侧边栏 badge + 弹窗 | 不占空间，交互简单 |
@@ -124,7 +123,7 @@
 ```
 Owner (4) ─── 完全控制，唯一，可删除/转让 workspace
   │
-Manager (3) ── 管理成员+设置+邀请+分享链接，不可删除/转让
+Manager (3) ── 管理成员+设置+邀请，不可删除/转让
   │
 Editor (2) ─── 创建/编辑/删除页面，提交/审核内容
   │
@@ -144,7 +143,6 @@ Viewer (1) ─── 只读
 | 邀请成员 | ✅ | ✅ | ❌ | ❌ |
 | 移除成员 | ✅ | ✅ | ❌ | ❌ |
 | 修改成员角色 | ✅ | ✅ | ❌ | ❌ |
-| 管理分享链接 | ✅ | ✅ | ❌ | ❌ |
 | 修改 workspace 设置 | ✅ | ✅ | ❌ | ❌ |
 | 查看成员列表 | ✅ | ✅ | ✅ | ✅ |
 | 查看审计日志 | ✅ | ✅ | ❌ | ❌ |
@@ -180,11 +178,6 @@ impl Role {
     pub fn can_delete_workspace(&self) -> bool { *self == Self::Owner }
     pub fn can_transfer_ownership(&self) -> bool { *self == Self::Owner }
 
-    /// Share links can only assign up to Editor
-    pub fn is_shareable(&self) -> bool {
-        matches!(self, Self::Viewer | Self::Editor)
-    }
-
     /// Higher role manages lower role (strictly greater)
     pub fn can_manage_role(&self, target: Role) -> bool {
         *self > target
@@ -204,13 +197,9 @@ impl Role {
 erDiagram
     workspaces ||--o{ workspace_members : has
     workspaces ||--o{ invitations : has
-    workspaces ||--o{ share_links : has
     workspaces ||--o{ audit_log : records
     users ||--o{ workspace_members : is
-    users ||--o{ invitations : invited_by
-    users ||--o{ share_links : creates
-    users ||--o{ share_link_joins : joins_via
-    share_links ||--o{ share_link_joins : tracked_by
+    users ||--o{ invitations : "invited_by / invited_user_id"
 
     users {
         uuid id PK
@@ -235,8 +224,7 @@ erDiagram
         uuid user_id PK_FK
         string role "CHECK: owner|manager|editor|viewer"
         uuid invited_by FK
-        string joined_via "direct|invitation|share_link|public_join"
-        uuid share_link_id FK
+        string joined_via "direct|invitation|public_join"
         timestamp joined_at
         timestamp last_active_at
     }
@@ -244,36 +232,16 @@ erDiagram
     invitations {
         uuid id PK
         uuid workspace_id FK
-        string email
+        uuid invited_user_id FK "被邀请用户"
+        string email "display only"
         string role "CHECK: owner|manager|editor|viewer"
-        uuid invited_by FK
+        uuid invited_by FK "发起邀请者"
         string status "pending|accepted|rejected|expired"
         string message
         timestamp expires_at
         int resent_count
         timestamp last_resent_at
         timestamp created_at
-    }
-
-    share_links {
-        uuid id PK
-        uuid workspace_id FK
-        uuid created_by FK
-        string label
-        string token UK
-        string role "CHECK: viewer|editor"
-        string password_hash
-        timestamp expires_at
-        boolean is_active
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    share_link_joins {
-        uuid id PK
-        uuid share_link_id FK
-        uuid user_id FK
-        timestamp joined_at
     }
 
     ownership_transfers {
@@ -304,7 +272,7 @@ erDiagram
 
 ```sql
 -- ============================================================
--- Migration 009: Enhanced Role System + Share Links
+-- Migration 009: Enhanced Role System + User Account Invitations
 -- Preserves 001–008, adds role expansion + new tables
 -- ============================================================
 
@@ -319,14 +287,13 @@ ALTER TABLE workspace_members
 -- 2. 新增列：来源追踪 + 最后活跃时间
 ALTER TABLE workspace_members
     ADD COLUMN IF NOT EXISTS joined_via TEXT NOT NULL DEFAULT 'direct',
-    ADD COLUMN IF NOT EXISTS share_link_id UUID,
     ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 ALTER TABLE workspace_members
     ADD CONSTRAINT workspace_members_joined_via_check
-    CHECK (joined_via IN ('direct', 'invitation', 'share_link', 'public_join'));
+    CHECK (joined_via IN ('direct', 'invitation', 'public_join'));
 
--- 3. 更新 invitations 角色约束 + 新增字段
+-- 3. 更新 invitations: 角色约束 + User Account 邀请 + 新字段
 ALTER TABLE invitations
     DROP CONSTRAINT IF EXISTS invitations_role_check;
 
@@ -335,48 +302,17 @@ ALTER TABLE invitations
     CHECK (role IN ('owner', 'manager', 'editor', 'reviewer', 'viewer'));
 
 ALTER TABLE invitations
+    ADD COLUMN IF NOT EXISTS invited_user_id UUID REFERENCES users(id),
     ADD COLUMN IF NOT EXISTS message TEXT,
     ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ
         DEFAULT (now() + INTERVAL '7 days'),
     ADD COLUMN IF NOT EXISTS resent_count INT NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS last_resent_at TIMESTAMPTZ;
 
+CREATE INDEX IF NOT EXISTS idx_invitations_user ON invitations(invited_user_id, status);
 CREATE INDEX IF NOT EXISTS idx_invitations_status ON invitations(status);
 
--- 4. 分享链接表
-CREATE TABLE IF NOT EXISTS share_links (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    created_by UUID NOT NULL REFERENCES users(id),
-    label VARCHAR(100),
-    token VARCHAR(64) UNIQUE NOT NULL,
-    role VARCHAR(20) NOT NULL DEFAULT 'viewer'
-        CHECK (role IN ('viewer', 'editor')),
-    password_hash VARCHAR(256),
-    expires_at TIMESTAMPTZ,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_share_links_workspace ON share_links(workspace_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_share_links_token ON share_links(token);
-
--- 5. 分享链接使用记录
-CREATE TABLE IF NOT EXISTS share_link_joins (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    share_link_id UUID NOT NULL REFERENCES share_links(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES users(id),
-    joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(share_link_id, user_id)
-);
-
--- 6. FK: workspace_members.share_link_id → share_links
-ALTER TABLE workspace_members
-    ADD CONSTRAINT fk_member_share_link
-    FOREIGN KEY (share_link_id) REFERENCES share_links(id) ON DELETE SET NULL;
-
--- 7. Ownership 转让表
+-- 4. Ownership 转让表
 CREATE TABLE IF NOT EXISTS ownership_transfers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -394,7 +330,7 @@ CREATE INDEX IF NOT EXISTS idx_transfers_workspace
 CREATE INDEX IF NOT EXISTS idx_transfers_to_user
     ON ownership_transfers(to_user_id, status);
 
--- 8. 旧角色兼容转换 (向后兼容)
+-- 5. 旧角色兼容转换 (向后兼容)
 UPDATE workspace_members SET role = 'editor' WHERE role = 'writer';
 UPDATE workspace_members SET role = 'viewer' WHERE role = 'reader';
 UPDATE invitations SET role = 'editor' WHERE role = 'writer';
@@ -458,9 +394,6 @@ async fn invite(
 | `PATCH /workspaces/{slug}` | ManageWorkspace |
 | `POST /workspaces/{slug}/invitations` | ManageMembers |
 | `DELETE /workspaces/{slug}/invitations/{id}` | ManageMembers |
-| `POST /workspaces/{slug}/share-links` | ManageMembers |
-| `PATCH /workspaces/{slug}/share-links/{id}` | ManageMembers |
-| `DELETE /workspaces/{slug}/share-links/{id}` | ManageMembers |
 | `PATCH /workspaces/{slug}/members/{userId}/role` | ManageMembers |
 | `DELETE /workspaces/{slug}/members/{userId}` | ManageMembers |
 | `POST /workspaces/{slug}/join` | ViewContent |
@@ -495,22 +428,15 @@ PATCH  /api/workspaces/{slug}/members/{userId}/role    修改角色 (Manager+)
 DELETE /api/workspaces/{slug}/members/{userId}         移除成员 (Manager+)
 POST   /api/workspaces/{slug}/join                     公开加入
 
-# ── 邮箱邀请 ──
+# ── 用户邀请 (User Account) ──
 POST   /api/workspaces/{slug}/invitations              发送邀请 (支持批量, Manager+)
+                                                       Body: { invitations: [{ user: "id|email|name", role, message? }] }
 GET    /api/workspaces/{slug}/invitations              邀请列表 (Manager+)
 POST   /api/workspaces/{slug}/invitations/{id}/resend  重发邀请 (Manager+)
 DELETE /api/workspaces/{slug}/invitations/{id}         撤回邀请 (Manager+)
-GET    /api/invitations/pending                        我的待处理邀请
+GET    /api/invitations/pending                        我的待处理邀请 (按 user_id 匹配)
 POST   /api/invitations/{id}/accept                    接受邀请
 POST   /api/invitations/{id}/reject                    拒绝邀请
-
-# ── 分享链接 ──
-POST   /api/workspaces/{slug}/share-links              创建分享链接 (Manager+)
-GET    /api/workspaces/{slug}/share-links              分享链接列表 (Manager+)
-PATCH  /api/workspaces/{slug}/share-links/{id}         更新链接设置 (Manager+)
-DELETE /api/workspaces/{slug}/share-links/{id}         撤销链接 (Manager+)
-POST   /api/share/{token}/join                        通过链接加入
-GET    /api/share/{token}/info                        获取链接信息 (无需认证)
 
 # ── 审计日志 ──
 GET    /api/workspaces/{slug}/audit-log                审计日志 (Manager+)
@@ -518,81 +444,28 @@ GET    /api/workspaces/{slug}/audit-log                审计日志 (Manager+)
 
 ### 5.2 关键 API 详情
 
-#### 批量邀请
+#### User Account 批量邀请
 
 ```
 POST /api/workspaces/{slug}/invitations
 Auth: Manager+
 Body: {
   "invitations": [
-    { "email": "a@example.com", "role": "editor", "message": "欢迎!" },
-    { "email": "b@example.com", "role": "viewer" }
+    { "user": "alice", "role": "editor", "message": "欢迎!" },
+    { "user": "bob@example.com", "role": "viewer" },
+    { "user": "550e8400-e29b-...", "role": "manager" }
   ]
 }
+// user 字段支持: user_id (UUID) / email / username
+// 后端按顺序查找: UUID 精确匹配 → email 精确匹配 → username 精确匹配
 Response 201: {
   "sent": 2,
-  "failed": 0,
+  "failed": 1,
   "results": [
-    { "email": "a@example.com", "status": "sent", "invitation_id": "uuid" },
-    { "email": "b@example.com", "status": "sent", "invitation_id": "uuid" }
+    { "user": "alice", "user_id": "uuid", "status": "sent", "invitation_id": "uuid" },
+    { "user": "bob@example.com", "user_id": "uuid", "status": "sent", "invitation_id": "uuid" },
+    { "user": "550e8400...", "status": "failed", "reason": "user not found" }
   ]
-}
-```
-
-#### 创建分享链接
-
-```
-POST /api/workspaces/{slug}/share-links
-Auth: Manager+
-Body: {
-  "label": "设计审核用",        // 可选
-  "role": "viewer",             // viewer | editor (天花板)
-  "password": "...",            // 可选
-  "expires_at": "2026-07-01T00:00:00Z"  // 可选
-}
-Response 201: {
-  "id": "uuid",
-  "token": "64-char-random-token",
-  "url": "https://cowiki.example.com/join/{slug}?token={token}",
-  "label": "设计审核用",
-  "role": "viewer",
-  "has_password": true,
-  "expires_at": "2026-07-01T00:00:00Z",
-  "is_active": true,
-  "created_at": "2026-06-05T..."
-}
-```
-
-#### 通过链接加入
-
-```
-POST /api/share/{token}/join
-Auth: required
-Body: { "password": "..." }    // 如链接设置了密码
-Response 200: {
-  "workspace": { "name": "...", "slug": "..." },
-  "role": "viewer",
-  "joined_via": "share_link"
-}
-Errors:
-  404 → 链接不存在或已失效
-  403 → 密码错误
-  410 → 链接已过期
-  409 → 已是成员
-```
-
-#### 获取链接信息（无需认证）
-
-```
-GET /api/share/{token}/info
-Auth: optional
-Response 200: {
-  "workspace": { "name": "设计知识库", "slug": "design" },
-  "role": "viewer",
-  "requires_password": true,
-  "expires_at": "2026-07-01T00:00:00Z",
-  "is_active": true,
-  "member_count": 12
 }
 ```
 
@@ -637,28 +510,17 @@ Response 200: { "status": "cancelled" }
 
 ## 7. 安全设计
 
-### 7.1 分享链接安全
+### 7.1 邀请安全
 
 | 措施 | 说明 |
 |------|------|
-| Token | 64-char cryptographically random (URL-safe base64) |
-| 密码哈希 | bcrypt, cost >= 12 |
-| 角色天花板 | 最高 Editor，不可 Manager/Owner |
-| 速率限制 | 单 IP 10次/小时 |
-| 审计追踪 | share_link_joins + audit_log |
-| 失效级联 | 链接失效不影响已加入者 |
-
-### 7.2 邀请安全
-
-| 措施 | 说明 |
-|------|------|
-| 邮箱验证 | accept 时验证当前用户 email === 邀请 email |
+| 身份验证 | accept 时验证当前用户 id === invited_user_id |
 | 过期 | 默认 7 天，后台任务标记 expired |
-| 重复拒绝 | 同一邮箱+同一 workspace 已有 pending 邀请时拒绝新建 |
+| 重复拒绝 | 同一 user+同一 workspace 已有 pending 邀请时拒绝新建 |
 | 角色限制 | Manager 不能邀请 Owner |
 | 不能邀请自己 | 不能邀请已是成员的用户 |
 
-### 7.3 权限边界
+### 7.2 权限边界
 
 ```
 Owner:   可管理所有角色 (含 Manager)
@@ -688,19 +550,14 @@ Manager: 可管理 Editor/Viewer
 - 重构所有路由 handler，移除硬编码 role check
 - 权限矩阵测试全覆盖
 
-### Phase 3: 邀请系统增强
-- 批量邀请 API
+### Phase 3: User Account 邀请系统增强
+- 批量邀请 API (id/email/username 解析)
 - 邀请撤回/重发
 - 邀请过期处理
+- pending 列表按 user_id 匹配
 - API 测试
 
-### Phase 4: 分享链接
-- ShareLink CRUD API
-- Join via link API
-- 密码验证 + 过期逻辑
-- API 测试
-
-### Phase 5: 转让 Ownership
+### Phase 4: 转让 Ownership
 - 转让 API（pending 记录 + 确认流程）
 - 测试
 
