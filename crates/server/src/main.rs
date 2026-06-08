@@ -83,11 +83,26 @@ async fn main() {
 
     let port = config.server.port.to_string();
 
+    // Clone db for background task before moving into AppState
+    let expire_db = db.clone();
+
     let state = Arc::new(AppState {
         db,
         config,
         repo_manager,
         compiler,
+    });
+
+    // Background task: expire stale invitations every hour
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+            match cowiki_db::workspaces::expire_stale_invitations(&expire_db).await {
+                Ok(n) if n > 0 => tracing::info!("expired {n} stale invitation(s)"),
+                Err(e) => tracing::error!("failed to expire stale invitations: {e}"),
+                _ => {}
+            }
+        }
     });
 
     let app = Router::new()
@@ -108,11 +123,14 @@ async fn main() {
         .route("/api/workspaces/{slug}/rename", post(routes::workspace::rename_workspace))
         .route("/api/workspaces/{slug}/invite", post(routes::workspace::invite))
         .route("/api/workspaces/{slug}/members", get(routes::workspace::list_members))
-        // Invitations (accept/reject/pending)
+        // Invitations (batch invite, list, resend, revoke, accept, reject, pending)
+        .route("/api/workspaces/{slug}/invitations", get(routes::workspace::list_invitations))
+        .route("/api/workspaces/{slug}/invitations/{id}/resend", post(routes::workspace::resend_invitation))
+        .route("/api/workspaces/{slug}/invitations/{id}", delete(routes::workspace::revoke_invitation))
         .route("/api/invitations/pending", get(routes::workspace::list_pending_invitations))
         .route("/api/invitations/{id}/accept", post(routes::workspace::accept_invitation))
         .route("/api/invitations/{id}/reject", post(routes::workspace::reject_invitation))
-        // Member management (owner only)
+        // Member management (Manager+)
         .route("/api/workspaces/{slug}/members/remove", post(routes::workspace::remove_member))
         .route("/api/workspaces/{slug}/members/role", post(routes::workspace::change_member_role))
         // Workspace deletion (owner only)

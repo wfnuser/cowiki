@@ -135,6 +135,27 @@ pub struct InviteWithRoleRequest {
     pub role: Option<String>,             // defaults to "viewer"
 }
 
+#[derive(Deserialize)]
+pub struct BatchInviteRequest {
+    pub invitations: Vec<InviteWithRoleRequest>,
+}
+
+#[derive(Serialize)]
+pub struct InviteResult {
+    pub user: String,
+    pub user_id: Option<String>,
+    pub status: String,                // "sent" | "failed"
+    pub invitation_id: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct BatchInviteResponse {
+    pub sent: usize,
+    pub failed: usize,
+    pub results: Vec<InviteResult>,
+}
+
 #[derive(Serialize)]
 pub struct InviteResponse {
     pub invitation_id: String,
@@ -142,57 +163,121 @@ pub struct InviteResponse {
     pub workspace: String,
 }
 
-/// Invite someone to a workspace by email with optional role.
-/// Owner-only. Creates a pending invitation — the invited user must accept/reject.
+/// Invite users to a workspace (Manager+). Supports batch via `BatchInviteRequest`.
+/// Creates pending invitations — invitees must accept/reject.
 pub async fn invite(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
     Path(workspace_slug): Path<String>,
-    Json(input): Json<InviteWithRoleRequest>,
-) -> Result<Json<InviteResponse>> {
+    Json(input): Json<BatchInviteRequest>,
+) -> Result<Json<BatchInviteResponse>> {
     let guard = guard::require_membership(&state, &headers, &workspace_slug).await?;
     guard::require(&guard, Permission::ManageMembers)?;
 
-    // Validate role
-    let role = input.role.as_deref().unwrap_or("viewer");
-    if role.parse::<cowiki_db::workspaces::Role>().is_err() {
-        return Err(AppError::BadRequest(
-            format!("invalid role '{role}': must be one of: owner, manager, editor, viewer")
-        ));
+    let mut results = Vec::new();
+    let mut sent = 0;
+    let mut failed = 0;
+
+    for item in &input.invitations {
+        // Validate role
+        let role = item.role.as_deref().unwrap_or("viewer");
+        if role.parse::<cowiki_db::workspaces::Role>().is_err() {
+            failed += 1;
+            results.push(InviteResult {
+                user: item.user.clone(), user_id: None,
+                status: "failed".into(), invitation_id: None,
+                reason: Some(format!("invalid role: {role}")),
+            });
+            continue;
+        }
+
+        // Resolve user identifier
+        let invited_user = match cowiki_db::workspaces::resolve_user_identifier(&state.db, &item.user).await {
+            Ok(Some(id)) => id,
+            Ok(None) => {
+                failed += 1;
+                results.push(InviteResult {
+                    user: item.user.clone(), user_id: None,
+                    status: "failed".into(), invitation_id: None,
+                    reason: Some("user not found".into()),
+                });
+                continue;
+            }
+            Err(_) => {
+                failed += 1;
+                results.push(InviteResult {
+                    user: item.user.clone(), user_id: None,
+                    status: "failed".into(), invitation_id: None,
+                    reason: Some("lookup error".into()),
+                });
+                continue;
+            }
+        };
+
+        // Cannot invite self
+        if invited_user == guard.user.id {
+            failed += 1;
+            results.push(InviteResult {
+                user: item.user.clone(), user_id: Some(invited_user.to_string()),
+                status: "failed".into(), invitation_id: None,
+                reason: Some("cannot invite yourself".into()),
+            });
+            continue;
+        }
+
+        // Cannot invite existing member
+        if cowiki_db::workspaces::is_member(&state.db, guard.workspace.id, invited_user).await.unwrap_or(false) {
+            failed += 1;
+            results.push(InviteResult {
+                user: item.user.clone(), user_id: Some(invited_user.to_string()),
+                status: "failed".into(), invitation_id: None,
+                reason: Some("already a member".into()),
+            });
+            continue;
+        }
+
+        // Create invitation
+        match cowiki_db::workspaces::create_invitation(
+            &state.db, guard.workspace.id, &item.user, role, guard.user.id, invited_user,
+        ).await {
+            Ok(invitation) => {
+                // Fire-and-forget audit log
+                let db = state.db.clone();
+                let ws_id = guard.workspace.id;
+                let actor_id = guard.user.id;
+                let inv_id = invitation.id;
+                let user_display = item.user.clone();
+                let role_display = role.to_string();
+                tokio::spawn(async move {
+                    let _ = cowiki_db::audit::log(
+                        &db, ws_id, actor_id,
+                        "invite_member", Some("invitation"), Some(inv_id),
+                        Some(serde_json::json!({"user": user_display, "role": role_display})),
+                    ).await;
+                });
+                sent += 1;
+                results.push(InviteResult {
+                    user: item.user.clone(),
+                    user_id: Some(invited_user.to_string()),
+                    status: "sent".into(),
+                    invitation_id: Some(invitation.id.to_string()),
+                    reason: None,
+                });
+            }
+            Err(_) => {
+                failed += 1;
+                results.push(InviteResult {
+                    user: item.user.clone(),
+                    user_id: Some(invited_user.to_string()),
+                    status: "failed".into(),
+                    invitation_id: None,
+                    reason: Some("database error".into()),
+                });
+            }
+        }
     }
 
-    // Resolve user identifier to a user ID
-    let invited_user = cowiki_db::workspaces::resolve_user_identifier(&state.db, &input.user)
-        .await?
-        .ok_or_else(|| AppError::NotFound(format!("user '{}' not found", input.user)))?;
-
-    // Cannot invite self
-    if invited_user == guard.user.id {
-        return Err(AppError::BadRequest("cannot invite yourself".into()));
-    }
-
-    // Cannot invite existing member
-    if cowiki_db::workspaces::is_member(&state.db, guard.workspace.id, invited_user).await? {
-        return Err(AppError::BadRequest("user is already a member".into()));
-    }
-
-    // Create invitation
-    let invitation = cowiki_db::workspaces::create_invitation(
-        &state.db, guard.workspace.id, &input.user, role, guard.user.id, invited_user,
-    ).await?;
-
-    // Audit log
-    cowiki_db::audit::log(
-        &state.db, guard.workspace.id, guard.user.id,
-        "invite_member", Some("invitation"), Some(invitation.id),
-        Some(serde_json::json!({"user": input.user, "role": role})),
-    ).await?;
-
-    Ok(Json(InviteResponse {
-        invitation_id: invitation.id.to_string(),
-        email: input.user,
-        workspace: guard.workspace.slug.clone(),
-    }))
+    Ok(Json(BatchInviteResponse { sent, failed, results }))
 }
 
 /// List members of a workspace
@@ -290,18 +375,10 @@ pub async fn accept_invitation(
         return Err(AppError::BadRequest("invitation is no longer pending".into()));
     }
 
-    // Verify the invitation is for this user (by email match)
-    let current_user = cowiki_db::users::find_by_id(&state.db, user.id)
-        .await?
-        .ok_or_else(|| AppError::Unauthorized("user not found".into()))?;
-
-    if current_user.email.is_none() {
-        return Err(AppError::BadRequest(
-            "Please set your email in settings to accept invitations".into(),
-        ));
-    }
-    if current_user.email.as_deref() != Some(&invitation.email) {
-        return Err(AppError::Forbidden("this invitation is for a different email address".into()));
+    // Verify invitation is for this user by invited_user_id
+    match invitation.invited_user_id {
+        Some(invited_id) if invited_id == user.id => {}
+        _ => return Err(AppError::Forbidden("this invitation is for a different user".into())),
     }
 
     // Add as member with the invited role
@@ -321,10 +398,9 @@ pub async fn accept_invitation(
     ).await?;
 
     // Create user branch in the workspace repo
-    let ws = cowiki_db::workspaces::find_by_id(
-        &state.db, invitation.workspace_id,
-    ).await?
-    .ok_or_else(|| AppError::NotFound("workspace not found".into()))?;
+    let ws = cowiki_db::workspaces::find_by_id(&state.db, invitation.workspace_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("workspace not found".into()))?;
 
     state.repo_manager
         .get(&ws.slug)
@@ -351,13 +427,10 @@ pub async fn reject_invitation(
         return Err(AppError::BadRequest("invitation is no longer pending".into()));
     }
 
-    // Verify email match
-    let current_user = cowiki_db::users::find_by_id(&state.db, user.id)
-        .await?
-        .ok_or_else(|| AppError::Unauthorized("user not found".into()))?;
-
-    if current_user.email.as_deref() != Some(&invitation.email) {
-        return Err(AppError::Forbidden("this invitation is for a different email address".into()));
+    // Verify invitation is for this user by invited_user_id
+    match invitation.invited_user_id {
+        Some(invited_id) if invited_id == user.id => {}
+        _ => return Err(AppError::Forbidden("this invitation is for a different user".into())),
     }
 
     cowiki_db::workspaces::reject_invitation(&state.db, invitation.id).await?;
@@ -412,6 +485,88 @@ pub async fn list_pending_invitations(
 pub struct RemoveMemberRequest {
     pub user_id: String,
 }
+
+// ── Invitation Management ──
+
+#[derive(Serialize)]
+pub struct InvitationDetailResponse {
+    pub id: String,
+    pub email: String,
+    pub role: String,
+    pub status: String,
+    pub invited_user_id: Option<String>,
+    pub message: Option<String>,
+    pub expires_at: Option<String>,
+    pub resent_count: i32,
+    pub created_at: String,
+}
+
+/// List all invitations for a workspace (Manager+).
+pub async fn list_invitations(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Path(workspace_slug): Path<String>,
+) -> Result<Json<Vec<InvitationDetailResponse>>> {
+    let guard = guard::require_membership(&state, &headers, &workspace_slug).await?;
+    guard::require(&guard, Permission::ManageMembers)?;
+
+    let invitations = cowiki_db::workspaces::find_invitations_by_workspace(&state.db, guard.workspace.id).await?;
+    let result: Vec<InvitationDetailResponse> = invitations.iter().map(|inv| InvitationDetailResponse {
+        id: inv.id.to_string(),
+        email: inv.email.clone(),
+        role: inv.role.clone(),
+        status: inv.status.clone(),
+        invited_user_id: inv.invited_user_id.map(|id| id.to_string()),
+        message: inv.message.clone(),
+        expires_at: inv.expires_at.map(|t| t.to_rfc3339()),
+        resent_count: inv.resent_count,
+        created_at: inv.created_at.to_rfc3339(),
+    }).collect();
+
+    Ok(Json(result))
+}
+
+/// Resend a pending invitation (Manager+).
+pub async fn resend_invitation(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Path((workspace_slug, invitation_id)): Path<(String, Uuid)>,
+) -> Result<Json<InvitationDetailResponse>> {
+    let guard = guard::require_membership(&state, &headers, &workspace_slug).await?;
+    guard::require(&guard, Permission::ManageMembers)?;
+
+    let inv = cowiki_db::workspaces::resend_invitation(&state.db, invitation_id).await
+        .map_err(|_| AppError::NotFound("invitation not found or not pending".into()))?;
+
+    Ok(Json(InvitationDetailResponse {
+        id: inv.id.to_string(),
+        email: inv.email.clone(),
+        role: inv.role.clone(),
+        status: inv.status.clone(),
+        invited_user_id: inv.invited_user_id.map(|id| id.to_string()),
+        message: inv.message.clone(),
+        expires_at: inv.expires_at.map(|t| t.to_rfc3339()),
+        resent_count: inv.resent_count,
+        created_at: inv.created_at.to_rfc3339(),
+    }))
+}
+
+/// Revoke (expire) a pending invitation (Manager+).
+pub async fn revoke_invitation(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Path((workspace_slug, invitation_id)): Path<(String, Uuid)>,
+) -> Result<Json<serde_json::Value>> {
+    let guard = guard::require_membership(&state, &headers, &workspace_slug).await?;
+    guard::require(&guard, Permission::ManageMembers)?;
+
+    cowiki_db::workspaces::revoke_invitation(&state.db, invitation_id).await
+        .map_err(|_| AppError::NotFound("invitation not found or not pending".into()))?;
+
+    Ok(Json(serde_json::json!({"status": "revoked"})))
+}
+
+// ── Member management ──
 
 /// Remove a member from a workspace (Manager+).
 pub async fn remove_member(
