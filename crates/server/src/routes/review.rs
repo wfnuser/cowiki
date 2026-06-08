@@ -5,15 +5,17 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 use crate::error::{AppError, Result};
-use crate::routes::auth::extract_user;
 use crate::routes::guard::{self, Permission};
 use crate::AppState;
 
 pub async fn list_reviews(
     State(state): State<Arc<AppState>>,
     Path(ws_slug): Path<String>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<Vec<cowiki_db::submissions::Submission>>> {
-    let subs = cowiki_db::submissions::list_pending_for_workspace(&state.db, &ws_slug).await?;
+    let guard = guard::require_membership(&state, &headers, &ws_slug).await?;
+    guard::require(&guard, Permission::ViewContent)?;
+    let subs = cowiki_db::submissions::list_pending_for_workspace(&state.db, &guard.workspace.slug).await?;
     Ok(Json(subs))
 }
 
@@ -26,15 +28,19 @@ pub struct ReviewDetail {
 pub async fn get_review(
     State(state): State<Arc<AppState>>,
     Path((ws_slug, id)): Path<(String, uuid::Uuid)>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<ReviewDetail>> {
+    let guard = guard::require_membership(&state, &headers, &ws_slug).await?;
+    guard::require(&guard, Permission::ViewContent)?;
+
     let submission = cowiki_db::submissions::find_by_id(&state.db, id)
         .await?
         .ok_or_else(|| AppError::NotFound("submission not found".into()))?;
-    if submission.workspace_slug != ws_slug {
+    if submission.workspace_slug != guard.workspace.slug {
         return Err(AppError::NotFound("submission not found in this workspace".into()));
     }
 
-    let repo = state.repo_manager.get(&ws_slug)
+    let repo = state.repo_manager.get(&guard.workspace.slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     let diffs = repo
         .diff_files(&submission.source_branch, &submission.page_slugs)

@@ -92,6 +92,7 @@ mod tests {
             include_str!("migrations/006_api_keys.sql"),
             include_str!("migrations/007_team_permissions.sql"),
             include_str!("migrations/008_submission_workspace.sql"),
+            include_str!("migrations/009_role_management.sql"),
         ] {
             let _ = sqlx::raw_sql(m).execute(&pool).await;
         }

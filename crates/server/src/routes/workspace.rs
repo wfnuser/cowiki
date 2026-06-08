@@ -83,7 +83,7 @@ pub async fn list_workspaces(
     for ws in workspaces {
         let role = cowiki_db::workspaces::get_member_role(&state.db, ws.id, user.id)
             .await?
-            .unwrap_or_else(|| if ws.created_by == user.id { "owner".into() } else { "reader".into() });
+            .unwrap_or_else(|| if ws.created_by == user.id { "owner".into() } else { "viewer".into() });
         result.push(ws_response(&ws, &role));
     }
     Ok(Json(result))
@@ -117,7 +117,7 @@ pub async fn join_workspace(
         return Err(AppError::BadRequest("workspace is private, you need an invitation".into()));
     }
 
-    cowiki_db::workspaces::add_member(&state.db, ws.id, user.id, "writer", user.id).await?;
+    cowiki_db::workspaces::add_member_public_join(&state.db, ws.id, user.id, "editor", user.id).await?;
 
     // Create user branch in the workspace repo
     state.repo_manager
@@ -126,7 +126,7 @@ pub async fn join_workspace(
         .ensure_user_branch(&user.id.to_string())
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    Ok(Json(ws_response(&ws, "writer")))
+    Ok(Json(ws_response(&ws, "editor")))
 }
 
 #[derive(Deserialize)]
@@ -154,13 +154,6 @@ pub struct BatchInviteResponse {
     pub sent: usize,
     pub failed: usize,
     pub results: Vec<InviteResult>,
-}
-
-#[derive(Serialize)]
-pub struct InviteResponse {
-    pub invitation_id: String,
-    pub email: String,
-    pub workspace: String,
 }
 
 /// Invite users to a workspace (Manager+). Supports batch via `BatchInviteRequest`.

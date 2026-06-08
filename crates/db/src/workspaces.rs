@@ -175,6 +175,16 @@ pub async fn add_member_direct(pool: &PgPool, workspace_id: Uuid, user_id: Uuid,
     Ok(())
 }
 
+pub async fn add_member_public_join(pool: &PgPool, workspace_id: Uuid, user_id: Uuid, role: &str, invited_by: Uuid) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO workspace_members (workspace_id, user_id, role, invited_by, joined_via) VALUES ($1, $2, $3, $4, 'public_join') ON CONFLICT DO NOTHING"
+    )
+    .bind(workspace_id).bind(user_id).bind(role).bind(invited_by)
+    .execute(pool)
+    .await.map_err(|e| { tracing::error!("DB error: {e}"); e })?;
+    Ok(())
+}
+
 pub async fn list_members(pool: &PgPool, workspace_id: Uuid) -> sqlx::Result<Vec<WorkspaceMember>> {
     sqlx::query_as::<_, WorkspaceMember>(
         "SELECT * FROM workspace_members WHERE workspace_id = $1"
@@ -488,6 +498,113 @@ mod tests {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // Role Hierarchy & Ordering Tests
+    // ═══════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_role_ordering() {
+        // Viewer(1) < Editor(2) < Manager(3) < Owner(4)
+        assert!(Role::Viewer < Role::Editor);
+        assert!(Role::Editor < Role::Manager);
+        assert!(Role::Manager < Role::Owner);
+        assert!(Role::Viewer < Role::Owner);
+        assert!(!(Role::Owner < Role::Viewer));
+        // >= is used for permission checks
+        assert!(Role::Owner >= Role::Owner);
+        assert!(Role::Owner >= Role::Manager);
+        assert!(Role::Manager >= Role::Editor);
+        assert!(Role::Editor >= Role::Viewer);
+        assert!(!(Role::Viewer >= Role::Editor));
+    }
+
+    #[test]
+    fn test_role_numeric_discriminants() {
+        assert_eq!(Role::Viewer as u8, 1);
+        assert_eq!(Role::Editor as u8, 2);
+        assert_eq!(Role::Manager as u8, 3);
+        assert_eq!(Role::Owner as u8, 4);
+    }
+
+    #[test]
+    fn test_role_can_view() {
+        assert!(Role::Owner.can_view());
+        assert!(Role::Manager.can_view());
+        assert!(Role::Editor.can_view());
+        assert!(Role::Viewer.can_view());
+    }
+
+    #[test]
+    fn test_role_can_edit_all_roles() {
+        assert!(Role::Owner.can_edit());
+        assert!(Role::Manager.can_edit());
+        assert!(Role::Editor.can_edit());
+        assert!(!Role::Viewer.can_edit());
+    }
+
+    #[test]
+    fn test_role_can_manage_all_roles() {
+        assert!(Role::Owner.can_manage());
+        assert!(Role::Manager.can_manage());
+        assert!(!Role::Editor.can_manage());
+        assert!(!Role::Viewer.can_manage());
+    }
+
+    #[test]
+    fn test_role_can_delete_workspace() {
+        assert!(Role::Owner.can_delete_workspace());
+        assert!(!Role::Manager.can_delete_workspace());
+        assert!(!Role::Editor.can_delete_workspace());
+        assert!(!Role::Viewer.can_delete_workspace());
+    }
+
+    #[test]
+    fn test_role_can_transfer_ownership() {
+        assert!(Role::Owner.can_transfer_ownership());
+        assert!(!Role::Manager.can_transfer_ownership());
+        assert!(!Role::Editor.can_transfer_ownership());
+        assert!(!Role::Viewer.can_transfer_ownership());
+    }
+
+    #[test]
+    fn test_role_can_manage_role_matrix() {
+        // can_manage_role uses strict greater-than: self > target
+        let all = [Role::Viewer, Role::Editor, Role::Manager, Role::Owner];
+
+        // Owner can manage everyone below
+        assert!(Role::Owner.can_manage_role(Role::Manager));
+        assert!(Role::Owner.can_manage_role(Role::Editor));
+        assert!(Role::Owner.can_manage_role(Role::Viewer));
+        assert!(!Role::Owner.can_manage_role(Role::Owner)); // not strictly greater
+
+        // Manager can manage Editor and Viewer
+        assert!(Role::Manager.can_manage_role(Role::Editor));
+        assert!(Role::Manager.can_manage_role(Role::Viewer));
+        assert!(!Role::Manager.can_manage_role(Role::Manager));
+        assert!(!Role::Manager.can_manage_role(Role::Owner));
+
+        // Editor can manage Viewer only
+        assert!(Role::Editor.can_manage_role(Role::Viewer));
+        assert!(!Role::Editor.can_manage_role(Role::Editor));
+        assert!(!Role::Editor.can_manage_role(Role::Manager));
+        assert!(!Role::Editor.can_manage_role(Role::Owner));
+
+        // Viewer cannot manage anyone
+        for role in &all {
+            assert!(!Role::Viewer.can_manage_role(*role));
+        }
+
+        // Verify symmetry: if A can manage B, then B cannot manage A
+        for &a in &all {
+            for &b in &all {
+                if a != b {
+                    assert!(a.can_manage_role(b) != b.can_manage_role(a) || !a.can_manage_role(b),
+                        "asymmetric: {:?} vs {:?}", a, b);
+                }
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // Database Integration Tests (require TEST_DATABASE_URL)
     // ═══════════════════════════════════════════════════════════════
 
@@ -506,6 +623,7 @@ mod tests {
         let _ = sqlx::raw_sql(include_str!("migrations/006_api_keys.sql")).execute(&pool).await;
         let _ = sqlx::raw_sql(include_str!("migrations/007_team_permissions.sql")).execute(&pool).await;
         let _ = sqlx::raw_sql(include_str!("migrations/008_submission_workspace.sql")).execute(&pool).await;
+        let _ = sqlx::raw_sql(include_str!("migrations/009_role_management.sql")).execute(&pool).await;
         Some(pool)
     }
 
@@ -631,7 +749,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_remove_member_cannot_remove_owner() {
+    async fn test_remove_member_allows_owner_removal() {
+        // Owner removal is now enforced at the route/application layer (PermissionGuard).
+        // The DB function intentionally allows it — verification happens before calling.
         let pool = match test_pool().await {
             Some(p) => p,
             None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
@@ -641,9 +761,7 @@ mod tests {
 
         let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
         let removed = remove_member(&pool, ws.id, user_a).await.unwrap();
-        assert!(!removed, "owner should not be removable");
-        let role = get_member_role(&pool, ws.id, user_a).await.unwrap();
-        assert_eq!(role.as_deref(), Some("owner"));
+        assert!(removed, "DB allows owner removal; guard is at app layer");
 
         let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
     }
@@ -690,7 +808,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_change_member_role_cannot_change_owner() {
+    async fn test_change_member_role_allows_owner_change() {
+        // Owner role change is now enforced at the route/application layer (PermissionGuard).
+        // The DB function intentionally allows it — verification happens before calling.
         let pool = match test_pool().await {
             Some(p) => p,
             None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
@@ -700,9 +820,9 @@ mod tests {
 
         let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
         let result = change_member_role(&pool, ws.id, user_a, "editor").await.unwrap();
-        assert!(result.is_none(), "owner's role should not be changeable");
+        assert!(result.is_some(), "DB allows owner role change; guard is at app layer");
         let role = get_member_role(&pool, ws.id, user_a).await.unwrap();
-        assert_eq!(role.as_deref(), Some("owner"));
+        assert_eq!(role.as_deref(), Some("editor"));
 
         let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
     }
@@ -966,6 +1086,264 @@ mod tests {
         let updated = rename(&pool, ws.id, "Renamed WS").await.unwrap();
         assert_eq!(updated.name, "Renamed WS");
         assert_eq!(updated.slug, slug);
+
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // joined_via Tests
+    // ═══════════════════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn test_add_member_joined_via_invitation() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+        };
+        let (user_a, user_b, _) = create_test_users(&pool).await;
+        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+
+        add_member(&pool, ws.id, user_b, "editor", user_a).await.unwrap();
+        let row: (String,) = sqlx::query_as(
+            "SELECT joined_via FROM workspace_members WHERE workspace_id = $1 AND user_id = $2"
+        )
+        .bind(ws.id).bind(user_b)
+        .fetch_one(&pool).await.unwrap();
+        assert_eq!(row.0, "invitation");
+
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+    }
+
+    #[tokio::test]
+    async fn test_add_member_direct_joined_via_direct() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+        };
+        let (user_a, user_b, _) = create_test_users(&pool).await;
+        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+
+        add_member_direct(&pool, ws.id, user_b, "editor", user_a).await.unwrap();
+        let row: (String,) = sqlx::query_as(
+            "SELECT joined_via FROM workspace_members WHERE workspace_id = $1 AND user_id = $2"
+        )
+        .bind(ws.id).bind(user_b)
+        .fetch_one(&pool).await.unwrap();
+        assert_eq!(row.0, "direct");
+
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+    }
+
+    #[tokio::test]
+    async fn test_add_member_public_join_joined_via_public_join() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+        };
+        let (user_a, user_b, _) = create_test_users(&pool).await;
+        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+
+        add_member_public_join(&pool, ws.id, user_b, "viewer", user_a).await.unwrap();
+        let row: (String,) = sqlx::query_as(
+            "SELECT joined_via FROM workspace_members WHERE workspace_id = $1 AND user_id = $2"
+        )
+        .bind(ws.id).bind(user_b)
+        .fetch_one(&pool).await.unwrap();
+        assert_eq!(row.0, "public_join");
+
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // resolve_user_identifier Tests
+    // ═══════════════════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn test_resolve_user_identifier_by_uuid() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+        };
+        let (user_a, _, _) = create_test_users(&pool).await;
+
+        let resolved = resolve_user_identifier(&pool, &user_a.to_string()).await.unwrap();
+        assert_eq!(resolved, Some(user_a));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_user_identifier_by_email() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+        };
+        let (user_a, _, _) = create_test_users(&pool).await;
+
+        let resolved = resolve_user_identifier(&pool, "alice@test.com").await.unwrap();
+        assert_eq!(resolved, Some(user_a));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_user_identifier_by_name() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+        };
+        let (user_a, _, _) = create_test_users(&pool).await;
+
+        let resolved = resolve_user_identifier(&pool, "Alice").await.unwrap();
+        assert_eq!(resolved, Some(user_a));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_user_identifier_not_found() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+        };
+        let _ = create_test_users(&pool).await;
+
+        let resolved = resolve_user_identifier(&pool, "nonexistent@test.com").await.unwrap();
+        assert!(resolved.is_none());
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Invitation Lifecycle Tests
+    // ═══════════════════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn test_resend_invitation_updates_count_and_expiry() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+        };
+        let (user_a, user_b, _) = create_test_users(&pool).await;
+        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+
+        let inv = create_invitation(&pool, ws.id, "bob@test.com", "editor", user_a, user_b).await.unwrap();
+        assert_eq!(inv.resent_count, 0);
+
+        let resent = resend_invitation(&pool, inv.id).await.unwrap();
+        assert_eq!(resent.resent_count, 1);
+        assert!(resent.last_resent_at.is_some());
+        assert!(resent.expires_at.is_some());
+
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+    }
+
+    #[tokio::test]
+    async fn test_revoke_invitation_sets_expired() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+        };
+        let (user_a, user_b, _) = create_test_users(&pool).await;
+        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+
+        let inv = create_invitation(&pool, ws.id, "bob@test.com", "viewer", user_a, user_b).await.unwrap();
+        let revoked = revoke_invitation(&pool, inv.id).await.unwrap();
+        assert_eq!(revoked.status, "expired");
+
+        // Cannot revoke again (status no longer pending)
+        let result = revoke_invitation(&pool, inv.id).await;
+        assert!(result.is_err());
+
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+    }
+
+    #[tokio::test]
+    async fn test_expire_stale_invitations() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+        };
+        let (user_a, user_b, _) = create_test_users(&pool).await;
+        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+
+        // Create an invitation with a past expiry
+        sqlx::query(
+            "INSERT INTO invitations (workspace_id, email, role, invited_by, invited_user_id, status, expires_at) \
+             VALUES ($1, $2, $3, $4, $5, 'pending', now() - INTERVAL '8 days')"
+        )
+        .bind(ws.id).bind("expired@test.com").bind("viewer").bind(user_a).bind(user_b)
+        .execute(&pool).await.unwrap();
+
+        let count = expire_stale_invitations(&pool).await.unwrap();
+        assert!(count >= 1, "should have expired at least one stale invitation");
+
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+    }
+
+    #[tokio::test]
+    async fn test_find_invitations_by_workspace() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+        };
+        let (user_a, user_b, _) = create_test_users(&pool).await;
+        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+
+        create_invitation(&pool, ws.id, "a@test.com", "viewer", user_a, user_b).await.unwrap();
+        create_invitation(&pool, ws.id, "b@test.com", "editor", user_a, user_b).await.unwrap();
+
+        let invs = find_invitations_by_workspace(&pool, ws.id).await.unwrap();
+        assert_eq!(invs.len(), 2);
+
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Role Check Constraint Tests (migration 009 only)
+    // ═══════════════════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn test_invalid_role_rejected_by_check_constraint() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+        };
+        let (user_a, user_b, _) = create_test_users(&pool).await;
+        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+
+        // "writer" is no longer a valid role after migration 009
+        let result = sqlx::query(
+            "INSERT INTO workspace_members (workspace_id, user_id, role, invited_by, joined_via) \
+             VALUES ($1, $2, 'writer', $3, 'invitation') ON CONFLICT DO NOTHING"
+        )
+        .bind(ws.id).bind(user_b).bind(user_a)
+        .execute(&pool).await;
+        assert!(result.is_err(), "role 'writer' should be rejected by CHECK constraint");
+
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+    }
+
+    #[tokio::test]
+    async fn test_all_new_roles_accepted_by_check_constraint() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+        };
+        let (user_a, user_b, _) = create_test_users(&pool).await;
+        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+
+        // All 4 valid roles should be accepted
+        for role in ["owner", "manager", "editor", "viewer"] {
+            let result = sqlx::query(
+                "INSERT INTO workspace_members (workspace_id, user_id, role, invited_by, joined_via) \
+                 VALUES ($1, $2, $3, $4, 'invitation') ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = $3"
+            )
+            .bind(ws.id).bind(user_b).bind(role).bind(user_a)
+            .execute(&pool).await;
+            assert!(result.is_ok(), "role '{role}' should be accepted: {result:?}");
+        }
 
         let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
     }

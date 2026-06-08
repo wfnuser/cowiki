@@ -368,22 +368,33 @@ impl Permission {
 
 ### 4.2 使用方式
 
-```rust
-// Extractor: resolves workspace + member role from DB, then checks permission.
-// Extracted from Path + Auth headers. Injects (Workspace, member Role) into handler.
+采用手动调用模式（非 axum extractor），与路由签名完全兼容：
 
+```rust
+// 1. 解析成员身份 + 权限检查
 async fn invite(
     State(state): State<Arc<AppState>>,
-    guard: PermissionGuard,           // ← declare needed permission
+    headers: HeaderMap,
     Path(slug): Path<String>,
-    Json(body): Json<InviteRequest>,
-) -> Result<Json<InviteResponse>> {
-    guard.require(Permission::ManageMembers)?;
-    // guard.workspace already resolved
-    // guard.member_role already available
-    // ... handler logic, no more role checks
+    Json(body): Json<BatchInviteRequest>,
+) -> Result<Json<BatchInviteResponse>> {
+    let guard = guard::require_membership(&state, &headers, &slug).await?;
+    guard::require(&guard, Permission::ManageMembers)?;
+    // guard.workspace / guard.user / guard.member_role 已可用
+    // ... handler logic
+}
+
+// 2. 角色层级管理 (Manager 不能管理同级或上级)
+if !guard.member_role.can_manage_role(target_role) {
+    return Err(AppError::Forbidden("cannot manage equal or higher role"));
 }
 ```
+
+`require_membership` 内部自动：
+- 从 Header 提取用户
+- 按 slug 查找 workspace
+- 查询 member role
+- 更新 `last_active_at` (fire-and-forget)`
 
 ### 4.3 路由 → 权限映射
 
@@ -514,11 +525,11 @@ Response 200: { "status": "cancelled" }
 
 | 措施 | 说明 |
 |------|------|
-| 身份验证 | accept 时验证当前用户 id === invited_user_id |
-| 过期 | 默认 7 天，后台任务标记 expired |
-| 重复拒绝 | 同一 user+同一 workspace 已有 pending 邀请时拒绝新建 |
-| 角色限制 | Manager 不能邀请 Owner |
-| 不能邀请自己 | 不能邀请已是成员的用户 |
+| 身份验证 | accept/reject 时验证 `invited_user_id === current_user.id`（精确 UUID 匹配，非 email 比对） |
+| 过期 | 默认 7 天，后台 tokio task 每小时运行 `expire_stale_invitations()` |
+| 角色限制 | `can_manage_role()` 确保 Manager 不能邀请 Owner，不能管理同级 |
+| 不能邀请自己 | 检查 `invited_user != guard.user.id` |
+| 不能邀请已有成员 | 检查 `is_member()` 后再创建邀请 |
 
 ### 7.2 权限边界
 
@@ -526,13 +537,30 @@ Response 200: { "status": "cancelled" }
 Owner:   可管理所有角色 (含 Manager)
          唯一可删除 workspace
          唯一可转让 ownership
+         can_manage_role() 使用严格大于 (>), Owner > Manager > Editor > Viewer
 
 Manager: 可管理 Editor/Viewer
-         不能管理 Owner
-         不能提升为 Owner
+         不能管理 Owner (can_manage_role 返回 false)
+         不能提升为 Owner (路由层额外检查)
          不能删除 workspace
          不能转让 ownership
 ```
+
+### 7.3 转让安全
+
+| 措施 | 说明 |
+|------|------|
+| TOCTOU 防护 | `accept_transfer` 事务内使用 `SELECT ... FOR UPDATE` + `WHERE status = 'pending'` 原子化锁定 |
+| 状态机 | pending → accepted/rejected/cancelled，非 pending 状态拒绝操作 |
+| 身份验证 | accept/reject 验证 `to_user_id`，cancel 验证 `from_user_id` |
+| 角色约束 | `previous_owner_new_role` 只能是 manager/editor/viewer |
+
+### 7.4 来源追踪 (joined_via)
+
+`workspace_members.joined_via` 记录成员加入方式，用于审计和未来分析：
+- `'direct'` — 管理员直接添加 (`add_member_direct`)
+- `'invitation'` — 通过邀请加入 (`add_member`)
+- `'public_join'` — 公开 workspace 自助加入 (`add_member_public_join`)
 
 ---
 
@@ -566,3 +594,155 @@ Manager: 可管理 Editor/Viewer
 ---
 
 > **下一步**: 确认此设计后，进入 implementation plan 阶段。
+
+---
+
+## 9. 实施记录
+
+### 9.1 实施状态
+
+| Phase | 内容 | 状态 |
+|-------|------|------|
+| Phase 1 | Migration 009 + 4-tier Role enum 重构 | ✅ 完成 |
+| Phase 2 | PermissionGuard 中间件 | ✅ 完成 |
+| Phase 3 | User Account 邀请系统 | ✅ 完成 |
+| Phase 4 | Ownership 转让系统 | ✅ 完成 |
+
+### 9.2 实际实现与设计差异
+
+#### PermissionGuard 实现方式
+
+设计文档最初计划使用 axum extractor 模式，实际实现采用了更简洁的手动调用模式：
+
+```rust
+// 实际实现 (crates/server/src/routes/guard.rs)
+pub struct WorkspaceGuard {
+    pub workspace: Workspace,
+    pub user: User,
+    pub member_role: Role,
+}
+
+pub async fn require_membership(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    slug: &str,
+) -> Result<WorkspaceGuard> { ... }
+
+pub fn require(guard: &WorkspaceGuard, permission: Permission) -> Result<()> {
+    if guard.member_role >= permission.required_role() {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden(...))
+    }
+}
+
+// 路由中的使用方式
+async fn some_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(slug): Path<String>,
+) -> Result<...> {
+    let guard = guard::require_membership(&state, &headers, &slug).await?;
+    guard::require(&guard, Permission::ManageMembers)?;
+    // ... handler logic
+}
+```
+
+这种方式的优点：与 axum 路由签名完全兼容，无需自定义 extractor 的复杂泛型实现。
+
+#### 角色层级管理
+
+`can_manage_role(target)` 使用严格大于 (`>`) 而不是大于等于 (`>=`)，确保：
+- Owner 可以管理 Manager、Editor、Viewer
+- Manager 可以管理 Editor、Viewer
+- Editor 只能管理 Viewer
+- 同级不能互管（Manager 不能管理另一个 Manager）
+
+#### 邀请系统：从 email 匹配改为 user_id 匹配
+
+原设计通过 email 匹配邀请，实际实现改为 `invited_user_id` 精确匹配：
+- 邀请时通过 `resolve_user_identifier()` 解析用户（UUID → email → name 三级回退）
+- 接受/拒绝邀请时直接比较 `invited_user_id == current_user.id`
+- 移除了 "用户必须先设置 email 才能接受邀请" 的限制
+
+#### joined_via 来源追踪
+
+`workspace_members.joined_via` 有三个合法值，各有对应的 DB 函数：
+
+| joined_via | DB 函数 | 使用场景 |
+|-----------|---------|---------|
+| `'direct'` | `add_member_direct()` | 管理员直接添加成员 |
+| `'invitation'` | `add_member()` | 通过邀请加入 |
+| `'public_join'` | `add_member_public_join()` | 公开 workspace 自助加入 |
+
+#### accept_transfer 并发安全
+
+`accept_transfer` 使用 `SELECT ... FOR UPDATE` + `WHERE status = 'pending'` 实现事务内原子化状态检查，防止 TOCTOU 竞态条件：
+- 外部先快速检查状态（快速失败）
+- 事务内 `FOR UPDATE` 锁定行并再次验证
+- UPDATE 也带 `AND status = 'pending'` 双重保护
+
+### 9.3 测试覆盖
+
+**总测试数: 92** (64 db + 17 server unit + 11 server integration)
+
+#### Role 枚举单元测试 (无 DB)
+| 测试 | 覆盖 |
+|------|------|
+| `test_role_from_str_valid` | 四种角色解析 + 大小写不敏感 |
+| `test_role_from_str_invalid` | 非法输入拒绝（含旧角色 "writer"/"reader"） |
+| `test_role_display` | Display trait 输出 |
+| `test_role_roundtrip_parse_then_display` | parse → display 往返 |
+| `test_role_copy_and_eq` | Copy/Eq trait |
+| `test_role_serde_roundtrip` | JSON 序列化/反序列化 |
+| `test_role_ordering` | PartialOrd: Viewer(1) < Editor(2) < Manager(3) < Owner(4) |
+| `test_role_numeric_discriminants` | 枚举数值 = 1,2,3,4 |
+| `test_role_can_view` | 所有角色 can_view() = true |
+| `test_role_can_edit_all_roles` | Owner/Manager/Editor can_edit(), Viewer 不能 |
+| `test_role_can_manage_all_roles` | Owner/Manager can_manage(), Editor/Viewer 不能 |
+| `test_role_can_delete_workspace` | 只有 Owner can_delete_workspace() |
+| `test_role_can_transfer_ownership` | 只有 Owner can_transfer_ownership() |
+| `test_role_can_manage_role_matrix` | 完整 4×4 矩阵 + 非对称性验证 |
+
+#### Permission & Guard 单元测试 (无 DB)
+| 测试 | 覆盖 |
+|------|------|
+| `test_permission_required_role_mapping` | 6 个 Permission → Role 映射 |
+| `test_require_owner_passes_all` | Owner 通过所有权限检查 |
+| `test_require_manager_permissions` | Manager 通过 Manager 及以下，拒绝 Owner 级别 |
+| `test_require_editor_permissions` | Editor 通过 Editor 及以下，拒绝 Manager+ |
+| `test_require_viewer_permissions` | Viewer 仅通过 ViewContent |
+| `test_permission_matrix_exhaustive` | 4 角色 × 6 权限 = 24 组合全遍历 |
+| `test_all_permissions_have_role_mapping` | 所有 Permission 映射到有效 Role |
+| `test_require_error_message_contains_required_role` | 错误消息包含所需角色 |
+| `test_require_error_message_contains_current_role` | 错误消息包含当前角色 |
+
+#### DB 集成测试
+| 类别 | 测试数 | 关键测试 |
+|------|--------|---------|
+| Workspace CRUD | 4 | 创建/私有/重命名/删除 |
+| 成员管理 | 6 | 添加/移除/角色变更/idempotent |
+| joined_via 追踪 | 3 | invitation/direct/public_join 三种来源 |
+| 邀请生命周期 | 7 | 创建/接受/拒绝/重发/撤回/过期/workspace 列表 |
+| resolve_user_identifier | 4 | UUID/email/name 匹配 + not found |
+| Role CHECK constraint | 2 | 新角色接受 + 旧角色 "writer" 拒绝 |
+| Ownership 转让 | 8 | 完整生命周期 + 拒绝后不可接受 + 取消 + 双重接受拒绝 + 只返回 pending |
+
+### 9.4 角色 → API 权限映射（实际实现）
+
+| 路由 | 所需权限 | 检查方式 |
+|------|---------|---------|
+| `DELETE /api/workspaces/{slug}` | DeleteWorkspace (Owner) | `guard::require(&guard, Permission::DeleteWorkspace)` |
+| `POST /api/workspaces/{slug}/transfer-ownership` | TransferOwnership (Owner) | `guard::require(&guard, Permission::TransferOwnership)` |
+| `POST /api/workspaces/{slug}/rename` | ManageWorkspace (Manager+) | `guard::require(&guard, Permission::ManageWorkspace)` |
+| `POST /api/workspaces/{slug}/invite` | ManageMembers (Manager+) | `guard::require(&guard, Permission::ManageMembers)` |
+| `GET /api/workspaces/{slug}/invitations` | ManageMembers (Manager+) | `guard::require(&guard, Permission::ManageMembers)` |
+| `POST /api/workspaces/{slug}/invitations/{id}/resend` | ManageMembers (Manager+) | `guard::require(&guard, Permission::ManageMembers)` |
+| `DELETE /api/workspaces/{slug}/invitations/{id}` | ManageMembers (Manager+) | `guard::require(&guard, Permission::ManageMembers)` |
+| `POST /api/workspaces/{slug}/members/remove` | ManageMembers (Manager+) | `guard::require(&guard, Permission::ManageMembers)` + `can_manage_role()` |
+| `POST /api/workspaces/{slug}/members/role` | ManageMembers (Manager+) | `guard::require(&guard, Permission::ManageMembers)` + `can_manage_role()` |
+| `POST /api/workspaces/{slug}/submit` | EditContent (Editor+) | 仅 skip_review 路径额外检查 Owner |
+| `POST /api/workspaces/{slug}/reviews/{id}` | EditContent (Editor+) | `guard::require(&guard, Permission::EditContent)` |
+| `GET /api/workspaces/{slug}/reviews` | ViewContent (Viewer+) | `guard::require(&guard, Permission::ViewContent)` |
+| `GET /api/workspaces/{slug}/reviews/{id}` | ViewContent (Viewer+) | `guard::require(&guard, Permission::ViewContent)` |
+| `GET /api/workspaces/{slug}/members` | 仅成员可查看 | `is_member()` 手动检查 |
