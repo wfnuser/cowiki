@@ -227,6 +227,21 @@ impl WikiRepo {
     ) -> Result<(), git2::Error> {
         let lock = self.branch_lock(branch);
         let _guard = lock.write().unwrap();
+        self.write_file_locked(branch, file_path, content, message, author)
+    }
+
+    /// Like `write_file`, but assumes the caller already holds the branch's write
+    /// lock. `merge_to_main` locks "main" once for the whole merge, so it must use
+    /// this — calling the public `write_file` there would re-acquire the same
+    /// non-reentrant `RwLock` and self-deadlock the request thread.
+    fn write_file_locked(
+        &self,
+        branch: &str,
+        file_path: &str,
+        content: &[u8],
+        message: &str,
+        author: &str,
+    ) -> Result<(), git2::Error> {
         let repo = self.repo()?;
 
         // Write file to working directory
@@ -446,9 +461,61 @@ impl WikiRepo {
         let _guard = lock.write().unwrap();
         for path in file_paths {
             if let Some(content) = self.read_file(branch, path)? {
-                self.write_file("main", path, &content, message, author)?;
+                // NOTE: must use the lock-free variant — we already hold the "main"
+                // lock above, and the lock is non-reentrant.
+                self.write_file_locked("main", path, &content, message, author)?;
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WikiRepo;
+    use std::sync::{mpsc, Arc};
+    use std::time::Duration;
+
+    fn temp_repo_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("cowiki-git-test-{}-{}", std::process::id(), tag));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    /// Regression for the `merge_to_main` self-deadlock: it held the "main" write
+    /// lock and then called `write_file("main", …)`, which re-acquired the same
+    /// non-reentrant lock. The merge runs on a worker thread guarded by a timeout
+    /// so this test FAILS (rather than hanging the whole suite) if it ever regresses.
+    #[test]
+    fn merge_to_main_does_not_deadlock() {
+        let dir = temp_repo_dir("merge-deadlock");
+        let repo = Arc::new(WikiRepo::open_or_init(dir.to_str().unwrap()).unwrap());
+        repo.ensure_branch_exists("user/test").unwrap();
+        repo.write_file("user/test", "wiki/page.md", b"# Hello\n", "edit", "tester")
+            .unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        let r2 = Arc::clone(&repo);
+        std::thread::spawn(move || {
+            let res = r2.merge_to_main(
+                "user/test",
+                &["wiki/page.md".to_string()],
+                "tester",
+                "approve",
+            );
+            let _ = tx.send(res);
+        });
+
+        match rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => panic!("merge_to_main returned error: {e}"),
+            Err(_) => panic!("merge_to_main deadlocked (timed out after 10s)"),
+        }
+
+        let merged = repo.read_file("main", "wiki/page.md").unwrap();
+        assert_eq!(merged.as_deref(), Some(&b"# Hello\n"[..]));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
