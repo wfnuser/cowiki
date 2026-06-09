@@ -91,17 +91,7 @@ pub async fn submit(
         .collect::<Vec<_>>()
         .join("\n");
 
-    let summary = match state
-        .compiler
-        .generate_summary(&format!("Submission changes:\n{diff_desc}"))
-        .await
-    {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!("summary generation failed, falling back to diff description: {e}");
-            diff_desc
-        }
-    };
+    let summary = generate_submission_summary(&state.config, &diff_desc).await;
 
     if input.skip_review {
         // Authorization: skip_review only allowed for personal workspaces (private + owner)
@@ -160,4 +150,40 @@ pub async fn submit(
         summary,
         duplicates,
     }))
+}
+
+async fn generate_submission_summary(config: &crate::config::Config, diff_desc: &str) -> String {
+    let llm_config = &config.llm;
+    let agent_config = cowiki_agents::embedded::EmbeddedAgentConfig {
+        provider: llm_config.provider.clone(),
+        model: llm_config.model.clone(),
+        api_key: llm_config.api_key.clone(),
+        api_base: llm_config.api_base.clone(),
+        temperature: llm_config.temperature,
+        max_tokens: llm_config.max_tokens,
+        max_rounds: 1,
+        token_budget: 4000,
+    };
+    let agent = cowiki_agents::embedded::create_embedded_agent(agent_config);
+    let messages = vec![
+        cowiki_agents::embedded::ChatMessage {
+            role: "system".into(),
+            content: "Generate a one-line summary (max 100 chars) of this content. Return only the summary, nothing else.".into(),
+            tool_call_id: None,
+            name: None,
+        },
+        cowiki_agents::embedded::ChatMessage {
+            role: "user".into(),
+            content: format!("Submission changes:\n{diff_desc}"),
+            tool_call_id: None,
+            name: None,
+        },
+    ];
+    match agent.chat(&messages).await {
+        Ok(s) => s.content,
+        Err(e) => {
+            tracing::warn!("summary generation failed, falling back to diff description: {e}");
+            diff_desc.to_string()
+        }
+    }
 }

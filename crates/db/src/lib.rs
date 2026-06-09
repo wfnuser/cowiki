@@ -1,6 +1,7 @@
 use sqlx::PgPool;
 
 pub mod users;
+pub mod embed;
 pub mod pages;
 pub mod submissions;
 pub mod workspaces;

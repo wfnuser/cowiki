@@ -7,6 +7,8 @@ use clap::Parser;
 use serde::Deserialize;
 use std::path::PathBuf;
 
+pub mod token_usage;
+
 // ── CLI args (reusable) ───────────────────────────────────────
 
 /// Common CLI arguments for cowiki binaries.

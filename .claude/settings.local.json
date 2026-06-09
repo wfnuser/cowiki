@@ -4,7 +4,22 @@
       "WebSearch",
       "Bash(npm install:*)",
       "Bash(npx vite:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(HTTPS_PROXY=http://localhost:8888 gh issue *)",
+      "Bash(cargo clippy *)",
+      "Bash(cargo check *)",
+      "Bash(cargo test *)",
+      "Bash(gh pr *)",
+      "Bash(git branch *)",
+      "Bash(git merge *)",
+      "Bash(https_proxy=http://localhost:8888 http_proxy=http://localhost:8888 curl -s \"https://raw.githubusercontent.com/davidondrej/pi-agent/main/AGENTS.md\")",
+      "Bash(https_proxy=http://localhost:8888 http_proxy=http://localhost:8888 curl -s \"https://api.github.com/repos/davidondrej/pi-agent/contents/\")",
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(f'{i[\\\\\"name\\\\\"]:40s} {i[\\\\\"type\\\\\"]}'\\) for i in data]\")",
+      "Bash(https_proxy=http://localhost:8888 http_proxy=http://localhost:8888 curl -s \"https://api.github.com/repos/davidondrej/pi-agent/contents/packages\")",
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(f'{i[\\\\\"name\\\\\"]:30s} {i[\\\\\"type\\\\\"]}'\\) for i in data]\")",
+      "Bash(https_proxy=http://localhost:8888 http_proxy=http://localhost:8888 curl -s \"https://raw.githubusercontent.com/davidondrej/pi-agent/main/packages/agent/README.md\")",
+      "Bash(https_proxy=http://localhost:8888 http_proxy=http://localhost:8888 curl -s \"https://api.github.com/repos/davidondrej/pi-agent/contents/packages/agent/src\")",
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(f'{i[\\\\\"name\\\\\"]:50s} {i[\\\\\"type\\\\\"]}'\\) for i in data]\")"
     ]
   }
 }

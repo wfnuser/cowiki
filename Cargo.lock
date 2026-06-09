@@ -346,14 +346,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
+name = "cowiki-agents"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "cowiki-utils",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "cowiki-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "cowiki-agents",
+ "cowiki-db",
+ "cowiki-utils",
  "git2",
+ "lru",
  "pgvector",
- "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2",
@@ -368,8 +387,11 @@ dependencies = [
 name = "cowiki-db"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
+ "cowiki-utils",
  "pgvector",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2",
@@ -400,6 +422,7 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
+ "cowiki-agents",
  "cowiki-core",
  "cowiki-db",
  "cowiki-extractor",
@@ -426,6 +449,7 @@ dependencies = [
 name = "cowiki-utils"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "clap",
  "dotenvy",
  "serde",
@@ -1518,6 +1542,15 @@ name = "log"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+
+[[package]]
+name = "lru"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f8cc7106155f10bdf99a6f379688f543ad6596a415375b36a59a054ceda1198"
+dependencies = [
+ "hashbrown 0.15.5",
+]
 
 [[package]]
 name = "mac"

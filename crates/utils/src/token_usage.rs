@@ -3,7 +3,6 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 /// Per-model token usage statistics.
-/// Mirrors OpenViking's models/vlm/token_usage.py TokenUsage.
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct TokenUsage {
     pub prompt_tokens: u32,
@@ -25,7 +24,6 @@ impl TokenUsage {
 }
 
 /// Tracks token usage across multiple models.
-/// Mirrors OpenViking's TokenUsageTracker.
 #[derive(Debug, Clone, Default)]
 pub struct TokenUsageTracker {
     usage_by_model: HashMap<String, TokenUsage>,

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+cowiki-agents = { path = "../agents" }
 cowiki-core = { path = "../core" }
 cowiki-db = { path = "../db" }
 cowiki-utils = { path = "../utils" }

@@ -5,16 +5,66 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-use super::super::token_usage::{TokenUsage, TokenUsageTracker};
-use super::{EmbedResult, Embedder, EmbedderConfig};
+use cowiki_utils::token_usage::{TokenUsage, TokenUsageTracker};
+
+// ── Configuration ─────────────────────────────────────────────
+
+/// Configuration for an embedding provider.
+#[derive(Debug, Clone)]
+pub struct EmbedderConfig {
+    pub provider: String,
+    pub model: String,
+    pub api_key: String,
+    pub api_base: String,
+    pub dimension: u32,
+}
+
+/// Result of an embedding operation.
+#[derive(Debug, Clone)]
+pub struct EmbedResult {
+    pub vector: Vec<f32>,
+}
+
+/// Trait for embedding providers.
+#[async_trait]
+pub trait Embedder: Send + Sync {
+    /// Embed a single text.
+    async fn embed(&self, text: &str, is_query: bool) -> Result<EmbedResult, String>;
+
+    /// Embed multiple texts in batch.
+    async fn embed_batch(
+        &self,
+        texts: &[String],
+        is_query: bool,
+    ) -> Result<Vec<EmbedResult>, String>;
+
+    /// Get a snapshot of tracked token usage by model.
+    fn usage_snapshot(&self) -> HashMap<String, TokenUsage>;
+}
+
+/// Factory: create an Embedder instance from configuration.
+pub fn create_embedder(config: EmbedderConfig) -> Box<dyn Embedder> {
+    match config.provider.as_str() {
+        "openai" => Box::new(OpenAIEmbedder::new(config)),
+        other => panic!("unsupported embedder provider: {other}"),
+    }
+}
+
+/// Supported embedder provider names.
+pub const VALID_PROVIDERS: &[&str] = &["openai"];
+
+/// Check if a provider name is valid.
+pub fn is_valid_provider(name: &str) -> bool {
+    VALID_PROVIDERS.contains(&name)
+}
+
+// ── OpenAI Embedder ───────────────────────────────────────────
 
 pub struct OpenAIEmbedder {
     client: Client,
     config: EmbedderConfig,
     tracker: Arc<Mutex<TokenUsageTracker>>,
 }
-
-// ── OpenAI API types ──
 
 #[derive(Serialize)]
 struct EmbeddingRequest<'a> {
@@ -42,8 +92,6 @@ struct EmbedUsageInfo {
     total_tokens: u32,
 }
 
-// ── Batch request ──
-
 #[derive(Serialize)]
 struct EmbeddingBatchRequest<'a> {
     model: &'a str,
@@ -67,7 +115,6 @@ impl OpenAIEmbedder {
         }
     }
 
-    /// Get a clone of the Arc<Mutex<>> tracker for sharing.
     pub fn tracker_arc(&self) -> Arc<Mutex<TokenUsageTracker>> {
         Arc::clone(&self.tracker)
     }

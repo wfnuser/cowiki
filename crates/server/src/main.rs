@@ -2,8 +2,7 @@ use axum::routing::{delete, get, post};
 use axum::Router;
 use clap::Parser;
 use cowiki_core::compiler::Compiler;
-use cowiki_core::ai::embedder::{create_embedder, EmbedderConfig};
-use cowiki_core::ai::llm::{create_llm, LlmConfig};
+use cowiki_db::embed::{create_embedder, EmbedderConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
@@ -25,17 +24,13 @@ pub struct AppState {
 
 #[derive(serde::Serialize)]
 struct UsageResponse {
-    llm: HashMap<String, cowiki_core::ai::token_usage::TokenUsage>,
-    vlm: HashMap<String, cowiki_core::ai::token_usage::TokenUsage>,
-    embedder: HashMap<String, cowiki_core::ai::token_usage::TokenUsage>,
+    embedder: HashMap<String, cowiki_utils::token_usage::TokenUsage>,
 }
 
 async fn get_usage(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
 ) -> axum::Json<UsageResponse> {
     axum::Json(UsageResponse {
-        llm: state.compiler.llm_usage(),
-        vlm: state.compiler.vlm_usage(),
         embedder: state.compiler.embedder_usage(),
     })
 }
@@ -61,15 +56,6 @@ async fn main() {
     let repo_manager = cowiki_core::git::WikiRepoManager::new(&config.server.data_dir);
     tracing::info!("wiki repos dir: {}", config.server.data_dir);
 
-    let llm = create_llm(LlmConfig {
-        provider: config.llm.provider.clone(),
-        model: config.llm.model.clone(),
-        api_key: config.llm.api_key.clone(),
-        api_base: config.llm.api_base.clone(),
-        temperature: config.llm.temperature,
-        max_tokens: config.llm.max_tokens,
-    });
-
     let embedder = create_embedder(EmbedderConfig {
         provider: config.embedder.provider.clone(),
         model: config.embedder.model.clone(),
@@ -78,8 +64,8 @@ async fn main() {
         dimension: config.embedder.dimension,
     });
 
-    // Compiler
-    let compiler = Compiler::new(llm, None, embedder);
+    // Compiler (legacy — will be replaced by agent dispatch)
+    let compiler = Compiler::new(embedder);
 
     let port = config.server.port.to_string();
 
