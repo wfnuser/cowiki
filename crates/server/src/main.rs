@@ -1,9 +1,9 @@
 use axum::routing::{delete, get, post};
 use axum::Router;
 use clap::Parser;
-use cowiki_core::compiler::Compiler;
 use cowiki_core::ai::embedder::{create_embedder, EmbedderConfig};
 use cowiki_core::ai::llm::{create_llm, LlmConfig};
+use cowiki_core::compiler::Compiler;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
@@ -112,53 +112,176 @@ async fn main() {
         // Auth
         .route("/api/auth/register", post(routes::auth::register))
         .route("/api/auth/me", get(routes::auth::me))
-        .route("/api/auth/regenerate-key", post(routes::auth::regenerate_key))
+        .route(
+            "/api/auth/regenerate-key",
+            post(routes::auth::regenerate_key),
+        )
         .route("/api/auth/github", get(routes::auth::github_login))
-        .route("/api/auth/github/callback", get(routes::auth::github_callback))
+        .route(
+            "/api/auth/github/callback",
+            get(routes::auth::github_callback),
+        )
         // Workspaces
         .route("/api/workspaces", get(routes::workspace::list_workspaces))
         .route("/api/workspaces", post(routes::workspace::create_workspace))
-        .route("/api/workspaces/public", get(routes::workspace::list_public_workspaces))
-        .route("/api/workspaces/{slug}/join", post(routes::workspace::join_workspace))
-        .route("/api/workspaces/{slug}/rename", post(routes::workspace::rename_workspace))
-        .route("/api/workspaces/{slug}/invite", post(routes::workspace::invite))
-        .route("/api/workspaces/{slug}/members", get(routes::workspace::list_members))
+        // Workspaces
+        .route("/api/workspaces", get(routes::workspace::list_workspaces))
+        .route("/api/workspaces", post(routes::workspace::create_workspace))
+        .route(
+            "/api/workspaces/public",
+            get(routes::workspace::list_public_workspaces),
+        )
+        .route(
+            "/api/workspaces/{slug}/join",
+            post(routes::workspace::join_workspace),
+        )
+        .route(
+            "/api/workspaces/{slug}/rename",
+            post(routes::workspace::rename_workspace),
+        )
+        .route(
+            "/api/workspaces/{slug}/invite",
+            post(routes::workspace::invite),
+        )
+        .route(
+            "/api/workspaces/{slug}/members",
+            get(routes::workspace::list_members),
+        )
         // Invitations (batch invite, list, resend, revoke, accept, reject, pending)
-        .route("/api/workspaces/{slug}/invitations", get(routes::workspace::list_invitations))
-        .route("/api/workspaces/{slug}/invitations/{id}/resend", post(routes::workspace::resend_invitation))
-        .route("/api/workspaces/{slug}/invitations/{id}", delete(routes::workspace::revoke_invitation))
-        .route("/api/invitations/pending", get(routes::workspace::list_pending_invitations))
-        .route("/api/invitations/{id}/accept", post(routes::workspace::accept_invitation))
-        .route("/api/invitations/{id}/reject", post(routes::workspace::reject_invitation))
+        .route(
+            "/api/workspaces/{slug}/invitations",
+            get(routes::workspace::list_invitations),
+        )
+        .route(
+            "/api/workspaces/{slug}/invitations/{id}/resend",
+            post(routes::workspace::resend_invitation),
+        )
+        .route(
+            "/api/workspaces/{slug}/invitations/{id}",
+            delete(routes::workspace::revoke_invitation),
+        )
+        .route(
+            "/api/invitations/pending",
+            get(routes::workspace::list_pending_invitations),
+        )
+        .route(
+            "/api/invitations/{id}/accept",
+            post(routes::workspace::accept_invitation),
+        )
+        .route(
+            "/api/invitations/{id}/reject",
+            post(routes::workspace::reject_invitation),
+        )
         // Member management (Manager+)
-        .route("/api/workspaces/{slug}/members/remove", post(routes::workspace::remove_member))
-        .route("/api/workspaces/{slug}/members/role", post(routes::workspace::change_member_role))
+        .route(
+            "/api/workspaces/{slug}/members/remove",
+            post(routes::workspace::remove_member),
+        )
+        .route(
+            "/api/workspaces/{slug}/members/role",
+            post(routes::workspace::change_member_role),
+        )
         // Ownership transfer
-        .route("/api/workspaces/{slug}/transfer-ownership", post(routes::transfers::initiate_transfer))
-        .route("/api/transfers/pending", get(routes::transfers::list_pending_transfers))
-        .route("/api/transfers/{id}/accept", post(routes::transfers::accept_transfer))
-        .route("/api/transfers/{id}/reject", post(routes::transfers::reject_transfer))
-        .route("/api/transfers/{id}", delete(routes::transfers::cancel_transfer))
+        .route(
+            "/api/workspaces/{slug}/transfer-ownership",
+            post(routes::transfers::initiate_transfer),
+        )
+        .route(
+            "/api/transfers/pending",
+            get(routes::transfers::list_pending_transfers),
+        )
+        .route(
+            "/api/transfers/{id}/accept",
+            post(routes::transfers::accept_transfer),
+        )
+        .route(
+            "/api/transfers/{id}/reject",
+            post(routes::transfers::reject_transfer),
+        )
+        .route(
+            "/api/transfers/{id}",
+            delete(routes::transfers::cancel_transfer),
+        )
         // Workspace deletion (Owner only)
-        .route("/api/workspaces/{slug}", delete(routes::workspace::delete_workspace))
+        .route(
+            "/api/workspaces/{slug}",
+            delete(routes::workspace::delete_workspace),
+        )
         // Pages (workspace-scoped — uses per-workspace repo)
-        .route("/api/workspaces/{ws_slug}/pages", get(routes::pages::list_pages_ws))
-        .route("/api/workspaces/{ws_slug}/pages", post(routes::pages::write_page_ws))
-        .route("/api/workspaces/{ws_slug}/folders", post(routes::pages::create_folder_ws))
-        .route("/api/workspaces/{ws_slug}/pages/{*slug}", get(routes::pages::get_page_ws))
+        .route(
+            "/api/workspaces/{ws_slug}/pages",
+            get(routes::pages::list_pages_ws),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/pages",
+            post(routes::pages::write_page_ws),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/folders",
+            post(routes::pages::create_folder_ws),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/pages/{*slug}",
+            get(routes::pages::get_page_ws),
+        )
         // Ingest
-        .route("/api/workspaces/{ws_slug}/ingest", post(routes::ingest::ingest_ws))
+        .route(
+            "/api/workspaces/{ws_slug}/ingest",
+            post(routes::ingest::ingest_ws),
+        )
         // Compile
-        .route("/api/workspaces/{ws_slug}/compile", post(routes::compile::compile_ws))
+        .route(
+            "/api/workspaces/{ws_slug}/compile",
+            post(routes::compile::compile_ws),
+        )
         // Sources
-        .route("/api/workspaces/{ws_slug}/sources", get(routes::sources::list_sources))
-        .route("/api/workspaces/{ws_slug}/sources/{filename}", get(routes::sources::get_source))
+        .route(
+            "/api/workspaces/{ws_slug}/sources",
+            get(routes::sources::list_sources),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/sources/{filename}",
+            get(routes::sources::get_source),
+        )
         // Submit (workspace-scoped)
-        .route("/api/workspaces/{ws_slug}/submit", post(routes::submit::submit))
+        .route(
+            "/api/workspaces/{ws_slug}/submit",
+            post(routes::submit::submit),
+        )
         // Reviews (workspace-scoped)
-        .route("/api/workspaces/{ws_slug}/reviews", get(routes::review::list_reviews))
-        .route("/api/workspaces/{ws_slug}/reviews/{id}", get(routes::review::get_review))
-        .route("/api/workspaces/{ws_slug}/reviews/{id}", post(routes::review::review_action))
+        .route(
+            "/api/workspaces/{ws_slug}/reviews",
+            get(routes::review::list_reviews),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/reviews/{id}",
+            get(routes::review::get_review),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/reviews/{id}",
+            post(routes::review::review_action),
+        )
+        // Review comments
+        .route(
+            "/api/workspaces/{ws_slug}/reviews/{submission_id}/comments",
+            get(routes::comments::list_comments),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/reviews/{submission_id}/comments",
+            post(routes::comments::create_comment),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/reviews/{submission_id}/comments/{comment_id}/resolve",
+            post(routes::comments::resolve_comment),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/reviews/{submission_id}/comments/{comment_id}/unresolve",
+            post(routes::comments::unresolve_comment),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/reviews/{submission_id}/comments/{comment_id}",
+            delete(routes::comments::delete_comment),
+        )
         // Search
         .route("/api/search", get(routes::search::search))
         // API Keys — multi-key management

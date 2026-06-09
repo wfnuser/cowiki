@@ -15,7 +15,7 @@ pub async fn log(
     let meta = metadata.unwrap_or(serde_json::Value::Object(Default::default()));
     sqlx::query(
         "INSERT INTO audit_log (workspace_id, actor_id, action, target_type, target_id, metadata)
-         VALUES ($1, $2, $3, $4, $5, $6)"
+         VALUES ($1, $2, $3, $4, $5, $6)",
     )
     .bind(workspace_id)
     .bind(actor_id)

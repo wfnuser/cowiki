@@ -156,22 +156,21 @@ dimension = 1024
 
 ---
 
-### `[github]`
+### GitHub OAuth (environment variables only)
 
-GitHub OAuth app credentials for social login.
+GitHub OAuth credentials are **not** read from `cowiki.conf` — they come from environment variables only (loaded from `.env` via dotenvy), to keep a single source of truth.
 
-| Field | Type | Default | Env Var | Description |
-|-------|------|---------|---------|-------------|
-| `client_id` | string | `""` | `GITHUB_CLIENT_ID` | GitHub OAuth app client ID |
-| `client_secret` | string | `""` | `GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret |
-| `redirect_uri` | string | `"http://localhost:3000/api/auth/github/callback"` | `GITHUB_REDIRECT_URI` | OAuth callback URL |
+| Env Var | Default | Description |
+|---------|---------|-------------|
+| `GITHUB_CLIENT_ID` | `""` | GitHub OAuth app client ID |
+| `GITHUB_CLIENT_SECRET` | `""` | GitHub OAuth app client secret |
+| `GITHUB_REDIRECT_URI` | `"http://localhost:3000/api/auth/github/callback"` | OAuth callback URL |
 
-Example:
-```toml
-[github]
-client_id = "Iv23li..."
-client_secret = "abc123..."
-redirect_uri = "http://localhost:3000/api/auth/github/callback"
+Example (`.env`):
+```bash
+GITHUB_CLIENT_ID=Iv23li...
+GITHUB_CLIENT_SECRET=abc123...
+GITHUB_REDIRECT_URI=http://localhost:3000/api/auth/github/callback
 ```
 
 ---
@@ -213,10 +212,9 @@ Every field in `cowiki.conf` can be overridden by an environment variable. The e
 | `embedder.api_key` | `COWIKI_EMBEDDER_API_KEY` |
 | `embedder.api_base` | `COWIKI_EMBEDDER_BASE_URL` |
 | `embedder.dimension` | `COWIKI_EMBEDDER_DIMENSION` |
-| `github.client_id` | `GITHUB_CLIENT_ID` |
-| `github.client_secret` | `GITHUB_CLIENT_SECRET` |
-| `github.redirect_uri` | `GITHUB_REDIRECT_URI` |
 | `frontend.url` | `FRONTEND_URL` |
+
+> GitHub OAuth has no `cowiki.conf` keys — it is configured via `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_REDIRECT_URI` environment variables only.
 
 ---
 

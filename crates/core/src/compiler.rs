@@ -13,11 +13,7 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    pub fn new(
-        llm: Box<dyn Llm>,
-        vlm: Option<Box<dyn Vlm>>,
-        embedder: Box<dyn Embedder>,
-    ) -> Self {
+    pub fn new(llm: Box<dyn Llm>, vlm: Option<Box<dyn Vlm>>, embedder: Box<dyn Embedder>) -> Self {
         Self { llm, vlm, embedder }
     }
 

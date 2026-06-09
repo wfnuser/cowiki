@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"git merge dev 2>&1\",\"timeout\":30000,\"description\":\"Merge dev into PR #41 branch\"}",
+  "error": "Exit code 1\nAuto-merging crates/db/src/lib.rs\nCONFLICT (content): Merge conflict in crates/db/src/lib.rs\nAuto-merging crates/db/src/submissions.rs\nCONFLICT (content): Merge conflict in crates/db/src/submissions.rs\nAuto-merging crates/db/src/workspaces.rs\nCONFLICT (content): Merge conflict in crates/db/src/workspaces.rs\nAuto-merging crates/server/src/main.rs\nCONFLICT (content): Merge conflict in crates/server/src/main.rs\nAuto-merging crates/server/src/routes/mod.rs\nCONFLICT (content): Merge confl...",
+  "timestamp": "2026-06-09T14:10:39.287Z",
+  "retry_count": 2
+}

@@ -25,23 +25,12 @@ impl Config {
     pub fn load(args: Option<CliArgs>) -> Self {
         let shared = cowiki_utils::CowikiConfig::load(args);
 
-        // GitHub OAuth: from TOML if available, else env vars
-        let github = cowiki_utils::discover_config_path(None).and_then(|path| {
-            let content = std::fs::read_to_string(&path).ok()?;
-            let toml: cowiki_utils::TomlConfig = toml::from_str(&content).ok()?;
-            toml.github
-        });
-
+        // GitHub OAuth: env vars only (loaded from .env via dotenvy). Single source of truth.
         let auth = AuthConfig {
-            github_client_id: github.as_ref().and_then(|g| g.client_id.clone())
-                .or_else(|| std::env::var("GITHUB_CLIENT_ID").ok())
-                .unwrap_or_default(),
-            github_client_secret: github.as_ref().and_then(|g| g.client_secret.clone())
-                .or_else(|| std::env::var("GITHUB_CLIENT_SECRET").ok())
-                .unwrap_or_default(),
-            github_redirect_uri: github.as_ref().and_then(|g| g.redirect_uri.clone())
-                .or_else(|| std::env::var("GITHUB_REDIRECT_URI").ok())
-                .unwrap_or_else(|| "http://localhost:3000/api/auth/github/callback".into()),
+            github_client_id: std::env::var("GITHUB_CLIENT_ID").unwrap_or_default(),
+            github_client_secret: std::env::var("GITHUB_CLIENT_SECRET").unwrap_or_default(),
+            github_redirect_uri: std::env::var("GITHUB_REDIRECT_URI")
+                .unwrap_or_else(|_| "http://localhost:3000/api/auth/github/callback".into()),
         };
 
         Config {

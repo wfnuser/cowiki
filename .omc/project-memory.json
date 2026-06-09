@@ -1,0 +1,276 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1781008399737,
+  "projectRoot": "/home/deadpool/OpenSource/cowiki-2",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Rust",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "Cargo.toml"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "cargo",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "cargo build 2>&1 | tail -20",
+    "testCommand": "cargo test",
+    "lintCommand": "cargo clippy",
+    "devCommand": "cargo run",
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "scripts"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "cli": {
+      "path": "cli",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1781008399731,
+      "keyFiles": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "README.md"
+      ]
+    },
+    "cowiki-mcp-server": {
+      "path": "cowiki-mcp-server",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1781008399733,
+      "keyFiles": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "README.md"
+      ]
+    },
+    "crates": {
+      "path": "crates",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1781008399734,
+      "keyFiles": []
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 7,
+      "lastAccessed": 1781008399734,
+      "keyFiles": [
+        "config.md",
+        "implementation-plan.md",
+        "mcp.md",
+        "multi-user-testing-guide.md",
+        "product-review-2026-05-23.md"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 2,
+      "lastAccessed": 1781008399735,
+      "keyFiles": [
+        "reset.sh",
+        "setup-multi-user-test.sh"
+      ]
+    },
+    "skills": {
+      "path": "skills",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1781008399735,
+      "keyFiles": []
+    },
+    "target": {
+      "path": "target",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1781008399735,
+      "keyFiles": [
+        "CACHEDIR.TAG"
+      ]
+    },
+    "web": {
+      "path": "web",
+      "purpose": null,
+      "fileCount": 12,
+      "lastAccessed": 1781008399735,
+      "keyFiles": [
+        "DESIGN_SYSTEM.md",
+        "README.md",
+        "components.json",
+        "eslint.config.js",
+        "index.html"
+      ]
+    },
+    "cli/src": {
+      "path": "cli/src",
+      "purpose": "Source code",
+      "fileCount": 7,
+      "lastAccessed": 1781008399735,
+      "keyFiles": [
+        "client.rs",
+        "completions.rs",
+        "config.rs"
+      ]
+    },
+    "cli/tests": {
+      "path": "cli/tests",
+      "purpose": "Test files",
+      "fileCount": 1,
+      "lastAccessed": 1781008399735,
+      "keyFiles": [
+        "cli_tests.rs"
+      ]
+    },
+    "cowiki-mcp-server/src": {
+      "path": "cowiki-mcp-server/src",
+      "purpose": "Source code",
+      "fileCount": 2,
+      "lastAccessed": 1781008399735,
+      "keyFiles": [
+        "main.rs",
+        "server.rs"
+      ]
+    },
+    "crates/utils": {
+      "path": "crates/utils",
+      "purpose": "Utility functions",
+      "fileCount": 1,
+      "lastAccessed": 1781008399736,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "web/public": {
+      "path": "web/public",
+      "purpose": "Public files",
+      "fileCount": 2,
+      "lastAccessed": 1781008399736,
+      "keyFiles": [
+        "favicon.svg",
+        "icons.svg"
+      ]
+    },
+    "web/src": {
+      "path": "web/src",
+      "purpose": "Source code",
+      "fileCount": 5,
+      "lastAccessed": 1781008399737,
+      "keyFiles": [
+        "App.tsx",
+        "api.ts",
+        "auth.ts"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "crates/server/src/routes/review.rs",
+      "accessCount": 6,
+      "lastAccessed": 1781015261891,
+      "type": "file"
+    },
+    {
+      "path": "crates/server/src/routes/mod.rs",
+      "accessCount": 3,
+      "lastAccessed": 1781014265847,
+      "type": "file"
+    },
+    {
+      "path": "crates/db/src/lib.rs",
+      "accessCount": 3,
+      "lastAccessed": 1781014273627,
+      "type": "file"
+    },
+    {
+      "path": "crates/server/src/main.rs",
+      "accessCount": 3,
+      "lastAccessed": 1781014365042,
+      "type": "file"
+    },
+    {
+      "path": "crates/db/src/submissions.rs",
+      "accessCount": 2,
+      "lastAccessed": 1781014275427,
+      "type": "file"
+    },
+    {
+      "path": "crates/server/src/routes/workspace.rs",
+      "accessCount": 1,
+      "lastAccessed": 1781008900179,
+      "type": "file"
+    },
+    {
+      "path": "web/src/components/views/MembersView.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1781008900574,
+      "type": "file"
+    },
+    {
+      "path": "web/src/api.ts",
+      "accessCount": 1,
+      "lastAccessed": 1781008901011,
+      "type": "file"
+    },
+    {
+      "path": "web/src/lib/design.ts",
+      "accessCount": 1,
+      "lastAccessed": 1781008910993,
+      "type": "file"
+    },
+    {
+      "path": "web/src/pages/MainLayout.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1781008911645,
+      "type": "file"
+    },
+    {
+      "path": "web/src/auth.ts",
+      "accessCount": 1,
+      "lastAccessed": 1781008911848,
+      "type": "file"
+    },
+    {
+      "path": "crates/db/src/users.rs",
+      "accessCount": 1,
+      "lastAccessed": 1781009196384,
+      "type": "file"
+    },
+    {
+      "path": "crates/db/src/workspaces.rs",
+      "accessCount": 1,
+      "lastAccessed": 1781009196952,
+      "type": "file"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-06-09-member-management-frontend-design.md",
+      "accessCount": 1,
+      "lastAccessed": 1781009365735,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

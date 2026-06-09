@@ -17,3 +17,4 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chro
 pgvector = { version = "0.4", features = ["sqlx"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 async-trait = "0.1"
+similar = "2"

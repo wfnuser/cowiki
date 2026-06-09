@@ -45,12 +45,24 @@ fn parse_frontmatter(content: &str) -> (String, String) {
     let title = fm
         .lines()
         .find(|l| l.trim().starts_with("title:"))
-        .map(|l| l.trim().trim_start_matches("title:").trim().trim_matches('"').to_string())
+        .map(|l| {
+            l.trim()
+                .trim_start_matches("title:")
+                .trim()
+                .trim_matches('"')
+                .to_string()
+        })
         .unwrap_or_else(|| "Untitled".into());
     let summary = fm
         .lines()
         .find(|l| l.trim().starts_with("summary:"))
-        .map(|l| l.trim().trim_start_matches("summary:").trim().trim_matches('"').to_string())
+        .map(|l| {
+            l.trim()
+                .trim_start_matches("summary:")
+                .trim()
+                .trim_matches('"')
+                .to_string()
+        })
         .unwrap_or_default();
     (title, summary)
 }
@@ -77,7 +89,9 @@ pub async fn list_pages_ws(
     Path(ws_slug): Path<String>,
     Query(params): Query<ListParams>,
 ) -> Result<Json<Vec<PageListItem>>> {
-    let repo = state.repo_manager.get(&ws_slug)
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     let branch = params.branch.unwrap_or_else(|| "main".into());
     ensure_user_branch_if_needed(&repo, &branch)?;
@@ -90,17 +104,26 @@ pub async fn get_page_ws(
     Query(params): Query<ListParams>,
 ) -> Result<Json<PageResponse>> {
     let slug = raw_slug.strip_prefix('/').unwrap_or(&raw_slug).to_string();
-    let repo = state.repo_manager.get(&ws_slug)
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     let branch = params.branch.unwrap_or_else(|| "main".into());
     ensure_user_branch_if_needed(&repo, &branch)?;
     let path = format!("wiki/{slug}.md");
-    let content = repo.read_file(&branch, &path)
+    let content = repo
+        .read_file(&branch, &path)
         .map_err(|e| AppError::Internal(e.to_string()))?
         .ok_or_else(|| AppError::NotFound(format!("page {slug} not found")))?;
     let body = String::from_utf8_lossy(&content).into_owned();
     let (title, summary) = parse_frontmatter(&body);
-    Ok(Json(PageResponse { slug, title, summary, body, branch }))
+    Ok(Json(PageResponse {
+        slug,
+        title,
+        summary,
+        body,
+        branch,
+    }))
 }
 
 pub async fn write_page_ws(
@@ -108,12 +131,20 @@ pub async fn write_page_ws(
     Path(ws_slug): Path<String>,
     Json(input): Json<WritePage>,
 ) -> Result<Json<serde_json::Value>> {
-    let repo = state.repo_manager.get(&ws_slug)
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     ensure_user_branch_if_needed(&repo, &input.branch)?;
     let path = format!("wiki/{}.md", input.slug);
-    repo.write_file(&input.branch, &path, input.body.as_bytes(), &format!("edit: {}", input.slug), &input.branch)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    repo.write_file(
+        &input.branch,
+        &path,
+        input.body.as_bytes(),
+        &format!("edit: {}", input.slug),
+        &input.branch,
+    )
+    .map_err(|e| AppError::Internal(e.to_string()))?;
     Ok(Json(serde_json::json!({"ok": true, "slug": input.slug})))
 }
 
@@ -122,35 +153,60 @@ pub async fn create_folder_ws(
     Path(ws_slug): Path<String>,
     Json(input): Json<CreateFolder>,
 ) -> Result<Json<serde_json::Value>> {
-    let repo = state.repo_manager.get(&ws_slug)
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     ensure_user_branch_if_needed(&repo, &input.branch)?;
-    let slug = input.name.to_lowercase()
+    let slug = input
+        .name
+        .to_lowercase()
         .replace(|c: char| !c.is_alphanumeric() && c != ' ', "")
-        .split_whitespace().collect::<Vec<_>>().join("-");
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-");
     let dir = match &input.parent {
         Some(p) => format!("{p}/{slug}"),
         None => format!("wiki/{slug}"),
     };
     let index_path = format!("{dir}/_index.md");
-    let body = format!("---\ntitle: \"{}\"\nsummary: \"\"\nkind: overview\n---\n\n", input.name);
-    repo.write_file(&input.branch, &index_path, body.as_bytes(), &format!("create folder: {}", input.name), &input.branch)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-    Ok(Json(serde_json::json!({"ok": true, "slug": format!("{slug}/_index"), "path": dir})))
+    let body = format!(
+        "---\ntitle: \"{}\"\nsummary: \"\"\nkind: overview\n---\n\n",
+        input.name
+    );
+    repo.write_file(
+        &input.branch,
+        &index_path,
+        body.as_bytes(),
+        &format!("create folder: {}", input.name),
+        &input.branch,
+    )
+    .map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok(Json(
+        serde_json::json!({"ok": true, "slug": format!("{slug}/_index"), "path": dir}),
+    ))
 }
 
 /// Ensure user branch exists lazily (for workspace repos and legacy routes)
-pub(crate) fn ensure_user_branch_if_needed(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Result<()> {
+pub(crate) fn ensure_user_branch_if_needed(
+    repo: &cowiki_core::git::WikiRepo,
+    branch: &str,
+) -> Result<()> {
     if let Some(user_id) = branch.strip_prefix("user/") {
-        repo.ensure_user_branch(user_id)
-            .map_err(|e| AppError::Internal(format!("failed to ensure user branch '{branch}': {e}")))?;
+        repo.ensure_user_branch(user_id).map_err(|e| {
+            AppError::Internal(format!("failed to ensure user branch '{branch}': {e}"))
+        })?;
     }
     Ok(())
 }
 
 /// Internal: list pages from a specific repo instance
-fn list_pages_from_repo(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Result<Json<Vec<PageListItem>>> {
-    let files = repo.list_files_recursive(branch, "wiki")
+fn list_pages_from_repo(
+    repo: &cowiki_core::git::WikiRepo,
+    branch: &str,
+) -> Result<Json<Vec<PageListItem>>> {
+    let files = repo
+        .list_files_recursive(branch, "wiki")
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // Collect all items: pages and folder _index metadata
@@ -173,11 +229,23 @@ fn list_pages_from_repo(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Resu
         };
         let parts: Vec<&str> = slug.split('/').collect();
         if parts.len() == 1 {
-            items.push(RawItem { slug: slug.clone(), title, summary, is_index: false, dir: String::new() });
+            items.push(RawItem {
+                slug: slug.clone(),
+                title,
+                summary,
+                is_index: false,
+                dir: String::new(),
+            });
         } else {
             let dir = parts[..parts.len() - 1].join("/");
             let filename = *parts.last().unwrap();
-            items.push(RawItem { slug: slug.clone(), title, summary, is_index: filename == "_index", dir });
+            items.push(RawItem {
+                slug: slug.clone(),
+                title,
+                summary,
+                is_index: filename == "_index",
+                dir,
+            });
         }
     }
 
@@ -189,8 +257,12 @@ fn list_pages_from_repo(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Resu
         for item in items {
             if item.dir == parent_dir && !item.is_index {
                 result.push(PageListItem {
-                    slug: item.slug.clone(), title: item.title.clone(), summary: item.summary.clone(),
-                    branch: branch.into(), kind: "page".into(), children: Vec::new(),
+                    slug: item.slug.clone(),
+                    title: item.title.clone(),
+                    summary: item.summary.clone(),
+                    branch: branch.into(),
+                    kind: "page".into(),
+                    children: Vec::new(),
                 });
             }
         }
@@ -210,7 +282,10 @@ fn list_pages_from_repo(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Resu
                 } else {
                     // Nested: subdirs start with parent_dir + "/"
                     if item.dir.starts_with(&format!("{parent_dir}/")) || item.dir == parent_dir {
-                        let rest = item.dir.strip_prefix(&format!("{parent_dir}/")).unwrap_or("");
+                        let rest = item
+                            .dir
+                            .strip_prefix(&format!("{parent_dir}/"))
+                            .unwrap_or("");
                         if rest.is_empty() {
                             continue; // same dir
                         }
@@ -232,7 +307,8 @@ fn list_pages_from_repo(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Resu
 
         for subdir in subdirs {
             // Find _index for this subdir
-            let (title, summary) = items.iter()
+            let (title, summary) = items
+                .iter()
                 .find(|i| i.dir == subdir && i.is_index)
                 .map(|i| (i.title.clone(), i.summary.clone()))
                 .unwrap_or_else(|| {
@@ -242,13 +318,21 @@ fn list_pages_from_repo(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Resu
 
             let children = build_level(items, &subdir, branch);
             result.push(PageListItem {
-                slug: format!("{subdir}/_index"), title, summary,
-                branch: branch.into(), kind: "folder".into(), children,
+                slug: format!("{subdir}/_index"),
+                title,
+                summary,
+                branch: branch.into(),
+                kind: "folder".into(),
+                children,
             });
         }
 
         // Sort: folders first, then alphabetically
-        result.sort_by(|a, b| (b.kind == "folder").cmp(&(a.kind == "folder")).then(a.title.cmp(&b.title)));
+        result.sort_by(|a, b| {
+            (b.kind == "folder")
+                .cmp(&(a.kind == "folder"))
+                .then(a.title.cmp(&b.title))
+        });
         result
     }
 

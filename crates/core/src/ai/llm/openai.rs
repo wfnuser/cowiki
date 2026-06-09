@@ -101,16 +101,22 @@ impl Llm for OpenAILlm {
             .send()
             .await
             .map_err(|e| {
-                tracing::error!("LLM API request failed for model {}: {e}", self.config.model);
+                tracing::error!(
+                    "LLM API request failed for model {}: {e}",
+                    self.config.model
+                );
                 e.to_string()
             })?
             .json::<ChatResponse>()
             .await
             .map_err(|e| {
-                tracing::error!("LLM API response parse failed for model {}: {e}", self.config.model);
+                tracing::error!(
+                    "LLM API response parse failed for model {}: {e}",
+                    self.config.model
+                );
                 e.to_string()
             })?;
-        
+
         let content = resp
             .choices
             .first()

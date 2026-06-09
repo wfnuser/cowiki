@@ -46,4 +46,3 @@ pub fn create_vlm(config: VlmConfig) -> Box<dyn Vlm> {
         other => panic!("unsupported VLM provider: {other}"),
     }
 }
-

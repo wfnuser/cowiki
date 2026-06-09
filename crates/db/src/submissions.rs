@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Submission {
@@ -42,13 +42,17 @@ pub async fn list_pending_for_workspace(
     workspace_slug: &str,
 ) -> sqlx::Result<Vec<Submission>> {
     sqlx::query_as::<_, Submission>(
-        "SELECT * FROM submissions WHERE status = 'pending' AND workspace_slug = $1 \
+        "SELECT * FROM submissions \
+         WHERE status IN ('pending', 'approved', 'rejected', 'merged') AND workspace_slug = $1 \
          ORDER BY created_at DESC",
     )
     .bind(workspace_slug)
     .fetch_all(pool)
     .await
-    .map_err(|e| { tracing::error!("DB list submissions for workspace failed: {e}"); e })
+    .map_err(|e| {
+        tracing::error!("DB list submissions for workspace failed: {e}");
+        e
+    })
 }
 
 pub async fn find_by_id(pool: &PgPool, id: Uuid) -> sqlx::Result<Option<Submission>> {
@@ -56,7 +60,10 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> sqlx::Result<Option<Submissi
         .bind(id)
         .fetch_optional(pool)
         .await
-        .map_err(|e| { tracing::error!("DB find submission by id failed: {e}"); e })
+        .map_err(|e| {
+            tracing::error!("DB find submission by id failed: {e}");
+            e
+        })
 }
 
 pub async fn update_status(
@@ -93,6 +100,7 @@ mod tests {
             include_str!("migrations/007_team_permissions.sql"),
             include_str!("migrations/008_submission_workspace.sql"),
             include_str!("migrations/009_role_management.sql"),
+            include_str!("migrations/009_review_comments.sql"),
         ] {
             let _ = sqlx::raw_sql(m).execute(&pool).await;
         }
@@ -115,18 +123,87 @@ mod tests {
 
     #[tokio::test]
     async fn submission_records_and_filters_by_workspace() {
-        let Some(pool) = test_pool().await else { return };
+        let Some(pool) = test_pool().await else {
+            return;
+        };
         let user = make_user(&pool).await;
 
-        let s = create(&pool, user, "summary", &["page-a".into()], "user/abc", "team-alpha")
-            .await
-            .unwrap();
+        let s = create(
+            &pool,
+            user,
+            "summary",
+            &["page-a".into()],
+            "user/abc",
+            "team-alpha",
+        )
+        .await
+        .unwrap();
         assert_eq!(s.workspace_slug, "team-alpha");
 
-        let in_alpha = list_pending_for_workspace(&pool, "team-alpha").await.unwrap();
+        let in_alpha = list_pending_for_workspace(&pool, "team-alpha")
+            .await
+            .unwrap();
         assert!(in_alpha.iter().any(|x| x.id == s.id));
 
-        let in_beta = list_pending_for_workspace(&pool, "team-beta").await.unwrap();
+        let in_beta = list_pending_for_workspace(&pool, "team-beta")
+            .await
+            .unwrap();
         assert!(!in_beta.iter().any(|x| x.id == s.id));
+    }
+
+    #[tokio::test]
+    async fn review_list_includes_active_review_states() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = make_user(&pool).await;
+
+        let approved = create(
+            &pool,
+            user,
+            "approved",
+            &["page-a".into()],
+            "user/a",
+            "team-alpha",
+        )
+        .await
+        .unwrap();
+        let merged = create(
+            &pool,
+            user,
+            "merged",
+            &["page-b".into()],
+            "user/b",
+            "team-alpha",
+        )
+        .await
+        .unwrap();
+        let rejected = create(
+            &pool,
+            user,
+            "rejected",
+            &["page-c".into()],
+            "user/c",
+            "team-alpha",
+        )
+        .await
+        .unwrap();
+
+        update_status(&pool, approved.id, "approved", user)
+            .await
+            .unwrap();
+        update_status(&pool, merged.id, "merged", user)
+            .await
+            .unwrap();
+        update_status(&pool, rejected.id, "rejected", user)
+            .await
+            .unwrap();
+
+        let in_alpha = list_pending_for_workspace(&pool, "team-alpha")
+            .await
+            .unwrap();
+        assert!(in_alpha.iter().any(|x| x.id == approved.id));
+        assert!(in_alpha.iter().any(|x| x.id == merged.id));
+        assert!(in_alpha.iter().any(|x| x.id == rejected.id));
     }
 }

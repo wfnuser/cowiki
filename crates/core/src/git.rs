@@ -15,12 +15,76 @@ pub struct FileDiff {
     pub path: String,
     pub old_content: Option<String>,
     pub new_content: Option<String>,
+    /// Line-level diff hunks
+    pub hunks: Vec<DiffHunk>,
+    /// Stats: lines added
+    pub additions: usize,
+    /// Stats: lines deleted
+    pub deletions: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DiffHunk {
+    pub header: String,
+    pub lines: Vec<DiffLine>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DiffLine {
+    /// "add", "del", or "ctx" (context)
+    pub kind: String,
+    /// Line number in old file (None for added lines)
+    pub old_line: Option<usize>,
+    /// Line number in new file (None for deleted lines)
+    pub new_line: Option<usize>,
+    pub text: String,
 }
 
 impl FileDiff {
     pub fn is_new(&self) -> bool {
         self.old_content.is_none() && self.new_content.is_some()
     }
+}
+
+/// Compute line-level diff between two strings, returning hunks with context lines.
+fn compute_line_diff(old: &str, new: &str) -> (Vec<DiffHunk>, usize, usize) {
+    use similar::{ChangeTag, TextDiff};
+
+    let diff = TextDiff::from_lines(old, new);
+    let mut hunks = Vec::new();
+    let mut total_adds = 0usize;
+    let mut total_dels = 0usize;
+
+    for hunk in diff.unified_diff().context_radius(3).iter_hunks() {
+        let header = hunk.header().to_string();
+        let mut lines = Vec::new();
+        for change in hunk.iter_changes() {
+            let (kind, old_line, new_line) = match change.tag() {
+                ChangeTag::Equal => (
+                    "ctx",
+                    change.old_index().map(|i| i + 1),
+                    change.new_index().map(|i| i + 1),
+                ),
+                ChangeTag::Delete => {
+                    total_dels += 1;
+                    ("del", change.old_index().map(|i| i + 1), None)
+                }
+                ChangeTag::Insert => {
+                    total_adds += 1;
+                    ("add", None, change.new_index().map(|i| i + 1))
+                }
+            };
+            lines.push(DiffLine {
+                kind: kind.to_string(),
+                old_line,
+                new_line,
+                text: change.value().trim_end_matches('\n').to_string(),
+            });
+        }
+        hunks.push(DiffHunk { header, lines });
+    }
+
+    (hunks, total_adds, total_dels)
 }
 
 fn rename_master_to_main(repo_path: &Path) {
@@ -236,11 +300,7 @@ impl WikiRepo {
         Ok(())
     }
 
-    pub fn read_file(
-        &self,
-        branch: &str,
-        file_path: &str,
-    ) -> Result<Option<Vec<u8>>, git2::Error> {
+    pub fn read_file(&self, branch: &str, file_path: &str) -> Result<Option<Vec<u8>>, git2::Error> {
         let repo = self.repo()?;
         let branch_ref = repo.find_branch(branch, BranchType::Local)?;
         let commit = branch_ref.get().peel_to_commit()?;
@@ -286,7 +346,11 @@ impl WikiRepo {
     }
 
     /// List all files recursively under a directory, returning full paths.
-    pub fn list_files_recursive(&self, branch: &str, dir: &str) -> Result<Vec<String>, git2::Error> {
+    pub fn list_files_recursive(
+        &self,
+        branch: &str,
+        dir: &str,
+    ) -> Result<Vec<String>, git2::Error> {
         let repo = self.repo()?;
         let branch_ref = repo.find_branch(branch, BranchType::Local)?;
         let commit = branch_ref.get().peel_to_commit()?;
@@ -343,20 +407,29 @@ impl WikiRepo {
         Ok(())
     }
 
-    pub fn diff_files(
-        &self,
-        branch: &str,
-        slugs: &[String],
-    ) -> Result<Vec<FileDiff>, git2::Error> {
+    pub fn diff_files(&self, branch: &str, slugs: &[String]) -> Result<Vec<FileDiff>, git2::Error> {
         let mut diffs = Vec::new();
         for slug in slugs {
             let path = format!("wiki/{slug}.md");
             let main_content = self.read_file("main", &path)?;
             let branch_content = self.read_file(branch, &path)?;
+            let old_str = main_content
+                .as_ref()
+                .map(|b| String::from_utf8_lossy(b).into_owned());
+            let new_str = branch_content
+                .as_ref()
+                .map(|b| String::from_utf8_lossy(b).into_owned());
+            let (hunks, additions, deletions) = compute_line_diff(
+                old_str.as_deref().unwrap_or(""),
+                new_str.as_deref().unwrap_or(""),
+            );
             diffs.push(FileDiff {
                 path,
-                old_content: main_content.map(|b| String::from_utf8_lossy(&b).into_owned()),
-                new_content: branch_content.map(|b| String::from_utf8_lossy(&b).into_owned()),
+                old_content: old_str,
+                new_content: new_str,
+                hunks,
+                additions,
+                deletions,
             });
         }
         Ok(diffs)

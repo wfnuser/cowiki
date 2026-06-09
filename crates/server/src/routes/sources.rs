@@ -37,7 +37,10 @@ pub struct SourceContent {
     pub compiled_pages: Vec<String>,
 }
 
-fn load_compile_state(repo: &cowiki_core::git::WikiRepo, branch: &str) -> super::compile::CompileState {
+fn load_compile_state(
+    repo: &cowiki_core::git::WikiRepo,
+    branch: &str,
+) -> super::compile::CompileState {
     repo.read_file(branch, ".cowiki/state.json")
         .ok()
         .flatten()
@@ -63,17 +66,22 @@ pub async fn list_sources(
 
     let mut items = Vec::new();
     for file in &source_files {
-        let filename = file
-            .strip_prefix("sources/")
-            .unwrap_or(file)
-            .to_string();
+        let filename = file.strip_prefix("sources/").unwrap_or(file).to_string();
         let compiled = compile_state.sources.contains_key(&filename);
         let compiled_pages = if compiled {
-            compile_state.source_pages.get(&filename).cloned().unwrap_or_default()
+            compile_state
+                .source_pages
+                .get(&filename)
+                .cloned()
+                .unwrap_or_default()
         } else {
             Vec::new()
         };
-        items.push(SourceItem { filename, compiled, compiled_pages });
+        items.push(SourceItem {
+            filename,
+            compiled,
+            compiled_pages,
+        });
     }
     Ok(Json(items))
 }
@@ -101,10 +109,19 @@ pub async fn get_source(
     let compile_state = load_compile_state(&repo, branch);
     let compiled = compile_state.sources.contains_key(&filename);
     let compiled_pages = if compiled {
-        compile_state.source_pages.get(&filename).cloned().unwrap_or_default()
+        compile_state
+            .source_pages
+            .get(&filename)
+            .cloned()
+            .unwrap_or_default()
     } else {
         Vec::new()
     };
 
-    Ok(Json(SourceContent { filename, content, compiled, compiled_pages }))
+    Ok(Json(SourceContent {
+        filename,
+        content,
+        compiled,
+        compiled_pages,
+    }))
 }
