@@ -6,34 +6,43 @@
 
 @theme {
   /* ── CoWiki Design System ──
-     Warm editorial palette aligned with landing page (cowiki.ai).
-     App uses a lighter variant of the landing page's warm beige. */
+     Warm editorial palette from the team-space design handoff:
+     paper surfaces, near-black ink, and a direct orange accent. */
 
   --font-sans: "Inter Variable", system-ui, sans-serif;
   --font-serif: "Source Serif 4 Variable", Georgia, serif;
 
-  /* Surfaces — warm-tinted whites (derived from landing #EFEAE0) */
-  --color-bg: #FDFCFA;
-  --color-bg-secondary: #F8F6F2;
-  --color-bg-hover: #F3F1EC;
-  --color-bg-active: #EDEBE5;
-  --color-border: #E4E0D8;
-  --color-border-hover: #D4CFC5;
+  /* Surfaces */
+  --color-bg: #faf9f7;
+  --color-panel: #fdfcfb;
+  --color-bg-secondary: #f5f4f1;
+  --color-bg-hover: #efedea;
+  --color-bg-active: #e8e6e1;
+  --color-border: #e8e6e1;
+  --color-border-hover: #d7d3ca;
+  --color-border-soft: #eeece8;
 
-  /* Text — warm ink (from landing --ink #1F1B16) */
-  --color-text: #1F1B16;
-  --color-text-secondary: #4A433A;
-  --color-text-tertiary: #8B8275;
+  /* Text */
+  --color-text: #1d1c1a;
+  --color-text-secondary: #403e3a;
+  --color-text-tertiary: #8c897f;
+  --color-text-faint: #a8a59b;
 
-  /* Brand accent — rust red (from landing --accent #C8442A) */
-  --color-accent: #C8442A;
-  --color-accent-hover: #A8371F;
+  /* Brand accent */
+  --color-accent: #e2590b;
+  --color-accent-hover: #c94b08;
+  --color-accent-soft: #fbeadd;
 
   /* Semantic colors */
-  --color-green: #2A6B5A;
-  --color-red: #C8442A;
-  --color-amber: #B5651D;
-  --color-tag: #ECE8E1;
+  --color-green: #2f8a5b;
+  --color-green-soft: #e3f1e9;
+  --color-red: #cf222e;
+  --color-red-soft: #fcebe8;
+  --color-amber: #b5790f;
+  --color-amber-soft: #f6ecd6;
+  --color-blue: #2f6bb0;
+  --color-blue-soft: #e6eef7;
+  --color-tag: #ece8e1;
 }
 
 body {
@@ -55,7 +64,7 @@ body {
 .prose p { margin: 0.375rem 0; }
 .prose ul, .prose ol { margin: 0.375rem 0; padding-left: 1.5rem; }
 .prose li { margin: 0.125rem 0; }
-.prose code { background: var(--color-bg-hover); padding: 0.125rem 0.375rem; border-radius: 3px; font-size: 0.85em; color: #C8442A; }
+.prose code { background: var(--color-bg-hover); padding: 0.125rem 0.375rem; border-radius: 3px; font-size: 0.85em; color: var(--color-accent); }
 .prose pre { background: #282c34; color: #abb2bf; padding: 1rem; border-radius: 6px; overflow-x: auto; margin: 0.75rem 0; font-size: 0.85em; }
 .prose pre code { background: none; color: inherit; padding: 0; }
 .prose blockquote { border-left: 3px solid var(--color-border); padding-left: 1rem; color: var(--color-text-secondary); margin: 0.75rem 0; }
@@ -89,37 +98,37 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: var(--color-border-hover); }
 
 :root {
-  /* ── CoWiki shadcn theme — warm editorial ── */
-  --background: 40 33% 98%;       /* #FDFCFA */
-  --foreground: 30 19% 10%;       /* #1F1B16 */
-  --card: 40 33% 98%;
-  --card-foreground: 30 19% 10%;
-  --popover: 40 33% 98%;
-  --popover-foreground: 30 19% 10%;
-  --primary: 30 19% 10%;          /* ink */
-  --primary-foreground: 40 33% 98%;
-  --secondary: 36 18% 95%;        /* warm off-white */
-  --secondary-foreground: 30 19% 10%;
-  --muted: 36 18% 95%;
-  --muted-foreground: 30 11% 40%; /* ink-soft */
-  --accent: 36 18% 95%;
-  --accent-foreground: 30 19% 10%;
-  --destructive: 11 66% 47%;      /* rust red #C8442A */
-  --destructive-foreground: 40 33% 98%;
-  --border: 33 14% 87%;           /* warm border */
-  --input: 33 14% 87%;
-  --ring: 30 11% 78%;
-  --radius: 0.375rem;             /* slightly tighter radius */
+  /* ── CoWiki shadcn theme — design handoff palette ── */
+  --background: 40 23% 97%;       /* #faf9f7 */
+  --foreground: 40 5% 11%;        /* #1d1c1a */
+  --card: 30 33% 99%;             /* #fdfcfb */
+  --card-foreground: 40 5% 11%;
+  --popover: 30 33% 99%;
+  --popover-foreground: 40 5% 11%;
+  --primary: 40 5% 11%;
+  --primary-foreground: 40 23% 97%;
+  --secondary: 45 17% 95%;        /* #f5f4f1 */
+  --secondary-foreground: 40 5% 11%;
+  --muted: 45 17% 95%;
+  --muted-foreground: 43 6% 53%;  /* #8c897f */
+  --accent: 25 90% 46%;           /* #e2590b */
+  --accent-foreground: 30 33% 99%;
+  --destructive: 356 71% 47%;     /* #cf222e */
+  --destructive-foreground: 30 33% 99%;
+  --border: 40 14% 90%;           /* #e8e6e1 */
+  --input: 40 14% 90%;
+  --ring: 25 90% 46%;
+  --radius: 0.5rem;
 
-  /* Sidebar — warm paper tint */
-  --sidebar: hsl(36 25% 97%);
-  --sidebar-foreground: hsl(30 19% 10%);
-  --sidebar-primary: hsl(30 19% 10%);
-  --sidebar-primary-foreground: hsl(40 33% 98%);
-  --sidebar-accent: hsl(36 18% 94%);
-  --sidebar-accent-foreground: hsl(30 19% 10%);
-  --sidebar-border: hsl(33 14% 93%);
-  --sidebar-ring: hsl(11 66% 47%);
+  /* Sidebar */
+  --sidebar: hsl(45 17% 95%);     /* #f5f4f1 */
+  --sidebar-foreground: hsl(40 5% 11%);
+  --sidebar-primary: hsl(40 5% 11%);
+  --sidebar-primary-foreground: hsl(40 23% 97%);
+  --sidebar-accent: hsl(30 86% 93%); /* #fbeadd */
+  --sidebar-accent-foreground: hsl(25 90% 46%);
+  --sidebar-border: hsl(40 14% 90%);
+  --sidebar-ring: hsl(25 90% 46%);
 }
 
 /* Notion-like subtle sidebar border */

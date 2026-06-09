@@ -1,28 +1,9 @@
 import { useState, useCallback } from 'react';
 import { MessageSquare, Check, ChevronDown, ChevronRight, Send, X, FileText } from 'lucide-react';
 import type { FileDiff, DiffHunk, DiffLine, ReviewComment } from '../../api';
+import { C, fonts } from '@/lib/design';
 
-/* ── Design tokens ── */
-const C = {
-  bg: '#faf9f7',
-  panel: '#fdfcfb',
-  sidebar: '#f5f4f1',
-  rail: '#efedea',
-  ink: '#1d1c1a',
-  ink2: '#403e3a',
-  muted: '#8c897f',
-  faint: '#a8a59b',
-  line: '#e8e6e1',
-  accent: '#e2590b',
-  green: '#2f8a5b',
-  amber: '#b5790f',
-  greenBg: '#dafbe1',
-  greenBgSoft: '#e6f9ec',
-  redBg: '#ffebe9',
-  redBgSoft: '#fff5f4',
-} as const;
-
-const mono = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+const mono = fonts.mono;
 
 function fileStatus(f: FileDiff): 'added' | 'deleted' | 'modified' {
   if (f.old_content == null) return 'added';
@@ -32,8 +13,8 @@ function fileStatus(f: FileDiff): 'added' | 'deleted' | 'modified' {
 
 const statusColors: Record<string, { bg: string; fg: string }> = {
   added: { bg: C.greenBg, fg: C.green },
-  deleted: { bg: C.redBg, fg: '#cf222e' },
-  modified: { bg: '#fff8c5', fg: C.amber },
+  deleted: { bg: C.redBg, fg: C.red },
+  modified: { bg: C.amberSoft, fg: C.amber },
 };
 
 /* ── Inline comment thread ── */
@@ -238,7 +219,7 @@ function HunkView({
               {/* Prefix (+/-/space) */}
               <td style={{
                 width: 18, textAlign: 'center', fontFamily: mono, fontSize: 13,
-                color: line.kind === 'add' ? C.green : line.kind === 'del' ? '#cf222e' : C.muted,
+                color: line.kind === 'add' ? C.green : line.kind === 'del' ? C.red : C.muted,
                 padding: 0, userSelect: 'none', lineHeight: '22px',
               }}>
                 {prefix}
@@ -346,7 +327,7 @@ function FileDiffCard({
         <span style={{ marginLeft: 'auto', fontSize: 12, color: C.muted }}>
           <span style={{ color: C.green }}>+{file.additions}</span>
           {' '}
-          <span style={{ color: '#cf222e' }}>-{file.deletions}</span>
+          <span style={{ color: C.red }}>-{file.deletions}</span>
         </span>
       </div>
       {/* Diff body */}

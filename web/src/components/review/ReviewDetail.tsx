@@ -5,22 +5,7 @@ import {
   type ReviewDetail as ReviewDetailData, type ReviewComment,
 } from '../../api';
 import { DiffView } from './DiffView';
-
-/* ── Design tokens ── */
-const C = {
-  bg: '#faf9f7',
-  panel: '#fdfcfb',
-  sidebar: '#f5f4f1',
-  rail: '#efedea',
-  ink: '#1d1c1a',
-  ink2: '#403e3a',
-  muted: '#8c897f',
-  faint: '#a8a59b',
-  line: '#e8e6e1',
-  accent: '#e2590b',
-  green: '#2f8a5b',
-  amber: '#b5790f',
-} as const;
+import { C, fonts } from '@/lib/design';
 
 function timeAgo(iso: string): string {
   const then = new Date(iso).getTime();
@@ -35,10 +20,10 @@ function timeAgo(iso: string): string {
 }
 
 const statusBadge: Record<string, { bg: string; fg: string; label: string }> = {
-  pending: { bg: '#fff8c5', fg: '#9a6700', label: 'Review needed' },
-  approved: { bg: '#e3f1e9', fg: '#2f8a5b', label: 'Approved' },
-  rejected: { bg: '#fbeadd', fg: '#e2590b', label: 'Changes requested' },
-  merged: { bg: '#ddf4ff', fg: '#0969da', label: 'Merged' },
+  pending: { bg: C.amberSoft, fg: C.amber, label: 'Review needed' },
+  approved: { bg: C.greenSoft, fg: C.green, label: 'Approved' },
+  rejected: { bg: C.accentSoft, fg: C.accent, label: 'Changes requested' },
+  merged: { bg: C.blueSoft, fg: C.blue, label: 'Merged' },
 };
 
 export function ReviewDetail({
@@ -150,7 +135,7 @@ export function ReviewDetail({
     return (
       <div style={{ padding: 24 }}>
         <button onClick={onBack} style={backBtnStyle}><ArrowLeft size={14} /> Reviews</button>
-        <p style={{ color: '#cf222e', fontSize: 14, marginTop: 12 }}>Failed to load review: {error}</p>
+        <p style={{ color: C.red, fontSize: 14, marginTop: 12 }}>Failed to load review: {error}</p>
       </div>
     );
   }
@@ -181,7 +166,7 @@ export function ReviewDetail({
         </button>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-          <h1 style={{ fontFamily: 'Spectral, Georgia, serif', fontSize: 26, fontWeight: 700, color: C.ink, margin: 0 }}>
+          <h1 style={{ fontFamily: fonts.serif, fontSize: 26, fontWeight: 700, color: C.ink, margin: 0 }}>
             {submission.summary || 'Submission'}
           </h1>
           <span style={{ fontSize: 16, color: C.faint, fontWeight: 400 }}>#{submissionId.slice(0, 6)}</span>
@@ -213,7 +198,7 @@ export function ReviewDetail({
             background: C.rail, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
           }}>wiki/main</code>
           <span style={{ color: C.green }}>+{totalAdd}</span>
-          <span style={{ color: '#cf222e' }}>&minus;{totalDel}</span>
+          <span style={{ color: C.red }}>&minus;{totalDel}</span>
           <span style={{ color: C.faint }}>&middot;</span>
           <span>{diffs.length} file{diffs.length === 1 ? '' : 's'}</span>
           <span style={{ color: C.faint }}>&middot;</span>

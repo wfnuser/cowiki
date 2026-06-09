@@ -33,22 +33,7 @@ import { SpacePanel, type NavTab } from '../components/layout/SpacePanel';
 import { ReviewList } from '../components/review/ReviewList';
 import { ReviewDetail } from '../components/review/ReviewDetail';
 import { MembersView } from '../components/views/MembersView';
-
-/* ── Design tokens ── */
-const C = {
-  bg: '#faf9f7',
-  panel: '#fdfcfb',
-  sidebar: '#f5f4f1',
-  rail: '#efedea',
-  ink: '#1d1c1a',
-  ink2: '#403e3a',
-  muted: '#8c897f',
-  faint: '#a8a59b',
-  line: '#e8e6e1',
-  accent: '#e2590b',
-  green: '#2f8a5b',
-  amber: '#b5790f',
-} as const;
+import { C } from '@/lib/design';
 
 type ActiveView =
   | { kind: 'page'; slug: string; content: PageFull | null }
@@ -728,7 +713,7 @@ export function MainLayout() {
                       <button style={{
                         display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px',
                         borderRadius: 6, border: 'none', cursor: 'pointer',
-                        background: '#fff8c5', color: '#9a6700', fontSize: 11, fontWeight: 500,
+                        background: C.amberSoft, color: C.amber, fontSize: 11, fontWeight: 500,
                       }}>
                         <Bell size={12} /> {pendingInvites.length}
                       </button>
@@ -791,7 +776,7 @@ export function MainLayout() {
               <div style={{
                 margin: '8px 24px 0', padding: '8px 12px', borderRadius: 6, fontSize: 12,
                 background: message.type === 'success' ? '#dafbe1' : '#ffebe9',
-                color: message.type === 'success' ? '#1a7f37' : '#cf222e',
+                color: message.type === 'success' ? C.green : C.red,
               }}>
                 {message.text}
               </div>
@@ -878,7 +863,7 @@ export function MainLayout() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
                     <span style={{
                       padding: '2px 10px', fontSize: 11, borderRadius: 12,
-                      background: '#ddf4ff', color: '#0969da', fontWeight: 500,
+                      background: C.blueSoft, color: C.blue, fontWeight: 500,
                     }}>
                       Source File
                     </span>
@@ -903,7 +888,7 @@ export function MainLayout() {
                           {i > 0 && ', '}
                           <button
                             onClick={() => activeWorkspace && selectPage(activeWorkspace, slug)}
-                            style={{ fontSize: 12, color: '#0969da', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                            style={{ fontSize: 12, color: C.blue, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
                           >
                             {slug}
                           </button>

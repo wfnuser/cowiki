@@ -1,30 +1,15 @@
 import { useEffect, useState } from 'react';
 import { GitBranch, MessageSquare } from 'lucide-react';
 import { listReviews, type Submission } from '../../api';
-
-/* ── Design tokens ── */
-const C = {
-  bg: '#faf9f7',
-  panel: '#fdfcfb',
-  sidebar: '#f5f4f1',
-  rail: '#efedea',
-  ink: '#1d1c1a',
-  ink2: '#403e3a',
-  muted: '#8c897f',
-  faint: '#a8a59b',
-  line: '#e8e6e1',
-  accent: '#e2590b',
-  green: '#2f8a5b',
-  amber: '#b5790f',
-} as const;
+import { C } from '@/lib/design';
 
 type Filter = 'open' | 'merged' | 'all';
 
 const statusBadge: Record<string, { bg: string; fg: string; label: string }> = {
-  pending: { bg: '#fff8c5', fg: '#9a6700', label: 'Review needed' },
-  approved: { bg: '#dafbe1', fg: '#1a7f37', label: 'Approved' },
-  rejected: { bg: '#ffebe9', fg: '#cf222e', label: 'Changes req.' },
-  merged: { bg: '#ddf4ff', fg: '#0969da', label: 'Merged' },
+  pending: { bg: C.amberSoft, fg: C.amber, label: 'Review needed' },
+  approved: { bg: C.greenSoft, fg: C.green, label: 'Approved' },
+  rejected: { bg: C.accentSoft, fg: C.accent, label: 'Changes req.' },
+  merged: { bg: C.blueSoft, fg: C.blue, label: 'Merged' },
 };
 
 function timeAgo(iso: string): string {
@@ -69,7 +54,7 @@ export function ReviewList({
   });
 
   if (error) {
-    return <p style={{ color: '#cf222e', fontSize: 14 }}>Failed to load reviews: {error}</p>;
+    return <p style={{ color: C.red, fontSize: 14 }}>Failed to load reviews: {error}</p>;
   }
 
   if (subs == null) {
@@ -142,7 +127,7 @@ export function ReviewList({
                 onMouseLeave={(e) => { e.currentTarget.style.background = C.panel; }}
               >
                 {/* Branch icon */}
-                <GitBranch size={16} color={s.status === 'pending' ? C.green : s.status === 'merged' ? '#8250df' : C.muted} />
+                <GitBranch size={16} color={s.status === 'pending' ? C.green : s.status === 'merged' ? C.purple : C.muted} />
 
                 {/* Main content */}
                 <div style={{ flex: 1, minWidth: 0 }}>

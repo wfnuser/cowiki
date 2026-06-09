@@ -8,22 +8,7 @@ import type { Workspace, PageMeta, SourceItem } from '../../api';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-
-/* ── Design tokens ── */
-const C = {
-  bg: '#faf9f7',
-  panel: '#fdfcfb',
-  sidebar: '#f5f4f1',
-  rail: '#efedea',
-  ink: '#1d1c1a',
-  ink2: '#403e3a',
-  muted: '#8c897f',
-  faint: '#a8a59b',
-  line: '#e8e6e1',
-  accent: '#e2590b',
-  green: '#2f8a5b',
-  amber: '#b5790f',
-} as const;
+import { C } from '@/lib/design';
 
 export type NavTab = 'wiki' | 'reviews' | 'members' | 'activity';
 

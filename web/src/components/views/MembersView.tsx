@@ -1,20 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Users, UserPlus, ChevronDown } from 'lucide-react';
 import { listMembers, type MemberInfo } from '../../api';
-
-/* ── Design tokens ── */
-const C = {
-  bg: '#faf9f7',
-  panel: '#fdfcfb',
-  sidebar: '#f5f4f1',
-  rail: '#efedea',
-  ink: '#1d1c1a',
-  ink2: '#403e3a',
-  muted: '#8c897f',
-  faint: '#a8a59b',
-  line: '#e8e6e1',
-  accent: '#e2590b',
-} as const;
+import { C } from '@/lib/design';
 
 interface MembersViewProps {
   workspaceSlug: string;
@@ -35,7 +22,7 @@ export function MembersView({ workspaceSlug }: MembersViewProps) {
   }, [workspaceSlug]);
 
   if (error) {
-    return <p style={{ color: '#cf222e', fontSize: 14, padding: '16px 0' }}>Failed to load members: {error}</p>;
+    return <p style={{ color: C.red, fontSize: 14, padding: '16px 0' }}>Failed to load members: {error}</p>;
   }
 
   if (members == null) {

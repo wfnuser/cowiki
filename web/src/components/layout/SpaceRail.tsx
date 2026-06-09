@@ -6,26 +6,10 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-
-/* ── Design tokens ── */
-const C = {
-  bg: '#faf9f7',
-  panel: '#fdfcfb',
-  sidebar: '#f5f4f1',
-  rail: '#efedea',
-  ink: '#1d1c1a',
-  ink2: '#403e3a',
-  muted: '#8c897f',
-  faint: '#a8a59b',
-  line: '#e8e6e1',
-  accent: '#e2590b',
-  green: '#2f8a5b',
-} as const;
-
-const TILE_COLORS = ['#3f6c8c', '#5d8a6c', '#9a6f93', '#c2410c', '#6366f1', '#14b8a6', '#f59e0b', '#8b5cf6'];
+import { C, spaceTileColors } from '@/lib/design';
 
 function tileColor(index: number): string {
-  return TILE_COLORS[index % TILE_COLORS.length];
+  return spaceTileColors[index % spaceTileColors.length];
 }
 
 interface SpaceRailProps {
