@@ -66,6 +66,7 @@ pub struct EmbeddedAgentResponse {
 /// Directly calls Anthropic/OpenAI APIs in-process.
 pub struct EmbeddedAgent {
     config: EmbeddedAgentConfig,
+    client: Client,
     tracker: Arc<Mutex<TokenUsageTracker>>,
 }
 
@@ -165,6 +166,7 @@ impl EmbeddedAgent {
     pub fn new(config: EmbeddedAgentConfig) -> Self {
         Self {
             config,
+            client: Client::new(),
             tracker: Arc::new(Mutex::new(TokenUsageTracker::default())),
         }
     }
@@ -235,7 +237,7 @@ impl EmbeddedAgent {
         };
 
         let resp = self
-            .client()
+            .client
             .post(&url)
             .bearer_auth(&self.config.api_key)
             .json(&request)
@@ -286,9 +288,6 @@ impl EmbeddedAgent {
             .unwrap_or_default()
     }
 
-    fn client(&self) -> Client {
-        Client::new()
-    }
 }
 
 // ── Factory ───────────────────────────────────────────────────
