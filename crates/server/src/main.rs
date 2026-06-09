@@ -7,6 +7,8 @@ use cowiki_core::compiler::Compiler;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
+use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
+use tracing::Level;
 
 mod config;
 mod error;
@@ -301,6 +303,11 @@ async fn main() {
         .route(
             "/api/notifications/{id}/read",
             post(routes::notifications::mark_read),
+        )
+        .layer(
+            TraceLayer::new_for_http()
+                .on_request(DefaultOnRequest::new().level(Level::INFO))
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
         .layer(CorsLayer::permissive())
         .with_state(state);

@@ -132,23 +132,34 @@ async fn do_compile(
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
         let hash = format!("{:x}", Sha256::digest(full_content.as_bytes()));
-        if let Ok(emb) = state
+        match state
             .compiler
             .embed(&format!("{}\n{}", page.title, page.summary))
             .await
         {
-            cowiki_db::pages::upsert(
-                &state.db,
-                &page.slug,
-                &page.title,
-                &page.summary,
-                branch,
-                &hash,
-                Some(&emb),
-                default_user.id,
-            )
-            .await
-            .ok();
+            Ok(emb) => {
+                if let Err(e) = cowiki_db::pages::upsert(
+                    &state.db,
+                    &page.slug,
+                    &page.title,
+                    &page.summary,
+                    branch,
+                    &hash,
+                    Some(&emb),
+                    default_user.id,
+                )
+                .await
+                {
+                    tracing::warn!(
+                        "failed to index compiled page '{}' for search: {e}",
+                        page.slug
+                    );
+                }
+            }
+            Err(e) => tracing::warn!(
+                "failed to embed compiled page '{}' (not indexed for search): {e}",
+                page.slug
+            ),
         }
 
         // Record source→page mapping from the compiler's output
@@ -185,14 +196,18 @@ fn load_state(repo: &cowiki_core::git::WikiRepo, branch: &str) -> CompileState {
 }
 
 fn save_state(repo: &cowiki_core::git::WikiRepo, branch: &str, compile_state: &CompileState) {
-    if let Ok(json) = serde_json::to_string_pretty(compile_state) {
-        repo.write_file(
-            branch,
-            ".cowiki/state.json",
-            json.as_bytes(),
-            "update compile state",
-            "cowiki",
-        )
-        .ok();
+    match serde_json::to_string_pretty(compile_state) {
+        Ok(json) => {
+            if let Err(e) = repo.write_file(
+                branch,
+                ".cowiki/state.json",
+                json.as_bytes(),
+                "update compile state",
+                "cowiki",
+            ) {
+                tracing::warn!("failed to persist compile state on branch '{branch}': {e}");
+            }
+        }
+        Err(e) => tracing::warn!("failed to serialize compile state: {e}"),
     }
 }
