@@ -442,8 +442,6 @@ impl WikiRepo {
         author: &str,
         message: &str,
     ) -> Result<(), git2::Error> {
-        let lock = self.branch_lock("main");
-        let _guard = lock.write().unwrap();
         for path in file_paths {
             if let Some(content) = self.read_file(branch, path)? {
                 self.write_file("main", path, &content, message, author)?;
