@@ -1,15 +1,42 @@
 # cowiki Compile System Design
 
-> Status: v4 | Date: 2026-06-07 | Issue: [#15](https://github.com/wfnuser/cowiki/issues/15)
+> Status: v5 | Date: 2026-06-09 | Issue: [#15](https://github.com/wfnuser/cowiki/issues/15)
 
 ## Overview
 
-A **two-stage compile pipeline** with **wiki-page-centric knowledge architecture** and **decoupled agent communication**.
+A **two-stage compile pipeline** that transforms extracted source folders (from `memany-extractor`) into structured wiki knowledge with **wiki-page-centric architecture** and **decoupled agent communication**.
 
-- **ShallowCompile (sync)**: Agent explores source directories, produces wiki pages + entity pages + concept pages in markdown. Deduplicates and merges against existing content. Inserts metadata into PSQL indices.
+```
+Ingest (memany-extractor)          Compile (cowiki)
+─────────────────────────          ─────────────────
+WebApp   ─┐
+LocalFS  ─┤                       ShallowCompile         DeepCompile
+RemoteFS ─┼─ SourceFolder ────→  (sync)          →     (async, human-triggered)
+Text     ─┘  (manifest.json       sources → wiki         health-check:
+             + content files       + entities            contradictions,
+             + directory tree)     + concepts            duplicates, orphans,
+                                   + wikilinks           broken links)
+```
+
+- **ShallowCompile (sync)**: Agent explores source folders in `sources/`, reads `manifest.json` and content files, produces wiki pages + entity pages + concept pages in markdown. Deduplicates against existing content using `content_hash` from the extractor. Inserts metadata into PSQL indices.
 - **DeepCompile (async, human-triggered)**: Agent health-checks the wiki — detects contradictions, duplicates, orphan nodes, broken wikilinks. Personal Space: manual trigger. Team Space: post-review-approve hook.
 
 **Core principle:** Wiki pages are the center. Entities are navigation bridges between wiki pages. Entities and concepts live as markdown files (FS source of truth) with PSQL metadata tables for search and dedup.
+
+**Separation of concerns:** Extraction (fetching raw content → structured Markdown) is handled by the external `memany-extractor` crate. Compile (Markdown → wiki pages + entities + concepts + relationships) is cowiki's domain. See [Related](#related) for the extractor design proposal.
+
+## Folder Source Types
+
+Cowiki ingests content from four source types, each producing a structured `SourceFolder` via `memany-extractor`:
+
+| Source Type | Origin | How It Works | Typical Input |
+|-------------|--------|-------------|---------------|
+| **WebApp** | Web application / documentation site | Headless Chrome (chromiumoxide) crawls multiple pages, converts HTML to Markdown via processor chain | Documentation site URL, web app |
+| **LocalFS** | Local filesystem directory | `walkdir` traverses directory, hard-links files, routes through file processors by MIME type | `/home/user/docs/`, mounted drive |
+| **RemoteFS** | Remote filesystem | SSH/SFTP or AWS S3 fetches files to a temporary work directory, then processes them | `ssh://server/path/`, `s3://bucket/prefix/` |
+| **Text** | Inline text / Markdown string | Passthrough — validates Markdown structure, extracts frontmatter metadata | Pasted text, piped input from CLI |
+
+Each source is extracted **before** ShallowCompile runs. The extraction layer (`memany-extractor`) produces a `SourceFolder` containing `manifest.json`, processed content files (Markdown), and assets — preserving the original directory tree structure. ShallowCompile consumes these structured folders as input.
 
 ## Data Architecture
 
@@ -42,6 +69,22 @@ workspace/
       kubernetes-architecture.md
     guides/
       deployment.md
+  sources/                      ← extracted source folders
+    webapp-docs-site/           ← WebApp source (directory tree preserved)
+      manifest.json
+      index.md
+      guides/
+        getting-started.md
+        deployment.md
+      assets/
+        diagram.png
+    localfs-project-notes/      ← LocalFS source (directory tree preserved)
+      manifest.json
+      design-notes.md
+      meeting-notes.md
+    text-cli-pipe/              ← Text source (flat)
+      manifest.json
+      content.md
   entities/                     ← named entities
     docker.md
     kubernetes.md
@@ -49,12 +92,20 @@ workspace/
     containerization.md
     microservices.md
   queries/                      ← agent-digested Q&A (reserved)
-  sources/                      ← raw ingested sources
-    sha256_abc123/
-      manifest.json
-      content.md
   .cowiki/state.json
 ```
+
+### manifest.json (From memany-extractor)
+
+Each source folder contains a `manifest.json` produced by `memany-extractor`. The compile system **reads** these manifests — it does not generate them.
+
+| Field | Use in Compile |
+|-------|---------------|
+| `content_hash` | Identity check for ShallowCompile dedup |
+| `source_type` | `"webapp"`, `"localfs"`, `"remotefs"`, or `"text"` — informs agent strategy |
+| `source_location` | Original source address (URL, path) for traceability |
+| `files[]` | File manifest with `role` (primary/asset/raw), `status` (ok/skipped/error), and `path` |
+| `processor_log` | Extractor statistics for debugging extraction issues |
 
 ### PSQL Tables (Metadata Indices)
 
@@ -140,12 +191,15 @@ tags: [infrastructure, architecture]
 
 ### Pipeline
 
-1. **Identity Check** — lookup identity hash in `.cowiki/state.json`; skip if compiled
-2. **List Sources** — enumerate source dirs in `sources/`
+1. **Identity Check** — read `manifest.json` from each source folder; lookup `content_hash` in `.cowiki/state.json`; skip if already compiled
+2. **List Source Folders** — enumerate folders in `sources/`
 3. **Acquire Agent** — from space pool
 4. **Agent Execution** — agent:
-   - Reads source dirs (source FS tools: `ls`, `grep`, `read`)
-   - **Deduplicates** against existing wiki/entities/concepts (reads via `read_wiki`)
+   - Surveys source folders via `ls_sources` (names, types, freshness)
+   - Reads `manifest.json` via `read_manifest` to understand content structure and extractor status
+   - Browses directory trees via `ls_source_dir` (preserves hierarchy — sibling files suggest related pages, subdirectories suggest nested topics, parent directory names suggest categories)
+   - Reads content files via `read_source`
+   - **Deduplicates** against existing wiki/entities/concepts (reads via `read_wiki`, `read_entity`, `read_concept`)
    - Creates/updates wiki pages (`create_wiki`, `edit_wiki`)
    - Creates/updates entity pages (`create_entity`, `edit_entity`)
    - Creates/updates concept pages (`create_concept`, `edit_concept`)
@@ -158,13 +212,14 @@ tags: [infrastructure, architecture]
 
 ### Agent Tools — ShallowCompile
 
-**Source FS Access (read-only):**
+**Source Folder Exploration (read-only):**
 
 | Tool | Description |
 |------|-------------|
-| `ls` | List source directory |
-| `grep` | Search within source directory |
-| `read` | Read source file |
+| `ls_sources` | List source folders in `sources/` (name, source_type, content_hash, freshness) |
+| `read_manifest` | Read `manifest.json` from a source folder — file list with roles, statuses, processor log |
+| `ls_source_dir` | List contents of a directory within a source folder — preserves hierarchy |
+| `read_source` | Read a specific extracted content file from a source folder |
 
 **Wiki FS Manipulate:**
 
@@ -193,14 +248,27 @@ tags: [infrastructure, architecture]
 | `read_concept` | Read concept for dedup |
 | `rm_concept` | Delete concept |
 
+### Directory Tree Utilization
+
+The agent uses the preserved directory structure from extraction to inform wiki page organization:
+
+| Structure Signal | Wiki Inference |
+|-----------------|----------------|
+| Sibling files in same directory | Related pages — likely share entities and concepts |
+| Nested subdirectories | Topic hierarchy — subdirectory name becomes a category or parent page |
+| Parent directory name | Implicit category or grouping label |
+| `assets/` directory | Media references — images embedded in content |
+| `manifest.json` file count + roles | Content scope — how many primary vs asset vs raw files |
+
 ### Dedup & Merge Strategy
 
 During ShallowCompile, the agent:
 
-1. **Entity dedup** — before creating a new entity, reads existing entities. If similar (by embedding or name), merges: adds new aliases, updates summary, appends new wiki page to `## Mentioned In`
-2. **Concept dedup** — same pattern for concepts
-3. **Wiki page dedup** — checks if source content is already covered by an existing wiki page. If redundant, skips creation
-4. **Cross-space scope** — dedup scope is per-space. Personal Space entities don't conflict with Team Space entities
+1. **Source-level dedup** — checks `content_hash` in manifest.json against `.cowiki/state.json`. If the exact same source folder was already compiled, skip.
+2. **Entity dedup** — before creating a new entity, reads existing entities. If similar (by embedding or name), merges: adds new aliases, updates summary, appends new wiki page to `## Mentioned In`
+3. **Concept dedup** — same pattern for concepts
+4. **Wiki page dedup** — checks if source content is already covered by an existing wiki page. If redundant, skips creation
+5. **Cross-space scope** — dedup scope is per-space. Personal Space entities don't conflict with Team Space entities
 
 ### pgvector Timing
 
@@ -362,26 +430,38 @@ All agents are separate HTTP/gRPC processes.
 
 ## State Persistence
 
-`.cowiki/state.json` in git. Tracks identity hashes and all outputs per source for cascade-on-delete:
+`.cowiki/state.json` in git. Tracks identity information and all outputs per source folder for cascade-on-delete:
 
 ```json
 {
   "sources": {
-    "sha256_abc123": {
-      "identity_hash": "sha256_abc123",
-      "source_type": "url",
-      "source_identity": "https://example.com/article"
+    "webapp-docs-site": {
+      "content_hash": "sha256:abc123...",
+      "source_type": "webapp",
+      "source_location": "https://example.com/docs"
+    },
+    "localfs-project-notes": {
+      "content_hash": "sha256:def456...",
+      "source_type": "localfs",
+      "source_location": "/home/user/project-notes"
     }
   },
   "source_pages": {
-    "sha256_abc123": {
+    "webapp-docs-site": {
       "wiki": ["infra/docker-networking.md"],
       "entities": ["entities/docker.md"],
       "concepts": ["concepts/containerization.md"]
+    },
+    "localfs-project-notes": {
+      "wiki": ["guides/deployment.md"],
+      "entities": [],
+      "concepts": []
     }
   }
 }
 ```
+
+Identity check uses `content_hash` from `manifest.json` (produced by `memany-extractor`), not a separately computed hash. Source type and location are recorded for traceability.
 
 ## Page Deletion
 
@@ -394,11 +474,13 @@ Sequential cleanup:
 
 ## What This Design Does NOT Include
 
-- PostgreSQL knowledge graph (facts table, page_entities junction) — replaced by wikilinks + FS
-- DeepIntegrate as entity extraction — replaced by ShallowCompile entity creation + DeepCompile health-check
-- Neo4j migration — no graph DB needed
-- Auto-scaling agent pools
-- Agent harness implementations (existing projects)
+- **File-level extraction** (PDF, DOCX, PPTX, CSV, etc.) — handled by `memany-extractor` (see [`docs/plans/2026-06-07-extractor-design-proposal.md`](plans/2026-06-07-extractor-design-proposal.md))
+- **Ingest API** (`POST /api/ingest`) — extraction layer concern; this design assumes sources are already extracted into `sources/`
+- **PostgreSQL knowledge graph** (facts table, page_entities junction) — replaced by wikilinks + FS
+- **DeepIntegrate as entity extraction** — replaced by ShallowCompile entity creation + DeepCompile health-check
+- **Neo4j migration** — no graph DB needed
+- **Auto-scaling agent pools**
+- **Agent harness implementations** (existing projects)
 
 ## Related
 
@@ -407,4 +489,6 @@ Sequential cleanup:
 - Issue [#31](https://github.com/wfnuser/cowiki/issues/31) — Multi-format source ingestion
 - Issue [#44](https://github.com/wfnuser/cowiki/issues/44) — Branch-aware search and merge
 - Issue [#48](https://github.com/wfnuser/cowiki/issues/48) — No snapshots: delete+rebuild
+- [`docs/plans/2026-06-07-extractor-design-proposal.md`](plans/2026-06-07-extractor-design-proposal.md) — Per-format extractor design
+- `memany-extractor` crate — Source extraction implementation (external Rust library)
 - llm_wiki pattern — `wiki/` + `entities/` + `concepts/` + wikilinks + lint

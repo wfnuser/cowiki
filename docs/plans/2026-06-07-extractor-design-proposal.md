@@ -1,141 +1,192 @@
-# Design Proposal: Multi-Format Source Extraction for Cowiki
+# Design Proposal: Multi-Format File Extraction for Cowiki
 
 **Issue:** [#31](https://github.com/wfnuser/cowiki/issues/31)
-**Status:** Proposed | **Date:** 2026-06-07
+**Status:** Proposed | **Date:** 2026-06-07 | **Updated:** 2026-06-09
+
+> **Implementation crate:** [`memany-extractor`](https://crates.io/crates/memany-extractor) — this proposal covers the **file-level processors** (`FileProcessor` trait implementations) within MemAny's `SourceFetcher → FileProcessor → FolderBuilder` pipeline. Folder-level source types (WebApp, LocalFS, RemoteFS, Text) and the compile pipeline are covered in [`docs/compile-system-design.md`](../compile-system-design.md).
 
 ## 1. Problem Statement
 
 Cowiki currently supports three source types at ingest time: `url` (raw HTML fetch), `text` (passthrough), and `file` (passthrough). Raw HTML is noisy for LLM compilation, binary documents are rejected outright, and structured formats like CSV or RSS feeds require manual preprocessing.
 
-This proposal introduces a **pluggable extraction framework** — `crates/extractor/` — that converts 13+ diverse source types into clean, structured Markdown. The design is grounded in analysis of three mature open-source projects in the `third-party/` directory: **Open Notebook** (content-core library), **OpenCLI** (166-site CLI toolkit), and **MinerU** (document parsing engine).
+This proposal defines the **file-format processors** within `memany-extractor`'s `FileProcessor` trait — converting 13+ diverse file types into clean, structured Markdown. Each processor implements `FileProcessor`, with `can_handle()` routing files by MIME type/extension and `process()` producing `ProcessedFile` output. The design is grounded in analysis of three mature open-source projects: **Open Notebook** (content-core library), **OpenCLI** (166-site CLI toolkit), and **MinerU** (document parsing engine).
 
 ## 2. Architecture
 
-### 2.1 New Crate Structure
+### 2.1 Position Within memany-extractor
+
+These file-format processors are `FileProcessor` trait implementations within the `memany-extractor` pipeline:
 
 ```
-crates/extractor/src/
-├── lib.rs              # SourceExtractor trait, create_default_registry()
-├── error.rs            # ExtractError enum (7 variants)
-├── types.rs            # SourceType(13), AuthStrategy, ExtractInput, ExtractResult
-├── registry.rs         # ExtractorRegistry — HashMap<SourceType, Arc<dyn SourceExtractor>>
-├── universal.rs        # content-core subprocess wrapper (PDF, DOCX, PPTX, EPUB, YouTube, OCR)
-├── text.rs             # TextExtractor — passthrough
-├── markdown.rs         # MarkdownExtractor — validation + normalization
-├── csv.rs              # CsvExtractor — CSV → GFM table
-├── xlsx.rs             # XlsxExtractor — calamine → multi-sheet Markdown tables
-├── url.rs              # UrlExtractor — content-core → fallback scraper + html2md
-├── github.rs           # GitHubExtractor — octocrab → README + issues
-├── rss.rs              # RssExtractor — feed-rs → Markdown feed digest
+memany-extractor pipeline:
+  Source (WebApp|LocalFS|RemoteFS|Text)
+    → SourceFetcher::fetch()        ← folder-level retrieval
+    → FileProcessor::process()      ← **THIS PROPOSAL** — per-file format conversion
+    → FolderBuilder::build()        ← assembly into SourceFolder
+```
+
+The `SourceFetcher` trait (4 source types) and `FolderBuilder` (SourceFolder output) are covered by [`docs/compile-system-design.md`](../compile-system-design.md). This proposal covers the `FileProcessor` implementations for individual file formats.
+
+### 2.2 Crate Structure (memany-extractor/src/processors/)
+
+```
+memany-extractor/src/processors/
+├── mod.rs              # Re-exports all processors
+├── plain_text.rs       # PlainTextProcessor — passthrough (default)
+├── markdown.rs         # MarkdownProcessor — validation + normalization
+├── html.rs             # HtmlProcessor — scraper → Markdown
+├── csv_proc.rs         # CsvProcessor — CSV → GFM table
+├── xlsx.rs             # XlsxProcessor — calamine → multi-sheet Markdown tables
+├── docx.rs             # DocxProcessor — zip + quick-xml OOXML parser
+├── pptx.rs             # PptxProcessor — slide extraction
+├── image_proc.rs       # ImageProcessor — metadata extraction
 └── (future)
     reddit.rs, twitter.rs, xiaohongshu.rs, podcast.rs
+
+External processors (Python subprocess via content-core):
+  PDF, DOCX (enhanced), PPTX (enhanced), YouTube, EPUB, OCR
+  → Called through a universal content-core adapter processor
 ```
 
-### 2.2 Core Trait
+### 2.3 Core Trait (memany-extractor::FileProcessor)
 
 ```rust
 #[async_trait]
-pub trait SourceExtractor: Send + Sync {
-    fn supported_types(&self) -> Vec<SourceType>;
-    fn auth_strategy(&self) -> AuthStrategy;
-    async fn extract(&self, input: ExtractInput) -> Result<ExtractResult, ExtractError>;
+pub trait FileProcessor: Send + Sync {
+    /// Processor name, used in manifest logs and debugging.
+    fn name(&self) -> &str;
+
+    /// Routing predicate: can this processor handle the file?
+    /// `FolderBuilder` tries processors in registration order; first match wins.
+    fn can_handle(&self, mime_type: &str, extension: &str) -> bool;
+
+    /// Process a single file, producing one or more structured outputs.
+    async fn process(&self, file: &RawFile) -> Result<Vec<ProcessedFile>, ExtractError>;
 }
 ```
 
-### 2.3 Registry Dispatch
+### 2.4 Processor Routing
+
+The `FolderBuilder` iterates registered processors and routes each file to the first matching processor:
+
+| File Extension | MIME Type | Processor |
+|---------------|-----------|-----------|
+| `.pdf` | `application/pdf` | PdfProcessor (content-core) |
+| `.docx` | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | DocxProcessor |
+| `.pptx` | `application/vnd.openxmlformats-officedocument.presentationml.presentation` | PptxProcessor |
+| `.xlsx` | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` | XlsxProcessor |
+| `.csv` | `text/csv` | CsvProcessor |
+| `.md` | `text/markdown` | MarkdownProcessor |
+| `.html`, `.htm` | `text/html` | HtmlProcessor |
+| `.txt` | `text/plain` | PlainTextProcessor (fallback) |
+| `.png`, `.jpg`, `.webp` | `image/*` | ImageProcessor |
+
+Processors are registered in priority order — the first `can_handle()` returning `true` wins.
+
+### 2.5 Key Types (memany-extractor)
 
 ```rust
-pub struct ExtractorRegistry {
-    extractors: HashMap<SourceType, Arc<dyn SourceExtractor>>,
+/// Raw file metadata (file on disk, not in memory)
+pub struct RawFile {
+    pub path: PathBuf,
+    pub mime_type: String,
+    pub size_bytes: u64,
+}
+
+/// Processed file output
+pub struct ProcessedFile {
+    pub original_path: PathBuf,
+    pub output_name: String,         // e.g. "content.md", "assets/chart.png"
+    pub content: String,             // Processed text (Markdown)
+    pub role: FileRole,              // Primary, Asset, Raw, Metadata
+    pub status: FileStatus,          // Ok, Skipped{reason}, Error{message}
+    pub extra: HashMap<String, Value>,
+}
+
+/// Final folder output — consumed by cowiki's ShallowCompile
+pub struct SourceFolder {
+    pub manifest: Manifest,
+    pub content_hash: String,        // Identity check for compile dedup
 }
 ```
 
-Each extractor registers for one or more `SourceType` values. The registry dispatches by type:
+## 3. Integration With Cowiki
 
-- `SourceType::Pdf` → `PdfExtractor`
-- `SourceType::Auto` → detects type from filename extension, then dispatches
-- `SourceType::Url` → `UrlExtractor` (backward-compatible with existing API)
-
-### 2.4 Key Types
-
-```rust
-pub enum SourceType {
-    Auto, Text, Url, Pdf, Docx, Pptx, Xlsx, Csv, Markdown,
-    GitHubRepo, GitHubIssue, Rss,
-    // Phase 2: YouTube, Epub, Reddit, Ocr
-    // Phase 3: Twitter, Xiaohongshu, Podcast
-}
-
-pub enum AuthStrategy { NoAuth, ApiKey, Cookie }
-
-pub struct ExtractInput {
-    pub source_type: SourceType,
-    pub content: String,            // URL, raw text, or base64-encoded bytes
-    pub encoding: Option<String>,   // "base64" for binary files
-    pub filename: Option<String>,   // for auto-detection and original file naming
-    pub config: HashMap<String, String>,
-}
-
-pub struct ExtractResult {
-    pub text: String,               // Clean Markdown
-    pub suggested_filename: String,
-    pub original_content: Vec<u8>,  // Raw original bytes (always preserved)
-    pub metadata: ExtractMetadata,
-}
-```
-
-## 3. API Integration
-
-### 3.1 Ingest Flow
+### 3.1 End-to-End Flow
 
 ```
-POST /api/ingest { source_type, content, encoding?, filename? }
+POST /api/ingest { source_type: "localfs"|"webapp"|"remotefs"|"text", location, ... }
        │
        ▼
-ExtractorRegistry.extract(ExtractInput)
+memany-extractor::FolderBuilder::build()
        │
-       ├── Success → Write original (.pdf/.docx) + extracted (.md) to sources/
-       └── Failure → Save original, return { extracted: false, extract_error: "..." }
+       ├── SourceFetcher::fetch()       ← retrieve files to work_dir
+       ├── FileProcessor::process() × N  ← **THIS PROPOSAL** — convert each file
+       └── FolderBuilder::build()       ← produce SourceFolder + manifest.json
+              │
+              ▼
+         sources/<folder-name>/
+              │
+              ▼
+         cowiki ShallowCompile          ← read manifest.json, compile → wiki
 ```
 
-### 3.2 API Changes (Backward-Compatible)
+### 3.2 Ingest API (Cowiki Server)
 
-New optional fields on `IngestRequest`:
+The ingest endpoint accepts a source descriptor and delegates to `memany-extractor`:
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `encoding` | `Option<String>` | `"base64"` for binary files; omit for plain text/URL |
-| `filename` | `Option<String>` | Enables auto-detection and preserves original file |
+| `source_type` | `"webapp"` \| `"localfs"` \| `"remotefs"` \| `"text"` | Folder-level source type |
+| `location` | `String` | Source address: URL, filesystem path, or inline text |
+| `metadata` | `Option<SourceMetadata>` | Display name, extra config key-value pairs |
 
-Existing `"url"` and `"text"` values for `source_type` continue working unchanged. New values (`"pdf"`, `"docx"`, etc.) route through the same `ExtractorRegistry`.
+### 3.3 Output: SourceFolder
 
-### 3.3 File Storage
+The extractor produces a structured folder in `sources/`:
 
 ```
 sources/
-├── report.pdf          ← Original binary (always preserved, never modified)
-├── report.md           ← Extracted Markdown (Compile input)
-├── data.csv            ← Original CSV
-├── data.csv.md         ← Extracted Markdown table
+  webapp-docs-site/
+    ├── manifest.json        # Directory index with per-file status
+    ├── index.md             # Primary content (Markdown)
+    ├── guides/
+    │   ├── getting-started.md
+    │   └── deployment.md
+    └── assets/
+        └── diagram.png
 ```
 
-### 3.4 Response Format
+Directory tree structure is preserved. `manifest.json` provides the content index with `content_hash` for compile dedup. This is the input consumed by [`ShallowCompile`](../compile-system-design.md#shallowcompile-source--wiki--entities--concepts-sync).
 
-Success:
-```json
-{ "filename": "report.md", "content_hash": "a1b2...", "extracted": true, "extract_error": null }
-```
+### 3.4 manifest.json Schema
 
-Failure:
 ```json
-{ "filename": "report.pdf", "content_hash": "d4e5...", "extracted": false, "extract_error": "PDF parsing failed: corrupted header" }
+{
+  "version": 1,
+  "source_type": "webapp",
+  "source_location": "https://example.com/docs",
+  "content_hash": "sha256:abc123...",
+  "created_at": "2026-06-09T10:30:00Z",
+  "extractor_version": "0.1.0",
+  "files": [
+    { "path": "index.md", "role": "primary", "status": "ok" },
+    { "path": "guides/getting-started.md", "role": "primary", "status": "ok" },
+    { "path": "assets/diagram.png", "role": "asset", "status": "ok" },
+    { "path": "raw/broken.doc", "role": "raw", "status": "skipped", "reason": "exceeds max_file_size" }
+  ],
+  "processor_log": {
+    "html-processor": { "processed": 3, "errors": 0 },
+    "image-processor": { "processed": 1, "errors": 0 }
+  }
+}
 ```
 
 ## 4. Extractor Designs
 
 ### 4.1 Guiding Principle
 
-The `third-party/` directory contains three production-grade open-source projects. We analyzed each to identify proven approaches and avoid reinventing wheels:
+Each file-format processor implements the `FileProcessor` trait from `memany-extractor`. We analyzed three production-grade open-source projects to identify proven approaches and avoid reinventing wheels:
 
 | Project | Language | What It Does | What We Learned |
 |---------|----------|-------------|-----------------|
@@ -439,30 +490,40 @@ OpenCLI covers 166 services but has no Xiaohongshu CLI — confirming that even 
 
 ## 6. Phased Delivery Plan
 
+All processors are `FileProcessor` trait implementations in `memany-extractor`.
+
 ### Phase 1 — This Issue (#31)
-- [ ] `crates/extractor/` crate with `SourceExtractor` trait + `ExtractorRegistry`
-- [ ] 9 extractors: PDF, DOCX, PPTX, Markdown, CSV, XLSX, URL, GitHub, RSS
-- [ ] Integration with `POST /api/ingest`
-- [ ] `"auto"` type detection from filename extension or magic bytes
-- [ ] `encoding: "base64"` support for binary file transfer
-- [ ] Original file preservation + structured error handling (`extracted: false`)
+- [ ] 9 file processors: PDF, DOCX, PPTX, Markdown, CSV, XLSX, HTML, Image, PlainText
+- [ ] content-core adapter processor (Python subprocess for PDF/DOCX/PPTX enhanced modes)
+- [ ] `FolderBuilder` integration — processor registration and MIME routing
+- [ ] `SourceFolder` output with `manifest.json` + preserved directory tree
+- [ ] Integration with cowiki `POST /api/ingest`
 
 ### Phase 2 (#35, #36)
-- [ ] YouTube, EPUB, Reddit, OCR extractors
+- [ ] YouTube, EPUB, Reddit, OCR processors
 
 ### Phase 3 (#37, #38)
-- [ ] Twitter/X, Xiaohongshu, Podcast extractors
+- [ ] Twitter/X, Xiaohongshu, Podcast processors
 
 ## 7. Design Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
+| Implementation location | `memany-extractor` external crate | Separate crate avoids coupling extraction to cowiki; reusable by other projects |
+| Extension point | `FileProcessor` trait (not standalone) | Integrates into MemAny's `SourceFetcher → FileProcessor → FolderBuilder` pipeline; processors are composable |
 | Complex documents (PDF, DOCX, PPTX) | `content-core` subprocess | Avoids reimplementing thousands of lines of format-specific parsing; leverages mature Python libraries (Docling, PyMuPDF, mammoth) |
-| Structured formats (CSV, XLSX, RSS) | Pure Rust crates | Simple enough for Rust-native; zero runtime overhead |
-| Binary transfer | Base64 + `encoding` field | Backward-compatible JSON API; simpler than multipart file upload |
-| Type detection | Explicit `source_type` + `"auto"` | Precision for MCP agent calls; convenience for human web UI use |
+| Structured formats (CSV, XLSX, Markdown) | Pure Rust crates | Simple enough for Rust-native; zero runtime overhead |
+| Binary transfer | File-on-disk (RawFile.path) | Disk-first design — no base64, no memory bloat for large files |
+| Type detection | MIME + extension routing (`can_handle()`) | Standard web pattern; processors register for specific types; first match wins |
 | Original files | Always preserved; never overwritten | User input safety; enables future re-extraction with improved extractors |
-| Error handling | Save original, return `extracted: false` with error message | Input never lost; user gets actionable feedback |
-| GitHub auth | Anonymous (60 req/hr) + optional token | Sufficient for public repos; no forced configuration |
-| content-core dependency | Optional; graceful degradation | Best extraction quality when installed; pure Rust otherwise |
-| URL extraction | content-core preferred, scraper fallback | Best results via Python engine; basic functionality without it |
+| Error handling | Per-file `FileStatus::Error` in manifest | Single corrupt file never aborts entire folder; errors are recorded in `manifest.json` |
+| GitHub/Reddit/RSS fetch | URL content as input to processor | Platform-specific processors accept URLs and fetch their own data |
+| content-core dependency | Optional; graceful degradation | Best extraction quality when installed; pure Rust fallback otherwise |
+| Output format | `SourceFolder` with `manifest.json` | Produces structured input directly consumable by cowiki's ShallowCompile |
+
+## 8. Related
+
+- [`docs/compile-system-design.md`](../compile-system-design.md) — Cowiki compile pipeline (ShallowCompile + DeepCompile)
+- [`memany-extractor`](https://crates.io/crates/memany-extractor) — Implementation crate
+- Issue [#15](https://github.com/wfnuser/cowiki/issues/15) — Compile system redesign
+- Issue [#31](https://github.com/wfnuser/cowiki/issues/31) — Multi-format source ingestion
