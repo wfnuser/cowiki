@@ -484,6 +484,8 @@ Sequential cleanup:
 
 ## Related
 
+- [`docs/agent-integration-design.md`](../agent-integration-design.md) — Agent runtime integration (PiAgent, protocol, session routing)
+- [`docs/agent-integration-architecture.html`](../agent-integration-architecture.html) — Agent integration architecture diagram
 - Issue [#15](https://github.com/wfnuser/cowiki/issues/15) — Compile system redesign
 - Issue [#14](https://github.com/wfnuser/cowiki/issues/14) — HTML view layer
 - Issue [#31](https://github.com/wfnuser/cowiki/issues/31) — Multi-format source ingestion
