@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Compass, FileText, Search,
-  Upload, Zap, ArrowUpRight, MoreHorizontal, RefreshCw, Bell, Trash2,
+  Upload, Zap, ArrowUpRight, MoreHorizontal, RefreshCw, Bell,
   CheckCircle2, Clock,
 } from 'lucide-react';
 import {
@@ -20,10 +20,10 @@ import {
   listWorkspaces, listPages, getPage, createWorkspace, writePage, createFolder,
   compile, submit, renameWorkspace,
   listPendingInvitations, acceptInvitation, rejectInvitation,
-  inviteToWorkspace, listMembers, removeMember, changeMemberRole, deleteWorkspace,
+  inviteToWorkspace, deleteWorkspace,
   listPublicWorkspaces, joinWorkspace,
   listSources, getSource, listReviews,
-  type Workspace, type PageMeta, type PageFull, type PendingInvitation, type MemberInfo, type SourceItem, type SourceContent,
+  type Workspace, type PageMeta, type PageFull, type PendingInvitation, type SourceItem, type SourceContent,
 } from '../api';
 import { AddSourceDialog } from '@/components/AddSourceDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
@@ -33,6 +33,9 @@ import { SpacePanel, type NavTab } from '../components/layout/SpacePanel';
 import { ReviewList } from '../components/review/ReviewList';
 import { ReviewDetail } from '../components/review/ReviewDetail';
 import { MembersView } from '../components/views/MembersView';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import { C } from '@/lib/design';
 
 type ActiveView =
@@ -94,12 +97,9 @@ export function MainLayout() {
   const [pendingInvites, setPendingInvites] = useState<PendingInvitation[]>([]);
   const [showInviteDialog, setShowInviteDialog] = useState<Workspace | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState('writer');
-  const [showMembersPanel, setShowMembersPanel] = useState<Workspace | null>(null);
-  const [membersList, setMembersList] = useState<MemberInfo[]>([]);
+  const [inviteRole, setInviteRole] = useState('viewer');
+  const [inviteExpires, setInviteExpires] = useState('7');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<Workspace | null>(null);
-  const [membersLoading, setMembersLoading] = useState(false);
-  const [membersError, setMembersError] = useState(false);
 
   const userBranch = `user/${auth?.id}`;
 
@@ -465,13 +465,14 @@ export function MainLayout() {
     e.preventDefault();
     if (!inviteEmail.trim() || !showInviteDialog) return;
     try {
-      await inviteToWorkspace(showInviteDialog.slug, inviteEmail.trim(), inviteRole);
+      await inviteToWorkspace(showInviteDialog.slug, inviteEmail.trim(), inviteRole, Number(inviteExpires));
       setShowInviteDialog(null);
       setInviteEmail('');
-      setInviteRole('writer');
+      setInviteRole('viewer');
+      setInviteExpires('7');
       setMessage({ text: 'Invitation sent.', type: 'success' });
-    } catch {
-      setMessage({ text: 'Failed to send invitation', type: 'error' });
+    } catch (e: any) {
+      setMessage({ text: e?.message || 'Failed to send invitation', type: 'error' });
     }
   };
 
@@ -492,41 +493,6 @@ export function MainLayout() {
       setPendingInvites((prev) => prev.filter((i) => i.id !== inv.id));
     } catch {
       setMessage({ text: 'Failed to reject invitation', type: 'error' });
-    }
-  };
-
-  // Load and show members panel (for dialog)
-  const openMembersPanel = async (ws: Workspace) => {
-    setShowMembersPanel(ws);
-    setMembersList([]);
-    setMembersLoading(true);
-    setMembersError(false);
-    try {
-      const members = await listMembers(ws.slug);
-      setMembersList(members);
-    } catch {
-      setMembersError(true);
-    } finally {
-      setMembersLoading(false);
-    }
-  };
-
-  const handleRemoveMember = async (ws: Workspace, userId: string) => {
-    try {
-      await removeMember(ws.slug, userId);
-      setMembersList((prev) => prev.filter((m) => m.id !== userId));
-      setMessage({ text: 'Member removed.', type: 'success' });
-    } catch {
-      setMessage({ text: 'Failed to remove member', type: 'error' });
-    }
-  };
-
-  const handleChangeRole = async (ws: Workspace, userId: string, role: string) => {
-    try {
-      await changeMemberRole(ws.slug, userId, role);
-      setMembersList((prev) => prev.map((m) => m.id === userId ? { ...m, role } : m));
-    } catch {
-      setMessage({ text: 'Failed to change role', type: 'error' });
     }
   };
 
@@ -626,7 +592,7 @@ export function MainLayout() {
             onAddFolderInFolder={(parentPath) => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(parentPath); } }}
             onShowIngest={() => setShowIngest(true)}
             onCompile={handleCompile}
-            onSettings={() => activeWorkspace && openMembersPanel(activeWorkspace)}
+            onSettings={() => setSettingsOpen(true)}
           />
 
           {/* Main Content Area */}
@@ -846,7 +812,13 @@ export function MainLayout() {
 
               /* Members */
               ) : activeView?.kind === 'members' && activeWorkspace ? (
-                <MembersView workspaceSlug={activeWorkspace.slug} />
+                <MembersView
+                  workspaceSlug={activeWorkspace.slug}
+                  canManage={isOwner || activeWorkspace.role === 'manager'}
+                  currentUserRole={activeWorkspace.role}
+                  currentUserId={auth?.id || ''}
+                  onInvite={() => setShowInviteDialog(activeWorkspace)}
+                />
 
               /* Activity */
               ) : activeView?.kind === 'activity' ? (
@@ -1013,66 +985,41 @@ export function MainLayout() {
               <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Email</label>
               <Input value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="colleague@example.com" autoFocus />
             </div>
-            <div>
-              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Role</label>
-              <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                <option value="writer">Writer</option>
-                <option value="reader">Reader</option>
-                <option value="owner">Owner</option>
-              </select>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Role</label>
+                <Select value={inviteRole} onValueChange={setInviteRole}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="viewer">Viewer</SelectItem>
+                    <SelectItem value="editor">Editor</SelectItem>
+                    <SelectItem value="manager">Manager</SelectItem>
+                    <SelectItem value="owner">Owner</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Expires</label>
+                <Select value={inviteExpires} onValueChange={setInviteExpires}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">1 day</SelectItem>
+                    <SelectItem value="3">3 days</SelectItem>
+                    <SelectItem value="7">7 days</SelectItem>
+                    <SelectItem value="30">30 days</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" type="button" onClick={() => setShowInviteDialog(null)}>Cancel</Button>
-              <Button type="submit" disabled={!inviteEmail.trim()}>Send Invitation</Button>
+              <Button type="submit" disabled={!inviteEmail.trim() || inviteRole === 'owner'}>Send Invitation</Button>
             </div>
           </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Members management (dialog) */}
-      <Dialog open={!!showMembersPanel} onOpenChange={(open) => !open && setShowMembersPanel(null)}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle>Members -- {showMembersPanel?.name}</DialogTitle></DialogHeader>
-          <div className="space-y-2 mt-2 max-h-80 overflow-y-auto">
-            {membersLoading ? (
-              <p className="text-sm text-gray-400">Loading...</p>
-            ) : membersError ? (
-              <p className="text-sm text-red-500">Failed to load members.</p>
-            ) : membersList.length === 0 ? (
-              <p className="text-sm text-gray-400">No members found.</p>
-            ) : (
-              membersList.map((m) => (
-                <div key={m.id} className="flex items-center justify-between py-2 border-b last:border-0">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">{m.name}</div>
-                    <div className="text-xs text-gray-400">{m.email || 'no email'}</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={m.role}
-                      onChange={(e) => showMembersPanel && handleChangeRole(showMembersPanel, m.id, e.target.value)}
-                      disabled={m.role === 'owner'}
-                      className="text-xs rounded border border-input bg-background px-2 py-1"
-                    >
-                      <option value="owner">Owner</option>
-                      <option value="writer">Writer</option>
-                      <option value="reader">Reader</option>
-                    </select>
-                    {m.role !== 'owner' && (
-                      <button
-                        onClick={() => showMembersPanel && handleRemoveMember(showMembersPanel, m.id)}
-                        className="p-1 rounded text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                        title="Remove member"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
         </DialogContent>
       </Dialog>
 

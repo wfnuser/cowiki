@@ -93,6 +93,8 @@ export interface MemberInfo {
   name: string;
   email: string | null;
   role: string;
+  last_active_at: string | null;
+  joined_via: string;
 }
 
 export interface PendingInvitation {
@@ -176,17 +178,25 @@ export async function renameWorkspace(slug: string, name: string): Promise<Works
   return res.json();
 }
 
-export async function inviteToWorkspace(workspaceSlug: string, email: string, role = 'writer') {
+export async function inviteToWorkspace(workspaceSlug: string, user: string, role = 'viewer', _expiresInDays = 7) {
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/invite`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ email, role }),
+    body: JSON.stringify({
+      invitations: [{ user, role }],
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Request failed: ${res.status}`);
   }
-  return res.json();
+  const data = await res.json();
+  // Check per-item status — the first failed result gives the reason
+  const firstFailed = data.results?.find((r: { status: string; reason?: string }) => r.status === 'failed');
+  if (firstFailed) {
+    throw new Error(firstFailed.reason || 'Invitation was not sent');
+  }
+  return data;
 }
 
 export async function listPendingInvitations(): Promise<PendingInvitation[]> {

@@ -124,9 +124,6 @@ async fn main() {
         // Workspaces
         .route("/api/workspaces", get(routes::workspace::list_workspaces))
         .route("/api/workspaces", post(routes::workspace::create_workspace))
-        // Workspaces
-        .route("/api/workspaces", get(routes::workspace::list_workspaces))
-        .route("/api/workspaces", post(routes::workspace::create_workspace))
         .route(
             "/api/workspaces/public",
             get(routes::workspace::list_public_workspaces),

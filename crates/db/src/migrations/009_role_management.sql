@@ -1,6 +1,7 @@
 -- ============================================================
 -- Migration 009: Enhanced Role System + User Account Invitations
 -- Preserves 001–008, adds role expansion + new tables
+-- Idempotent: safe to run on already-migrated databases
 -- ============================================================
 
 -- 1. 更新 workspace_members 角色约束
@@ -15,6 +16,9 @@ ALTER TABLE workspace_members
 ALTER TABLE workspace_members
     ADD COLUMN IF NOT EXISTS joined_via TEXT NOT NULL DEFAULT 'direct',
     ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+ALTER TABLE workspace_members
+    DROP CONSTRAINT IF EXISTS workspace_members_joined_via_check;
 
 ALTER TABLE workspace_members
     ADD CONSTRAINT workspace_members_joined_via_check
@@ -57,7 +61,7 @@ CREATE INDEX IF NOT EXISTS idx_transfers_workspace
 CREATE INDEX IF NOT EXISTS idx_transfers_to_user
     ON ownership_transfers(to_user_id, status);
 
--- 5. 旧角色兼容转换 (向后兼容)
+-- 5. 旧角色兼容转换 (向后兼容) — safe to re-run (no-op when already updated)
 UPDATE workspace_members SET role = 'editor' WHERE role = 'writer';
 UPDATE workspace_members SET role = 'viewer' WHERE role = 'reader';
 UPDATE invitations SET role = 'editor' WHERE role = 'writer';
