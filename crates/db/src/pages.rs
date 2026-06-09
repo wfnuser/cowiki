@@ -1,7 +1,7 @@
+use pgvector::Vector;
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
-use serde::{Deserialize, Serialize};
-use pgvector::Vector;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct PageMeta {
@@ -46,7 +46,10 @@ pub async fn upsert(
     .bind(user_id)
     .fetch_one(pool)
     .await
-    .map_err(|e| { tracing::error!("DB upsert page {slug}: {e}"); e })
+    .map_err(|e| {
+        tracing::error!("DB upsert page {slug}: {e}");
+        e
+    })
 }
 
 pub async fn list_by_branch(pool: &PgPool, branch: &str) -> sqlx::Result<Vec<PageMeta>> {
@@ -69,7 +72,20 @@ pub async fn find_similar(
     let emb = Vector::from(embedding.to_vec());
 
     // Use a subquery to compute similarity then filter
-    let rows = sqlx::query_as::<_, (Uuid, String, String, String, String, String, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>, f64)>(
+    let rows = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            String,
+            String,
+            String,
+            String,
+            String,
+            chrono::DateTime<chrono::Utc>,
+            chrono::DateTime<chrono::Utc>,
+            f64,
+        ),
+    >(
         r#"SELECT id, slug, title, summary, branch, content_hash, created_at, updated_at,
             1 - (embedding <=> $1::vector) as similarity
         FROM pages
@@ -83,7 +99,11 @@ pub async fn find_similar(
     .bind(threshold)
     .bind(limit)
     .fetch_all(pool)
-    .await.map_err(|e| { tracing::error!("DB error: {e}"); e })?;
+    .await
+    .map_err(|e| {
+        tracing::error!("DB error: {e}");
+        e
+    })?;
 
     Ok(rows
         .into_iter()

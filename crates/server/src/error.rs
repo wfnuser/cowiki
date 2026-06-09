@@ -42,8 +42,8 @@ impl From<git2::Error> for AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::response::IntoResponse;
     use axum::http::StatusCode;
+    use axum::response::IntoResponse;
 
     fn status_of(err: AppError) -> StatusCode {
         err.into_response().status()
@@ -51,27 +51,42 @@ mod tests {
 
     #[test]
     fn test_internal_returns_500() {
-        assert_eq!(status_of(AppError::Internal("boom".into())), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            status_of(AppError::Internal("boom".into())),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 
     #[test]
     fn test_not_found_returns_404() {
-        assert_eq!(status_of(AppError::NotFound("gone".into())), StatusCode::NOT_FOUND);
+        assert_eq!(
+            status_of(AppError::NotFound("gone".into())),
+            StatusCode::NOT_FOUND
+        );
     }
 
     #[test]
     fn test_bad_request_returns_400() {
-        assert_eq!(status_of(AppError::BadRequest("wrong".into())), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            status_of(AppError::BadRequest("wrong".into())),
+            StatusCode::BAD_REQUEST
+        );
     }
 
     #[test]
     fn test_unauthorized_returns_401() {
-        assert_eq!(status_of(AppError::Unauthorized("no access".into())), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            status_of(AppError::Unauthorized("no access".into())),
+            StatusCode::UNAUTHORIZED
+        );
     }
 
     #[test]
     fn test_forbidden_returns_403() {
-        assert_eq!(status_of(AppError::Forbidden("not allowed".into())), StatusCode::FORBIDDEN);
+        assert_eq!(
+            status_of(AppError::Forbidden("not allowed".into())),
+            StatusCode::FORBIDDEN
+        );
     }
 
     #[test]
@@ -84,13 +99,18 @@ mod tests {
             AppError::Forbidden("".into()),
         ];
 
-        let codes: Vec<StatusCode> = errors.into_iter()
+        let codes: Vec<StatusCode> = errors
+            .into_iter()
             .map(|e| e.into_response().status())
             .collect();
 
         use std::collections::HashSet;
         let unique: HashSet<_> = codes.into_iter().collect();
-        assert_eq!(unique.len(), 5, "all error types should have distinct status codes");
+        assert_eq!(
+            unique.len(),
+            5,
+            "all error types should have distinct status codes"
+        );
     }
 
     #[test]

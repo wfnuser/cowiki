@@ -69,11 +69,7 @@ pub fn extract_headings(html: &str) -> Vec<Heading> {
 
     for el in document.select(&selector) {
         let tag = el.value().name();
-        let level: u8 = tag
-            .chars()
-            .nth(1)
-            .and_then(|c| c.to_digit(10))
-            .unwrap_or(1) as u8;
+        let level: u8 = tag.chars().nth(1).and_then(|c| c.to_digit(10)).unwrap_or(1) as u8;
         let text = el.text().collect::<String>().trim().to_string();
         if !text.is_empty() {
             headings.push(Heading { level, text });

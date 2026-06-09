@@ -1,8 +1,8 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
-use serde::{Deserialize, Serialize};
-use sha2::{Sha256, Digest};
-use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ApiKey {
@@ -77,7 +77,10 @@ pub async fn revoke(pool: &PgPool, key_id: Uuid, user_id: Uuid) -> sqlx::Result<
 
 /// Look up an active key by its SHA-256 hash. Returns (ApiKey, user_id) or None.
 /// Used by the auth fallback path — MUST filter revoked_at IS NULL.
-pub async fn find_by_key_hash(pool: &PgPool, key_hash: &str) -> sqlx::Result<Option<(ApiKey, Uuid)>> {
+pub async fn find_by_key_hash(
+    pool: &PgPool,
+    key_hash: &str,
+) -> sqlx::Result<Option<(ApiKey, Uuid)>> {
     sqlx::query_as::<_, ApiKey>(
         "SELECT id, user_id, name, key_prefix, last_used_at, created_at, revoked_at FROM api_keys WHERE key_hash = $1 AND revoked_at IS NULL"
     )
@@ -93,12 +96,17 @@ pub async fn find_by_key_hash(pool: &PgPool, key_hash: &str) -> sqlx::Result<Opt
 
 /// Update last_used_at when a key successfully authenticates.
 pub async fn touch_last_used(pool: &PgPool, key_hash: &str) -> sqlx::Result<()> {
-    sqlx::query("UPDATE api_keys SET last_used_at = now() WHERE key_hash = $1 AND revoked_at IS NULL")
-        .bind(key_hash)
-        .execute(pool)
-        .await
-        .map(|_| ())
-        .map_err(|e| { tracing::error!("DB touch_last_used failed: {e}"); e })
+    sqlx::query(
+        "UPDATE api_keys SET last_used_at = now() WHERE key_hash = $1 AND revoked_at IS NULL",
+    )
+    .bind(key_hash)
+    .execute(pool)
+    .await
+    .map(|_| ())
+    .map_err(|e| {
+        tracing::error!("DB touch_last_used failed: {e}");
+        e
+    })
 }
 
 // ── Helpers ──
@@ -106,7 +114,7 @@ pub async fn touch_last_used(pool: &PgPool, key_hash: &str) -> sqlx::Result<()> 
 pub fn mask_key_prefix(prefix: &str) -> String {
     // prefix is "cw_xxxxxxxx" (11 chars). Show "cw_****xxxx"
     if prefix.len() >= 7 {
-        format!("{}****{}", &prefix[..3], &prefix[prefix.len()-4..])
+        format!("{}****{}", &prefix[..3], &prefix[prefix.len() - 4..])
     } else {
         format!("{}****", prefix)
     }

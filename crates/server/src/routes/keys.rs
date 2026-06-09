@@ -11,7 +11,7 @@ use crate::AppState;
 pub struct KeyResponse {
     pub id: String,
     pub name: String,
-    pub key_prefix: String,   // masked: "cw_****xxxx"
+    pub key_prefix: String, // masked: "cw_****xxxx"
     pub last_used_at: Option<String>,
     pub created_at: String,
 }
@@ -26,7 +26,7 @@ pub struct CreateKeyResponse {
     pub id: String,
     pub name: String,
     pub key_prefix: String,
-    pub raw_key: String,      // ONLY returned here — store it now!
+    pub raw_key: String, // ONLY returned here — store it now!
     pub created_at: String,
 }
 
@@ -88,7 +88,9 @@ pub async fn revoke_key(
     let revoked = cowiki_db::api_keys::revoke(&state.db, key_id, user.id).await?;
 
     if !revoked {
-        return Err(AppError::NotFound("key not found or already revoked".into()));
+        return Err(AppError::NotFound(
+            "key not found or already revoked".into(),
+        ));
     }
 
     Ok(Json(serde_json::json!({ "revoked": true })))

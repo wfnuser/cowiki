@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Submission {
@@ -48,7 +48,10 @@ pub async fn list_pending_for_workspace(
     .bind(workspace_slug)
     .fetch_all(pool)
     .await
-    .map_err(|e| { tracing::error!("DB list submissions for workspace failed: {e}"); e })
+    .map_err(|e| {
+        tracing::error!("DB list submissions for workspace failed: {e}");
+        e
+    })
 }
 
 pub async fn find_by_id(pool: &PgPool, id: Uuid) -> sqlx::Result<Option<Submission>> {
@@ -56,7 +59,10 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> sqlx::Result<Option<Submissi
         .bind(id)
         .fetch_optional(pool)
         .await
-        .map_err(|e| { tracing::error!("DB find submission by id failed: {e}"); e })
+        .map_err(|e| {
+            tracing::error!("DB find submission by id failed: {e}");
+            e
+        })
 }
 
 pub async fn update_status(
@@ -114,18 +120,31 @@ mod tests {
 
     #[tokio::test]
     async fn submission_records_and_filters_by_workspace() {
-        let Some(pool) = test_pool().await else { return };
+        let Some(pool) = test_pool().await else {
+            return;
+        };
         let user = make_user(&pool).await;
 
-        let s = create(&pool, user, "summary", &["page-a".into()], "user/abc", "team-alpha")
-            .await
-            .unwrap();
+        let s = create(
+            &pool,
+            user,
+            "summary",
+            &["page-a".into()],
+            "user/abc",
+            "team-alpha",
+        )
+        .await
+        .unwrap();
         assert_eq!(s.workspace_slug, "team-alpha");
 
-        let in_alpha = list_pending_for_workspace(&pool, "team-alpha").await.unwrap();
+        let in_alpha = list_pending_for_workspace(&pool, "team-alpha")
+            .await
+            .unwrap();
         assert!(in_alpha.iter().any(|x| x.id == s.id));
 
-        let in_beta = list_pending_for_workspace(&pool, "team-beta").await.unwrap();
+        let in_beta = list_pending_for_workspace(&pool, "team-beta")
+            .await
+            .unwrap();
         assert!(!in_beta.iter().any(|x| x.id == s.id));
     }
 }

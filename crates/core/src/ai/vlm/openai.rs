@@ -98,13 +98,19 @@ impl Vlm for OpenAIVlm {
             .send()
             .await
             .map_err(|e| {
-                tracing::error!("VLM API request failed for model {}: {e}", self.config.model);
+                tracing::error!(
+                    "VLM API request failed for model {}: {e}",
+                    self.config.model
+                );
                 e.to_string()
             })?
             .json::<ChatResponse>()
             .await
             .map_err(|e| {
-                tracing::error!("VLM API response parse failed for model {}: {e}", self.config.model);
+                tracing::error!(
+                    "VLM API response parse failed for model {}: {e}",
+                    self.config.model
+                );
                 e.to_string()
             })?;
 
