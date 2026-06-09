@@ -290,9 +290,13 @@ impl CowikiConfig {
     pub fn from_env() -> Self {
         // COWIKI_PORT → cowiki-server REST API port; COWIKI_MCP_PORT → MCP server port
         let server_port: u16 = std::env::var("COWIKI_PORT")
-            .ok().and_then(|s| s.parse().ok()).unwrap_or(3000);
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(3000);
         let mcp_port: u16 = std::env::var("COWIKI_MCP_PORT")
-            .ok().and_then(|s| s.parse().ok()).unwrap_or(8080);
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(8080);
 
         let llm_api_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
         let llm_api_base =

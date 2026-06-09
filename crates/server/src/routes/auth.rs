@@ -32,11 +32,15 @@ pub async fn register(
     State(state): State<Arc<AppState>>,
     Json(input): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>> {
-    if cowiki_db::users::find_by_name(&state.db, &input.name).await?.is_some() {
+    if cowiki_db::users::find_by_name(&state.db, &input.name)
+        .await?
+        .is_some()
+    {
         return Err(AppError::BadRequest("name already taken".into()));
     }
 
-    let user = cowiki_db::users::create(&state.db, &input.name, input.email.as_deref(), None).await?;
+    let user =
+        cowiki_db::users::create(&state.db, &input.name, input.email.as_deref(), None).await?;
     init_user_space(&state, &user).await?;
 
     Ok(Json(AuthResponse {
@@ -133,18 +137,25 @@ pub async fn github_callback(
             "client_secret": state.config.auth.github_client_secret,
             "code": params.code,
         }))
-        .send().await
+        .send()
+        .await
         .map_err(|e| AppError::Internal(format!("github token exchange failed: {e}")))?
-        .json::<GithubTokenResponse>().await
+        .json::<GithubTokenResponse>()
+        .await
         .map_err(|e| AppError::Internal(format!("github token parse failed: {e}")))?;
 
     let gh_user = client
         .get("https://api.github.com/user")
-        .header("Authorization", format!("Bearer {}", token_resp.access_token))
+        .header(
+            "Authorization",
+            format!("Bearer {}", token_resp.access_token),
+        )
         .header("User-Agent", "cowiki")
-        .send().await
+        .send()
+        .await
         .map_err(|e| AppError::Internal(format!("github user fetch failed: {e}")))?
-        .json::<GithubUser>().await
+        .json::<GithubUser>()
+        .await
         .map_err(|e| AppError::Internal(format!("github user parse failed: {e}")))?;
 
     let email = if gh_user.email.is_some() {
@@ -152,9 +163,13 @@ pub async fn github_callback(
     } else {
         let emails = match client
             .get("https://api.github.com/user/emails")
-            .header("Authorization", format!("Bearer {}", token_resp.access_token))
+            .header(
+                "Authorization",
+                format!("Bearer {}", token_resp.access_token),
+            )
             .header("User-Agent", "cowiki")
-            .send().await
+            .send()
+            .await
         {
             Ok(r) => r.json::<Vec<GithubEmail>>().await.ok(),
             Err(_) => None,
@@ -162,18 +177,23 @@ pub async fn github_callback(
         emails.and_then(|list| list.into_iter().find(|e| e.primary).map(|e| e.email))
     };
 
-    let user = if let Some(existing) = cowiki_db::users::find_by_name(&state.db, &gh_user.login).await? {
+    let user = if let Some(existing) =
+        cowiki_db::users::find_by_name(&state.db, &gh_user.login).await?
+    {
         // Update email if the existing user has none but GitHub provides one
         if existing.email.is_none() {
             if let Some(ref gh_email) = email {
-                if let Err(e) = cowiki_db::users::update_email(&state.db, existing.id, gh_email).await {
+                if let Err(e) =
+                    cowiki_db::users::update_email(&state.db, existing.id, gh_email).await
+                {
                     tracing::warn!("failed to update email for user {}: {:?}", existing.name, e);
                 }
             }
         }
         existing
     } else {
-        let user = cowiki_db::users::create(&state.db, &gh_user.login, email.as_deref(), None).await?;
+        let user =
+            cowiki_db::users::create(&state.db, &gh_user.login, email.as_deref(), None).await?;
         if let Err(e) = init_user_space(&state, &user).await {
             tracing::error!("failed to init user space: {:?}", e);
         }
@@ -201,7 +221,7 @@ pub async fn extract_user(
     db: &sqlx::PgPool,
     headers: &axum::http::HeaderMap,
 ) -> Result<cowiki_db::users::User> {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
 
     let auth_header = headers
         .get("authorization")
@@ -250,34 +270,64 @@ async fn init_user_space(state: &crate::AppState, user: &cowiki_db::users::User)
 
     // 1. Create personal workspace in DB
     let personal_slug = format!("personal-{}", &user.id.to_string()[..8]);
-    cowiki_db::workspaces::create(&state.db, &format!("{}'s Space", user.name), &personal_slug, "private", user.id)
-        .await.ok();
+    cowiki_db::workspaces::create(
+        &state.db,
+        &format!("{}'s Space", user.name),
+        &personal_slug,
+        "private",
+        user.id,
+    )
+    .await
+    .ok();
 
     // 2. Init personal repo + user branch + welcome page
-    let personal_repo = state.repo_manager.get(&personal_slug)
+    let personal_repo = state
+        .repo_manager
+        .get(&personal_slug)
         .map_err(|e| AppError::Internal(e.to_string()))?;
-    personal_repo.ensure_user_branch(&user.id.to_string())
+    personal_repo
+        .ensure_user_branch(&user.id.to_string())
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     let welcome = "---\ntitle: \"Getting Started\"\nsummary: \"Welcome to your personal knowledge space.\"\nkind: concept\n---\n\n# Getting Started\n\nWelcome to **CoWiki** — your personal knowledge space.\n\n## What you can do here\n\n- **Add sources** — paste text or URLs, CoWiki will compile them into wiki pages\n- **Organize** — create folders to keep your knowledge structured\n- **Search** — find anything with semantic search\n- **Collaborate** — join or create a Team Space to share knowledge with others\n";
 
-    personal_repo.write_file(&branch, "wiki/getting-started.md", welcome.as_bytes(), "init: getting started", &user.name)
+    personal_repo
+        .write_file(
+            &branch,
+            "wiki/getting-started.md",
+            welcome.as_bytes(),
+            "init: getting started",
+            &user.name,
+        )
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // 3. Create default Team Space ("General") in DB
     let team_slug = format!("general-{}", &user.id.to_string()[..8]);
-    if cowiki_db::workspaces::create(&state.db, "General", &team_slug, "public", user.id).await.is_ok() {
+    if cowiki_db::workspaces::create(&state.db, "General", &team_slug, "public", user.id)
+        .await
+        .is_ok()
+    {
         // 4. Init team repo + welcome page on main
-        let team_repo = state.repo_manager.get(&team_slug)
+        let team_repo = state
+            .repo_manager
+            .get(&team_slug)
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
         let team_welcome = "---\ntitle: \"Team Space Home\"\nsummary: \"Welcome to the team's shared knowledge base.\"\nkind: overview\n---\n\n# Team Space Home\n\nWelcome to the team! This is your shared knowledge base.\n\nUse the **+** button in the sidebar to add pages and folders.\n\n## Getting started\n\n1. **Add sources** — paste articles, docs, or notes\n2. **Compile** — AI turns your sources into structured wiki pages\n3. **Submit** — submit your drafts for team review\n4. **Review** — approve or request changes on teammates' submissions\n";
 
-        team_repo.write_file("main", "wiki/team-space-home.md", team_welcome.as_bytes(), "init: team space home", "cowiki")
+        team_repo
+            .write_file(
+                "main",
+                "wiki/team-space-home.md",
+                team_welcome.as_bytes(),
+                "init: team space home",
+                "cowiki",
+            )
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
         // Create user branch in team repo too
-        team_repo.ensure_user_branch(&user.id.to_string())
+        team_repo
+            .ensure_user_branch(&user.id.to_string())
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
         tracing::info!("created team space '{}' for user {}", team_slug, user.name);

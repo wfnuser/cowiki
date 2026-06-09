@@ -31,7 +31,9 @@ pub async fn submit(
     Json(input): Json<SubmitRequest>,
 ) -> Result<Json<SubmitResponse>> {
     let user = extract_user(&state.db, &headers).await?;
-    let repo = state.repo_manager.get(&ws_slug)
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     super::pages::ensure_user_branch_if_needed(&repo, &input.branch)?;
 
@@ -128,14 +130,13 @@ pub async fn submit(
             .iter()
             .map(|s| format!("wiki/{s}.md"))
             .collect();
-        repo
-            .merge_to_main(
-                &input.branch,
-                &file_paths,
-                &user.name,
-                &format!("commit: {summary}"),
-            )
-            .map_err(|e| AppError::Internal(e.to_string()))?;
+        repo.merge_to_main(
+            &input.branch,
+            &file_paths,
+            &user.name,
+            &format!("commit: {summary}"),
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
 
         return Ok(Json(SubmitResponse {
             submission_id: uuid::Uuid::nil(),

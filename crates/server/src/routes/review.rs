@@ -30,10 +30,14 @@ pub async fn get_review(
         .await?
         .ok_or_else(|| AppError::NotFound("submission not found".into()))?;
     if submission.workspace_slug != ws_slug {
-        return Err(AppError::NotFound("submission not found in this workspace".into()));
+        return Err(AppError::NotFound(
+            "submission not found in this workspace".into(),
+        ));
     }
 
-    let repo = state.repo_manager.get(&ws_slug)
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     let diffs = repo
         .diff_files(&submission.source_branch, &submission.page_slugs)
@@ -59,7 +63,9 @@ pub async fn review_action(
         .await?
         .ok_or_else(|| AppError::NotFound("submission not found".into()))?;
     if submission.workspace_slug != ws_slug {
-        return Err(AppError::NotFound("submission not found in this workspace".into()));
+        return Err(AppError::NotFound(
+            "submission not found in this workspace".into(),
+        ));
     }
 
     // Authorization: reviewer must be a writer/owner of the workspace.
@@ -75,7 +81,9 @@ pub async fn review_action(
         ));
     }
 
-    let repo = state.repo_manager.get(&ws_slug)
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
 
     match input.action.as_str() {
@@ -86,14 +94,13 @@ pub async fn review_action(
                 .map(|s| format!("wiki/{s}.md"))
                 .collect();
 
-            repo
-                .merge_to_main(
-                    &submission.source_branch,
-                    &file_paths,
-                    &reviewer.name,
-                    &format!("approve: {}", submission.summary),
-                )
-                .map_err(|e| AppError::Internal(e.to_string()))?;
+            repo.merge_to_main(
+                &submission.source_branch,
+                &file_paths,
+                &reviewer.name,
+                &format!("approve: {}", submission.summary),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
 
             // Update page records to main branch
             for slug in &submission.page_slugs {

@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct User {
@@ -38,7 +38,12 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> sqlx::Result<Option<User>> {
         .await
 }
 
-pub async fn create(pool: &PgPool, name: &str, email: Option<&str>, password_hash: Option<&str>) -> sqlx::Result<User> {
+pub async fn create(
+    pool: &PgPool,
+    name: &str,
+    email: Option<&str>,
+    password_hash: Option<&str>,
+) -> sqlx::Result<User> {
     let api_key = generate_api_key();
     sqlx::query_as::<_, User>(
         "INSERT INTO users (name, email, api_key, password_hash) VALUES ($1, $2, $3, $4) RETURNING id, name, email, api_key"
@@ -54,13 +59,16 @@ pub async fn create(pool: &PgPool, name: &str, email: Option<&str>, password_has
 pub async fn regenerate_api_key(pool: &PgPool, user_id: Uuid) -> sqlx::Result<User> {
     let api_key = generate_api_key();
     sqlx::query_as::<_, User>(
-        "UPDATE users SET api_key = $2 WHERE id = $1 RETURNING id, name, email, api_key"
+        "UPDATE users SET api_key = $2 WHERE id = $1 RETURNING id, name, email, api_key",
     )
     .bind(user_id)
     .bind(&api_key)
     .fetch_one(pool)
     .await
-    .map_err(|e| { tracing::error!("DB regenerate API key failed: {e}"); e })
+    .map_err(|e| {
+        tracing::error!("DB regenerate API key failed: {e}");
+        e
+    })
 }
 
 pub async fn update_email(pool: &PgPool, user_id: Uuid, email: &str) -> sqlx::Result<()> {
@@ -70,7 +78,10 @@ pub async fn update_email(pool: &PgPool, user_id: Uuid, email: &str) -> sqlx::Re
         .execute(pool)
         .await
         .map(|_| ())
-        .map_err(|e| { tracing::error!("DB update_email failed: {e}"); e })
+        .map_err(|e| {
+            tracing::error!("DB update_email failed: {e}");
+            e
+        })
 }
 
 pub async fn get_default(pool: &PgPool) -> sqlx::Result<User> {

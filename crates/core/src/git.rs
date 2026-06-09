@@ -236,11 +236,7 @@ impl WikiRepo {
         Ok(())
     }
 
-    pub fn read_file(
-        &self,
-        branch: &str,
-        file_path: &str,
-    ) -> Result<Option<Vec<u8>>, git2::Error> {
+    pub fn read_file(&self, branch: &str, file_path: &str) -> Result<Option<Vec<u8>>, git2::Error> {
         let repo = self.repo()?;
         let branch_ref = repo.find_branch(branch, BranchType::Local)?;
         let commit = branch_ref.get().peel_to_commit()?;
@@ -286,7 +282,11 @@ impl WikiRepo {
     }
 
     /// List all files recursively under a directory, returning full paths.
-    pub fn list_files_recursive(&self, branch: &str, dir: &str) -> Result<Vec<String>, git2::Error> {
+    pub fn list_files_recursive(
+        &self,
+        branch: &str,
+        dir: &str,
+    ) -> Result<Vec<String>, git2::Error> {
         let repo = self.repo()?;
         let branch_ref = repo.find_branch(branch, BranchType::Local)?;
         let commit = branch_ref.get().peel_to_commit()?;
@@ -343,11 +343,7 @@ impl WikiRepo {
         Ok(())
     }
 
-    pub fn diff_files(
-        &self,
-        branch: &str,
-        slugs: &[String],
-    ) -> Result<Vec<FileDiff>, git2::Error> {
+    pub fn diff_files(&self, branch: &str, slugs: &[String]) -> Result<Vec<FileDiff>, git2::Error> {
         let mut diffs = Vec::new();
         for slug in slugs {
             let path = format!("wiki/{slug}.md");

@@ -1,7 +1,7 @@
-use sqlx::PgPool;
-use uuid::Uuid;
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use std::str::FromStr;
+use uuid::Uuid;
 
 /// Workspace member role with GitHub-style three-tier permissions.
 /// Extensible: add new variants + update ALL + update DB CHECK constraint.
@@ -79,8 +79,17 @@ pub struct Invitation {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-pub async fn create(pool: &PgPool, name: &str, slug: &str, visibility: &str, created_by: Uuid) -> sqlx::Result<Workspace> {
-    let mut tx = pool.begin().await.map_err(|e| { tracing::error!("DB begin tx error: {e}"); e })?;
+pub async fn create(
+    pool: &PgPool,
+    name: &str,
+    slug: &str,
+    visibility: &str,
+    created_by: Uuid,
+) -> sqlx::Result<Workspace> {
+    let mut tx = pool.begin().await.map_err(|e| {
+        tracing::error!("DB begin tx error: {e}");
+        e
+    })?;
 
     let ws = sqlx::query_as::<_, Workspace>(
         "INSERT INTO workspaces (name, slug, visibility, created_by) VALUES ($1, $2, $3, $4) RETURNING *"
@@ -91,13 +100,21 @@ pub async fn create(pool: &PgPool, name: &str, slug: &str, visibility: &str, cre
 
     // Add creator as owner
     sqlx::query(
-        "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, 'owner')"
+        "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, 'owner')",
     )
-    .bind(ws.id).bind(created_by)
+    .bind(ws.id)
+    .bind(created_by)
     .execute(&mut *tx)
-    .await.map_err(|e| { tracing::error!("DB error: {e}"); e })?;
+    .await
+    .map_err(|e| {
+        tracing::error!("DB error: {e}");
+        e
+    })?;
 
-    tx.commit().await.map_err(|e| { tracing::error!("DB commit tx error: {e}"); e })?;
+    tx.commit().await.map_err(|e| {
+        tracing::error!("DB commit tx error: {e}");
+        e
+    })?;
 
     Ok(ws)
 }
@@ -107,7 +124,10 @@ pub async fn find_by_slug(pool: &PgPool, slug: &str) -> sqlx::Result<Option<Work
         .bind(slug)
         .fetch_optional(pool)
         .await
-        .map_err(|e| { tracing::error!("DB find workspace by slug failed: {e}"); e })
+        .map_err(|e| {
+            tracing::error!("DB find workspace by slug failed: {e}");
+            e
+        })
 }
 
 pub async fn find_by_id(pool: &PgPool, id: Uuid) -> sqlx::Result<Option<Workspace>> {
@@ -115,12 +135,15 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> sqlx::Result<Option<Workspac
         .bind(id)
         .fetch_optional(pool)
         .await
-        .map_err(|e| { tracing::error!("DB find workspace by id failed: {e}"); e })
+        .map_err(|e| {
+            tracing::error!("DB find workspace by id failed: {e}");
+            e
+        })
 }
 
 pub async fn list_public(pool: &PgPool) -> sqlx::Result<Vec<Workspace>> {
     sqlx::query_as::<_, Workspace>(
-        "SELECT * FROM workspaces WHERE visibility = 'public' ORDER BY created_at DESC"
+        "SELECT * FROM workspaces WHERE visibility = 'public' ORDER BY created_at DESC",
     )
     .fetch_all(pool)
     .await
@@ -138,15 +161,26 @@ pub async fn list_for_user(pool: &PgPool, user_id: Uuid) -> sqlx::Result<Vec<Wor
 
 pub async fn is_member(pool: &PgPool, workspace_id: Uuid, user_id: Uuid) -> sqlx::Result<bool> {
     let row = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM workspace_members WHERE workspace_id = $1 AND user_id = $2"
+        "SELECT COUNT(*) FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
     )
-    .bind(workspace_id).bind(user_id)
+    .bind(workspace_id)
+    .bind(user_id)
     .fetch_one(pool)
-    .await.map_err(|e| { tracing::error!("DB error: {e}"); e })?;
+    .await
+    .map_err(|e| {
+        tracing::error!("DB error: {e}");
+        e
+    })?;
     Ok(row > 0)
 }
 
-pub async fn add_member(pool: &PgPool, workspace_id: Uuid, user_id: Uuid, role: &str, invited_by: Uuid) -> sqlx::Result<()> {
+pub async fn add_member(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    user_id: Uuid,
+    role: &str,
+    invited_by: Uuid,
+) -> sqlx::Result<()> {
     sqlx::query(
         "INSERT INTO workspace_members (workspace_id, user_id, role, invited_by) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING"
     )
@@ -157,16 +191,23 @@ pub async fn add_member(pool: &PgPool, workspace_id: Uuid, user_id: Uuid, role: 
 }
 
 pub async fn list_members(pool: &PgPool, workspace_id: Uuid) -> sqlx::Result<Vec<WorkspaceMember>> {
-    sqlx::query_as::<_, WorkspaceMember>(
-        "SELECT * FROM workspace_members WHERE workspace_id = $1"
-    )
-    .bind(workspace_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| { tracing::error!("DB list members failed: {e}"); e })
+    sqlx::query_as::<_, WorkspaceMember>("SELECT * FROM workspace_members WHERE workspace_id = $1")
+        .bind(workspace_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("DB list members failed: {e}");
+            e
+        })
 }
 
-pub async fn create_invitation(pool: &PgPool, workspace_id: Uuid, email: &str, role: &str, invited_by: Uuid) -> sqlx::Result<Invitation> {
+pub async fn create_invitation(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    email: &str,
+    role: &str,
+    invited_by: Uuid,
+) -> sqlx::Result<Invitation> {
     sqlx::query_as::<_, Invitation>(
         "INSERT INTO invitations (workspace_id, email, role, invited_by) VALUES ($1, $2, $3, $4) RETURNING *"
     )
@@ -178,7 +219,7 @@ pub async fn create_invitation(pool: &PgPool, workspace_id: Uuid, email: &str, r
 
 pub async fn find_pending_invitations(pool: &PgPool, email: &str) -> sqlx::Result<Vec<Invitation>> {
     sqlx::query_as::<_, Invitation>(
-        "SELECT * FROM invitations WHERE email = $1 AND status = 'pending'"
+        "SELECT * FROM invitations WHERE email = $1 AND status = 'pending'",
     )
     .bind(email)
     .fetch_all(pool)
@@ -187,7 +228,7 @@ pub async fn find_pending_invitations(pool: &PgPool, email: &str) -> sqlx::Resul
 
 pub async fn accept_invitation(pool: &PgPool, invitation_id: Uuid) -> sqlx::Result<Invitation> {
     sqlx::query_as::<_, Invitation>(
-        "UPDATE invitations SET status = 'accepted' WHERE id = $1 RETURNING *"
+        "UPDATE invitations SET status = 'accepted' WHERE id = $1 RETURNING *",
     )
     .bind(invitation_id)
     .fetch_one(pool)
@@ -195,23 +236,30 @@ pub async fn accept_invitation(pool: &PgPool, invitation_id: Uuid) -> sqlx::Resu
 }
 
 pub async fn rename(pool: &PgPool, id: Uuid, new_name: &str) -> sqlx::Result<Workspace> {
-    sqlx::query_as::<_, Workspace>(
-        "UPDATE workspaces SET name = $2 WHERE id = $1 RETURNING *"
-    )
-    .bind(id).bind(new_name)
-    .fetch_one(pool)
-    .await
+    sqlx::query_as::<_, Workspace>("UPDATE workspaces SET name = $2 WHERE id = $1 RETURNING *")
+        .bind(id)
+        .bind(new_name)
+        .fetch_one(pool)
+        .await
 }
 
 /// Get the role of a user in a workspace. Returns None if not a member.
-pub async fn get_member_role(pool: &PgPool, workspace_id: Uuid, user_id: Uuid) -> sqlx::Result<Option<String>> {
+pub async fn get_member_role(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    user_id: Uuid,
+) -> sqlx::Result<Option<String>> {
     sqlx::query_scalar::<_, String>(
-        "SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2"
+        "SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
     )
-    .bind(workspace_id).bind(user_id)
+    .bind(workspace_id)
+    .bind(user_id)
     .fetch_optional(pool)
     .await
-    .map_err(|e| { tracing::error!("DB get_member_role failed: {e}"); e })
+    .map_err(|e| {
+        tracing::error!("DB get_member_role failed: {e}");
+        e
+    })
 }
 
 /// Remove a member from a workspace. Cannot remove owners. Returns true if deleted.
@@ -228,51 +276,65 @@ pub async fn remove_member(pool: &PgPool, workspace_id: Uuid, user_id: Uuid) -> 
 
 /// Change a member's role. Cannot change owner's role. Returns the new role string.
 pub async fn change_member_role(
-    pool: &PgPool, workspace_id: Uuid, user_id: Uuid, new_role: &str
+    pool: &PgPool,
+    workspace_id: Uuid,
+    user_id: Uuid,
+    new_role: &str,
 ) -> sqlx::Result<Option<String>> {
     let row = sqlx::query_scalar::<_, String>(
         "UPDATE workspace_members SET role = $3
          WHERE workspace_id = $1 AND user_id = $2 AND role != 'owner'
-         RETURNING role"
+         RETURNING role",
     )
-    .bind(workspace_id).bind(user_id).bind(new_role)
+    .bind(workspace_id)
+    .bind(user_id)
+    .bind(new_role)
     .fetch_optional(pool)
     .await
-    .map_err(|e| { tracing::error!("DB change_member_role failed: {e}"); e })?;
+    .map_err(|e| {
+        tracing::error!("DB change_member_role failed: {e}");
+        e
+    })?;
     Ok(row)
 }
 
 /// Find all pending invitations for a user.
 /// Tries email match first, falls back to NULL-email handling.
 pub async fn find_pending_invitations_for_user(
-    pool: &PgPool, user_id: Uuid
+    pool: &PgPool,
+    user_id: Uuid,
 ) -> sqlx::Result<Vec<Invitation>> {
     // First get the user's email
-    let email: Option<String> = sqlx::query_scalar(
-        "SELECT email FROM users WHERE id = $1"
-    )
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| { tracing::error!("DB get user email failed: {e}"); e })?
-    .flatten();
+    let email: Option<String> = sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("DB get user email failed: {e}");
+            e
+        })?
+        .flatten();
 
     match email {
-        Some(ref e) if !e.is_empty() => {
-            sqlx::query_as::<_, Invitation>(
-                "SELECT i.* FROM invitations i WHERE i.email = $1 AND i.status = 'pending'"
-            )
-            .bind(e)
-            .fetch_all(pool)
-            .await
-            .map_err(|e| { tracing::error!("DB find_pending_invitations_for_user failed: {e}"); e })
-        }
-        _ => Ok(vec![]) // No email → no email-based invitations
+        Some(ref e) if !e.is_empty() => sqlx::query_as::<_, Invitation>(
+            "SELECT i.* FROM invitations i WHERE i.email = $1 AND i.status = 'pending'",
+        )
+        .bind(e)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("DB find_pending_invitations_for_user failed: {e}");
+            e
+        }),
+        _ => Ok(vec![]), // No email → no email-based invitations
     }
 }
 
 /// Find an invitation by its ID.
-pub async fn find_invitation_by_id(pool: &PgPool, invitation_id: Uuid) -> sqlx::Result<Option<Invitation>> {
+pub async fn find_invitation_by_id(
+    pool: &PgPool,
+    invitation_id: Uuid,
+) -> sqlx::Result<Option<Invitation>> {
     sqlx::query_as::<_, Invitation>("SELECT * FROM invitations WHERE id = $1")
         .bind(invitation_id)
         .fetch_optional(pool)
@@ -282,7 +344,7 @@ pub async fn find_invitation_by_id(pool: &PgPool, invitation_id: Uuid) -> sqlx::
 /// Reject an invitation (set status to 'rejected').
 pub async fn reject_invitation(pool: &PgPool, invitation_id: Uuid) -> sqlx::Result<Invitation> {
     sqlx::query_as::<_, Invitation>(
-        "UPDATE invitations SET status = 'rejected' WHERE id = $1 RETURNING *"
+        "UPDATE invitations SET status = 'rejected' WHERE id = $1 RETURNING *",
     )
     .bind(invitation_id)
     .fetch_one(pool)
@@ -295,7 +357,10 @@ pub async fn delete_workspace(pool: &PgPool, workspace_id: Uuid) -> sqlx::Result
         .bind(workspace_id)
         .execute(pool)
         .await
-        .map_err(|e| { tracing::error!("DB delete_workspace failed: {e}"); e })?;
+        .map_err(|e| {
+            tracing::error!("DB delete_workspace failed: {e}");
+            e
+        })?;
     Ok(rows.rows_affected() > 0)
 }
 
@@ -440,13 +505,27 @@ mod tests {
         // Run all migrations
         let sql1 = include_str!("migrations/001_init.sql").replace("__EMBEDDING_DIM__", "768");
         let _ = sqlx::raw_sql(&sql1).execute(&pool).await;
-        let _ = sqlx::raw_sql(include_str!("migrations/002_workspaces.sql")).execute(&pool).await;
-        let _ = sqlx::raw_sql(include_str!("migrations/003_workspace_visibility.sql")).execute(&pool).await;
-        let _ = sqlx::raw_sql(include_str!("migrations/004_role_update.sql")).execute(&pool).await;
-        let _ = sqlx::raw_sql(include_str!("migrations/005_fts.sql")).execute(&pool).await;
-        let _ = sqlx::raw_sql(include_str!("migrations/006_api_keys.sql")).execute(&pool).await;
-        let _ = sqlx::raw_sql(include_str!("migrations/007_team_permissions.sql")).execute(&pool).await;
-        let _ = sqlx::raw_sql(include_str!("migrations/008_submission_workspace.sql")).execute(&pool).await;
+        let _ = sqlx::raw_sql(include_str!("migrations/002_workspaces.sql"))
+            .execute(&pool)
+            .await;
+        let _ = sqlx::raw_sql(include_str!("migrations/003_workspace_visibility.sql"))
+            .execute(&pool)
+            .await;
+        let _ = sqlx::raw_sql(include_str!("migrations/004_role_update.sql"))
+            .execute(&pool)
+            .await;
+        let _ = sqlx::raw_sql(include_str!("migrations/005_fts.sql"))
+            .execute(&pool)
+            .await;
+        let _ = sqlx::raw_sql(include_str!("migrations/006_api_keys.sql"))
+            .execute(&pool)
+            .await;
+        let _ = sqlx::raw_sql(include_str!("migrations/007_team_permissions.sql"))
+            .execute(&pool)
+            .await;
+        let _ = sqlx::raw_sql(include_str!("migrations/008_submission_workspace.sql"))
+            .execute(&pool)
+            .await;
         Some(pool)
     }
 
@@ -481,12 +560,20 @@ mod tests {
     async fn test_create_workspace_adds_creator_as_owner() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, _, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
         assert_eq!(ws.name, "Test WS");
         assert_eq!(ws.slug, slug);
         assert_eq!(ws.visibility, "public");
@@ -495,58 +582,104 @@ mod tests {
         let role = get_member_role(&pool, ws.id, user_a).await.unwrap();
         assert_eq!(role.as_deref(), Some("owner"));
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     #[tokio::test]
     async fn test_get_member_role_returns_none_for_non_member() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, user_b, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
         let role = get_member_role(&pool, ws.id, user_b).await.unwrap();
         assert!(role.is_none());
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     #[tokio::test]
     async fn test_add_member_with_role() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, user_b, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
-        add_member(&pool, ws.id, user_b, "reader", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
+        add_member(&pool, ws.id, user_b, "reader", user_a)
+            .await
+            .unwrap();
         let role = get_member_role(&pool, ws.id, user_b).await.unwrap();
         assert_eq!(role.as_deref(), Some("reader"));
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     #[tokio::test]
     async fn test_add_member_idempotent_no_override() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, user_b, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
-        add_member(&pool, ws.id, user_b, "reader", user_a).await.unwrap();
-        add_member(&pool, ws.id, user_b, "writer", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
+        add_member(&pool, ws.id, user_b, "reader", user_a)
+            .await
+            .unwrap();
+        add_member(&pool, ws.id, user_b, "writer", user_a)
+            .await
+            .unwrap();
         let role = get_member_role(&pool, ws.id, user_b).await.unwrap();
-        assert_eq!(role.as_deref(), Some("reader"), "ON CONFLICT DO NOTHING preserves original role");
+        assert_eq!(
+            role.as_deref(),
+            Some("reader"),
+            "ON CONFLICT DO NOTHING preserves original role"
+        );
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     // ── Remove Member Tests ───────────────────────────────────────
@@ -555,54 +688,89 @@ mod tests {
     async fn test_remove_member_success() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, user_b, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
-        add_member(&pool, ws.id, user_b, "writer", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
+        add_member(&pool, ws.id, user_b, "writer", user_a)
+            .await
+            .unwrap();
 
         let removed = remove_member(&pool, ws.id, user_b).await.unwrap();
         assert!(removed);
         let role = get_member_role(&pool, ws.id, user_b).await.unwrap();
         assert!(role.is_none());
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     #[tokio::test]
     async fn test_remove_member_cannot_remove_owner() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, _, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
         let removed = remove_member(&pool, ws.id, user_a).await.unwrap();
         assert!(!removed, "owner should not be removable");
         let role = get_member_role(&pool, ws.id, user_a).await.unwrap();
         assert_eq!(role.as_deref(), Some("owner"));
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     #[tokio::test]
     async fn test_remove_member_nonexistent_returns_false() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, _, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
         let removed = remove_member(&pool, ws.id, Uuid::new_v4()).await.unwrap();
         assert!(!removed);
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     // ── Change Role Tests ─────────────────────────────────────────
@@ -611,41 +779,71 @@ mod tests {
     async fn test_change_member_role_success() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, user_b, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
-        add_member(&pool, ws.id, user_b, "reader", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
+        add_member(&pool, ws.id, user_b, "reader", user_a)
+            .await
+            .unwrap();
 
-        let new_role = change_member_role(&pool, ws.id, user_b, "writer").await.unwrap();
+        let new_role = change_member_role(&pool, ws.id, user_b, "writer")
+            .await
+            .unwrap();
         assert_eq!(new_role.as_deref(), Some("writer"));
         let role = get_member_role(&pool, ws.id, user_b).await.unwrap();
         assert_eq!(role.as_deref(), Some("writer"));
 
-        let new_role = change_member_role(&pool, ws.id, user_b, "reader").await.unwrap();
+        let new_role = change_member_role(&pool, ws.id, user_b, "reader")
+            .await
+            .unwrap();
         assert_eq!(new_role.as_deref(), Some("reader"));
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     #[tokio::test]
     async fn test_change_member_role_cannot_change_owner() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, _, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
-        let result = change_member_role(&pool, ws.id, user_a, "writer").await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
+        let result = change_member_role(&pool, ws.id, user_a, "writer")
+            .await
+            .unwrap();
         assert!(result.is_none(), "owner's role should not be changeable");
         let role = get_member_role(&pool, ws.id, user_a).await.unwrap();
         assert_eq!(role.as_deref(), Some("owner"));
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     // ── Invitation Tests ──────────────────────────────────────────
@@ -654,73 +852,124 @@ mod tests {
     async fn test_create_invitation_with_role() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, _, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
 
-        let inv = create_invitation(&pool, ws.id, "newuser@test.com", "reader", user_a).await.unwrap();
+        let inv = create_invitation(&pool, ws.id, "newuser@test.com", "reader", user_a)
+            .await
+            .unwrap();
         assert_eq!(inv.email, "newuser@test.com");
         assert_eq!(inv.role, "reader");
         assert_eq!(inv.status, "pending");
         assert_eq!(inv.invited_by, user_a);
 
-        let inv2 = create_invitation(&pool, ws.id, "newuser2@test.com", "writer", user_a).await.unwrap();
+        let inv2 = create_invitation(&pool, ws.id, "newuser2@test.com", "writer", user_a)
+            .await
+            .unwrap();
         assert_eq!(inv2.role, "writer");
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     #[tokio::test]
     async fn test_accept_invitation_changes_status() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, _, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
-        let inv = create_invitation(&pool, ws.id, "newuser@test.com", "writer", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
+        let inv = create_invitation(&pool, ws.id, "newuser@test.com", "writer", user_a)
+            .await
+            .unwrap();
 
         assert_eq!(inv.status, "pending");
         let accepted = accept_invitation(&pool, inv.id).await.unwrap();
         assert_eq!(accepted.status, "accepted");
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     #[tokio::test]
     async fn test_reject_invitation_changes_status() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, _, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
-        let inv = create_invitation(&pool, ws.id, "newuser@test.com", "reader", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
+        let inv = create_invitation(&pool, ws.id, "newuser@test.com", "reader", user_a)
+            .await
+            .unwrap();
 
         let rejected = reject_invitation(&pool, inv.id).await.unwrap();
         assert_eq!(rejected.status, "rejected");
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     #[tokio::test]
     async fn test_find_invitation_by_id() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, _, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
-        let inv = create_invitation(&pool, ws.id, "findme@test.com", "writer", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
+        let inv = create_invitation(&pool, ws.id, "findme@test.com", "writer", user_a)
+            .await
+            .unwrap();
 
         let found = find_invitation_by_id(&pool, inv.id).await.unwrap();
         assert!(found.is_some());
@@ -729,7 +978,10 @@ mod tests {
         let not_found = find_invitation_by_id(&pool, Uuid::new_v4()).await.unwrap();
         assert!(not_found.is_none());
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     // ── Delete Workspace Test ─────────────────────────────────────
@@ -738,12 +990,20 @@ mod tests {
     async fn test_delete_workspace_success() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, _, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
         let deleted = delete_workspace(&pool, ws.id).await.unwrap();
         assert!(deleted);
         let found = find_by_slug(&pool, &slug).await.unwrap();
@@ -754,7 +1014,10 @@ mod tests {
     async fn test_delete_workspace_nonexistent_returns_false() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let deleted = delete_workspace(&pool, Uuid::new_v4()).await.unwrap();
         assert!(!deleted);
@@ -766,55 +1029,100 @@ mod tests {
     async fn test_audit_log_insert() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, _, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
 
         crate::audit::log(
-            &pool, ws.id, user_a,
-            "invite_member", Some("invitation"), Some(Uuid::new_v4()),
+            &pool,
+            ws.id,
+            user_a,
+            "invite_member",
+            Some("invitation"),
+            Some(Uuid::new_v4()),
             Some(serde_json::json!({"email": "test@test.com", "role": "writer"})),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         let count: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = $1 AND actor_id = $2"
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = $1 AND actor_id = $2",
         )
-        .bind(ws.id).bind(user_a)
-        .fetch_one(&pool).await.unwrap();
+        .bind(ws.id)
+        .bind(user_a)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert!(count.0 >= 1, "audit log entry should exist");
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     #[tokio::test]
     async fn test_audit_log_multiple_actions() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, _, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
 
-        let actions = ["invite_member", "remove_member", "change_member_role", "delete_workspace"];
+        let actions = [
+            "invite_member",
+            "remove_member",
+            "change_member_role",
+            "delete_workspace",
+        ];
         for action in &actions {
             crate::audit::log(
-                &pool, ws.id, user_a, action, Some("user"), Some(Uuid::new_v4()), None,
-            ).await.unwrap();
+                &pool,
+                ws.id,
+                user_a,
+                action,
+                Some("user"),
+                Some(Uuid::new_v4()),
+                None,
+            )
+            .await
+            .unwrap();
         }
 
-        let count: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = $1"
-        )
-        .bind(ws.id)
-        .fetch_one(&pool).await.unwrap();
+        let count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM audit_log WHERE workspace_id = $1")
+                .bind(ws.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert!(count.0 >= 4, "all audit log entries should exist");
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     // ── Edge Cases ────────────────────────────────────────────────
@@ -823,30 +1131,53 @@ mod tests {
     async fn test_is_member_returns_false_for_non_member() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, user_b, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
         assert!(is_member(&pool, ws.id, user_a).await.unwrap());
         assert!(!is_member(&pool, ws.id, user_b).await.unwrap());
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     #[tokio::test]
     async fn test_list_members_includes_all_roles() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, user_b, user_c) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
-        add_member(&pool, ws.id, user_b, "writer", user_a).await.unwrap();
-        add_member(&pool, ws.id, user_c, "reader", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
+        add_member(&pool, ws.id, user_b, "writer", user_a)
+            .await
+            .unwrap();
+        add_member(&pool, ws.id, user_c, "reader", user_a)
+            .await
+            .unwrap();
 
         let members = list_members(&pool, ws.id).await.unwrap();
         assert_eq!(members.len(), 3);
@@ -855,59 +1186,102 @@ mod tests {
         assert!(roles.contains(&"writer"));
         assert!(roles.contains(&"reader"));
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     #[tokio::test]
     async fn test_find_pending_invitations_for_user() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, user_b, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Test WS", &slug, "public", user_a).await.unwrap();
-        create_invitation(&pool, ws.id, "bob@test.com", "writer", user_a).await.unwrap();
+        let ws = create(&pool, "Test WS", &slug, "public", user_a)
+            .await
+            .unwrap();
+        create_invitation(&pool, ws.id, "bob@test.com", "writer", user_a)
+            .await
+            .unwrap();
 
-        let pending = find_pending_invitations_for_user(&pool, user_b).await.unwrap();
-        assert!(!pending.is_empty(), "user_b should see the pending invitation");
+        let pending = find_pending_invitations_for_user(&pool, user_b)
+            .await
+            .unwrap();
+        assert!(
+            !pending.is_empty(),
+            "user_b should see the pending invitation"
+        );
         assert_eq!(pending[0].email, "bob@test.com");
         assert_eq!(pending[0].status, "pending");
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     #[tokio::test]
     async fn test_create_workspace_private_visibility() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, _, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Private WS", &slug, "private", user_a).await.unwrap();
+        let ws = create(&pool, "Private WS", &slug, "private", user_a)
+            .await
+            .unwrap();
         assert_eq!(ws.visibility, "private");
         assert_eq!(ws.name, "Private WS");
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 
     #[tokio::test]
     async fn test_rename_workspace() {
         let pool = match test_pool().await {
             Some(p) => p,
-            None => { eprintln!("Skipping: TEST_DATABASE_URL not set"); return; }
+            None => {
+                eprintln!("Skipping: TEST_DATABASE_URL not set");
+                return;
+            }
         };
         let (user_a, _, _) = create_test_users(&pool).await;
-        let slug = format!("test-ws-{}", Uuid::new_v4().to_string().split('-').next().unwrap());
+        let slug = format!(
+            "test-ws-{}",
+            Uuid::new_v4().to_string().split('-').next().unwrap()
+        );
 
-        let ws = create(&pool, "Original Name", &slug, "public", user_a).await.unwrap();
+        let ws = create(&pool, "Original Name", &slug, "public", user_a)
+            .await
+            .unwrap();
         let updated = rename(&pool, ws.id, "Renamed WS").await.unwrap();
         assert_eq!(updated.name, "Renamed WS");
         assert_eq!(updated.slug, slug);
 
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(ws.id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(ws.id)
+            .execute(&pool)
+            .await;
     }
 }

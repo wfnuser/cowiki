@@ -114,12 +114,25 @@ mod tests {
 
     #[test]
     fn test_removes_noise_patterns() {
-        let input = "Great article about Rust.\nCookie Policy\nMore content here.\nPrivacy Policy\nEnd.";
+        let input =
+            "Great article about Rust.\nCookie Policy\nMore content here.\nPrivacy Policy\nEnd.";
         let result = clean_text(input);
-        assert!(!result.contains("Cookie Policy"), "should remove Cookie Policy");
-        assert!(!result.contains("Privacy Policy"), "should remove Privacy Policy");
-        assert!(result.contains("Great article about Rust."), "should keep real content");
-        assert!(result.contains("More content here."), "should keep real content");
+        assert!(
+            !result.contains("Cookie Policy"),
+            "should remove Cookie Policy"
+        );
+        assert!(
+            !result.contains("Privacy Policy"),
+            "should remove Privacy Policy"
+        );
+        assert!(
+            result.contains("Great article about Rust."),
+            "should keep real content"
+        );
+        assert!(
+            result.contains("More content here."),
+            "should keep real content"
+        );
         assert!(result.contains("End."), "should keep real content");
     }
 
@@ -128,9 +141,18 @@ mod tests {
         let input = "First paragraph.\n\n\n\n\nSecond paragraph.";
         let result = clean_text(input);
         // Should have at most 2 blank lines between paragraphs
-        assert!(!result.contains("\n\n\n"), "should not have 3+ consecutive newlines");
-        assert!(result.contains("First paragraph."), "should keep first paragraph");
-        assert!(result.contains("Second paragraph."), "should keep second paragraph");
+        assert!(
+            !result.contains("\n\n\n"),
+            "should not have 3+ consecutive newlines"
+        );
+        assert!(
+            result.contains("First paragraph."),
+            "should keep first paragraph"
+        );
+        assert!(
+            result.contains("Second paragraph."),
+            "should keep second paragraph"
+        );
     }
 
     #[test]
