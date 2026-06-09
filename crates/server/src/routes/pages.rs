@@ -33,13 +33,13 @@ pub struct PageResponse {
     pub branch: String,
 }
 
-fn parse_frontmatter(content: &str) -> (String, String) {
+pub(crate) fn parse_frontmatter(content: &str) -> (Option<String>, String) {
     if !content.starts_with("---") {
-        return ("Untitled".into(), String::new());
+        return (None, String::new());
     }
     let parts: Vec<&str> = content.splitn(3, "---").collect();
     if parts.len() < 3 {
-        return ("Untitled".into(), String::new());
+        return (None, String::new());
     }
     let fm = parts[1];
     let title = fm
@@ -52,7 +52,7 @@ fn parse_frontmatter(content: &str) -> (String, String) {
                 .trim_matches('"')
                 .to_string()
         })
-        .unwrap_or_else(|| "Untitled".into());
+        .filter(|title| !title.trim().is_empty());
     let summary = fm
         .lines()
         .find(|l| l.trim().starts_with("summary:"))
@@ -65,6 +65,49 @@ fn parse_frontmatter(content: &str) -> (String, String) {
         })
         .unwrap_or_default();
     (title, summary)
+}
+
+pub(crate) fn require_page_title(content: &str) -> Result<(String, String)> {
+    let (title, summary) = parse_frontmatter(content);
+    let title = title.ok_or_else(|| {
+        AppError::BadRequest("wiki pages require non-empty frontmatter.title".into())
+    })?;
+    Ok((title, summary))
+}
+
+fn fallback_title_from_content_or_slug(content: &str, slug: &str) -> String {
+    content
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("# "))
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| title_from_slug(slug))
+}
+
+fn title_from_slug(slug: &str) -> String {
+    let base = slug
+        .trim_end_matches("/_index")
+        .rsplit('/')
+        .next()
+        .unwrap_or(slug);
+    let title = base
+        .replace(['-', '_'], " ")
+        .split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    if title.is_empty() {
+        "Untitled".into()
+    } else {
+        title
+    }
 }
 
 #[derive(Deserialize)]
@@ -117,6 +160,7 @@ pub async fn get_page_ws(
         .ok_or_else(|| AppError::NotFound(format!("page {slug} not found")))?;
     let body = String::from_utf8_lossy(&content).into_owned();
     let (title, summary) = parse_frontmatter(&body);
+    let title = title.unwrap_or_else(|| fallback_title_from_content_or_slug(&body, &slug));
     Ok(Json(PageResponse {
         slug,
         title,
@@ -136,6 +180,7 @@ pub async fn write_page_ws(
         .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     ensure_user_branch_if_needed(&repo, &input.branch)?;
+    require_page_title(&input.body)?;
     let path = format!("wiki/{}.md", input.slug);
     repo.write_file(
         &input.branch,
@@ -224,8 +269,18 @@ fn list_pages_from_repo(
         let rel = file_path.strip_prefix("wiki/").unwrap_or(file_path);
         let slug = rel.strip_suffix(".md").unwrap_or(rel).to_string();
         let (title, summary) = match repo.read_file(branch, file_path) {
-            Ok(Some(content)) => parse_frontmatter(&String::from_utf8_lossy(&content)),
-            _ => ("Untitled".into(), String::new()),
+            Ok(Some(content)) => {
+                let body = String::from_utf8_lossy(&content);
+                let (title, summary) = parse_frontmatter(&body);
+                let title =
+                    title.unwrap_or_else(|| fallback_title_from_content_or_slug(&body, &slug));
+                (title, summary)
+            }
+            _ => {
+                return Err(AppError::BadRequest(format!(
+                    "{file_path} could not be read"
+                )));
+            }
         };
         let parts: Vec<&str> = slug.split('/').collect();
         if parts.len() == 1 {
