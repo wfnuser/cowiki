@@ -19,7 +19,7 @@ interface SettingsDialogProps {
 
 const itemFade = {
   initial: { opacity: 0, y: 12 },
-  animate: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 400, damping: 30 } },
+  animate: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 400, damping: 30 } },
   exit: { opacity: 0, y: -8, transition: { duration: 0.15 } },
 };
 
