@@ -33,15 +33,44 @@ export interface Submission {
   reviewed_at: string | null;
 }
 
+export interface DiffLine {
+  kind: 'add' | 'del' | 'ctx';
+  old_line: number | null;
+  new_line: number | null;
+  text: string;
+}
+
+export interface DiffHunk {
+  header: string;
+  lines: DiffLine[];
+}
+
 export interface FileDiff {
   path: string;
   old_content: string | null;
   new_content: string | null;
+  hunks: DiffHunk[];
+  additions: number;
+  deletions: number;
+}
+
+export interface ReviewComment {
+  id: string;
+  submission_id: string;
+  user_id: string;
+  file_path: string;
+  line_number: number | null;
+  body: string;
+  parent_id: string | null;
+  resolved: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ReviewDetail {
   submission: Submission;
   diffs: FileDiff[];
+  comments: ReviewComment[];
 }
 
 export interface SearchResult {
@@ -424,4 +453,56 @@ export async function getSource(workspaceSlug: string, filename: string, branch 
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/sources/${encodeURIComponent(filename)}?branch=${encodeURIComponent(branch)}`, { headers: h() });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
+}
+
+// ── Review Comments ──
+
+export async function listComments(workspaceSlug: string, submissionId: string): Promise<ReviewComment[]> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/reviews/${submissionId}/comments`, { headers: h() });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function createComment(
+  workspaceSlug: string,
+  submissionId: string,
+  body: string,
+  filePath: string,
+  lineNumber?: number,
+  parentId?: string,
+): Promise<ReviewComment> {
+  const payload: Record<string, unknown> = { file_path: filePath, body };
+  if (lineNumber != null) payload.line_number = lineNumber;
+  if (parentId != null) payload.parent_id = parentId;
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/reviews/${submissionId}/comments`, {
+    method: 'POST',
+    headers: h({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function resolveComment(workspaceSlug: string, submissionId: string, commentId: string): Promise<void> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/reviews/${submissionId}/comments/${commentId}/resolve`, {
+    method: 'POST',
+    headers: h(),
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+export async function unresolveComment(workspaceSlug: string, submissionId: string, commentId: string): Promise<void> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/reviews/${submissionId}/comments/${commentId}/unresolve`, {
+    method: 'POST',
+    headers: h(),
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+export async function deleteComment(workspaceSlug: string, submissionId: string, commentId: string): Promise<void> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/reviews/${submissionId}/comments/${commentId}`, {
+    method: 'DELETE',
+    headers: h(),
+  });
+  if (!res.ok) throw new Error(await res.text());
 }

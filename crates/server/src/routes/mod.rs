@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod comments;
 pub mod compile;
 pub mod ingest;
 pub mod keys;
