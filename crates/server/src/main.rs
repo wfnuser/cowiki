@@ -210,6 +210,27 @@ async fn main() {
             "/api/workspaces/{ws_slug}/reviews/{id}",
             post(routes::review::review_action),
         )
+        // Review comments
+        .route(
+            "/api/workspaces/{ws_slug}/reviews/{submission_id}/comments",
+            get(routes::comments::list_comments),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/reviews/{submission_id}/comments",
+            post(routes::comments::create_comment),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/reviews/{submission_id}/comments/{comment_id}/resolve",
+            post(routes::comments::resolve_comment),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/reviews/{submission_id}/comments/{comment_id}/unresolve",
+            post(routes::comments::unresolve_comment),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/reviews/{submission_id}/comments/{comment_id}",
+            delete(routes::comments::delete_comment),
+        )
         // Search
         .route("/api/search", get(routes::search::search))
         // API Keys — multi-key management
