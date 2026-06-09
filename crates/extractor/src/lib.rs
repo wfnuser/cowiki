@@ -41,6 +41,10 @@ pub enum ExtractError {
     Extract(String),
     #[error("content too large")]
     TooLarge,
+    #[error("blocked URL: {0}")]
+    Blocked(String),
+    #[error("too many redirects")]
+    TooManyRedirects,
 }
 
 /// Orchestrates: fetch → metadata → readability → clean
