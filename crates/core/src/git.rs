@@ -477,8 +477,8 @@ mod tests {
     use std::time::Duration;
 
     fn temp_repo_dir(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("cowiki-git-test-{}-{}", std::process::id(), tag));
+        let dir =
+            std::env::temp_dir().join(format!("cowiki-git-test-{}-{}", std::process::id(), tag));
         let _ = std::fs::remove_dir_all(&dir);
         dir
     }
