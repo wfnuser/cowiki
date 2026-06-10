@@ -1,10 +1,9 @@
 -- 007_team_permissions: Team Space invitation + permissions + audit log
--- Adds: invitation.role, audit_log table
 
 -- 1. Add role column to invitations
 ALTER TABLE invitations ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'viewer';
 
--- Add role check constraint (idempotent)
+-- Ensure 4-tier role constraint (idempotent)
 ALTER TABLE invitations DROP CONSTRAINT IF EXISTS invitations_role_check;
 ALTER TABLE invitations ADD CONSTRAINT invitations_role_check
     CHECK (role IN ('owner', 'manager', 'editor', 'viewer'));
