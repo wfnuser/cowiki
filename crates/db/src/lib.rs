@@ -66,8 +66,13 @@ pub async fn run_migrations(pool: &PgPool, embedding_dim: u32) -> sqlx::Result<(
         tracing::error!("DB error: {e}");
         e
     })?;
-    let sql11 = include_str!("migrations/010_notifications.sql");
+    let sql11 = include_str!("migrations/010_invitation_reject_status.sql");
     sqlx::raw_sql(sql11).execute(pool).await.map_err(|e| {
+        tracing::error!("DB error: {e}");
+        e
+    })?;
+    let sql12 = include_str!("migrations/010_notifications.sql");
+    sqlx::raw_sql(sql12).execute(pool).await.map_err(|e| {
         tracing::error!("DB error: {e}");
         e
     })?;

@@ -143,14 +143,13 @@ export function SpacePanel({
         )}
       </div>
 
-      {/* Tree content — only show when wiki tab is active */}
-      {activeTab === 'wiki' && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '4px 8px' }}>
-          {/* Pages header */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 10px', margin: '16px 0 8px' }}>
-            <span style={{ fontSize: 11.5, fontWeight: 600, color: C.faint, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-              Pages
-            </span>
+      {/* Tree content — always visible regardless of active tab */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 8px' }}>
+        {/* Wiki Space header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 10px', margin: '16px 0 8px' }}>
+          <span style={{ fontSize: 11.5, fontWeight: 600, color: C.faint, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            Wiki Space
+          </span>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button style={{
@@ -170,7 +169,7 @@ export function SpacePanel({
           {/* Sources section */}
           <SourcesSection
             sources={sources}
-            activeSource={activeSource}
+            activeSource={activeTab === 'wiki' ? activeSource : null}
             onSelectSource={onSelectSource}
             onSelectPage={onSelectPage}
             onShowIngest={onShowIngest}
@@ -187,7 +186,7 @@ export function SpacePanel({
               <PageTreeItem
                 key={p.slug}
                 page={p}
-                activePage={activePage}
+                activePage={activeTab === 'wiki' ? activePage : null}
                 depth={0}
                 onSelectPage={onSelectPage}
                 onAddPageInFolder={onAddPageInFolder}
@@ -195,8 +194,7 @@ export function SpacePanel({
               />
             ))
           )}
-        </div>
-      )}
+      </div>
 
       {/* Space settings moved into nav items above */}
     </aside>

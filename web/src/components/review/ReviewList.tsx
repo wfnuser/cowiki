@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { GitBranch, MessageSquare } from 'lucide-react';
 import { listReviews, type Submission } from '../../api';
 import { C } from '@/lib/design';
+import { timeAgo } from '../../lib/time';
 
 type Filter = 'open' | 'merged' | 'all';
 
@@ -11,18 +12,6 @@ const statusBadge: Record<string, { bg: string; fg: string; label: string }> = {
   rejected: { bg: C.accentSoft, fg: C.accent, label: 'Changes req.' },
   merged: { bg: C.blueSoft, fg: C.blue, label: 'Merged' },
 };
-
-function timeAgo(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return '';
-  const secs = Math.max(0, Math.floor((Date.now() - then) / 1000));
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  return `${Math.floor(hrs / 24)}d`;
-}
 
 export function ReviewList({
   workspaceSlug,
@@ -137,7 +126,7 @@ export function ReviewList({
                     </span>
                   </div>
                   <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
-                    {s.source_branch} · {s.page_slugs.length} file{s.page_slugs.length === 1 ? '' : 's'} · {timeAgo(s.created_at)} ago
+                    {s.source_branch} · {s.page_slugs.length} file{s.page_slugs.length === 1 ? '' : 's'} · {timeAgo(s.created_at)}
                   </div>
                 </div>
 

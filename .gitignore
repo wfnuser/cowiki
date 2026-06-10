@@ -1,6 +1,9 @@
 target/
 node_modules/
 .env
+.env.test
+.env.prod
+.env.*.local
 data/
 **/data/
 web/dist/
