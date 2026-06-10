@@ -12,7 +12,7 @@ use crate::AppState;
 #[derive(Deserialize)]
 pub struct TransferRequest {
     pub new_owner_user_id: Uuid,
-    pub previous_owner_role: Option<String>,  // defaults to "manager"
+    pub previous_owner_role: Option<String>, // defaults to "manager"
 }
 
 #[derive(Serialize)]
@@ -48,17 +48,25 @@ pub async fn initiate_transfer(
 
     let new_role = input.previous_owner_role.as_deref().unwrap_or("manager");
     if !["manager", "editor", "viewer"].contains(&new_role) {
-        return Err(AppError::BadRequest("previous_owner_role must be manager, editor, or viewer".into()));
+        return Err(AppError::BadRequest(
+            "previous_owner_role must be manager, editor, or viewer".into(),
+        ));
     }
 
     // Cannot transfer to self
     if input.new_owner_user_id == guard.user.id {
-        return Err(AppError::BadRequest("cannot transfer ownership to yourself".into()));
+        return Err(AppError::BadRequest(
+            "cannot transfer ownership to yourself".into(),
+        ));
     }
 
     // Target must be a member
-    if !cowiki_db::workspaces::is_member(&state.db, guard.workspace.id, input.new_owner_user_id).await? {
-        return Err(AppError::BadRequest("target user is not a member of this workspace".into()));
+    if !cowiki_db::workspaces::is_member(&state.db, guard.workspace.id, input.new_owner_user_id)
+        .await?
+    {
+        return Err(AppError::BadRequest(
+            "target user is not a member of this workspace".into(),
+        ));
     }
 
     let transfer = cowiki_db::transfers::create_transfer(
@@ -67,17 +75,24 @@ pub async fn initiate_transfer(
         guard.user.id,
         input.new_owner_user_id,
         new_role,
-    ).await.map_err(|e| AppError::Internal(e.to_string()))?;
+    )
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // Audit log
     cowiki_db::audit::log(
-        &state.db, guard.workspace.id, guard.user.id,
-        "initiate_transfer", Some("ownership_transfer"), Some(transfer.id),
+        &state.db,
+        guard.workspace.id,
+        guard.user.id,
+        "initiate_transfer",
+        Some("ownership_transfer"),
+        Some(transfer.id),
         Some(serde_json::json!({
             "new_owner": input.new_owner_user_id.to_string(),
             "previous_owner_new_role": new_role,
         })),
-    ).await?;
+    )
+    .await?;
 
     Ok(Json(transfer_response(&transfer)))
 }
@@ -105,7 +120,9 @@ pub async fn accept_transfer(
         .ok_or_else(|| AppError::NotFound("transfer not found".into()))?;
 
     if transfer.to_user_id != user.id {
-        return Err(AppError::Forbidden("this transfer is for a different user".into()));
+        return Err(AppError::Forbidden(
+            "this transfer is for a different user".into(),
+        ));
     }
 
     let result = cowiki_db::transfers::accept_transfer(&state.db, transfer_id)
@@ -114,10 +131,15 @@ pub async fn accept_transfer(
 
     // Audit log
     cowiki_db::audit::log(
-        &state.db, transfer.workspace_id, user.id,
-        "accept_transfer", Some("ownership_transfer"), Some(transfer_id),
+        &state.db,
+        transfer.workspace_id,
+        user.id,
+        "accept_transfer",
+        Some("ownership_transfer"),
+        Some(transfer_id),
         Some(serde_json::json!({"previous_owner_new_role": transfer.previous_owner_new_role})),
-    ).await?;
+    )
+    .await?;
 
     Ok(Json(transfer_response(&result)))
 }
@@ -135,7 +157,9 @@ pub async fn reject_transfer(
         .ok_or_else(|| AppError::NotFound("transfer not found".into()))?;
 
     if transfer.to_user_id != user.id {
-        return Err(AppError::Forbidden("this transfer is for a different user".into()));
+        return Err(AppError::Forbidden(
+            "this transfer is for a different user".into(),
+        ));
     }
 
     let result = cowiki_db::transfers::reject_transfer(&state.db, transfer_id)
@@ -158,7 +182,9 @@ pub async fn cancel_transfer(
         .ok_or_else(|| AppError::NotFound("transfer not found".into()))?;
 
     if transfer.from_user_id != user.id {
-        return Err(AppError::Forbidden("only the initiator can cancel the transfer".into()));
+        return Err(AppError::Forbidden(
+            "only the initiator can cancel the transfer".into(),
+        ));
     }
 
     let result = cowiki_db::transfers::cancel_transfer(&state.db, transfer_id)

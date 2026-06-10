@@ -1,7 +1,7 @@
 pub mod auth;
 pub mod comments;
-pub mod guard;
 pub mod compile;
+pub mod guard;
 pub mod ingest;
 pub mod keys;
 pub mod pages;

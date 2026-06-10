@@ -15,7 +15,8 @@ pub async fn list_reviews(
 ) -> Result<Json<Vec<cowiki_db::submissions::Submission>>> {
     let guard = guard::require_membership(&state, &headers, &ws_slug).await?;
     guard::require(&guard, Permission::ViewContent)?;
-    let subs = cowiki_db::submissions::list_pending_for_workspace(&state.db, &guard.workspace.slug).await?;
+    let subs = cowiki_db::submissions::list_pending_for_workspace(&state.db, &guard.workspace.slug)
+        .await?;
     Ok(Json(subs))
 }
 

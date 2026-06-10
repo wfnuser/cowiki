@@ -6,12 +6,12 @@ use crate::AppState;
 /// Permission levels corresponding to minimum role required.
 #[derive(Debug, Clone, Copy)]
 pub enum Permission {
-    ViewContent,        // Viewer+
-    EditContent,        // Editor+
-    ManageMembers,      // Manager+
-    ManageWorkspace,    // Manager+
-    DeleteWorkspace,    // Owner only
-    TransferOwnership,  // Owner only
+    ViewContent,       // Viewer+
+    EditContent,       // Editor+
+    ManageMembers,     // Manager+
+    ManageWorkspace,   // Manager+
+    DeleteWorkspace,   // Owner only
+    TransferOwnership, // Owner only
 }
 
 impl Permission {
@@ -49,16 +49,23 @@ pub async fn require_membership(
         .await?
         .ok_or_else(|| AppError::Forbidden("not a member of this workspace".into()))?;
 
-    let member_role: cowiki_db::workspaces::Role = role_str.parse()
+    let member_role: cowiki_db::workspaces::Role = role_str
+        .parse()
         .map_err(|_| AppError::Internal("invalid role stored in database".into()))?;
 
     // Touch last_active_at (fire-and-forget)
     let db = state.db.clone();
     let ws_id = workspace.id;
     let uid = user.id;
-    tokio::spawn(async move { let _ = cowiki_db::workspaces::touch_last_active(&db, ws_id, uid).await; });
+    tokio::spawn(async move {
+        let _ = cowiki_db::workspaces::touch_last_active(&db, ws_id, uid).await;
+    });
 
-    Ok(WorkspaceGuard { workspace, user, member_role })
+    Ok(WorkspaceGuard {
+        workspace,
+        user,
+        member_role,
+    })
 }
 
 /// Require a specific permission level.
@@ -186,7 +193,10 @@ mod tests {
         let guard = mock_guard(Role::Viewer);
         let err = require(&guard, Permission::EditContent).unwrap_err();
         let msg = format!("{err:?}");
-        assert!(msg.contains("Editor"), "error should mention required role: {msg}");
+        assert!(
+            msg.contains("Editor"),
+            "error should mention required role: {msg}"
+        );
     }
 
     #[test]
@@ -194,8 +204,10 @@ mod tests {
         let guard = mock_guard(Role::Viewer);
         let err = require(&guard, Permission::ManageMembers).unwrap_err();
         let msg = format!("{err:?}");
-        assert!(msg.contains("viewer") || msg.contains("Viewer"),
-            "error should mention current role: {msg}");
+        assert!(
+            msg.contains("viewer") || msg.contains("Viewer"),
+            "error should mention current role: {msg}"
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -246,8 +258,10 @@ mod tests {
         ];
         for perm in &all {
             let role = perm.required_role();
-            assert!(Role::ALL.contains(&role),
-                "{perm:?} maps to {role:?} which is in Role::ALL");
+            assert!(
+                Role::ALL.contains(&role),
+                "{perm:?} maps to {role:?} which is in Role::ALL"
+            );
         }
     }
 }
