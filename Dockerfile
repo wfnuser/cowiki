@@ -23,9 +23,11 @@ RUN mkdir -p crates/server/src crates/core/src crates/db/src crates/utils/src cr
 
 RUN cargo build --release --workspace 2>/dev/null || true
 
-# Copy real source and build
+# Copy real source and build. Touch every source file so cargo rebuilds all
+# workspace crates with the real code (the dummy-lib step above only primed the
+# external dependency cache); otherwise stale empty-lib artifacts get reused.
 COPY crates/ crates/
-RUN touch crates/server/src/main.rs \
+RUN find crates -name '*.rs' -exec touch {} + \
     && cargo build --release --workspace
 
 # Stage 2: Runtime
