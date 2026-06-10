@@ -4,15 +4,9 @@ import { listReviews, type Submission } from '../../api';
 import { C } from '@/lib/design';
 import { timeAgo } from '../../lib/time';
 import { AvatarBadge } from '@/components/ui/avatar-badge';
+import { statusBadge } from '@/lib/review';
 
 type Filter = 'open' | 'merged' | 'all';
-
-const statusBadge: Record<string, { bg: string; fg: string; label: string }> = {
-  pending: { bg: C.amberSoft, fg: C.amber, label: 'Review needed' },
-  approved: { bg: C.greenSoft, fg: C.green, label: 'Approved' },
-  rejected: { bg: C.accentSoft, fg: C.accent, label: 'Changes req.' },
-  merged: { bg: C.blueSoft, fg: C.blue, label: 'Merged' },
-};
 
 export function ReviewList({
   workspaceSlug,
