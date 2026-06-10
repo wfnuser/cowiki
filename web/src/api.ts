@@ -566,3 +566,42 @@ export async function markAllNotificationsRead(): Promise<void> {
   const res = await fetch(`${BASE}/notifications/read-all`, { method: 'POST', headers: h() });
   if (!res.ok) throw new Error(await res.text());
 }
+
+// ── Ownership Transfers ──
+
+export interface TransferResponse {
+  id: string;
+  status: string;
+  from_user_id: string;
+  to_user_id: string;
+  previous_owner_new_role: string;
+  created_at: string;
+}
+
+export async function initiateTransfer(
+  workspaceSlug: string,
+  newOwnerUserId: string,
+  previousOwnerRole = 'manager',
+): Promise<TransferResponse> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/transfer-ownership`, {
+    method: 'POST',
+    headers: h({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ new_owner_user_id: newOwnerUserId, previous_owner_role: previousOwnerRole }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function acceptTransfer(transferId: string): Promise<TransferResponse> {
+  const res = await fetch(`${BASE}/transfers/${transferId}/accept`, { method: 'POST', headers: h() });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function rejectTransfer(transferId: string): Promise<TransferResponse> {
+  const res = await fetch(`${BASE}/transfers/${transferId}/reject`, { method: 'POST', headers: h() });
+  if (!res.ok) throw new Error(await res.text());
+}

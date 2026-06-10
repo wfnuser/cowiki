@@ -94,6 +94,28 @@ pub async fn initiate_transfer(
     )
     .await?;
 
+    // Notify the recipient
+    let ws_name = guard.workspace.name.clone();
+    let from_name = guard.user.name.clone();
+    let ws_id = guard.workspace.id;
+    let transfer_id = transfer.id;
+    let recipient_id = input.new_owner_user_id;
+    tokio::spawn(async move {
+        let _ = cowiki_db::notifications::create(
+            &state.db,
+            recipient_id,
+            "ownership_transfer",
+            &format!("Ownership transfer from {}", from_name),
+            Some(&format!(
+                "{} wants to transfer ownership of {} to you. Your new role would be owner.",
+                from_name, ws_name
+            )),
+            Some(ws_id),
+            Some(&format!("/transfers/{}", transfer_id)),
+        )
+        .await;
+    });
+
     Ok(Json(transfer_response(&transfer)))
 }
 
@@ -140,6 +162,27 @@ pub async fn accept_transfer(
         Some(serde_json::json!({"previous_owner_new_role": transfer.previous_owner_new_role})),
     )
     .await?;
+
+    // Notify the old owner
+    let old_owner_id = transfer.from_user_id;
+    let ws_id = transfer.workspace_id;
+    let db = state.db.clone();
+    let acceptor_name = user.name.clone();
+    tokio::spawn(async move {
+        let _ = cowiki_db::notifications::create(
+            &db,
+            old_owner_id,
+            "transfer_accepted",
+            &format!("Ownership transferred to {}", acceptor_name),
+            Some(&format!(
+                "{} accepted ownership of the workspace. Your new role is {}.",
+                acceptor_name, transfer.previous_owner_new_role
+            )),
+            Some(ws_id),
+            None,
+        )
+        .await;
+    });
 
     Ok(Json(transfer_response(&result)))
 }

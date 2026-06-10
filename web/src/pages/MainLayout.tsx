@@ -34,6 +34,7 @@ import { ReviewList } from '../components/review/ReviewList';
 import { ReviewDetail } from '../components/review/ReviewDetail';
 import { MembersView } from '../components/views/MembersView';
 import { InviteDialog } from '../components/InviteDialog';
+import { TransferDialog } from '../components/TransferDialog';
 import { C } from '@/lib/design';
 
 type ActiveView =
@@ -94,6 +95,7 @@ export function MainLayout() {
   // Team space management state
   const [pendingInvites, setPendingInvites] = useState<PendingInvitation[]>([]);
   const [showInviteDialog, setShowInviteDialog] = useState<Workspace | null>(null);
+  const [showTransferDialog, setShowTransferDialog] = useState<Workspace | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<Workspace | null>(null);
 
   const userBranch = `user/${auth?.id}`;
@@ -804,7 +806,9 @@ export function MainLayout() {
                   canManage={isOwner || activeWorkspace.role === 'manager'}
                   currentUserRole={activeWorkspace.role}
                   currentUserId={auth?.id || ''}
+                  isOwner={isOwner}
                   onInvite={() => setShowInviteDialog(activeWorkspace)}
+                  onTransfer={() => setShowTransferDialog(activeWorkspace)}
                 />
 
               /* Activity */
@@ -970,6 +974,17 @@ export function MainLayout() {
         workspaceSlug={showInviteDialog?.slug || ''}
         onOpenChange={(open) => { if (!open) setShowInviteDialog(null); }}
         onInvited={handleInviteSuccess}
+        onError={handleInviteError}
+      />
+
+      {/* Transfer ownership */}
+      <TransferDialog
+        open={!!showTransferDialog}
+        workspaceName={showTransferDialog?.name || ''}
+        workspaceSlug={showTransferDialog?.slug || ''}
+        currentUserId={auth?.id || ''}
+        onOpenChange={(open) => { if (!open) setShowTransferDialog(null); }}
+        onSuccess={handleInviteSuccess}
         onError={handleInviteError}
       />
 

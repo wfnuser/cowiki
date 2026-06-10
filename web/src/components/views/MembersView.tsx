@@ -44,10 +44,12 @@ interface MembersViewProps {
   canManage: boolean;
   currentUserRole: string;
   currentUserId: string;
+  isOwner: boolean;
   onInvite: () => void;
+  onTransfer: () => void;
 }
 
-export function MembersView({ workspaceSlug, canManage, currentUserRole, currentUserId, onInvite }: MembersViewProps) {
+export function MembersView({ workspaceSlug, canManage, currentUserRole, currentUserId, isOwner, onInvite, onTransfer }: MembersViewProps) {
   const [members, setMembers] = useState<MemberInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
@@ -124,17 +126,33 @@ export function MembersView({ workspaceSlug, canManage, currentUserRole, current
             </h1>
             <span style={{ fontSize: 24, color: C.faint, fontWeight: 400 }}>{members.length}</span>
           </div>
-          <button
-            onClick={onInvite}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 7,
-              padding: '8px 14px', borderRadius: 6, border: 'none',
-              background: C.accent, color: '#fff', fontSize: '13.5px', fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            <UserPlus size={15} /> Invite people
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {isOwner && (
+              <button
+                onClick={onTransfer}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 7,
+                  padding: '8px 14px', borderRadius: 6, border: `1px solid ${C.line}`,
+                  background: 'transparent', color: C.amber, fontSize: '13.5px', fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                Transfer
+              </button>
+            )}
+            <button
+              onClick={onInvite}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 7,
+                padding: '8px 14px', borderRadius: 6, border: 'none',
+                background: C.accent, color: '#fff', fontSize: '13.5px', fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              <UserPlus size={15} /> Invite people
+            </button>
+          </div>
         </div>
       )}
 

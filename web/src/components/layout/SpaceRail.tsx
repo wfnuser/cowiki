@@ -4,6 +4,7 @@ import type { Workspace, Notification } from '../../api';
 import {
   listNotifications, notificationUnreadCount, markAllNotificationsRead,
   markNotificationRead, acceptInvitation, rejectInvitation,
+  acceptTransfer, rejectTransfer,
 } from '../../api';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -250,8 +251,8 @@ function NotificationBell() {
     } catch { /* ignore */ }
   };
 
-  // Extract invitation_id from notification link (format: /invitations/{uuid})
-  const extractInvitationId = (n: Notification): string | null => {
+  // Extract resource id from notification link (format: /invitations/{uuid} or /transfers/{uuid})
+  const extractLinkId = (n: Notification): string | null => {
     if (!n.link) return null;
     const parts = n.link.split('/');
     return parts[parts.length - 1] || null;
@@ -264,7 +265,7 @@ function NotificationBell() {
 
   const handleAccept = async () => {
     if (!detail) return;
-    const invId = extractInvitationId(detail);
+    const invId = extractLinkId(detail);
     if (!invId) return;
     setActing(true);
     try {
@@ -277,7 +278,7 @@ function NotificationBell() {
 
   const handleReject = async () => {
     if (!detail) return;
-    const invId = extractInvitationId(detail);
+    const invId = extractLinkId(detail);
     if (!invId) return;
     setActing(true);
     try {
@@ -302,7 +303,33 @@ function NotificationBell() {
     return d.toLocaleString();
   };
 
-  const isInvitation = detail?.kind === 'invitation' && extractInvitationId(detail);
+  const isInvitation = detail?.kind === 'invitation' && extractLinkId(detail);
+  const isTransfer = detail?.kind === 'ownership_transfer' && extractLinkId(detail);
+
+  const handleTransferAccept = async () => {
+    if (!detail) return;
+    const tId = extractLinkId(detail);
+    if (!tId) return;
+    setActing(true);
+    try {
+      await acceptTransfer(tId);
+      markRead(detail.id);
+      setDetail(null);
+      window.location.reload();
+    } catch { setActing(false); }
+  };
+
+  const handleTransferReject = async () => {
+    if (!detail) return;
+    const tId = extractLinkId(detail);
+    if (!tId) return;
+    setActing(true);
+    try {
+      await rejectTransfer(tId);
+      markRead(detail.id);
+      setDetail(null);
+    } catch { setActing(false); }
+  };
 
   return (
     <div style={{ position: 'relative' }}>
@@ -411,7 +438,9 @@ function NotificationBell() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle style={{ fontSize: 16 }}>
-              {detail?.kind === 'invitation' ? 'Workspace Invitation' : 'Notification'}
+              {detail?.kind === 'invitation' ? 'Workspace Invitation'
+                : detail?.kind === 'ownership_transfer' ? 'Ownership Transfer'
+                : 'Notification'}
             </DialogTitle>
             <DialogDescription />
           </DialogHeader>
@@ -459,8 +488,35 @@ function NotificationBell() {
                 </div>
               )}
 
+              {/* Action buttons for ownership transfer */}
+              {isTransfer && (
+                <div style={{
+                  display: 'flex', gap: 10, paddingTop: 8,
+                  borderTop: `1px solid ${C.line}`,
+                }}>
+                  <Button
+                    onClick={handleTransferAccept}
+                    disabled={acting}
+                    style={{
+                      flex: 1, background: C.accent, border: 'none',
+                      color: '#fff', fontWeight: 600,
+                    }}
+                  >
+                    {acting ? 'Accepting...' : 'Accept Transfer'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={handleTransferReject}
+                    disabled={acting}
+                    style={{ flex: 1 }}
+                  >
+                    Decline
+                  </Button>
+                </div>
+              )}
+
               {/* Read-only: other notification types */}
-              {!isInvitation && (
+              {!isInvitation && !isTransfer && (
                 <div className="flex justify-end pt-2">
                   <Button variant="outline" onClick={() => setDetail(null)}>
                     Close
