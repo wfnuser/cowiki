@@ -19,11 +19,10 @@ import remarkGfm from 'remark-gfm';
 import {
   listWorkspaces, listPages, getPage, createWorkspace, writePage, createFolder,
   compile, submit, renameWorkspace,
-  listPendingInvitations, acceptInvitation, rejectInvitation,
   deleteWorkspace,
   listPublicWorkspaces, joinWorkspace,
   listSources, getSource, listReviews,
-  type Workspace, type PageMeta, type PageFull, type PendingInvitation, type SourceItem, type SourceContent,
+  type Workspace, type PageMeta, type PageFull, type SourceItem, type SourceContent,
 } from '../api';
 import { AddSourceDialog } from '@/components/AddSourceDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
@@ -93,7 +92,6 @@ export function MainLayout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Team space management state
-  const [pendingInvites, setPendingInvites] = useState<PendingInvitation[]>([]);
   const [showInviteDialog, setShowInviteDialog] = useState<Workspace | null>(null);
   const [showTransferDialog, setShowTransferDialog] = useState<Workspace | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<Workspace | null>(null);
@@ -450,39 +448,12 @@ export function MainLayout() {
     }
   };
 
-  // Load pending invitations
-  useEffect(() => {
-    if (auth) {
-      listPendingInvitations().then(setPendingInvites).catch(() => {});
-    }
-  }, [auth?.id]);
-
   // Handle invite submission
   const handleInviteSuccess = (msg: string) => {
     setMessage({ text: msg, type: 'success' });
   };
   const handleInviteError = (msg: string) => {
     setMessage({ text: msg, type: 'error' });
-  };
-
-  const handleAcceptInvite = async (inv: PendingInvitation) => {
-    try {
-      await acceptInvitation(inv.id);
-      setPendingInvites((prev) => prev.filter((i) => i.id !== inv.id));
-      loadWorkspaces();
-      setMessage({ text: `Joined ${inv.workspace_name}!`, type: 'success' });
-    } catch {
-      setMessage({ text: 'Failed to accept invitation', type: 'error' });
-    }
-  };
-
-  const handleRejectInvite = async (inv: PendingInvitation) => {
-    try {
-      await rejectInvitation(inv.id);
-      setPendingInvites((prev) => prev.filter((i) => i.id !== inv.id));
-    } catch {
-      setMessage({ text: 'Failed to reject invitation', type: 'error' });
-    }
   };
 
   const handleDeleteWorkspace = async () => {

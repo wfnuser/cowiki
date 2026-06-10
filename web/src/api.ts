@@ -604,4 +604,5 @@ export async function acceptTransfer(transferId: string): Promise<TransferRespon
 export async function rejectTransfer(transferId: string): Promise<TransferResponse> {
   const res = await fetch(`${BASE}/transfers/${transferId}/reject`, { method: 'POST', headers: h() });
   if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }

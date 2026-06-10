@@ -57,7 +57,7 @@ export function InviteDialog({
   const [focusedIdx, setFocusedIdx] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Search on input change
   const doSearch = useCallback(async (q: string) => {
