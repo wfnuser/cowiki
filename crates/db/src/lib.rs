@@ -2,9 +2,11 @@ use sqlx::PgPool;
 
 pub mod api_keys;
 pub mod audit;
+pub mod notifications;
 pub mod pages;
 pub mod review_comments;
 pub mod submissions;
+pub mod transfers;
 pub mod users;
 pub mod workspaces;
 
@@ -54,13 +56,23 @@ pub async fn run_migrations(pool: &PgPool, embedding_dim: u32) -> sqlx::Result<(
         tracing::error!("DB error: {e}");
         e
     })?;
-    let sql9 = include_str!("migrations/009_review_comments.sql");
+    let sql9 = include_str!("migrations/009_role_management.sql");
     sqlx::raw_sql(sql9).execute(pool).await.map_err(|e| {
         tracing::error!("DB error: {e}");
         e
     })?;
-    let sql10 = include_str!("migrations/010_invitation_reject_status.sql");
+    let sql10 = include_str!("migrations/009_review_comments.sql");
     sqlx::raw_sql(sql10).execute(pool).await.map_err(|e| {
+        tracing::error!("DB error: {e}");
+        e
+    })?;
+    let sql11 = include_str!("migrations/010_invitation_reject_status.sql");
+    sqlx::raw_sql(sql11).execute(pool).await.map_err(|e| {
+        tracing::error!("DB error: {e}");
+        e
+    })?;
+    let sql12 = include_str!("migrations/010_notifications.sql");
+    sqlx::raw_sql(sql12).execute(pool).await.map_err(|e| {
         tracing::error!("DB error: {e}");
         e
     })?;

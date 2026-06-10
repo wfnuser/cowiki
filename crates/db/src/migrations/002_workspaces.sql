@@ -1,6 +1,6 @@
 -- Workspaces (a team's shared space)
 CREATE TABLE IF NOT EXISTS workspaces (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     slug TEXT NOT NULL UNIQUE,
     created_by UUID NOT NULL REFERENCES users(id),
@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
 CREATE TABLE IF NOT EXISTS workspace_members (
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'member')),
+    role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('owner', 'manager', 'editor', 'viewer')),
     invited_by UUID REFERENCES users(id),
     joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (workspace_id, user_id)
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS workspace_members (
 
 -- Invitations (pending)
 CREATE TABLE IF NOT EXISTS invitations (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     email TEXT NOT NULL,
     invited_by UUID NOT NULL REFERENCES users(id),

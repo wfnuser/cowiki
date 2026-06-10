@@ -1,23 +1,16 @@
 -- 007_team_permissions: Team Space invitation + permissions + audit log
--- Adds: invitation.role, audit_log table
 
 -- 1. Add role column to invitations
-ALTER TABLE invitations ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'writer';
+ALTER TABLE invitations ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'viewer';
 
--- Add role check constraint (idempotent)
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'invitations_role_check'
-    ) THEN
-        ALTER TABLE invitations ADD CONSTRAINT invitations_role_check
-            CHECK (role IN ('owner', 'writer', 'reader'));
-    END IF;
-END $$;
+-- Ensure 4-tier role constraint (idempotent)
+ALTER TABLE invitations DROP CONSTRAINT IF EXISTS invitations_role_check;
+ALTER TABLE invitations ADD CONSTRAINT invitations_role_check
+    CHECK (role IN ('owner', 'manager', 'editor', 'viewer'));
 
 -- 2. Audit log table for management operations
 CREATE TABLE IF NOT EXISTS audit_log (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID REFERENCES workspaces(id) ON DELETE SET NULL,
     actor_id UUID NOT NULL REFERENCES users(id),
     action VARCHAR(50) NOT NULL,

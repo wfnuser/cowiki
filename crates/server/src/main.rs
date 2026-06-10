@@ -81,11 +81,26 @@ async fn main() {
 
     let port = config.server.port.to_string();
 
+    // Clone db for background task before moving into AppState
+    let expire_db = db.clone();
+
     let state = Arc::new(AppState {
         db,
         config,
         repo_manager,
         compiler,
+    });
+
+    // Background task: expire stale invitations every hour
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+            match cowiki_db::workspaces::expire_stale_invitations(&expire_db).await {
+                Ok(n) if n > 0 => tracing::info!("expired {n} stale invitation(s)"),
+                Err(e) => tracing::error!("failed to expire stale invitations: {e}"),
+                _ => {}
+            }
+        }
     });
 
     let app = Router::new()
@@ -127,7 +142,19 @@ async fn main() {
             "/api/workspaces/{slug}/members",
             get(routes::workspace::list_members),
         )
-        // Invitations (accept/reject/pending)
+        // Invitations (batch invite, list, resend, revoke, accept, reject, pending)
+        .route(
+            "/api/workspaces/{slug}/invitations",
+            get(routes::workspace::list_invitations),
+        )
+        .route(
+            "/api/workspaces/{slug}/invitations/{id}/resend",
+            post(routes::workspace::resend_invitation),
+        )
+        .route(
+            "/api/workspaces/{slug}/invitations/{id}",
+            delete(routes::workspace::revoke_invitation),
+        )
         .route(
             "/api/invitations/pending",
             get(routes::workspace::list_pending_invitations),
@@ -140,7 +167,7 @@ async fn main() {
             "/api/invitations/{id}/reject",
             post(routes::workspace::reject_invitation),
         )
-        // Member management (owner only)
+        // Member management (Manager+)
         .route(
             "/api/workspaces/{slug}/members/remove",
             post(routes::workspace::remove_member),
@@ -149,7 +176,28 @@ async fn main() {
             "/api/workspaces/{slug}/members/role",
             post(routes::workspace::change_member_role),
         )
-        // Workspace deletion (owner only)
+        // Ownership transfer
+        .route(
+            "/api/workspaces/{slug}/transfer-ownership",
+            post(routes::transfers::initiate_transfer),
+        )
+        .route(
+            "/api/transfers/pending",
+            get(routes::transfers::list_pending_transfers),
+        )
+        .route(
+            "/api/transfers/{id}/accept",
+            post(routes::transfers::accept_transfer),
+        )
+        .route(
+            "/api/transfers/{id}/reject",
+            post(routes::transfers::reject_transfer),
+        )
+        .route(
+            "/api/transfers/{id}",
+            delete(routes::transfers::cancel_transfer),
+        )
+        // Workspace deletion (Owner only)
         .route(
             "/api/workspaces/{slug}",
             delete(routes::workspace::delete_workspace),
@@ -235,6 +283,25 @@ async fn main() {
         .route("/api/keys", get(routes::keys::list_keys))
         .route("/api/keys", post(routes::keys::create_key))
         .route("/api/keys/{id}", delete(routes::keys::revoke_key))
+        // User search (for invite autocomplete)
+        .route("/api/users/search", get(routes::users::search_users))
+        // Notifications
+        .route(
+            "/api/notifications",
+            get(routes::notifications::list_notifications),
+        )
+        .route(
+            "/api/notifications/unread-count",
+            get(routes::notifications::unread_count),
+        )
+        .route(
+            "/api/notifications/read-all",
+            post(routes::notifications::mark_all_read),
+        )
+        .route(
+            "/api/notifications/{id}/read",
+            post(routes::notifications::mark_read),
+        )
         .layer(CorsLayer::permissive())
         .with_state(state);
 

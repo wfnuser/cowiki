@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Compass, FileText, Search,
-  Upload, Zap, ArrowUpRight, MoreHorizontal, RefreshCw, Bell, Trash2,
+  Upload, Zap, ArrowUpRight, MoreHorizontal, RefreshCw,
   CheckCircle2, Clock,
 } from 'lucide-react';
 import {
@@ -20,10 +20,10 @@ import {
   listWorkspaces, listPages, getPage, createWorkspace, writePage, createFolder,
   compile, submit, renameWorkspace,
   listPendingInvitations, acceptInvitation, rejectInvitation,
-  inviteToWorkspace, listMembers, removeMember, changeMemberRole, deleteWorkspace,
+  deleteWorkspace,
   listPublicWorkspaces, joinWorkspace,
   listSources, getSource, listReviews,
-  type Workspace, type PageMeta, type PageFull, type PendingInvitation, type MemberInfo, type SourceItem, type SourceContent,
+  type Workspace, type PageMeta, type PageFull, type PendingInvitation, type SourceItem, type SourceContent,
 } from '../api';
 import { AddSourceDialog } from '@/components/AddSourceDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
@@ -33,6 +33,8 @@ import { SpacePanel, type NavTab } from '../components/layout/SpacePanel';
 import { ReviewList } from '../components/review/ReviewList';
 import { ReviewDetail } from '../components/review/ReviewDetail';
 import { MembersView } from '../components/views/MembersView';
+import { InviteDialog } from '../components/InviteDialog';
+import { TransferDialog } from '../components/TransferDialog';
 import { C } from '@/lib/design';
 
 type ActiveView =
@@ -93,13 +95,8 @@ export function MainLayout() {
   // Team space management state
   const [pendingInvites, setPendingInvites] = useState<PendingInvitation[]>([]);
   const [showInviteDialog, setShowInviteDialog] = useState<Workspace | null>(null);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState('writer');
-  const [showMembersPanel, setShowMembersPanel] = useState<Workspace | null>(null);
-  const [membersList, setMembersList] = useState<MemberInfo[]>([]);
+  const [showTransferDialog, setShowTransferDialog] = useState<Workspace | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<Workspace | null>(null);
-  const [membersLoading, setMembersLoading] = useState(false);
-  const [membersError, setMembersError] = useState(false);
 
   const userBranch = `user/${auth?.id}`;
 
@@ -461,18 +458,11 @@ export function MainLayout() {
   }, [auth?.id]);
 
   // Handle invite submission
-  const handleInvite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inviteEmail.trim() || !showInviteDialog) return;
-    try {
-      await inviteToWorkspace(showInviteDialog.slug, inviteEmail.trim(), inviteRole);
-      setShowInviteDialog(null);
-      setInviteEmail('');
-      setInviteRole('writer');
-      setMessage({ text: 'Invitation sent.', type: 'success' });
-    } catch {
-      setMessage({ text: 'Failed to send invitation', type: 'error' });
-    }
+  const handleInviteSuccess = (msg: string) => {
+    setMessage({ text: msg, type: 'success' });
+  };
+  const handleInviteError = (msg: string) => {
+    setMessage({ text: msg, type: 'error' });
   };
 
   const handleAcceptInvite = async (inv: PendingInvitation) => {
@@ -492,41 +482,6 @@ export function MainLayout() {
       setPendingInvites((prev) => prev.filter((i) => i.id !== inv.id));
     } catch {
       setMessage({ text: 'Failed to reject invitation', type: 'error' });
-    }
-  };
-
-  // Load and show members panel (for dialog)
-  const openMembersPanel = async (ws: Workspace) => {
-    setShowMembersPanel(ws);
-    setMembersList([]);
-    setMembersLoading(true);
-    setMembersError(false);
-    try {
-      const members = await listMembers(ws.slug);
-      setMembersList(members);
-    } catch {
-      setMembersError(true);
-    } finally {
-      setMembersLoading(false);
-    }
-  };
-
-  const handleRemoveMember = async (ws: Workspace, userId: string) => {
-    try {
-      await removeMember(ws.slug, userId);
-      setMembersList((prev) => prev.filter((m) => m.id !== userId));
-      setMessage({ text: 'Member removed.', type: 'success' });
-    } catch {
-      setMessage({ text: 'Failed to remove member', type: 'error' });
-    }
-  };
-
-  const handleChangeRole = async (ws: Workspace, userId: string, role: string) => {
-    try {
-      await changeMemberRole(ws.slug, userId, role);
-      setMembersList((prev) => prev.map((m) => m.id === userId ? { ...m, role } : m));
-    } catch {
-      setMessage({ text: 'Failed to change role', type: 'error' });
     }
   };
 
@@ -626,7 +581,7 @@ export function MainLayout() {
             onAddFolderInFolder={(parentPath) => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(parentPath); } }}
             onShowIngest={() => setShowIngest(true)}
             onCompile={handleCompile}
-            onSettings={() => activeWorkspace && openMembersPanel(activeWorkspace)}
+            onSettings={() => setSettingsOpen(true)}
           />
 
           {/* Main Content Area */}
@@ -706,32 +661,7 @@ export function MainLayout() {
                   />
                 </div>
 
-                {/* Pending invitations */}
-                {pendingInvites.length > 0 && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button style={{
-                        display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px',
-                        borderRadius: 6, border: 'none', cursor: 'pointer',
-                        background: C.amberSoft, color: C.amber, fontSize: 11, fontWeight: 500,
-                      }}>
-                        <Bell size={12} /> {pendingInvites.length}
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-72">
-                      {pendingInvites.map((inv) => (
-                        <div key={inv.id} className="px-2 py-2 border-b last:border-0">
-                          <div className="text-sm font-medium">{inv.workspace_name}</div>
-                          <div className="text-xs text-gray-500">as <span className="font-mono">{inv.role}</span> · invited by {inv.invited_by_name}</div>
-                          <div className="flex gap-1 mt-1.5">
-                            <button onClick={() => handleAcceptInvite(inv)} className="px-2 py-0.5 text-xs rounded bg-green-600 text-white hover:bg-green-700">Accept</button>
-                            <button onClick={() => handleRejectInvite(inv)} className="px-2 py-0.5 text-xs rounded bg-gray-200 text-gray-600 hover:bg-gray-300">Reject</button>
-                          </div>
-                        </div>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
+
 
                 {/* Wiki-specific actions */}
                 {activeTab === 'wiki' && (activeView?.kind === 'page' || activeView?.kind === 'source') && (
@@ -846,7 +776,15 @@ export function MainLayout() {
 
               /* Members */
               ) : activeView?.kind === 'members' && activeWorkspace ? (
-                <MembersView workspaceSlug={activeWorkspace.slug} />
+                <MembersView
+                  workspaceSlug={activeWorkspace.slug}
+                  canManage={isOwner || activeWorkspace.role === 'manager'}
+                  currentUserRole={activeWorkspace.role}
+                  currentUserId={auth?.id || ''}
+                  isOwner={isOwner}
+                  onInvite={() => setShowInviteDialog(activeWorkspace)}
+                  onTransfer={() => setShowTransferDialog(activeWorkspace)}
+                />
 
               /* Activity */
               ) : activeView?.kind === 'activity' ? (
@@ -1005,76 +943,25 @@ export function MainLayout() {
       </Dialog>
 
       {/* Invite member */}
-      <Dialog open={!!showInviteDialog} onOpenChange={(open) => !open && setShowInviteDialog(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Invite Member -- {showInviteDialog?.name}</DialogTitle></DialogHeader>
-          <form onSubmit={handleInvite} className="space-y-4 mt-2">
-            <div>
-              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Email</label>
-              <Input value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="colleague@example.com" autoFocus />
-            </div>
-            <div>
-              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Role</label>
-              <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                <option value="writer">Writer</option>
-                <option value="reader">Reader</option>
-                <option value="owner">Owner</option>
-              </select>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" type="button" onClick={() => setShowInviteDialog(null)}>Cancel</Button>
-              <Button type="submit" disabled={!inviteEmail.trim()}>Send Invitation</Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <InviteDialog
+        open={!!showInviteDialog}
+        workspaceName={showInviteDialog?.name || ''}
+        workspaceSlug={showInviteDialog?.slug || ''}
+        onOpenChange={(open) => { if (!open) setShowInviteDialog(null); }}
+        onInvited={handleInviteSuccess}
+        onError={handleInviteError}
+      />
 
-      {/* Members management (dialog) */}
-      <Dialog open={!!showMembersPanel} onOpenChange={(open) => !open && setShowMembersPanel(null)}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle>Members -- {showMembersPanel?.name}</DialogTitle></DialogHeader>
-          <div className="space-y-2 mt-2 max-h-80 overflow-y-auto">
-            {membersLoading ? (
-              <p className="text-sm text-gray-400">Loading...</p>
-            ) : membersError ? (
-              <p className="text-sm text-red-500">Failed to load members.</p>
-            ) : membersList.length === 0 ? (
-              <p className="text-sm text-gray-400">No members found.</p>
-            ) : (
-              membersList.map((m) => (
-                <div key={m.id} className="flex items-center justify-between py-2 border-b last:border-0">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">{m.name}</div>
-                    <div className="text-xs text-gray-400">{m.email || 'no email'}</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={m.role}
-                      onChange={(e) => showMembersPanel && handleChangeRole(showMembersPanel, m.id, e.target.value)}
-                      disabled={m.role === 'owner'}
-                      className="text-xs rounded border border-input bg-background px-2 py-1"
-                    >
-                      <option value="owner">Owner</option>
-                      <option value="writer">Writer</option>
-                      <option value="reader">Reader</option>
-                    </select>
-                    {m.role !== 'owner' && (
-                      <button
-                        onClick={() => showMembersPanel && handleRemoveMember(showMembersPanel, m.id)}
-                        className="p-1 rounded text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                        title="Remove member"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Transfer ownership */}
+      <TransferDialog
+        open={!!showTransferDialog}
+        workspaceName={showTransferDialog?.name || ''}
+        workspaceSlug={showTransferDialog?.slug || ''}
+        currentUserId={auth?.id || ''}
+        onOpenChange={(open) => { if (!open) setShowTransferDialog(null); }}
+        onSuccess={handleInviteSuccess}
+        onError={handleInviteError}
+      />
 
       {/* Delete workspace confirmation */}
       <Dialog open={!!showDeleteConfirm} onOpenChange={(open) => !open && setShowDeleteConfirm(null)}>

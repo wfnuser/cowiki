@@ -90,6 +90,31 @@ pub async fn get_default(pool: &PgPool) -> sqlx::Result<User> {
         .await
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct UserSearchResult {
+    pub id: Uuid,
+    pub name: String,
+    pub email: Option<String>,
+}
+
+/// Search users by name or email prefix (for invite autocomplete).
+pub async fn search(pool: &PgPool, query: &str, limit: i64) -> sqlx::Result<Vec<UserSearchResult>> {
+    let pattern = format!("{query}%");
+    sqlx::query_as::<_, UserSearchResult>(
+        "SELECT id, name, email FROM users \
+         WHERE name ILIKE $1 OR email ILIKE $1 \
+         ORDER BY name LIMIT $2",
+    )
+    .bind(&pattern)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("DB user search failed: {e}");
+        e
+    })
+}
+
 fn generate_api_key() -> String {
     format!("cw_{}", Uuid::new_v4().to_string().replace('-', ""))
 }

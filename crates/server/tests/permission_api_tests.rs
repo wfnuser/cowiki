@@ -126,7 +126,7 @@ fn test_list_workspaces_returns_correct_role() {
     // User B (writer, joined public) lists
     let (resp_b, _) = api_request("GET", "/workspaces", None, &key_b);
     assert!(
-        resp_b.contains("writer"),
+        resp_b.contains("editor"),
         "user_b should be writer for joined workspace"
     );
 }
@@ -154,7 +154,7 @@ fn test_invite_requires_owner() {
     join_workspace(&key_c, &slug); // user_c joins as writer
 
     // Writer tries to invite → should get 403 Forbidden
-    let body = r#"{"email":"new@test.com","role":"writer"}"#;
+    let body = r#"{"invitations":[{"user":"new@test.com","role":"editor"}]}"#;
     let (_resp, status) = api_request(
         "POST",
         &format!("/workspaces/{}/invite", slug),
@@ -188,7 +188,7 @@ fn test_invite_with_invalid_role_rejected() {
     create_workspace(&key_a, "Invite Role WS", &slug, "public");
 
     // Invalid role
-    let body = r#"{"email":"new@test.com","role":"admin"}"#;
+    let body = r#"{"invitations":[{"user":"new@test.com","role":"admin"}]}"#;
     let (_resp, status) = api_request(
         "POST",
         &format!("/workspaces/{}/invite", slug),
@@ -342,7 +342,7 @@ fn test_change_role_owner_only() {
         .expect("user_b should be in member list");
 
     // Writer tries to change role → 403
-    let body = format!(r#"{{"user_id":"{}","role":"reader"}}"#, user_b_id);
+    let body = format!(r#"{{"user_id":"{}","role":"viewer"}}"#, user_b_id);
     let (_resp, status) = api_request(
         "POST",
         &format!("/workspaces/{}/members/role", slug),
@@ -458,7 +458,7 @@ fn test_full_permission_matrix() {
     join_workspace(&key_b, &slug);
 
     // Owner invites Carol as reader
-    let invite_body = format!(r#"{{"email":"perm-matrix-carol@test.com","role":"reader"}}"#);
+    let invite_body = r#"{"invitations":[{"user":"perm-matrix-carol@test.com","role":"viewer"}]}"#;
     let (invite_resp, inv_status) = api_request(
         "POST",
         &format!("/workspaces/{}/invite", slug),
@@ -498,14 +498,14 @@ fn test_full_permission_matrix() {
     let (_, s) = api_request(
         "POST",
         &format!("/workspaces/{}/invite", slug),
-        Some(r#"{"email":"x@t.com","role":"reader"}"#),
+        Some(r#"{"invitations":[{"user":"x@t.com","role":"viewer"}]}"#),
         &key_b,
     );
     assert_eq!(s, 403, "writer invite → 403");
     let (_, s) = api_request(
         "POST",
         &format!("/workspaces/{}/invite", slug),
-        Some(r#"{"email":"x@t.com","role":"reader"}"#),
+        Some(r#"{"invitations":[{"user":"x@t.com","role":"viewer"}]}"#),
         &key_a,
     );
     assert_eq!(s, 200, "owner invite → 200");

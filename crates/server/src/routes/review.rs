@@ -5,14 +5,18 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 use crate::error::{AppError, Result};
-use crate::routes::auth::extract_user;
+use crate::routes::guard::{self, Permission};
 use crate::AppState;
 
 pub async fn list_reviews(
     State(state): State<Arc<AppState>>,
     Path(ws_slug): Path<String>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<Vec<cowiki_db::submissions::Submission>>> {
-    let subs = cowiki_db::submissions::list_pending_for_workspace(&state.db, &ws_slug).await?;
+    let guard = guard::require_membership(&state, &headers, &ws_slug).await?;
+    guard::require(&guard, Permission::ViewContent)?;
+    let subs = cowiki_db::submissions::list_pending_for_workspace(&state.db, &guard.workspace.slug)
+        .await?;
     Ok(Json(subs))
 }
 
@@ -26,7 +30,11 @@ pub struct ReviewDetail {
 pub async fn get_review(
     State(state): State<Arc<AppState>>,
     Path((ws_slug, id)): Path<(String, uuid::Uuid)>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<ReviewDetail>> {
+    let guard = guard::require_membership(&state, &headers, &ws_slug).await?;
+    guard::require(&guard, Permission::ViewContent)?;
+
     let submission = cowiki_db::submissions::find_by_id(&state.db, id)
         .await?
         .ok_or_else(|| AppError::NotFound("submission not found".into()))?;
@@ -64,8 +72,6 @@ pub async fn review_action(
     headers: axum::http::HeaderMap,
     Json(input): Json<ReviewAction>,
 ) -> Result<Json<serde_json::Value>> {
-    let reviewer = extract_user(&state.db, &headers).await?;
-
     let submission = cowiki_db::submissions::find_by_id(&state.db, id)
         .await?
         .ok_or_else(|| AppError::NotFound("submission not found".into()))?;
@@ -75,22 +81,13 @@ pub async fn review_action(
         ));
     }
 
-    // Authorization: reviewer must be a writer/owner of the workspace.
-    let ws = cowiki_db::workspaces::find_by_slug(&state.db, &ws_slug)
-        .await?
-        .ok_or_else(|| AppError::NotFound("workspace not found".into()))?;
-    let role = cowiki_db::workspaces::get_member_role(&state.db, ws.id, reviewer.id)
-        .await?
-        .unwrap_or_default();
-    if role != "owner" && role != "writer" {
-        return Err(AppError::Forbidden(
-            "only workspace owners or writers can review".into(),
-        ));
-    }
+    // Authorization: reviewer must have EditContent permission
+    let guard = guard::require_membership(&state, &headers, &ws_slug).await?;
+    guard::require(&guard, Permission::EditContent)?;
 
     match input.action.as_str() {
         "approve" => {
-            cowiki_db::submissions::update_status(&state.db, id, "approved", reviewer.id).await?;
+            cowiki_db::submissions::update_status(&state.db, id, "approved", guard.user.id).await?;
         }
         "merge" => {
             if submission.status != "approved" {
@@ -113,7 +110,7 @@ pub async fn review_action(
             repo.merge_to_main(
                 &submission.source_branch,
                 &file_paths,
-                &reviewer.name,
+                &guard.user.name,
                 &format!("approve: {}", submission.summary),
             )
             .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -135,17 +132,17 @@ pub async fn review_action(
                         "main",
                         &hash,
                         None,
-                        reviewer.id,
+                        guard.user.id,
                     )
                     .await
                     .ok();
                 }
             }
 
-            cowiki_db::submissions::update_status(&state.db, id, "merged", reviewer.id).await?;
+            cowiki_db::submissions::update_status(&state.db, id, "merged", guard.user.id).await?;
         }
         "reject" => {
-            cowiki_db::submissions::update_status(&state.db, id, "rejected", reviewer.id).await?;
+            cowiki_db::submissions::update_status(&state.db, id, "rejected", guard.user.id).await?;
         }
         _ => return Err(AppError::BadRequest("invalid action".into())),
     }
