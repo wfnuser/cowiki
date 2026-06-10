@@ -68,15 +68,20 @@ pub enum RebaseOutcome {
     Conflict(Vec<String>),
 }
 
-/// Build a git signature, falling back to a service identity if `author` is blank
-/// (an empty name makes `Signature::now` fail).
+/// Build a git signature from a user display name. libgit2 rejects names containing
+/// angle brackets (and control chars), so we strip those and fall back to a service
+/// identity when nothing usable remains — a real user name must never 500 a write.
+/// The email is a fixed placeholder (cowiki has no per-user git mailbox).
 fn signature(author: &str) -> Result<Signature<'static>, git2::Error> {
-    let name = if author.trim().is_empty() {
-        "cowiki"
-    } else {
-        author
+    let cleaned: String = author
+        .chars()
+        .filter(|c| !matches!(c, '<' | '>') && !c.is_control())
+        .collect();
+    let name = match cleaned.trim() {
+        "" => "cowiki",
+        n => n,
     };
-    Signature::now(name, &format!("{name}@cowiki"))
+    Signature::now(name, "noreply@cowiki")
 }
 
 /// Set one file `segments` (possibly nested, e.g. `["wiki", "a", "b.md"]`) to `blob`
@@ -89,16 +94,52 @@ fn set_path_in_tree(
     blob: git2::Oid,
 ) -> Result<git2::Oid, git2::Error> {
     let mut builder = repo.treebuilder(base_tree)?;
+    let existing = base_tree.and_then(|t| t.get_name(segments[0]));
     if segments.len() == 1 {
+        // Refuse to drop a whole subtree by overwriting it with a file.
+        if existing.as_ref().and_then(|e| e.kind()) == Some(git2::ObjectType::Tree) {
+            return Err(git2::Error::from_str(&format!(
+                "cannot write file over existing directory '{}'",
+                segments[0]
+            )));
+        }
         builder.insert(segments[0], blob, 0o100644)?;
     } else {
-        let sub_base = base_tree
-            .and_then(|t| t.get_name(segments[0]))
-            .and_then(|e| repo.find_tree(e.id()).ok());
+        // Refuse to descend through a file as if it were a directory.
+        if existing.as_ref().and_then(|e| e.kind()) == Some(git2::ObjectType::Blob) {
+            return Err(git2::Error::from_str(&format!(
+                "cannot create directory over existing file '{}'",
+                segments[0]
+            )));
+        }
+        let sub_base = existing.and_then(|e| repo.find_tree(e.id()).ok());
         let sub_oid = set_path_in_tree(repo, sub_base.as_ref(), &segments[1..], blob)?;
         builder.insert(segments[0], sub_oid, 0o040000)?;
     }
     builder.write()
+}
+
+/// Commit `tree_oid` as the new tip of `branch` (`refs/heads/<branch>`), authored by
+/// `author`. Lock-free: callers already holding the branch write lock use it directly.
+fn commit_tree(
+    repo: &Repository,
+    branch: &str,
+    tree_oid: git2::Oid,
+    message: &str,
+    author: &str,
+    parents: &[&git2::Commit],
+) -> Result<(), git2::Error> {
+    let tree = repo.find_tree(tree_oid)?;
+    let sig = signature(author)?;
+    repo.commit(
+        Some(&format!("refs/heads/{branch}")),
+        &sig,
+        &sig,
+        message,
+        &tree,
+        parents,
+    )?;
+    Ok(())
 }
 
 /// Compute line-level diff between two strings, returning hunks with context lines.
@@ -272,6 +313,9 @@ impl WikiRepo {
         Ok(branch_name.to_string())
     }
 
+    /// Commit a single file onto `branch`. The new tree is built entirely in memory,
+    /// so this never touches the working directory or the shared on-disk index —
+    /// avoiding the cross-branch nested-path index race the old implementation had.
     pub fn write_file(
         &self,
         branch: &str,
@@ -282,45 +326,16 @@ impl WikiRepo {
     ) -> Result<(), git2::Error> {
         let lock = self.branch_lock(branch);
         let _guard = lock.write().unwrap();
-        self.write_file_locked(branch, file_path, content, message, author)
-    }
-
-    /// Commit a single file to `branch`, assuming the caller already holds that
-    /// branch's write lock. `merge_to_main` / `rebase_onto_main` hold a lock for the
-    /// whole operation, so they MUST use this — calling the public `write_file` there
-    /// would re-acquire the same non-reentrant `RwLock` and self-deadlock the request.
-    ///
-    /// The tree is built entirely in memory, so this never touches the working
-    /// directory or the shared on-disk index — avoiding the cross-branch index race
-    /// the previous nested-path implementation had.
-    fn write_file_locked(
-        &self,
-        branch: &str,
-        file_path: &str,
-        content: &[u8],
-        message: &str,
-        author: &str,
-    ) -> Result<(), git2::Error> {
         let repo = self.repo()?;
-        let branch_ref = repo.find_branch(branch, BranchType::Local)?;
-        let parent_commit = branch_ref.get().peel_to_commit()?;
-        let parent_tree = parent_commit.tree()?;
+        let parent_commit = repo
+            .find_branch(branch, BranchType::Local)?
+            .get()
+            .peel_to_commit()?;
 
         let blob_oid = repo.blob(content)?;
         let segments: Vec<&str> = file_path.split('/').collect();
-        let tree_oid = set_path_in_tree(&repo, Some(&parent_tree), &segments, blob_oid)?;
-        let tree = repo.find_tree(tree_oid)?;
-
-        let sig = signature(author)?;
-        repo.commit(
-            Some(&format!("refs/heads/{branch}")),
-            &sig,
-            &sig,
-            message,
-            &tree,
-            &[&parent_commit],
-        )?;
-        Ok(())
+        let tree_oid = set_path_in_tree(&repo, Some(&parent_commit.tree()?), &segments, blob_oid)?;
+        commit_tree(&repo, branch, tree_oid, message, author, &[&parent_commit])
     }
 
     pub fn read_file(&self, branch: &str, file_path: &str) -> Result<Option<Vec<u8>>, git2::Error> {
@@ -459,10 +474,15 @@ impl WikiRepo {
     }
 
     /// Merge the given `wiki/<slug>.md` pages from `branch` into `main` with a real
-    /// 3-way merge (merge-base vs main vs branch), authored by `author` (the original
-    /// submitter). Only the requested pages are applied — the rest of `branch` (e.g.
-    /// unsubmitted drafts) is ignored. If any requested page conflicts with `main`,
-    /// nothing is written and the conflicting paths are returned via `Conflict`.
+    /// 3-way merge (merge-base vs main vs branch), recorded as a 2-parent merge commit
+    /// authored by `author` (the original submitter). Only the requested pages are
+    /// applied — the rest of `branch` (e.g. unsubmitted drafts) is ignored. If any
+    /// requested page conflicts with `main`, nothing is written and the conflicting
+    /// paths are returned via `Conflict`.
+    ///
+    /// The source-branch tip is read without holding the branch lock: git objects are
+    /// immutable, so the worst a concurrent edit can do is make the merge see a
+    /// slightly older tip — never a torn read or a bad write to `main`.
     pub fn merge_to_main(
         &self,
         branch: &str,
@@ -487,7 +507,10 @@ impl WikiRepo {
         let merged_index = repo.merge_commits(&main_commit, &branch_commit, None)?;
 
         // For each requested page, take the merged blob (stage 0). A requested page
-        // with no stage-0 entry is either conflicted or simply absent on the branch.
+        // with no stage-0 entry that still exists on the branch is a real conflict.
+        // (Note: a branch-side *deletion* that conflicts with a main-side edit is not
+        // distinguished here, but cowiki has no page-delete path and a clean rebase
+        // always precedes merge, so it is unreachable today.)
         let mut updates: Vec<(String, git2::Oid)> = Vec::new();
         let mut conflicts: Vec<String> = Vec::new();
         for path in file_paths {
@@ -508,22 +531,28 @@ impl WikiRepo {
             return Ok(MergeOutcome::Merged);
         }
 
-        // Apply only the requested pages onto main's tree, in memory.
+        // Apply only the requested pages onto main's current tree, in memory.
         let mut tree_oid = main_commit.tree()?.id();
         for (path, blob) in &updates {
             let cur = repo.find_tree(tree_oid)?;
             let segments: Vec<&str> = path.split('/').collect();
             tree_oid = set_path_in_tree(&repo, Some(&cur), &segments, *blob)?;
         }
-        let tree = repo.find_tree(tree_oid)?;
-        let sig = signature(author)?;
-        repo.commit(
-            Some("refs/heads/main"),
-            &sig,
-            &sig,
+
+        // Commit as a 2-parent merge of main + the branch. The branch parent is what
+        // makes `main` an ancestor of every contributing branch, so the merge base
+        // advances and a later edit to the *same* page no longer re-diffs against a
+        // stale base (which would otherwise surface as a bogus add/add conflict and
+        // block all repeat edits). Only the requested pages are in the committed
+        // tree, so unsubmitted drafts never reach main's content even though the
+        // branch is reachable in history.
+        commit_tree(
+            &repo,
+            "main",
+            tree_oid,
             message,
-            &tree,
-            &[&main_commit],
+            author,
+            &[&main_commit, &branch_commit],
         )?;
         Ok(MergeOutcome::Merged)
     }
@@ -576,14 +605,12 @@ impl WikiRepo {
         }
 
         let tree_oid = merged_index.write_tree_to(&repo)?;
-        let tree = repo.find_tree(tree_oid)?;
-        let sig = signature("cowiki")?;
-        repo.commit(
-            Some(&format!("refs/heads/{branch}")),
-            &sig,
-            &sig,
+        commit_tree(
+            &repo,
+            branch,
+            tree_oid,
             "sync: merge main into user branch",
-            &tree,
+            "cowiki",
             &[&branch_commit, &main_commit],
         )?;
         Ok(RebaseOutcome::Updated)
@@ -815,6 +842,102 @@ mod tests {
             }
             other => panic!("expected conflict, got {other:?}"),
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Regression for the merge-base drift bug: repeated edits to the SAME page on the
+    /// SAME long-lived branch must merge cleanly. The 2-parent merge makes main an
+    /// ancestor of the branch, advancing the base; previously the 2nd edit was a bogus
+    /// add/add conflict that blocked every follow-up edit.
+    #[test]
+    fn repeat_edits_to_same_page_on_same_branch_merge_cleanly() {
+        let (repo, dir) = temp_repo("repeat-edit");
+        repo.ensure_branch_exists("user/ed").unwrap();
+
+        repo.write_file("user/ed", "wiki/p.md", b"A1\n", "e", "ed")
+            .unwrap();
+        assert_eq!(
+            repo.rebase_onto_main("user/ed").unwrap(),
+            RebaseOutcome::UpToDate
+        );
+        assert_eq!(
+            repo.merge_to_main("user/ed", &["wiki/p.md".into()], "ed", "m1")
+                .unwrap(),
+            MergeOutcome::Merged
+        );
+        assert_eq!(read(&repo, "main", "wiki/p.md").as_deref(), Some("A1\n"));
+
+        // 2nd edit to the same page (the flow rebases then merges — both must be clean).
+        repo.write_file("user/ed", "wiki/p.md", b"A1\nA2\n", "e", "ed")
+            .unwrap();
+        assert_eq!(
+            repo.rebase_onto_main("user/ed").unwrap(),
+            RebaseOutcome::Updated
+        );
+        assert_eq!(
+            repo.merge_to_main("user/ed", &["wiki/p.md".into()], "ed", "m2")
+                .unwrap(),
+            MergeOutcome::Merged
+        );
+        assert_eq!(
+            read(&repo, "main", "wiki/p.md").as_deref(),
+            Some("A1\nA2\n")
+        );
+
+        // 3rd edit, to be sure the base keeps advancing.
+        repo.write_file("user/ed", "wiki/p.md", b"A1\nA2\nA3\n", "e", "ed")
+            .unwrap();
+        repo.rebase_onto_main("user/ed").unwrap();
+        assert_eq!(
+            repo.merge_to_main("user/ed", &["wiki/p.md".into()], "ed", "m3")
+                .unwrap(),
+            MergeOutcome::Merged
+        );
+        assert_eq!(
+            read(&repo, "main", "wiki/p.md").as_deref(),
+            Some("A1\nA2\nA3\n")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A display name with angle brackets / control chars must be sanitized, never
+    /// rejected by libgit2 (which would 500 every write/merge).
+    #[test]
+    fn writes_succeed_with_angle_bracket_author_name() {
+        let (repo, dir) = temp_repo("weird-name");
+        repo.ensure_branch_exists("user/w").unwrap();
+        repo.write_file("user/w", "wiki/p.md", b"x\n", "edit", "Alice <a>")
+            .unwrap();
+        assert_eq!(read(&repo, "user/w", "wiki/p.md").as_deref(), Some("x\n"));
+        let inner = repo.repo().unwrap();
+        let c = inner
+            .find_branch("user/w", git2::BranchType::Local)
+            .unwrap()
+            .get()
+            .peel_to_commit()
+            .unwrap();
+        assert_eq!(c.author().name(), Some("Alice a"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `set_path_in_tree` must refuse to overwrite a directory with a file rather than
+    /// silently dropping the whole subtree.
+    #[test]
+    fn writing_file_over_directory_errors_instead_of_clobbering() {
+        let (repo, dir) = temp_repo("collide");
+        repo.ensure_branch_exists("user/c").unwrap();
+        repo.write_file("user/c", "wiki/d/inner.md", b"keep\n", "e", "c")
+            .unwrap();
+        assert!(
+            repo.write_file("user/c", "wiki/d", b"oops\n", "e", "c")
+                .is_err(),
+            "writing a file over an existing directory must error"
+        );
+        // The subtree is untouched.
+        assert_eq!(
+            read(&repo, "user/c", "wiki/d/inner.md").as_deref(),
+            Some("keep\n")
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

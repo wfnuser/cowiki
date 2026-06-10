@@ -38,8 +38,14 @@ pub async fn submit(
     super::pages::ensure_user_branch_if_needed(&repo, &input.branch)?;
 
     // Best-effort: catch the branch up to main so the diff is against the latest
-    // shared content. A genuine conflict is left for merge time to surface.
-    let _ = repo.rebase_onto_main(&input.branch);
+    // shared content. A genuine conflict is left for merge time to surface; only a
+    // real git error is worth logging here.
+    if let Err(e) = repo.rebase_onto_main(&input.branch) {
+        tracing::warn!(
+            "best-effort rebase before submit failed for {}: {e}",
+            input.branch
+        );
+    }
 
     let diffs = match repo.diff_files(&input.branch, &input.page_slugs) {
         Ok(d) => d,
