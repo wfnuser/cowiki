@@ -26,7 +26,6 @@ pub struct AppState {
 #[derive(serde::Serialize)]
 struct UsageResponse {
     llm: HashMap<String, cowiki_core::ai::token_usage::TokenUsage>,
-    vlm: HashMap<String, cowiki_core::ai::token_usage::TokenUsage>,
     embedder: HashMap<String, cowiki_core::ai::token_usage::TokenUsage>,
 }
 
@@ -35,7 +34,6 @@ async fn get_usage(
 ) -> axum::Json<UsageResponse> {
     axum::Json(UsageResponse {
         llm: state.compiler.llm_usage(),
-        vlm: state.compiler.vlm_usage(),
         embedder: state.compiler.embedder_usage(),
     })
 }
@@ -79,7 +77,7 @@ async fn main() {
     });
 
     // Compiler
-    let compiler = Compiler::new(llm, None, embedder);
+    let compiler = Compiler::new(llm, embedder);
 
     let port = config.server.port.to_string();
 

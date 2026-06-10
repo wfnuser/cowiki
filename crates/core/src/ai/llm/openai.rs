@@ -79,7 +79,7 @@ impl Llm for OpenAILlm {
             self.config.api_base.trim_end_matches('/')
         );
 
-        let resp = self
+        let response = self
             .client
             .post(&url)
             .bearer_auth(&self.config.api_key)
@@ -106,16 +106,34 @@ impl Llm for OpenAILlm {
                     self.config.model
                 );
                 e.to_string()
-            })?
-            .json::<ChatResponse>()
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    "LLM API response parse failed for model {}: {e}",
-                    self.config.model
-                );
-                e.to_string()
             })?;
+
+        // Surface HTTP errors (401/429/500/…) instead of masking them as a generic
+        // JSON-parse failure when the error body fails to deserialize as ChatResponse.
+        let status = response.status();
+        let body = response.text().await.map_err(|e| {
+            tracing::error!(
+                "LLM API read body failed for model {}: {e}",
+                self.config.model
+            );
+            e.to_string()
+        })?;
+        if !status.is_success() {
+            let preview: String = body.chars().take(500).collect();
+            tracing::error!(
+                "LLM API error for model {} (status {status}): {preview}",
+                self.config.model
+            );
+            return Err(format!("LLM API error (status {status}): {preview}"));
+        }
+        let resp: ChatResponse = serde_json::from_str(&body).map_err(|e| {
+            let preview: String = body.chars().take(500).collect();
+            tracing::error!(
+                "LLM API response parse failed for model {} (status {status}): {e}\nResponse: {preview}",
+                self.config.model
+            );
+            format!("LLM parse error (status {status}): {e}")
+        })?;
 
         let content = resp
             .choices
