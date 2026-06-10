@@ -1,28 +1,13 @@
--- Migration 009: Enhanced Role System + User Account Invitations (idempotent)
+-- Migration 009: Enhanced Role System — new columns + tables only
+-- Role constraints already fixed in 004 and 007 (no migration needed here)
 
--- Step 1: Drop old constraints first, so UPDATEs to new role values aren't blocked
-ALTER TABLE workspace_members DROP CONSTRAINT IF EXISTS workspace_members_role_check;
-ALTER TABLE invitations DROP CONSTRAINT IF EXISTS invitations_role_check;
-
--- Step 2: Migrate known old roles to new values
-UPDATE workspace_members SET role = 'editor' WHERE role IN ('admin', 'member', 'writer');
-UPDATE workspace_members SET role = 'viewer' WHERE role IN ('reader');
-UPDATE invitations SET role = 'editor' WHERE role IN ('writer');
-UPDATE invitations SET role = 'viewer' WHERE role IN ('reader');
-
--- Step 3: Safety net — map any remaining unrecognized/NULL roles to 'editor'
-UPDATE workspace_members SET role = 'editor' WHERE role IS NULL OR role NOT IN ('owner', 'manager', 'editor', 'reviewer', 'viewer');
-UPDATE invitations SET role = 'editor' WHERE role IS NULL OR role NOT IN ('owner', 'manager', 'editor', 'reviewer', 'viewer');
-
--- Step 4: Add new constraints on cleaned data
-ALTER TABLE workspace_members ADD CONSTRAINT workspace_members_role_check CHECK (role IN ('owner', 'manager', 'editor', 'reviewer', 'viewer'));
-ALTER TABLE invitations ADD CONSTRAINT invitations_role_check CHECK (role IN ('owner', 'manager', 'editor', 'reviewer', 'viewer'));
-
+-- New columns for workspace_members
 ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS joined_via TEXT NOT NULL DEFAULT 'direct';
 ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ NOT NULL DEFAULT now();
 ALTER TABLE workspace_members DROP CONSTRAINT IF EXISTS workspace_members_joined_via_check;
 ALTER TABLE workspace_members ADD CONSTRAINT workspace_members_joined_via_check CHECK (joined_via IN ('direct', 'invitation', 'public_join'));
 
+-- New columns for invitations
 ALTER TABLE invitations ADD COLUMN IF NOT EXISTS invited_user_id UUID REFERENCES users(id);
 ALTER TABLE invitations ADD COLUMN IF NOT EXISTS message TEXT;
 ALTER TABLE invitations ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ DEFAULT (now() + INTERVAL '7 days');
@@ -31,6 +16,7 @@ ALTER TABLE invitations ADD COLUMN IF NOT EXISTS last_resent_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_invitations_user ON invitations(invited_user_id, status);
 CREATE INDEX IF NOT EXISTS idx_invitations_status ON invitations(status);
 
+-- Ownership transfers table
 CREATE TABLE IF NOT EXISTS ownership_transfers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
