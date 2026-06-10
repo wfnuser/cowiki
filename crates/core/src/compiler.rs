@@ -3,18 +3,16 @@ use std::collections::HashMap;
 use crate::ai::embedder::Embedder;
 use crate::ai::llm::Llm;
 use crate::ai::token_usage::TokenUsage;
-use crate::ai::vlm::Vlm;
 use crate::models::Page;
 
 pub struct Compiler {
     llm: Box<dyn Llm>,
-    vlm: Option<Box<dyn Vlm>>,
     embedder: Box<dyn Embedder>,
 }
 
 impl Compiler {
-    pub fn new(llm: Box<dyn Llm>, vlm: Option<Box<dyn Vlm>>, embedder: Box<dyn Embedder>) -> Self {
-        Self { llm, vlm, embedder }
+    pub fn new(llm: Box<dyn Llm>, embedder: Box<dyn Embedder>) -> Self {
+        Self { llm, embedder }
     }
 
     pub async fn compile(&self, sources: &[(String, String)]) -> Result<Vec<Page>, String> {
@@ -75,14 +73,6 @@ Be concise. One concept per page. Use clear headings. Attribute claims to source
     /// Get LLM token usage snapshot.
     pub fn llm_usage(&self) -> HashMap<String, TokenUsage> {
         self.llm.usage_snapshot()
-    }
-
-    /// Get VLM token usage snapshot (if configured).
-    pub fn vlm_usage(&self) -> HashMap<String, TokenUsage> {
-        self.vlm
-            .as_ref()
-            .map(|v| v.usage_snapshot())
-            .unwrap_or_default()
     }
 
     /// Get embedder token usage snapshot.
