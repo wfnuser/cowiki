@@ -95,6 +95,7 @@ pub async fn initiate_transfer(
     .await?;
 
     // Notify the recipient
+    let db = state.db.clone();
     let ws_name = guard.workspace.name.clone();
     let from_name = guard.user.name.clone();
     let ws_id = guard.workspace.id;
@@ -102,7 +103,7 @@ pub async fn initiate_transfer(
     let recipient_id = input.new_owner_user_id;
     tokio::spawn(async move {
         let _ = cowiki_db::notifications::create(
-            &state.db,
+            &db,
             recipient_id,
             "ownership_transfer",
             &format!("Ownership transfer from {}", from_name),
