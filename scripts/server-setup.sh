@@ -42,6 +42,14 @@ sudo apt-get install -y ca-certificates curl gnupg lsb-release ufw
 # ---------------------------------------------------------------------------
 # 2. Docker + compose plugin
 # ---------------------------------------------------------------------------
+# The snap build of Docker is confined and cannot bind-mount paths outside
+# /home (e.g. /opt). Remove it so we can install the apt docker-ce build.
+if snap list docker >/dev/null 2>&1; then
+  echo "==> Removing snap docker (confinement blocks /opt bind mounts)"
+  sudo snap stop docker 2>/dev/null || true
+  sudo snap remove --purge docker
+fi
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "==> Installing Docker"
   sudo install -m 0755 -d /etc/apt/keyrings
@@ -120,7 +128,10 @@ echo "==> Configuring firewall (ufw)"
 sudo ufw allow 22/tcp
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
-# 5432 stays closed to the public; Docker bridge traffic is local and unaffected.
+# Allow containers on the Docker bridge to reach host PostgreSQL.
+# (ufw otherwise drops bridge->host traffic, so the backend can't connect.)
+sudo ufw allow from "$DOCKER_SUBNET" to any port 5432 proto tcp
+# 5432 stays closed to the public; only the Docker subnet is allowed above.
 sudo ufw --force enable
 
 # ---------------------------------------------------------------------------
