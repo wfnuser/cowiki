@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Compass, FileText, Search,
-  Upload, Zap, ArrowUpRight, MoreHorizontal, RefreshCw, Bell,
+  Upload, Zap, ArrowUpRight, MoreHorizontal, RefreshCw,
   CheckCircle2, Clock,
 } from 'lucide-react';
 import {
@@ -661,32 +661,7 @@ export function MainLayout() {
                   />
                 </div>
 
-                {/* Pending invitations */}
-                {pendingInvites.length > 0 && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button style={{
-                        display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px',
-                        borderRadius: 6, border: 'none', cursor: 'pointer',
-                        background: C.amberSoft, color: C.amber, fontSize: 11, fontWeight: 500,
-                      }}>
-                        <Bell size={12} /> {pendingInvites.length}
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-72">
-                      {pendingInvites.map((inv) => (
-                        <div key={inv.id} className="px-2 py-2 border-b last:border-0">
-                          <div className="text-sm font-medium">{inv.workspace_name}</div>
-                          <div className="text-xs text-gray-500">as <span className="font-mono">{inv.role}</span> · invited by {inv.invited_by_name}</div>
-                          <div className="flex gap-1 mt-1.5">
-                            <button onClick={() => handleAcceptInvite(inv)} className="px-2 py-0.5 text-xs rounded bg-green-600 text-white hover:bg-green-700">Accept</button>
-                            <button onClick={() => handleRejectInvite(inv)} className="px-2 py-0.5 text-xs rounded bg-gray-200 text-gray-600 hover:bg-gray-300">Reject</button>
-                          </div>
-                        </div>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
+
 
                 {/* Wiki-specific actions */}
                 {activeTab === 'wiki' && (activeView?.kind === 'page' || activeView?.kind === 'source') && (
