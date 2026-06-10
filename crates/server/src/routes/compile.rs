@@ -109,16 +109,12 @@ async fn do_compile(
     // 5. Write pages
     let mut result_pages = Vec::new();
     for page in &compiled {
-        let full_content = format!(
-            "---\ntitle: \"{}\"\nsummary: \"{}\"\nkind: concept\nsources:\n{}\n---\n\n{}",
-            page.title,
-            page.summary,
-            page.sources
-                .iter()
-                .map(|s| format!("  - {s}"))
-                .collect::<Vec<_>>()
-                .join("\n"),
-            page.body,
+        let full_content = cowiki_core::frontmatter::build_page_markdown(
+            &page.title,
+            &page.summary,
+            "concept",
+            &page.sources,
+            &page.body,
         );
 
         let path = format!("wiki/{}.md", page.slug);

@@ -138,12 +138,9 @@ fn parse_compiled_page(raw: &str) -> Page {
         }
     }
 
-    let slug = title
-        .to_lowercase()
-        .replace(|c: char| !c.is_alphanumeric() && c != ' ', "")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join("-");
+    // Use the body as the fallback seed so a symbol-only title still gets a unique,
+    // deterministic slug instead of collapsing to an empty slug (`wiki/.md`).
+    let slug = crate::frontmatter::slug_for_title(&title, &body);
 
     Page {
         slug,
