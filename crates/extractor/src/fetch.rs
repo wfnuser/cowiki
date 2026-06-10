@@ -40,7 +40,11 @@ async fn validate_url(raw: &str) -> Result<(), ExtractError> {
     let parsed = url::Url::parse(raw)?;
     match parsed.scheme() {
         "http" | "https" => {}
-        other => return Err(ExtractError::Blocked(format!("scheme '{other}' not allowed"))),
+        other => {
+            return Err(ExtractError::Blocked(format!(
+                "scheme '{other}' not allowed"
+            )))
+        }
     }
     let host = parsed
         .host_str()
@@ -138,7 +142,12 @@ mod tests {
         ] {
             assert!(!is_public_ip(ip.parse().unwrap()), "{ip} should be blocked");
         }
-        for ip in ["1.1.1.1", "8.8.8.8", "93.184.216.34", "2606:4700:4700::1111"] {
+        for ip in [
+            "1.1.1.1",
+            "8.8.8.8",
+            "93.184.216.34",
+            "2606:4700:4700::1111",
+        ] {
             assert!(is_public_ip(ip.parse().unwrap()), "{ip} should be allowed");
         }
     }
