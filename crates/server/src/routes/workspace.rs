@@ -279,13 +279,16 @@ pub async fn invite(
         .await
         {
             Ok(invitation) => {
-                // Fire-and-forget audit log
+                // Fire-and-forget audit log + notification
                 let db = state.db.clone();
                 let ws_id = guard.workspace.id;
                 let actor_id = guard.user.id;
                 let inv_id = invitation.id;
                 let user_display = item.user.clone();
                 let role_display = role.to_string();
+                let ws_name = guard.workspace.name.clone();
+                let inviter_name = guard.user.name.clone();
+                let inv_id2 = inv_id;
                 tokio::spawn(async move {
                     let _ = cowiki_db::audit::log(
                         &db,
@@ -295,6 +298,20 @@ pub async fn invite(
                         Some("invitation"),
                         Some(inv_id),
                         Some(serde_json::json!({"user": user_display, "role": role_display})),
+                    )
+                    .await;
+                    // Notify invitee
+                    let _ = cowiki_db::notifications::create(
+                        &db,
+                        invited_user,
+                        "invitation",
+                        &format!("Invited to {}", ws_name),
+                        Some(&format!(
+                            "{} invited you to join {} as {}",
+                            inviter_name, ws_name, role_display
+                        )),
+                        Some(ws_id),
+                        Some(&format!("/invitations/{}", inv_id2)),
                     )
                     .await;
                 });
@@ -333,19 +350,10 @@ pub async fn list_members(
     headers: axum::http::HeaderMap,
     Path(workspace_slug): Path<String>,
 ) -> Result<Json<Vec<MemberResponse>>> {
-    let user = extract_user(&state.db, &headers).await?;
+    let guard = guard::require_membership(&state, &headers, &workspace_slug).await?;
+    guard::require(&guard, Permission::ViewContent)?;
 
-    let ws = cowiki_db::workspaces::find_by_slug(&state.db, &workspace_slug)
-        .await?
-        .ok_or_else(|| AppError::NotFound("workspace not found".into()))?;
-
-    if !cowiki_db::workspaces::is_member(&state.db, ws.id, user.id).await? {
-        return Err(AppError::Forbidden(
-            "you are not a member of this workspace".into(),
-        ));
-    }
-
-    let members = cowiki_db::workspaces::list_members(&state.db, ws.id).await?;
+    let members = cowiki_db::workspaces::list_members(&state.db, guard.workspace.id).await?;
 
     let mut result = Vec::new();
     for m in members {
@@ -355,6 +363,8 @@ pub async fn list_members(
                 name: u.name,
                 email: u.email,
                 role: m.role,
+                last_active_at: m.last_active_at.map(|t| t.to_rfc3339()),
+                joined_via: m.joined_via,
             });
         }
     }
@@ -367,6 +377,8 @@ pub struct MemberResponse {
     pub name: String,
     pub email: Option<String>,
     pub role: String,
+    pub last_active_at: Option<String>,
+    pub joined_via: String,
 }
 
 #[derive(Deserialize)]
@@ -776,11 +788,23 @@ pub async fn change_member_role(
         .await?
         .ok_or_else(|| AppError::NotFound("user not found".into()))?;
 
+    // Fetch the member record for last_active_at + joined_via
+    let member = cowiki_db::workspaces::list_members(&state.db, guard.workspace.id)
+        .await?
+        .into_iter()
+        .find(|m| m.user_id == target_id);
+
     Ok(Json(MemberResponse {
         id: member_user.id.to_string(),
         name: member_user.name,
         email: member_user.email,
         role: updated_role.to_string(),
+        last_active_at: member
+            .as_ref()
+            .and_then(|m| m.last_active_at.map(|t| t.to_rfc3339())),
+        joined_via: member
+            .as_ref()
+            .map_or_else(|| "direct".to_string(), |m| m.joined_via.clone()),
     }))
 }
 

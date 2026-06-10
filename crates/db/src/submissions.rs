@@ -101,6 +101,7 @@ mod tests {
             include_str!("migrations/008_submission_workspace.sql"),
             include_str!("migrations/009_role_management.sql"),
             include_str!("migrations/009_review_comments.sql"),
+            include_str!("migrations/010_notifications.sql"),
         ] {
             let _ = sqlx::raw_sql(m).execute(&pool).await;
         }

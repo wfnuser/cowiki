@@ -20,7 +20,7 @@ import {
   listWorkspaces, listPages, getPage, createWorkspace, writePage, createFolder,
   compile, submit, renameWorkspace,
   listPendingInvitations, acceptInvitation, rejectInvitation,
-  inviteToWorkspace, deleteWorkspace,
+  deleteWorkspace,
   listPublicWorkspaces, joinWorkspace,
   listSources, getSource, listReviews,
   type Workspace, type PageMeta, type PageFull, type PendingInvitation, type SourceItem, type SourceContent,
@@ -33,9 +33,7 @@ import { SpacePanel, type NavTab } from '../components/layout/SpacePanel';
 import { ReviewList } from '../components/review/ReviewList';
 import { ReviewDetail } from '../components/review/ReviewDetail';
 import { MembersView } from '../components/views/MembersView';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
+import { InviteDialog } from '../components/InviteDialog';
 import { C } from '@/lib/design';
 
 type ActiveView =
@@ -96,9 +94,6 @@ export function MainLayout() {
   // Team space management state
   const [pendingInvites, setPendingInvites] = useState<PendingInvitation[]>([]);
   const [showInviteDialog, setShowInviteDialog] = useState<Workspace | null>(null);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState('viewer');
-  const [inviteExpires, setInviteExpires] = useState('7');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<Workspace | null>(null);
 
   const userBranch = `user/${auth?.id}`;
@@ -461,19 +456,11 @@ export function MainLayout() {
   }, [auth?.id]);
 
   // Handle invite submission
-  const handleInvite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inviteEmail.trim() || !showInviteDialog) return;
-    try {
-      await inviteToWorkspace(showInviteDialog.slug, inviteEmail.trim(), inviteRole, Number(inviteExpires));
-      setShowInviteDialog(null);
-      setInviteEmail('');
-      setInviteRole('viewer');
-      setInviteExpires('7');
-      setMessage({ text: 'Invitation sent.', type: 'success' });
-    } catch (e: any) {
-      setMessage({ text: e?.message || 'Failed to send invitation', type: 'error' });
-    }
+  const handleInviteSuccess = (msg: string) => {
+    setMessage({ text: msg, type: 'success' });
+  };
+  const handleInviteError = (msg: string) => {
+    setMessage({ text: msg, type: 'error' });
   };
 
   const handleAcceptInvite = async (inv: PendingInvitation) => {
@@ -977,51 +964,14 @@ export function MainLayout() {
       </Dialog>
 
       {/* Invite member */}
-      <Dialog open={!!showInviteDialog} onOpenChange={(open) => !open && setShowInviteDialog(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Invite Member -- {showInviteDialog?.name}</DialogTitle></DialogHeader>
-          <form onSubmit={handleInvite} className="space-y-4 mt-2">
-            <div>
-              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Email</label>
-              <Input value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="colleague@example.com" autoFocus />
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div>
-                <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Role</label>
-                <Select value={inviteRole} onValueChange={setInviteRole}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="viewer">Viewer</SelectItem>
-                    <SelectItem value="editor">Editor</SelectItem>
-                    <SelectItem value="manager">Manager</SelectItem>
-                    <SelectItem value="owner">Owner</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Expires</label>
-                <Select value={inviteExpires} onValueChange={setInviteExpires}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">1 day</SelectItem>
-                    <SelectItem value="3">3 days</SelectItem>
-                    <SelectItem value="7">7 days</SelectItem>
-                    <SelectItem value="30">30 days</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" type="button" onClick={() => setShowInviteDialog(null)}>Cancel</Button>
-              <Button type="submit" disabled={!inviteEmail.trim() || inviteRole === 'owner'}>Send Invitation</Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <InviteDialog
+        open={!!showInviteDialog}
+        workspaceName={showInviteDialog?.name || ''}
+        workspaceSlug={showInviteDialog?.slug || ''}
+        onOpenChange={(open) => { if (!open) setShowInviteDialog(null); }}
+        onInvited={handleInviteSuccess}
+        onError={handleInviteError}
+      />
 
       {/* Delete workspace confirmation */}
       <Dialog open={!!showDeleteConfirm} onOpenChange={(open) => !open && setShowDeleteConfirm(null)}>

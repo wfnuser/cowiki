@@ -285,6 +285,25 @@ async fn main() {
         .route("/api/keys", get(routes::keys::list_keys))
         .route("/api/keys", post(routes::keys::create_key))
         .route("/api/keys/{id}", delete(routes::keys::revoke_key))
+        // User search (for invite autocomplete)
+        .route("/api/users/search", get(routes::users::search_users))
+        // Notifications
+        .route(
+            "/api/notifications",
+            get(routes::notifications::list_notifications),
+        )
+        .route(
+            "/api/notifications/unread-count",
+            get(routes::notifications::unread_count),
+        )
+        .route(
+            "/api/notifications/read-all",
+            post(routes::notifications::mark_all_read),
+        )
+        .route(
+            "/api/notifications/{id}/read",
+            post(routes::notifications::mark_read),
+        )
         .layer(CorsLayer::permissive())
         .with_state(state);
 

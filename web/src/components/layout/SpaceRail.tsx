@@ -1,5 +1,14 @@
-import { Plus, Settings, Compass, LogOut } from 'lucide-react';
-import type { Workspace } from '../../api';
+import { Plus, Settings, Compass, LogOut, Bell } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import type { Workspace, Notification } from '../../api';
+import {
+  listNotifications, notificationUnreadCount, markAllNotificationsRead,
+  markNotificationRead, acceptInvitation, rejectInvitation,
+} from '../../api';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import {
   Tooltip, TooltipContent, TooltipTrigger,
 } from '@/components/ui/tooltip';
@@ -114,6 +123,9 @@ export function SpaceRail({
       {/* Spacer */}
       <div style={{ flex: 1 }} />
 
+      {/* Notification bell */}
+      <NotificationBell />
+
       {/* User avatar + menu */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -189,6 +201,277 @@ function SpaceTile({
       </TooltipTrigger>
       <TooltipContent side="right">{workspace.name}</TooltipContent>
     </Tooltip>
+  );
+}
+
+// ── Notification Bell ──
+
+function NotificationBell() {
+  const [unread, setUnread] = useState(0);
+  const [notifs, setNotifs] = useState<Notification[]>([]);
+  const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<Notification | null>(null);
+  const [acting, setActing] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    notificationUnreadCount()
+      .then((c) => { if (!cancelled) setUnread(c); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const loadNotifs = async () => {
+    try {
+      const list = await listNotifications(30);
+      setNotifs(list);
+    } catch { /* ignore */ }
+  };
+
+  const handleBellClick = () => {
+    const next = !open;
+    setOpen(next);
+    if (next) loadNotifs();
+  };
+
+  const handleMarkAllRead = async () => {
+    try {
+      await markAllNotificationsRead();
+      setUnread(0);
+      setNotifs((prev) => prev.map((n) => ({ ...n, read: true })));
+    } catch { /* ignore */ }
+  };
+
+  const markRead = async (id: string) => {
+    try {
+      await markNotificationRead(id);
+      setNotifs((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+      setUnread((prev) => Math.max(0, prev - 1));
+    } catch { /* ignore */ }
+  };
+
+  // Extract invitation_id from notification link (format: /invitations/{uuid})
+  const extractInvitationId = (n: Notification): string | null => {
+    if (!n.link) return null;
+    const parts = n.link.split('/');
+    return parts[parts.length - 1] || null;
+  };
+
+  const handleItemClick = (n: Notification) => {
+    setDetail(n);
+    if (!n.read) markRead(n.id);
+  };
+
+  const handleAccept = async () => {
+    if (!detail) return;
+    const invId = extractInvitationId(detail);
+    if (!invId) return;
+    setActing(true);
+    try {
+      await acceptInvitation(invId);
+      markRead(detail.id);
+      setDetail(null);
+      window.location.reload();
+    } catch { setActing(false); }
+  };
+
+  const handleReject = async () => {
+    if (!detail) return;
+    const invId = extractInvitationId(detail);
+    if (!invId) return;
+    setActing(true);
+    try {
+      await rejectInvitation(invId);
+      markRead(detail.id);
+      setDetail(null);
+    } catch { setActing(false); }
+  };
+
+  const timeAgo = (iso: string): string => {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h`;
+    return `${Math.floor(hours / 24)}d`;
+  };
+
+  const formatTime = (iso: string): string => {
+    const d = new Date(iso);
+    return d.toLocaleString();
+  };
+
+  const isInvitation = detail?.kind === 'invitation' && extractInvitationId(detail);
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        onClick={handleBellClick}
+        style={{
+          width: 34, height: 34, borderRadius: '50%',
+          border: `1px solid ${C.line}`, background: 'transparent', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          marginBottom: 6, color: C.ink2, position: 'relative',
+        }}
+      >
+        <Bell size={16} />
+        {unread > 0 && (
+          <span style={{
+            position: 'absolute', top: -2, right: -2,
+            minWidth: 16, height: 16, borderRadius: 8,
+            background: C.accent, color: '#fff', fontSize: 10,
+            fontWeight: 600, display: 'flex', alignItems: 'center',
+            justifyContent: 'center', padding: '0 4px',
+          }}>
+            {unread > 99 ? '99+' : unread}
+          </span>
+        )}
+      </button>
+
+      {/* Notification list dropdown */}
+      {open && (
+        <>
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 90 }}
+            onClick={() => setOpen(false)}
+          />
+          <div style={{
+            position: 'fixed', left: 72, bottom: 60, zIndex: 100,
+            width: 360, maxHeight: 400,
+            border: `1px solid ${C.line}`, borderRadius: 10,
+            background: C.panel, boxShadow: '0 8px 28px rgba(29,28,26,0.15)',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '12px 16px', borderBottom: `1px solid ${C.line}`,
+            }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: C.ink }}>Notifications</span>
+              {unread > 0 && (
+                <button onClick={handleMarkAllRead} style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontSize: 12, color: C.accent, fontWeight: 500,
+                }}>
+                  Mark all read
+                </button>
+              )}
+            </div>
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              {notifs.length === 0 ? (
+                <div style={{ padding: '32px 16px', textAlign: 'center', color: C.muted, fontSize: 13 }}>
+                  No notifications
+                </div>
+              ) : (
+                notifs.map((n) => (
+                  <button
+                    key={n.id}
+                    onClick={() => { setOpen(false); handleItemClick(n); }}
+                    style={{
+                      display: 'flex', gap: 10, padding: '12px 16px',
+                      width: '100%', border: 'none', cursor: 'pointer',
+                      textAlign: 'left', background: n.read ? C.panel : C.sidebar,
+                      borderBottom: `1px solid ${C.lineSoft}`,
+                    }}
+                  >
+                    <div style={{
+                      width: 8, height: 8, borderRadius: '50%',
+                      background: n.read ? 'transparent' : C.accent,
+                      marginTop: 6, flexShrink: 0,
+                    }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 13, fontWeight: n.read ? 400 : 600, color: C.ink,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {n.title}
+                      </div>
+                      {n.body && (
+                        <div style={{
+                          fontSize: 12, color: C.muted, marginTop: 2,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                          {n.body}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 11, color: C.faint, marginTop: 4 }}>
+                        {timeAgo(n.created_at)}
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Detail modal */}
+      <Dialog open={!!detail} onOpenChange={(open) => { if (!open) setDetail(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle style={{ fontSize: 16 }}>
+              {detail?.kind === 'invitation' ? 'Workspace Invitation' : 'Notification'}
+            </DialogTitle>
+            <DialogDescription />
+          </DialogHeader>
+
+          {detail && (
+            <div className="space-y-4 mt-2">
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: C.ink, marginBottom: 4 }}>
+                  {detail.title}
+                </div>
+                {detail.body && (
+                  <div style={{ fontSize: 13, color: C.ink2, lineHeight: 1.5 }}>
+                    {detail.body}
+                  </div>
+                )}
+                <div style={{ fontSize: 12, color: C.faint, marginTop: 8 }}>
+                  {formatTime(detail.created_at)}
+                </div>
+              </div>
+
+              {/* Action buttons for invitation */}
+              {isInvitation && (
+                <div style={{
+                  display: 'flex', gap: 10, paddingTop: 8,
+                  borderTop: `1px solid ${C.line}`,
+                }}>
+                  <Button
+                    onClick={handleAccept}
+                    disabled={acting}
+                    style={{
+                      flex: 1, background: C.green, border: 'none',
+                      color: '#fff', fontWeight: 600,
+                    }}
+                  >
+                    {acting ? 'Accepting...' : 'Accept Invitation'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={handleReject}
+                    disabled={acting}
+                    style={{ flex: 1 }}
+                  >
+                    Decline
+                  </Button>
+                </div>
+              )}
+
+              {/* Read-only: other notification types */}
+              {!isInvitation && (
+                <div className="flex justify-end pt-2">
+                  <Button variant="outline" onClick={() => setDetail(null)}>
+                    Close
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 

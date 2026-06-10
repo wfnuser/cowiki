@@ -516,3 +516,53 @@ export async function deleteComment(workspaceSlug: string, submissionId: string,
   });
   if (!res.ok) throw new Error(await res.text());
 }
+
+// ── User Search ──
+
+export interface UserSearchResult {
+  id: string;
+  name: string;
+  email: string | null;
+}
+
+export async function searchUsers(q: string, limit = 10): Promise<UserSearchResult[]> {
+  const res = await fetch(`${BASE}/users/search?q=${encodeURIComponent(q)}&limit=${limit}`, { headers: h() });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// ── Notifications ──
+
+export interface Notification {
+  id: string;
+  kind: string;
+  title: string;
+  body: string | null;
+  workspace_id: string | null;
+  link: string | null;
+  read: boolean;
+  created_at: string;
+}
+
+export async function listNotifications(limit = 50): Promise<Notification[]> {
+  const res = await fetch(`${BASE}/notifications?limit=${limit}`, { headers: h() });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function notificationUnreadCount(): Promise<number> {
+  const res = await fetch(`${BASE}/notifications/unread-count`, { headers: h() });
+  if (!res.ok) throw new Error(await res.text());
+  const data = await res.json();
+  return data.count;
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/notifications/${id}/read`, { method: 'POST', headers: h() });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  const res = await fetch(`${BASE}/notifications/read-all`, { method: 'POST', headers: h() });
+  if (!res.ok) throw new Error(await res.text());
+}

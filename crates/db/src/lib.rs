@@ -2,6 +2,7 @@ use sqlx::PgPool;
 
 pub mod api_keys;
 pub mod audit;
+pub mod notifications;
 pub mod pages;
 pub mod review_comments;
 pub mod submissions;
@@ -62,6 +63,11 @@ pub async fn run_migrations(pool: &PgPool, embedding_dim: u32) -> sqlx::Result<(
     })?;
     let sql10 = include_str!("migrations/009_review_comments.sql");
     sqlx::raw_sql(sql10).execute(pool).await.map_err(|e| {
+        tracing::error!("DB error: {e}");
+        e
+    })?;
+    let sql11 = include_str!("migrations/010_notifications.sql");
+    sqlx::raw_sql(sql11).execute(pool).await.map_err(|e| {
         tracing::error!("DB error: {e}");
         e
     })?;
