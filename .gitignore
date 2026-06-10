@@ -16,3 +16,10 @@ mcp-server
 .github/skills
 .github/*.md
 .omg
+
+# claude related
+.claude/skills
+.claude/CLAUDE.md
+.claude/settings.local.json
+
+.omc
