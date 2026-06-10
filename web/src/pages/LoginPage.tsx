@@ -24,7 +24,7 @@ export function LoginPage() {
         </p>
 
         <a
-          href="/api/auth/github"
+          href={`${import.meta.env.VITE_API_BASE || ''}/api/auth/github`}
           className="inline-flex items-center gap-2.5 bg-[var(--color-text)] text-[var(--color-bg)] px-6 py-3 text-sm font-medium hover:opacity-90 transition-opacity"
           style={{ borderRadius: 'var(--radius)' }}
         >

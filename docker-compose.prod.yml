@@ -1,0 +1,35 @@
+services:
+  backend:
+    image: cowiki-backend:latest
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ${COWIKI_DATA_DIR:-./data}:/data
+    environment:
+      - COWIKI_DATA_DIR=/data
+    # Lets the container reach PostgreSQL running on the host (Linux).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      caddy:
+        condition: service_started
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+
+volumes:
+  caddy_data:
+  caddy_config:
