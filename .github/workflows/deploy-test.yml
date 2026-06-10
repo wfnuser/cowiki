@@ -36,7 +36,10 @@ jobs:
           key: ${{ secrets.TEST_SERVER_SSH_KEY }}
           script: |
             cd /opt/cowiki
+            git fetch origin dev
+            git checkout -B dev origin/dev
             docker load < /tmp/cowiki-deploy/image.tar.gz
-            docker compose -f docker-compose.prod.yml up -d --no-build backend
+            docker tag cowiki-backend:${{ github.sha }} cowiki-backend:latest
+            docker compose -f docker-compose.prod.yml up -d --no-build
             rm -f /tmp/cowiki-deploy/image.tar.gz
             docker image prune -f
