@@ -526,6 +526,12 @@ mod tests {
         let _ = sqlx::raw_sql(include_str!("migrations/008_submission_workspace.sql"))
             .execute(&pool)
             .await;
+        let _ = sqlx::raw_sql(include_str!("migrations/009_review_comments.sql"))
+            .execute(&pool)
+            .await;
+        let _ = sqlx::raw_sql(include_str!("migrations/010_invitation_reject_status.sql"))
+            .execute(&pool)
+            .await;
         Some(pool)
     }
 
