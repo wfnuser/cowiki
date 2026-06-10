@@ -37,6 +37,10 @@ pub async fn submit(
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     super::pages::ensure_user_branch_if_needed(&repo, &input.branch)?;
 
+    // Best-effort: catch the branch up to main so the diff is against the latest
+    // shared content. A genuine conflict is left for merge time to surface.
+    let _ = repo.rebase_onto_main(&input.branch);
+
     let diffs = match repo.diff_files(&input.branch, &input.page_slugs) {
         Ok(d) => d,
         Err(e) => {
@@ -130,13 +134,23 @@ pub async fn submit(
             .iter()
             .map(|s| format!("wiki/{s}.md"))
             .collect();
-        repo.merge_to_main(
-            &input.branch,
-            &file_paths,
-            &user.name,
-            &format!("commit: {summary}"),
-        )
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+        match repo
+            .merge_to_main(
+                &input.branch,
+                &file_paths,
+                &user.name,
+                &format!("commit: {summary}"),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?
+        {
+            cowiki_core::git::MergeOutcome::Merged => {}
+            cowiki_core::git::MergeOutcome::Conflict(paths) => {
+                return Err(AppError::Conflict(format!(
+                    "merge conflict on: {}; resolve against main first",
+                    paths.join(", ")
+                )));
+            }
+        }
 
         return Ok(Json(SubmitResponse {
             submission_id: uuid::Uuid::nil(),

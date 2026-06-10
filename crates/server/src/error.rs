@@ -10,6 +10,8 @@ pub enum AppError {
     BadRequest(String),
     Unauthorized(String),
     Forbidden(String),
+    /// 409 — e.g. a submission/branch conflicts with `main` and needs resolution.
+    Conflict(String),
 }
 
 impl IntoResponse for AppError {
@@ -20,6 +22,7 @@ impl IntoResponse for AppError {
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
+            AppError::Conflict(msg) => (StatusCode::CONFLICT, msg),
         };
         (status, msg).into_response()
     }
@@ -97,6 +100,7 @@ mod tests {
             AppError::BadRequest("".into()),
             AppError::Unauthorized("".into()),
             AppError::Forbidden("".into()),
+            AppError::Conflict("".into()),
         ];
 
         let codes: Vec<StatusCode> = errors
@@ -108,7 +112,7 @@ mod tests {
         let unique: HashSet<_> = codes.into_iter().collect();
         assert_eq!(
             unique.len(),
-            5,
+            6,
             "all error types should have distinct status codes"
         );
     }

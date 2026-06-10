@@ -101,19 +101,49 @@ pub async fn review_action(
                 .get(&ws_slug)
                 .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
 
+            // Bring the branch up to date with main first. If it conflicts, the
+            // author must resolve before this can merge.
+            if let cowiki_core::git::RebaseOutcome::Conflict(paths) = repo
+                .rebase_onto_main(&submission.source_branch)
+                .map_err(|e| AppError::Internal(e.to_string()))?
+            {
+                return Err(AppError::Conflict(format!(
+                    "branch conflicts with main; author must resolve: {}",
+                    paths.join(", ")
+                )));
+            }
+
             let file_paths: Vec<String> = submission
                 .page_slugs
                 .iter()
                 .map(|s| format!("wiki/{s}.md"))
                 .collect();
 
-            repo.merge_to_main(
-                &submission.source_branch,
-                &file_paths,
-                &guard.user.name,
-                &format!("approve: {}", submission.summary),
-            )
-            .map_err(|e| AppError::Internal(e.to_string()))?;
+            // Merge is authored by the original submitter, not the reviewer.
+            let author = cowiki_db::users::find_by_id(&state.db, submission.user_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|u| u.name)
+                .unwrap_or_else(|| guard.user.name.clone());
+
+            match repo
+                .merge_to_main(
+                    &submission.source_branch,
+                    &file_paths,
+                    &author,
+                    &format!("approve: {}", submission.summary),
+                )
+                .map_err(|e| AppError::Internal(e.to_string()))?
+            {
+                cowiki_core::git::MergeOutcome::Merged => {}
+                cowiki_core::git::MergeOutcome::Conflict(paths) => {
+                    return Err(AppError::Conflict(format!(
+                        "merge conflict on: {}; author must resolve against main",
+                        paths.join(", ")
+                    )));
+                }
+            }
 
             // Merge should not block on embedding; search indexing can catch up separately.
             for slug in &submission.page_slugs {
