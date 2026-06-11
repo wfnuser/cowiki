@@ -22,10 +22,33 @@ fn is_public_ip(ip: IpAddr) -> bool {
                 || v4.is_documentation()
                 || v4.is_multicast()
                 // CGNAT / shared address space 100.64.0.0/10
-                || (o[0] == 100 && (o[1] & 0xc0) == 0x40))
+                || (o[0] == 100 && (o[1] & 0xc0) == 0x40)
+                // benchmarking 198.18.0.0/15
+                || (o[0] == 198 && (o[1] & 0xfe) == 18)
+                // IETF protocol assignments 192.0.0.0/24
+                || (o[0] == 192 && o[1] == 0 && o[2] == 0)
+                // reserved 240.0.0.0/4
+                || o[0] >= 240)
         }
         IpAddr::V6(v6) => {
-            let seg0 = v6.segments()[0];
+            // IPv4-mapped (::ffff:a.b.c.d) and NAT64 (64:ff9b::/96) addresses embed an
+            // IPv4 target the OS will actually route to — classify by the embedded v4,
+            // otherwise ::ffff:127.0.0.1 / ::ffff:169.254.169.254 sail through as
+            // "public" v6 and reach loopback/metadata.
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_public_ip(IpAddr::V4(v4));
+            }
+            let segs = v6.segments();
+            if segs[0] == 0x0064 && segs[1] == 0xff9b && segs[2..6] == [0, 0, 0, 0] {
+                let v4 = std::net::Ipv4Addr::new(
+                    (segs[6] >> 8) as u8,
+                    (segs[6] & 0xff) as u8,
+                    (segs[7] >> 8) as u8,
+                    (segs[7] & 0xff) as u8,
+                );
+                return is_public_ip(IpAddr::V4(v4));
+            }
+            let seg0 = segs[0];
             !(v6.is_loopback()
                 || v6.is_unspecified()
                 || v6.is_multicast()
@@ -36,7 +59,11 @@ fn is_public_ip(ip: IpAddr) -> bool {
 }
 
 /// Validate that `raw` is an http(s) URL whose host resolves only to public IPs.
-async fn validate_url(raw: &str) -> Result<(), ExtractError> {
+/// Returns the validated `(host, first resolved address)` so the caller can **pin**
+/// the connection to exactly the address that was checked — without pinning, reqwest
+/// re-resolves the host and a rebinding DNS server (low TTL) can answer public here
+/// and private on the second lookup (TOCTOU).
+async fn validate_url(raw: &str) -> Result<(String, std::net::SocketAddr), ExtractError> {
     let parsed = url::Url::parse(raw)?;
     match parsed.scheme() {
         "http" | "https" => {}
@@ -53,41 +80,44 @@ async fn validate_url(raw: &str) -> Result<(), ExtractError> {
     let port = parsed.port_or_known_default().unwrap_or(80);
 
     // Resolve and check EVERY address the host maps to (defends against a domain
-    // that resolves to a private IP, e.g. DNS rebinding).
-    let mut saw_addr = false;
+    // whose record set mixes public and private addresses).
+    let mut first: Option<std::net::SocketAddr> = None;
     let addrs = tokio::net::lookup_host((host.as_str(), port))
         .await
         .map_err(|e| ExtractError::Blocked(format!("DNS resolution failed: {e}")))?;
     for addr in addrs {
-        saw_addr = true;
         if !is_public_ip(addr.ip()) {
             return Err(ExtractError::Blocked(format!(
                 "host resolves to non-public address {}",
                 addr.ip()
             )));
         }
+        first.get_or_insert(addr);
     }
-    if !saw_addr {
-        return Err(ExtractError::Blocked("host did not resolve".into()));
+    match first {
+        Some(addr) => Ok((host, addr)),
+        None => Err(ExtractError::Blocked("host did not resolve".into())),
     }
-    Ok(())
 }
 
 /// Fetch the HTML content at `url`, enforcing a 10 MB size limit and SSRF guards:
-/// only http(s), host must resolve to public addresses, and redirects are followed
-/// manually (re-validating each hop) up to `MAX_REDIRECTS`.
+/// only http(s); the host must resolve to public addresses and the connection is
+/// **pinned to the validated IP**; redirects are followed manually (re-validating
+/// and re-pinning each hop) up to `MAX_REDIRECTS`.
 pub async fn fetch_url(url: &str) -> Result<String, ExtractError> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .user_agent(USER_AGENT)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?;
-
     let mut current = url.to_string();
     let mut hops = 0usize;
 
     loop {
-        validate_url(&current).await?;
+        let (host, pinned) = validate_url(&current).await?;
+        // Per-hop client so `resolve()` pins this hop's host to the address we just
+        // vetted; reqwest then connects there instead of resolving again.
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .user_agent(USER_AGENT)
+            .redirect(reqwest::redirect::Policy::none())
+            .resolve(&host, pinned)
+            .build()?;
         let response = client.get(&current).send().await?;
 
         if response.status().is_redirection() {
@@ -139,6 +169,16 @@ mod tests {
             "::1",
             "fc00::1",
             "fe80::1",
+            // IPv4-mapped IPv6 must classify by the embedded v4 target
+            "::ffff:127.0.0.1",
+            "::ffff:169.254.169.254",
+            "::ffff:10.0.0.1",
+            // NAT64 well-known prefix embedding loopback
+            "64:ff9b::7f00:1",
+            // reserved / benchmarking v4 ranges
+            "240.0.0.1",
+            "198.18.0.1",
+            "192.0.0.1",
         ] {
             assert!(!is_public_ip(ip.parse().unwrap()), "{ip} should be blocked");
         }
