@@ -40,7 +40,7 @@ The trade-off is rebuild latency. Embeddings require API calls, and future graph
 
 ## Search Scope
 
-Search indexes must preserve workspace and branch scope. A physical database index may cover many rows, but query results must be filtered to the active workspace and branch/effective view.
+Search indexes must preserve workspace and branch scope. A physical database index may cover many rows, but query results must be filtered to the active workspace and branch. Per ADR 0004, the view a user searches is their own `user/{id}` branch tree (kept current by rebasing onto `main`) — there is no overlay of multiple branches to merge at query time.
 
 This follows the same architectural principle as Git-backed systems such as GitLab: repository content is canonical, and search indexes are eventually consistent derived data that can be rebuilt from repository state.
 
@@ -48,7 +48,7 @@ This follows the same architectural principle as Git-backed systems such as GitL
 
 - Whether graph extraction should cache intermediate results per Git object or commit to reduce rebuild cost.
 - Whether reset UI should expose page-level rebuilds, workspace-level rebuilds, or only workspace-level rebuilds at first.
-- How branch overlay search should behave once personal draft branches and approved `main` content are both indexed.
+- Index lifecycle when many `user/{id}` branches are indexed alongside `main` (ADR 0004 settled the *view* — search reads the user's branch tree — but per-branch index storage/GC strategy is open).
 
 ## Related
 
