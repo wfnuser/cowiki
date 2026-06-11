@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Compass, FileText, Search,
   Upload, Zap, ArrowUpRight, MoreHorizontal, RefreshCw,
-  CheckCircle2, Clock,
+  CheckCircle2, Clock, Pencil,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -33,6 +33,7 @@ import { ReviewList } from '../components/review/ReviewList';
 import { ReviewDetail } from '../components/review/ReviewDetail';
 import { MembersView } from '../components/views/MembersView';
 import { InviteDialog } from '../components/InviteDialog';
+import { PageEditor } from '../components/PageEditor';
 import { TransferDialog } from '../components/TransferDialog';
 import { C } from '@/lib/design';
 
@@ -91,6 +92,7 @@ export function MainLayout() {
   const [searchQuery, setSearchQuery] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [editingPage, setEditingPage] = useState(false);
 
   // Team space management state
   const [showInviteDialog, setShowInviteDialog] = useState<Workspace | null>(null);
@@ -260,6 +262,7 @@ export function MainLayout() {
   const selectPage = async (ws: Workspace, slug: string) => {
     setActiveWorkspace(ws);
     setActiveTab('wiki');
+    setEditingPage(false);
     setActiveView({ kind: 'page', slug, content: null });
     navigate(`/${ws.slug}/${slug}`, { replace: true });
 
@@ -534,6 +537,21 @@ export function MainLayout() {
     return body;
   };
 
+  // Save an in-page edit to the user's draft branch, then refresh the page + tree.
+  const handleSavePage = async (body: string) => {
+    if (!activeWorkspace || activeView?.kind !== 'page') return;
+    const ws = activeWorkspace;
+    const slug = activeView.slug;
+    await writePage(slug, body, userBranch, ws.slug);
+    setEditingPage(false);
+    setMessage({ text: 'Saved to your draft.', type: 'success' });
+    try {
+      const page = await getPage(slug, userBranch, ws.slug);
+      setActiveView((prev) => (prev?.kind === 'page' ? { ...prev, content: page } : prev));
+    } catch { /* keep the stale view; tree reload below still runs */ }
+    loadSpacePages(ws);
+  };
+
   const personal = activeWorkspace ? isPersonalSpace(activeWorkspace) : false;
   const isOwner = activeWorkspace?.role === 'owner';
 
@@ -674,6 +692,15 @@ export function MainLayout() {
                 {/* Wiki-specific actions */}
                 {activeTab === 'wiki' && (activeView?.kind === 'page' || activeView?.kind === 'source') && (
                   <>
+                    {activeView?.kind === 'page' && activeView.content && !editingPage && (
+                      <button
+                        onClick={() => setEditingPage(true)}
+                        style={headerBtnStyle}
+                        title="Edit this page (saved to your draft branch)"
+                      >
+                        <Pencil size={13} /> Edit
+                      </button>
+                    )}
                     <button
                       onClick={() => setShowIngest(true)}
                       style={headerBtnStyle}
@@ -854,9 +881,19 @@ export function MainLayout() {
 
               /* Page view */
               ) : activeView?.kind === 'page' && activeView.content ? (
-                <article className="prose">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{renderBody(activeView.content.body)}</ReactMarkdown>
-                </article>
+                editingPage ? (
+                  <PageEditor
+                    key={activeView.slug}
+                    initialBody={activeView.content.body}
+                    stripFrontmatter={renderBody}
+                    onSave={handleSavePage}
+                    onCancel={() => setEditingPage(false)}
+                  />
+                ) : (
+                  <article className="prose">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{renderBody(activeView.content.body)}</ReactMarkdown>
+                  </article>
+                )
 
               /* Discover */
               ) : location.pathname === '/discover' ? (
