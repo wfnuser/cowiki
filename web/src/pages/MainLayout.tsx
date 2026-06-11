@@ -21,7 +21,7 @@ import {
   compile, submit, renameWorkspace,
   deleteWorkspace,
   listPublicWorkspaces, joinWorkspace,
-  listSources, getSource, listReviews, syncBranch,
+  listSources, getSource, listReviews, syncBranch, renamePath, deletePath,
   type Workspace, type PageMeta, type PageFull, type SourceItem, type SourceContent,
 } from '../api';
 import { AddSourceDialog } from '@/components/AddSourceDialog';
@@ -93,6 +93,12 @@ export function MainLayout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [editingPage, setEditingPage] = useState(false);
+  // Tree path ops (rename/delete of pages & folders on the draft branch)
+  const [pathOp, setPathOp] = useState<
+    | { kind: 'rename'; path: string; isFolder: boolean; title: string; value: string }
+    | { kind: 'delete'; path: string; isFolder: boolean; title: string }
+    | null
+  >(null);
 
   // Team space management state
   const [showInviteDialog, setShowInviteDialog] = useState<Workspace | null>(null);
@@ -537,6 +543,42 @@ export function MainLayout() {
     return body;
   };
 
+  // Execute a pending rename/delete from the tree menus.
+  const handlePathOp = async () => {
+    if (!pathOp || !activeWorkspace) return;
+    const ws = activeWorkspace;
+    try {
+      if (pathOp.kind === 'rename') {
+        const slugified = pathOp.value
+          .toLowerCase()
+          .replace(/[^a-z0-9\s-]/g, '')
+          .trim()
+          .replace(/\s+/g, '-');
+        if (!slugified) { setMessage({ text: 'Name cannot be empty', type: 'error' }); return; }
+        const parent = pathOp.path.slice(0, pathOp.path.lastIndexOf('/'));
+        const to = pathOp.isFolder ? `${parent}/${slugified}` : `${parent}/${slugified}.md`;
+        if (to === pathOp.path) { setPathOp(null); return; }
+        await renamePath(ws.slug, userBranch, pathOp.path, to);
+        setMessage({ text: 'Renamed in your draft.', type: 'success' });
+      } else {
+        await deletePath(ws.slug, userBranch, pathOp.path);
+        setMessage({ text: `Deleted ${pathOp.isFolder ? 'folder' : 'page'} from your draft.`, type: 'success' });
+      }
+      setPathOp(null);
+      // If the open page lived under the changed path, drop the stale view.
+      if (activeView?.kind === 'page') {
+        const viewPath = `wiki/${activeView.slug}.md`;
+        if (viewPath === pathOp.path || viewPath.startsWith(pathOp.path + '/')) {
+          setActiveView(null);
+          navigate(`/`, { replace: true });
+        }
+      }
+      loadSpacePages(ws);
+    } catch (e) {
+      setMessage({ text: e instanceof Error ? e.message : 'Operation failed', type: 'error' });
+    }
+  };
+
   // Save an in-page edit to the user's draft branch, then refresh the page + tree.
   const handleSavePage = async (body: string) => {
     if (!activeWorkspace || activeView?.kind !== 'page') return;
@@ -593,6 +635,8 @@ export function MainLayout() {
             onNewFolder={() => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(null); } }}
             onAddPageInFolder={(folderPath) => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(folderPath); } }}
             onAddFolderInFolder={(parentPath) => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(parentPath); } }}
+            onRenamePath={(path, isFolder, title) => setPathOp({ kind: 'rename', path, isFolder, title, value: title })}
+            onDeletePath={(path, isFolder, title) => setPathOp({ kind: 'delete', path, isFolder, title })}
             onShowIngest={() => setShowIngest(true)}
             onCompile={handleCompile}
             onSettings={() => setSettingsOpen(true)}
@@ -1019,6 +1063,46 @@ export function MainLayout() {
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setShowDeleteConfirm(null)}>Cancel</Button>
               <Button variant="destructive" onClick={handleDeleteWorkspace}>Delete Workspace</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rename page/folder */}
+      <Dialog open={pathOp?.kind === 'rename'} onOpenChange={(open) => !open && setPathOp(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Rename {pathOp?.isFolder ? 'Folder' : 'Page'}</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-2">
+            <Input
+              value={pathOp?.kind === 'rename' ? pathOp.value : ''}
+              onChange={(e) => setPathOp((p) => (p?.kind === 'rename' ? { ...p, value: e.target.value } : p))}
+              onKeyDown={(e) => e.key === 'Enter' && handlePathOp()}
+              autoFocus
+            />
+            <p className="text-xs text-[var(--color-text-secondary)]">
+              Renames the {pathOp?.isFolder ? 'folder path' : 'page slug'} in your draft; links to the old name will need updating.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setPathOp(null)}>Cancel</Button>
+              <Button onClick={handlePathOp}>Rename</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete page/folder confirm */}
+      <Dialog open={pathOp?.kind === 'delete'} onOpenChange={(open) => !open && setPathOp(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Delete {pathOp?.isFolder ? 'Folder' : 'Page'}</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-2">
+            <p className="text-sm text-[var(--color-text-secondary)]">
+              Delete <strong>{pathOp?.title}</strong>
+              {pathOp?.isFolder ? ' and everything inside it' : ''} from your draft?
+              The change lands on the shared wiki when your submission is merged.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setPathOp(null)}>Cancel</Button>
+              <Button variant="destructive" onClick={handlePathOp}>Delete</Button>
             </div>
           </div>
         </DialogContent>

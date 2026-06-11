@@ -626,3 +626,23 @@ export async function syncBranch(workspaceSlug: string, branch: string): Promise
   }
   return res.json();
 }
+
+/** Rename/move a file or folder on your draft branch. Paths are repo paths (wiki/...). */
+export async function renamePath(workspaceSlug: string, branch: string, from: string, to: string): Promise<void> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/paths/rename`, {
+    method: 'POST',
+    headers: h({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ branch, from, to }),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => `Request failed: ${res.status}`));
+}
+
+/** Delete a file or an entire folder on your draft branch. Path is a repo path (wiki/...). */
+export async function deletePath(workspaceSlug: string, branch: string, path: string): Promise<void> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/paths/delete`, {
+    method: 'POST',
+    headers: h({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ branch, path }),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => `Request failed: ${res.status}`));
+}
