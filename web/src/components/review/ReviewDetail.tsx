@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback } from 'react';
 import { ArrowLeft, MessageSquare, XCircle, GitMerge, Check, AlertCircle, Plus } from 'lucide-react';
 import {
-  getReview, reviewAction, createComment, resolveComment, unresolveComment,
+  getReview, reviewAction, createComment, resolveComment, unresolveComment, editReview,
   type ReviewDetail as ReviewDetailData, type ReviewComment,
 } from '../../api';
 import { DiffView } from './DiffView';
 import { C, fonts } from '@/lib/design';
 import { timeAgo } from '../../lib/time';
+import { AvatarBadge } from '@/components/ui/avatar-badge';
 
 const statusBadge: Record<string, { bg: string; fg: string; label: string }> = {
   pending: { bg: C.amberSoft, fg: C.amber, label: 'Review needed' },
@@ -91,6 +92,15 @@ export function ReviewDetail({
     } catch { /* */ }
   }, [workspaceSlug, submissionId]);
 
+  // Review-screen edit of the pr/{id} snapshot. The backend amends a single review-fix
+  // commit on the frozen base and resets an approved submission to pending.
+  const handleEditFile = useCallback(async (path: string, content: string) => {
+    await editReview(workspaceSlug, submissionId, path, content);
+    const d = await getReview(workspaceSlug, submissionId);
+    setData(d);
+    setComments(d.comments ?? []);
+  }, [workspaceSlug, submissionId]);
+
   const handleReply = useCallback(async (body: string, parentId: string) => {
     const parent = comments.find((c) => c.id === parentId);
     if (!parent) return;
@@ -168,14 +178,8 @@ export function ReviewDetail({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 13, color: C.muted }}>
-          <div style={{
-            width: 22, height: 22, borderRadius: '50%', background: C.rail,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 10, fontWeight: 600, color: C.ink2,
-          }}>
-            {(submission.user_id ?? 'U').slice(0, 1).toUpperCase()}
-          </div>
-          <span style={{ fontWeight: 550, color: C.ink2 }}>{(submission.user_id ?? 'unknown').slice(0, 8)}</span>
+          <AvatarBadge name={submission.author_name || submission.user_id} size={22} />
+          <span style={{ fontWeight: 550, color: C.ink2 }}>{submission.author_name || submission.user_id.slice(0, 8)}</span>
           <span>wants to merge</span>
           <code style={{
             fontSize: 12, padding: '2px 7px', borderRadius: 6,
@@ -212,6 +216,7 @@ export function ReviewDetail({
             onResolve={handleResolve}
             onUnresolve={handleUnresolve}
             onReply={handleReply}
+            onEditSave={submission.status === 'merged' || submission.status === 'rejected' ? undefined : handleEditFile}
           />
 
           {/* Finish your review box */}
@@ -300,14 +305,8 @@ export function ReviewDetail({
             </div>
             {submission.reviewed_by ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{
-                  width: 26, height: 26, borderRadius: '50%', background: C.rail,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 11, fontWeight: 600, color: C.ink2,
-                }}>
-                  {submission.reviewed_by.slice(0, 1).toUpperCase()}
-                </div>
-                <span style={{ fontSize: 13.5, color: C.ink2, flex: 1 }}>{submission.reviewed_by.slice(0, 8)}</span>
+                <AvatarBadge name={submission.reviewer_name || submission.reviewed_by} size={26} />
+                <span style={{ fontSize: 13.5, color: C.ink2, flex: 1 }}>{submission.reviewer_name || submission.reviewed_by.slice(0, 8)}</span>
                 {/* Status pip */}
                 <div style={{
                   width: 18, height: 18, borderRadius: '50%',

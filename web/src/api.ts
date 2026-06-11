@@ -31,6 +31,8 @@ export interface Submission {
   created_at: string;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  author_name: string | null;
+  reviewer_name: string | null;
 }
 
 export interface DiffLine {
@@ -643,6 +645,16 @@ export async function deletePath(workspaceSlug: string, branch: string, path: st
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ branch, path }),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => `Request failed: ${res.status}`));
+}
+
+/** Apply a review-requested change to a submission's pr/{id} snapshot (review screen edit). */
+export async function editReview(workspaceSlug: string, submissionId: string, path: string, content: string): Promise<void> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/reviews/${submissionId}/edit`, {
+    method: 'POST',
+    headers: h({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ path, content }),
   });
   if (!res.ok) throw new Error(await res.text().catch(() => `Request failed: ${res.status}`));
 }

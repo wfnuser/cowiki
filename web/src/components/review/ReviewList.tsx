@@ -3,6 +3,7 @@ import { GitBranch, MessageSquare } from 'lucide-react';
 import { listReviews, type Submission } from '../../api';
 import { C } from '@/lib/design';
 import { timeAgo } from '../../lib/time';
+import { AvatarBadge } from '@/components/ui/avatar-badge';
 
 type Filter = 'open' | 'merged' | 'all';
 
@@ -62,29 +63,25 @@ export function ReviewList({
         </h1>
       </div>
 
-      {/* Filter tabs */}
-      <div style={{
-        display: 'flex', gap: 2, marginBottom: 16, padding: 2, background: C.rail, borderRadius: 8,
-        width: 'fit-content',
-      }}>
+      {/* Filter pills (design: active pill = ink, others plain) */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 18, fontSize: 13.5 }}>
         {([
-          { key: 'open' as Filter, label: `Open (${openCount})` },
-          { key: 'merged' as Filter, label: `Merged (${mergedCount})` },
-          { key: 'all' as Filter, label: `All (${subs.length})` },
+          { key: 'open' as Filter, label: 'Open', count: openCount },
+          { key: 'merged' as Filter, label: 'Merged', count: mergedCount },
+          { key: 'all' as Filter, label: 'All', count: subs.length },
         ]).map((tab) => (
           <button
             key={tab.key}
             onClick={() => setFilter(tab.key)}
             style={{
-              padding: '5px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-              fontSize: 12, fontWeight: filter === tab.key ? 600 : 400,
-              background: filter === tab.key ? '#fff' : 'transparent',
-              color: filter === tab.key ? C.ink : C.muted,
-              boxShadow: filter === tab.key ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+              padding: '6px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
+              fontWeight: 550,
+              background: filter === tab.key ? C.ink : 'transparent',
+              color: filter === tab.key ? '#fff' : C.muted,
               transition: 'all 0.15s',
             }}
           >
-            {tab.label}
+            {tab.label} · {tab.count}
           </button>
         ))}
       </div>
@@ -98,59 +95,52 @@ export function ReviewList({
           No {filter === 'all' ? '' : filter} reviews.
         </div>
       ) : (
-        <div style={{ border: `1px solid ${C.line}`, borderRadius: 8, overflow: 'hidden' }}>
+        <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'hidden', background: C.panel }}>
           {filtered?.map((s, i) => {
             const sb = statusBadge[s.status] ?? statusBadge.pending;
+            const author = s.author_name || s.user_id.slice(0, 8);
             return (
               <button
                 key={s.id}
                 onClick={() => onOpen(s.id)}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 12,
-                  padding: '12px 16px', background: C.panel, border: 'none',
-                  borderBottom: i < (filtered.length - 1) ? `1px solid ${C.line}` : 'none',
+                  display: 'flex', alignItems: 'center', gap: 14,
+                  padding: '15px 18px', background: C.panel, border: 'none',
+                  borderTop: i ? `1px solid ${C.line}` : 'none',
                   textAlign: 'left', cursor: 'pointer', width: '100%',
                   transition: 'background 0.1s',
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = C.sidebar; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = C.panel; }}
               >
-                {/* Branch icon */}
-                <GitBranch size={16} color={s.status === 'pending' ? C.green : s.status === 'merged' ? C.purple : C.muted} />
+                <GitBranch size={17} color={C.faint} />
 
                 {/* Main content */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 14, fontWeight: 500, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {s.summary || s.page_slugs.join(', ') || 'Submission'}
-                    </span>
+                  <div style={{ fontSize: 15, fontWeight: 550, color: C.ink, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.summary || s.page_slugs.join(', ') || 'Submission'}
                   </div>
-                  <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
-                    {s.source_branch} · {s.page_slugs.length} file{s.page_slugs.length === 1 ? '' : 's'} · {timeAgo(s.created_at)}
+                  <div style={{ fontSize: 12.5, color: C.muted, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span>{author}</span>
+                    <span>·</span>
+                    <span>{s.page_slugs.length} file{s.page_slugs.length === 1 ? '' : 's'}</span>
+                    <span>·</span>
+                    <span>{timeAgo(s.created_at)}</span>
                   </div>
                 </div>
 
                 {/* Right side */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-                  {/* Comment count placeholder */}
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 12, color: C.faint }}>
-                    <MessageSquare size={13} /> 0
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12.5, color: C.faint }}>
+                    <MessageSquare size={14} /> 0
                   </span>
-                  {/* Status badge */}
                   <span style={{
-                    fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 12,
+                    fontSize: 12, fontWeight: 600, padding: '5px 10px', borderRadius: 999,
                     background: sb.bg, color: sb.fg, whiteSpace: 'nowrap',
                   }}>
                     {sb.label}
                   </span>
-                  {/* Avatar */}
-                  <div style={{
-                    width: 24, height: 24, borderRadius: '50%', background: C.rail,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 11, fontWeight: 600, color: C.ink2,
-                  }}>
-                    {s.user_id.slice(0, 1).toUpperCase()}
-                  </div>
+                  <AvatarBadge name={author} size={26} />
                 </div>
               </button>
             );
