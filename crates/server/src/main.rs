@@ -245,6 +245,11 @@ async fn main() {
             "/api/workspaces/{ws_slug}/submit",
             post(routes::submit::submit),
         )
+        // Rebase / sync a branch onto main (the "sync with main" button)
+        .route(
+            "/api/workspaces/{ws_slug}/rebase",
+            post(routes::submit::rebase),
+        )
         // Reviews (workspace-scoped)
         .route(
             "/api/workspaces/{ws_slug}/reviews",
@@ -257,6 +262,11 @@ async fn main() {
         .route(
             "/api/workspaces/{ws_slug}/reviews/{id}",
             post(routes::review::review_action),
+        )
+        // Review-requested change: edit the submission's pr/{id} snapshot
+        .route(
+            "/api/workspaces/{ws_slug}/reviews/{id}/edit",
+            post(routes::review::edit_review),
         )
         // Review comments
         .route(

@@ -48,9 +48,11 @@ pub async fn get_review(
         .repo_manager
         .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
+    // Diff the frozen `pr/{id}` snapshot against main (whole branch). Once merged/rejected
+    // the snapshot refs are cleaned up, so fall back to an empty diff for historical rows.
     let diffs = repo
-        .diff_files(&submission.source_branch, &submission.page_slugs)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+        .diff_ref_against_main(&format!("pr/{}", submission.id))
+        .unwrap_or_default();
 
     let comments = cowiki_db::review_comments::list_for_submission(&state.db, id).await?;
 
@@ -101,62 +103,140 @@ pub async fn review_action(
                 .get(&ws_slug)
                 .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
 
-            let file_paths: Vec<String> = submission
-                .page_slugs
-                .iter()
-                .map(|s| format!("wiki/{s}.md"))
+            let pr_ref = format!("pr/{}", submission.id);
+            // Pages changed by this submission (for search indexing after the merge).
+            let changed: Vec<String> = repo
+                .diff_ref_against_main(&pr_ref)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|d| d.path)
                 .collect();
 
-            for (slug, path) in submission.page_slugs.iter().zip(file_paths.iter()) {
-                let content = repo
-                    .read_file(&submission.source_branch, path)
-                    .map_err(|e| AppError::Internal(e.to_string()))?
-                    .ok_or_else(|| AppError::BadRequest(format!("page {slug} not found")))?;
-                let text = String::from_utf8_lossy(&content);
-                super::pages::require_page_title(&text)?;
+            // Merge is authored by the original submitter, not the reviewer.
+            let author = cowiki_db::users::find_by_id(&state.db, submission.user_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|u| u.name)
+                .unwrap_or_else(|| guard.user.name.clone());
+
+            // Linear squash + rebase + fast-forward. A conflict with the current main
+            // means the author must rebase and resolve — surface it as 409.
+            match repo
+                .merge_pr(
+                    &submission.id.to_string(),
+                    &author,
+                    &format!("approve: {}", submission.summary),
+                )
+                .map_err(|e| AppError::Internal(e.to_string()))?
+            {
+                cowiki_core::git::MergeOutcome::Merged => {}
+                cowiki_core::git::MergeOutcome::Conflict(paths) => {
+                    return Err(AppError::Conflict(format!(
+                        "merge conflicts with main; author must rebase and resolve: {}",
+                        paths.join(", ")
+                    )));
+                }
             }
 
-            repo.merge_to_main(
-                &submission.source_branch,
-                &file_paths,
-                &guard.user.name,
-                &format!("approve: {}", submission.summary),
-            )
-            .map_err(|e| AppError::Internal(e.to_string()))?;
-
-            // Merge should not block on embedding; search indexing can catch up separately.
-            for slug in &submission.page_slugs {
-                let path = format!("wiki/{slug}.md");
-                if let Some(content) = repo
-                    .read_file("main", &path)
-                    .map_err(|e| AppError::Internal(e.to_string()))?
-                {
+            // Index changed pages from main (best-effort; search can catch up separately).
+            for path in &changed {
+                let slug = path
+                    .strip_prefix("wiki/")
+                    .and_then(|s| s.strip_suffix(".md"))
+                    .unwrap_or(path);
+                if let Ok(Some(content)) = repo.read_file("main", path) {
                     let text = String::from_utf8_lossy(&content);
-                    let (title, summary) = super::pages::require_page_title(&text)?;
-                    let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
-                    if let Err(e) = cowiki_db::pages::upsert(
-                        &state.db,
-                        slug,
-                        &title,
-                        &summary,
-                        "main",
-                        &hash,
-                        None,
-                        guard.user.id,
-                    )
-                    .await
-                    {
-                        tracing::warn!("failed to index merged page '{slug}' for search: {e}");
+                    if let Ok((title, summary)) = super::pages::require_page_title(&text) {
+                        let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
+                        if let Err(e) = cowiki_db::pages::upsert(
+                            &state.db,
+                            slug,
+                            &title,
+                            &summary,
+                            "main",
+                            &hash,
+                            None,
+                            guard.user.id,
+                        )
+                        .await
+                        {
+                            tracing::warn!("failed to index merged page '{slug}': {e}");
+                        }
                     }
                 }
             }
 
+            // Drop the snapshot refs and catch the author's branch up to the new main.
+            repo.cleanup_submission(&submission.id.to_string());
+            let _ = repo.rebase_onto_main(&submission.source_branch);
+
             cowiki_db::submissions::update_status(&state.db, id, "merged", guard.user.id).await?;
         }
         "reject" => {
+            // Drop the snapshot refs; the author keeps their changes on `source_branch`.
+            if let Ok(repo) = state.repo_manager.get(&ws_slug) {
+                repo.cleanup_submission(&submission.id.to_string());
+            }
             cowiki_db::submissions::update_status(&state.db, id, "rejected", guard.user.id).await?;
         }
         _ => return Err(AppError::BadRequest("invalid action".into())),
+    }
+
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+#[derive(Deserialize)]
+pub struct ReviewEdit {
+    /// Repo path, e.g. "wiki/foo.md".
+    pub path: String,
+    pub content: String,
+}
+
+/// Apply a review-requested change to a submission's `pr/{id}` snapshot (a single amended
+/// commit `R` on top of the frozen base `S`). Edits happen in the review screen against the
+/// snapshot branch, never the author's live `user/{id}` branch.
+pub async fn edit_review(
+    State(state): State<Arc<AppState>>,
+    Path((ws_slug, id)): Path<(String, uuid::Uuid)>,
+    headers: axum::http::HeaderMap,
+    Json(input): Json<ReviewEdit>,
+) -> Result<Json<serde_json::Value>> {
+    let submission = cowiki_db::submissions::find_by_id(&state.db, id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("submission not found".into()))?;
+    if submission.workspace_slug != ws_slug {
+        return Err(AppError::NotFound(
+            "submission not found in this workspace".into(),
+        ));
+    }
+    let guard = guard::require_membership(&state, &headers, &ws_slug).await?;
+    guard::require(&guard, Permission::EditContent)?;
+
+    if submission.status == "merged" || submission.status == "rejected" {
+        return Err(AppError::BadRequest(
+            "submission is closed; cannot edit".into(),
+        ));
+    }
+
+    super::pages::require_page_title(&input.content)?;
+
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
+        .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
+    repo.write_review_fix(
+        &submission.id.to_string(),
+        &input.path,
+        input.content.as_bytes(),
+        "review fix",
+        &guard.user.name,
+    )
+    .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    // A post-approval edit must be re-reviewed: reset to pending so it can't merge unseen.
+    if submission.status == "approved" {
+        cowiki_db::submissions::update_status(&state.db, id, "pending", guard.user.id).await?;
     }
 
     Ok(Json(serde_json::json!({"ok": true})))

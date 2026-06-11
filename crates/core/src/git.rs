@@ -87,6 +87,106 @@ fn compute_line_diff(old: &str, new: &str) -> (Vec<DiffHunk>, usize, usize) {
     (hunks, total_adds, total_dels)
 }
 
+/// Outcome of merging a submission's `pr/{id}` branch into `main`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergeOutcome {
+    /// Merged cleanly; `main` advanced by one linear squash commit.
+    Merged,
+    /// Conflicts with `main`. Nothing was written; carries the conflicting paths.
+    Conflict(Vec<String>),
+}
+
+/// Outcome of bringing a user branch up to date with `main`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RebaseOutcome {
+    /// Branch already contains all of `main`; nothing to do.
+    UpToDate,
+    /// `main`'s changes were folded into the branch; the branch advanced.
+    Updated,
+    /// Branch conflicts with `main`. The branch was left **untouched**;
+    /// carries the conflicting paths for the UI to surface.
+    Conflict(Vec<String>),
+}
+
+/// Build a git signature from a user display name. libgit2 rejects names containing
+/// angle brackets (and control chars), so we strip those and fall back to a service
+/// identity when nothing usable remains — a real user name must never 500 a write.
+fn signature(author: &str) -> Result<Signature<'static>, git2::Error> {
+    let cleaned: String = author
+        .chars()
+        .filter(|c| !matches!(c, '<' | '>') && !c.is_control())
+        .collect();
+    let name = match cleaned.trim() {
+        "" => "cowiki",
+        n => n,
+    };
+    Signature::now(name, "noreply@cowiki")
+}
+
+/// Set one file `segments` (possibly nested, e.g. `["wiki", "a", "b.md"]`) to `blob`
+/// inside `base_tree`, rebuilding only the touched subtrees **in memory** — no working
+/// directory, no shared on-disk index. Returns the new tree oid.
+fn set_path_in_tree(
+    repo: &Repository,
+    base_tree: Option<&git2::Tree>,
+    segments: &[&str],
+    blob: git2::Oid,
+) -> Result<git2::Oid, git2::Error> {
+    let mut builder = repo.treebuilder(base_tree)?;
+    let existing = base_tree.and_then(|t| t.get_name(segments[0]));
+    if segments.len() == 1 {
+        if existing.as_ref().and_then(|e| e.kind()) == Some(git2::ObjectType::Tree) {
+            return Err(git2::Error::from_str(&format!(
+                "cannot write file over existing directory '{}'",
+                segments[0]
+            )));
+        }
+        builder.insert(segments[0], blob, 0o100644)?;
+    } else {
+        if existing.as_ref().and_then(|e| e.kind()) == Some(git2::ObjectType::Blob) {
+            return Err(git2::Error::from_str(&format!(
+                "cannot create directory over existing file '{}'",
+                segments[0]
+            )));
+        }
+        let sub_base = existing.and_then(|e| repo.find_tree(e.id()).ok());
+        let sub_oid = set_path_in_tree(repo, sub_base.as_ref(), &segments[1..], blob)?;
+        builder.insert(segments[0], sub_oid, 0o040000)?;
+    }
+    builder.write()
+}
+
+/// Create a commit object for `tree_oid` with the given parents, **without** moving any
+/// ref (the caller updates refs explicitly). Lock-free; returns the new commit oid.
+fn commit_tree(
+    repo: &Repository,
+    tree_oid: git2::Oid,
+    message: &str,
+    author: &str,
+    parents: &[&git2::Commit],
+) -> Result<git2::Oid, git2::Error> {
+    let tree = repo.find_tree(tree_oid)?;
+    let sig = signature(author)?;
+    repo.commit(None, &sig, &sig, message, &tree, parents)
+}
+
+/// Collect conflicting `wiki/...` paths from a merge index.
+fn conflict_paths(index: &mut git2::Index) -> Vec<String> {
+    index
+        .conflicts()
+        .map(|cs| {
+            cs.filter_map(|c| c.ok())
+                .filter_map(|c| {
+                    c.our
+                        .or(c.their)
+                        .or(c.ancestor)
+                        .and_then(|e| String::from_utf8(e.path).ok())
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn rename_master_to_main(repo_path: &Path) {
     // Use git CLI to avoid libgit2 borrow issues
     let has_master = Command::new("git")
@@ -217,6 +317,12 @@ impl WikiRepo {
         Ok(branch_name.to_string())
     }
 
+    /// Apply one edit to `branch` as a single in-progress working commit.
+    ///
+    /// The branch carries exactly one commit on top of `merge-base(branch, main)`: each
+    /// write rebuilds the tree from the current tip and re-commits with that merge-base
+    /// as the parent, so repeated edits **amend** one commit instead of piling up
+    /// autosave commits. Pure in-memory — no working directory, no shared on-disk index.
     pub fn write_file(
         &self,
         branch: &str,
@@ -229,74 +335,28 @@ impl WikiRepo {
         let _guard = lock.write().unwrap();
         let repo = self.repo()?;
 
-        // Write file to working directory
-        let full_path = self.path.join(file_path);
-        if let Some(parent) = full_path.parent() {
-            fs::create_dir_all(parent).ok();
-        }
-        fs::write(&full_path, content)
-            .map_err(|e| git2::Error::from_str(&format!("write failed: {e}")))?;
+        let main_oid = repo
+            .find_branch("main", BranchType::Local)?
+            .get()
+            .peel_to_commit()?
+            .id();
+        let tip = repo
+            .find_branch(branch, BranchType::Local)?
+            .get()
+            .peel_to_commit()?;
 
-        // Get the branch's current commit
-        let branch_ref = repo.find_branch(branch, BranchType::Local)?;
-        let parent_commit = branch_ref.get().peel_to_commit()?;
+        // Parent = merge-base(branch, main): keeps the branch to one working commit on
+        // top of main. On a freshly forked branch (tip == main) this is the first commit.
+        let base_oid = repo
+            .merge_base(tip.id(), main_oid)
+            .unwrap_or_else(|_| tip.id());
+        let base = repo.find_commit(base_oid)?;
 
-        // Build a new tree from the parent tree + the new file
-        let blob_oid = repo.blob(content)?;
-        let mut builder = repo.treebuilder(Some(&parent_commit.tree()?))?;
-
-        // Handle nested paths by building subtrees
-        let parts: Vec<&str> = file_path.split('/').collect();
-        if parts.len() == 1 {
-            builder.insert(parts[0], blob_oid, 0o100644)?;
-        } else {
-            // For nested paths, we need to rebuild the tree hierarchy
-            // Simplified: use index-based approach
-            let mut index = repo.index()?;
-            // Reset index to parent tree
-            index.read_tree(&parent_commit.tree()?)?;
-            index.add_frombuffer(
-                &git2::IndexEntry {
-                    ctime: git2::IndexTime::new(0, 0),
-                    mtime: git2::IndexTime::new(0, 0),
-                    dev: 0,
-                    ino: 0,
-                    mode: 0o100644,
-                    uid: 0,
-                    gid: 0,
-                    file_size: content.len() as u32,
-                    id: blob_oid,
-                    flags: 0,
-                    flags_extended: 0,
-                    path: file_path.as_bytes().to_vec(),
-                },
-                content,
-            )?;
-            let tree_oid = index.write_tree()?;
-            let tree = repo.find_tree(tree_oid)?;
-            let sig = Signature::now(author, &format!("{author}@cowiki"))?;
-            repo.commit(
-                Some(&format!("refs/heads/{branch}")),
-                &sig,
-                &sig,
-                message,
-                &tree,
-                &[&parent_commit],
-            )?;
-            return Ok(());
-        }
-
-        let tree_oid = builder.write()?;
-        let tree = repo.find_tree(tree_oid)?;
-        let sig = Signature::now(author, &format!("{author}@cowiki"))?;
-        repo.commit(
-            Some(&format!("refs/heads/{branch}")),
-            &sig,
-            &sig,
-            message,
-            &tree,
-            &[&parent_commit],
-        )?;
+        let blob = repo.blob(content)?;
+        let segments: Vec<&str> = file_path.split('/').collect();
+        let tree_oid = set_path_in_tree(&repo, Some(&tip.tree()?), &segments, blob)?;
+        let new_oid = commit_tree(&repo, tree_oid, message, author, &[&base])?;
+        repo.reference(&format!("refs/heads/{branch}"), new_oid, true, message)?;
         Ok(())
     }
 
@@ -435,20 +495,516 @@ impl WikiRepo {
         Ok(diffs)
     }
 
-    pub fn merge_to_main(
+    /// Bring `branch` up to date with `main` (the user's "sync" / rebase button, and the
+    /// mandatory pre-submit step). Folds `main`'s changes into the branch as a single
+    /// commit on top of `main`; on conflict the branch is left **untouched** so the user
+    /// can resolve. Single-lock, lock-free body — no nested git locking, no deadlock.
+    pub fn rebase_onto_main(&self, branch: &str) -> Result<RebaseOutcome, git2::Error> {
+        if branch == "main" {
+            return Ok(RebaseOutcome::UpToDate);
+        }
+        let lock = self.branch_lock(branch);
+        let _guard = lock.write().unwrap();
+        let repo = self.repo()?;
+
+        let main_commit = repo
+            .find_branch("main", BranchType::Local)?
+            .get()
+            .peel_to_commit()?;
+        let branch_commit = repo
+            .find_branch(branch, BranchType::Local)?
+            .get()
+            .peel_to_commit()?;
+
+        if main_commit.id() == branch_commit.id()
+            || repo.graph_descendant_of(branch_commit.id(), main_commit.id())?
+        {
+            return Ok(RebaseOutcome::UpToDate);
+        }
+
+        // ours = branch, theirs = main → pull main's changes into the branch.
+        let mut idx = repo.merge_commits(&branch_commit, &main_commit, None)?;
+        if idx.has_conflicts() {
+            return Ok(RebaseOutcome::Conflict(conflict_paths(&mut idx)));
+        }
+        let tree_oid = idx.write_tree_to(&repo)?;
+        // Collapse to a single commit on top of main: the branch becomes
+        // "main + this user's net changes".
+        let new_oid = commit_tree(
+            &repo,
+            tree_oid,
+            "sync: rebase onto main",
+            "cowiki",
+            &[&main_commit],
+        )?;
+        repo.reference(&format!("refs/heads/{branch}"), new_oid, true, "sync")?;
+        Ok(RebaseOutcome::Updated)
+    }
+
+    /// Freeze the current state of `user_branch` as submission `id`'s reviewable snapshot:
+    /// `pr/{id}` (the PR tip that gets reviewed and merged) plus a frozen base ref, both at
+    /// commit `S`. The caller must rebase `user_branch` onto `main` first (submit does), so
+    /// `S` is already main-based. The live `user_branch` is not touched.
+    pub fn create_pr_snapshot(&self, user_branch: &str, id: &str) -> Result<(), git2::Error> {
+        let pr = format!("pr/{id}");
+        let lock = self.branch_lock(&pr);
+        let _guard = lock.write().unwrap();
+        let repo = self.repo()?;
+        let tip = repo
+            .find_branch(user_branch, BranchType::Local)?
+            .get()
+            .peel_to_commit()?
+            .id();
+        repo.reference(
+            &format!("refs/heads/{pr}"),
+            tip,
+            true,
+            "submit: pr snapshot",
+        )?;
+        repo.reference(
+            &format!("refs/cowiki/base/{id}"),
+            tip,
+            true,
+            "submit: frozen base",
+        )?;
+        Ok(())
+    }
+
+    /// Apply a review-requested change to submission `id` as a single commit `R` on top of
+    /// the frozen snapshot `S`, **amended** across rounds (`S` never moves, so `S`→`R` is
+    /// always the clean "what review changed" diff).
+    pub fn write_review_fix(
         &self,
-        branch: &str,
-        file_paths: &[String],
+        id: &str,
+        file_path: &str,
+        content: &[u8],
+        message: &str,
+        author: &str,
+    ) -> Result<(), git2::Error> {
+        let pr = format!("pr/{id}");
+        let lock = self.branch_lock(&pr);
+        let _guard = lock.write().unwrap();
+        let repo = self.repo()?;
+
+        let base_oid = repo.refname_to_id(&format!("refs/cowiki/base/{id}"))?;
+        let base = repo.find_commit(base_oid)?;
+        let tip = repo
+            .find_branch(&pr, BranchType::Local)?
+            .get()
+            .peel_to_commit()?;
+
+        let blob = repo.blob(content)?;
+        let segments: Vec<&str> = file_path.split('/').collect();
+        let tree_oid = set_path_in_tree(&repo, Some(&tip.tree()?), &segments, blob)?;
+        // Parent is always the frozen base `S`, so this stays one amended commit on top of S.
+        let r_oid = commit_tree(&repo, tree_oid, message, author, &[&base])?;
+        repo.reference(&format!("refs/heads/{pr}"), r_oid, true, message)?;
+        Ok(())
+    }
+
+    /// Merge submission `id`'s `pr/{id}` into `main`: a 3-way against the *current* `main`,
+    /// squashed into one commit and fast-forwarded. `main` stays **linear** — the commit
+    /// has a single parent (`main`), no two-parent merge node. Authored by the submitter.
+    /// Conflict with `main` → nothing is written.
+    pub fn merge_pr(
+        &self,
+        id: &str,
         author: &str,
         message: &str,
-    ) -> Result<(), git2::Error> {
+    ) -> Result<MergeOutcome, git2::Error> {
         let lock = self.branch_lock("main");
         let _guard = lock.write().unwrap();
-        for path in file_paths {
-            if let Some(content) = self.read_file(branch, path)? {
-                self.write_file("main", path, &content, message, author)?;
+        let repo = self.repo()?;
+
+        let main_commit = repo
+            .find_branch("main", BranchType::Local)?
+            .get()
+            .peel_to_commit()?;
+        let pr = format!("pr/{id}");
+        let pr_commit = repo
+            .find_branch(&pr, BranchType::Local)?
+            .get()
+            .peel_to_commit()?;
+
+        // ours = main, theirs = pr.
+        let mut idx = repo.merge_commits(&main_commit, &pr_commit, None)?;
+        if idx.has_conflicts() {
+            return Ok(MergeOutcome::Conflict(conflict_paths(&mut idx)));
+        }
+        let tree_oid = idx.write_tree_to(&repo)?;
+        // Single parent = main → linear squash commit.
+        let m_oid = commit_tree(&repo, tree_oid, message, author, &[&main_commit])?;
+        repo.reference("refs/heads/main", m_oid, true, message)?;
+        Ok(MergeOutcome::Merged)
+    }
+
+    /// Delete a submission's git refs (`pr/{id}` and its frozen base) — called after a
+    /// successful merge or a reject/abandon. Best-effort; missing refs are ignored.
+    pub fn cleanup_submission(&self, id: &str) {
+        let Ok(repo) = self.repo() else { return };
+        for name in [
+            format!("refs/heads/pr/{id}"),
+            format!("refs/cowiki/base/{id}"),
+        ] {
+            if let Ok(mut r) = repo.find_reference(&name) {
+                let _ = r.delete();
             }
         }
-        Ok(())
+    }
+
+    /// Whole-tree diff of a ref (e.g. `pr/{id}` or a `user/{id}` branch) against `main`,
+    /// as per-file `FileDiff`s for the changed `wiki/*.md` pages. Drives the review UI.
+    pub fn diff_ref_against_main(&self, ref_name: &str) -> Result<Vec<FileDiff>, git2::Error> {
+        let repo = self.repo()?;
+        let main_tree = repo
+            .find_branch("main", BranchType::Local)?
+            .get()
+            .peel_to_commit()?
+            .tree()?;
+        let ref_tree = repo.revparse_single(ref_name)?.peel_to_commit()?.tree()?;
+
+        let diff = repo.diff_tree_to_tree(Some(&main_tree), Some(&ref_tree), None)?;
+        let mut paths: Vec<String> = Vec::new();
+        diff.foreach(
+            &mut |delta, _| {
+                if let Some(p) = delta
+                    .new_file()
+                    .path()
+                    .or_else(|| delta.old_file().path())
+                    .and_then(|p| p.to_str())
+                {
+                    if p.starts_with("wiki/") && p.ends_with(".md") {
+                        paths.push(p.to_string());
+                    }
+                }
+                true
+            },
+            None,
+            None,
+            None,
+        )?;
+        paths.sort();
+        paths.dedup();
+
+        let mut out = Vec::new();
+        for path in paths {
+            let old = self
+                .read_file("main", &path)?
+                .map(|b| String::from_utf8_lossy(&b).into_owned());
+            let new = self
+                .read_file(ref_name, &path)?
+                .map(|b| String::from_utf8_lossy(&b).into_owned());
+            let (hunks, additions, deletions) =
+                compute_line_diff(old.as_deref().unwrap_or(""), new.as_deref().unwrap_or(""));
+            out.push(FileDiff {
+                path,
+                old_content: old,
+                new_content: new,
+                hunks,
+                additions,
+                deletions,
+            });
+        }
+        Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MergeOutcome, RebaseOutcome, WikiRepo};
+    use git2::{BranchType, Repository};
+    use std::sync::{mpsc, Arc};
+    use std::time::Duration;
+
+    fn temp_repo(tag: &str) -> (Arc<WikiRepo>, std::path::PathBuf) {
+        let dir =
+            std::env::temp_dir().join(format!("cowiki-git-test-{}-{}", std::process::id(), tag));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = Arc::new(WikiRepo::open_or_init(dir.to_str().unwrap()).unwrap());
+        (repo, dir)
+    }
+
+    fn read(repo: &WikiRepo, branch: &str, path: &str) -> Option<String> {
+        repo.read_file(branch, path)
+            .unwrap()
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+    }
+
+    fn git(dir: &std::path::Path) -> Repository {
+        Repository::open(dir.join("repo")).unwrap()
+    }
+    fn tip(g: &Repository, branch: &str) -> git2::Oid {
+        g.find_branch(branch, BranchType::Local)
+            .unwrap()
+            .get()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+    }
+
+    /// Every edit amends ONE working commit: the branch stays exactly one commit above
+    /// main (its single parent is main's tip), accumulating all pages of the task.
+    #[test]
+    fn edits_keep_a_single_working_commit() {
+        let (repo, dir) = temp_repo("single-commit");
+        repo.ensure_branch_exists("user/a").unwrap();
+        for i in 0..4 {
+            repo.write_file(
+                "user/a",
+                "wiki/p.md",
+                format!("v{i}\n").as_bytes(),
+                "edit",
+                "a",
+            )
+            .unwrap();
+        }
+        repo.write_file("user/a", "wiki/q.md", b"q\n", "edit", "a")
+            .unwrap();
+
+        let g = git(&dir);
+        let main_tip = tip(&g, "main");
+        let commit = g
+            .find_branch("user/a", BranchType::Local)
+            .unwrap()
+            .get()
+            .peel_to_commit()
+            .unwrap();
+        assert_eq!(commit.parent_count(), 1, "single working commit");
+        assert_eq!(commit.parent_id(0).unwrap(), main_tip, "parented on main");
+        assert_eq!(read(&repo, "user/a", "wiki/p.md").as_deref(), Some("v3\n"));
+        assert_eq!(read(&repo, "user/a", "wiki/q.md").as_deref(), Some("q\n"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Snapshot freezes S; review fixes are a single commit R on top of S, amended across
+    /// rounds — S (the frozen base ref) never moves.
+    #[test]
+    fn snapshot_then_review_fix_amends_on_frozen_base() {
+        let (repo, dir) = temp_repo("review-fix");
+        repo.ensure_branch_exists("user/b").unwrap();
+        repo.write_file("user/b", "wiki/p.md", b"original\n", "edit", "b")
+            .unwrap();
+        repo.create_pr_snapshot("user/b", "sub1").unwrap();
+
+        let g = git(&dir);
+        let base = g.refname_to_id("refs/cowiki/base/sub1").unwrap();
+        assert_eq!(
+            tip(&g, "pr/sub1"),
+            base,
+            "pr tip == frozen base before any fix"
+        );
+
+        repo.write_review_fix("sub1", "wiki/p.md", b"fixed\n", "fix", "b")
+            .unwrap();
+        let r1 = g.find_commit(tip(&g, "pr/sub1")).unwrap();
+        assert_eq!(r1.parent_id(0).unwrap(), base, "R is parented on frozen S");
+        assert_eq!(
+            g.refname_to_id("refs/cowiki/base/sub1").unwrap(),
+            base,
+            "base ref unchanged"
+        );
+
+        repo.write_review_fix("sub1", "wiki/p.md", b"fixed2\n", "fix2", "b")
+            .unwrap();
+        let r2 = g.find_commit(tip(&g, "pr/sub1")).unwrap();
+        assert_eq!(
+            r2.parent_id(0).unwrap(),
+            base,
+            "still one commit on frozen S"
+        );
+        assert_eq!(
+            read(&repo, "pr/sub1", "wiki/p.md").as_deref(),
+            Some("fixed2\n")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// merge_pr is linear (single parent = main), authored by the submitter, lands content.
+    #[test]
+    fn merge_pr_is_linear_and_lands_content() {
+        let (repo, dir) = temp_repo("merge-linear");
+        repo.ensure_branch_exists("user/c").unwrap();
+        repo.write_file("user/c", "wiki/p.md", b"hello\n", "edit", "carol")
+            .unwrap();
+        repo.create_pr_snapshot("user/c", "subc").unwrap();
+
+        let g = git(&dir);
+        let main_before = tip(&g, "main");
+        assert_eq!(
+            repo.merge_pr("subc", "carol", "approve: p").unwrap(),
+            MergeOutcome::Merged
+        );
+        let m = g
+            .find_branch("main", BranchType::Local)
+            .unwrap()
+            .get()
+            .peel_to_commit()
+            .unwrap();
+        assert_eq!(m.parent_count(), 1, "linear: single parent, no merge node");
+        assert_eq!(m.parent_id(0).unwrap(), main_before);
+        assert_eq!(m.author().name(), Some("carol"), "authored by submitter");
+        assert_eq!(read(&repo, "main", "wiki/p.md").as_deref(), Some("hello\n"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Post-submit edits on the live user branch must NOT change what gets merged — the
+    /// snapshot is frozen. (This is the core bug the redesign fixes.)
+    #[test]
+    fn post_submit_edits_do_not_leak_into_merge() {
+        let (repo, dir) = temp_repo("no-leak");
+        repo.ensure_branch_exists("user/j").unwrap();
+        repo.write_file("user/j", "wiki/p.md", b"reviewed\n", "edit", "j")
+            .unwrap();
+        repo.create_pr_snapshot("user/j", "subj").unwrap();
+        // keep editing the live branch AFTER submit
+        repo.write_file("user/j", "wiki/p.md", b"sneaky\n", "edit", "j")
+            .unwrap();
+        assert_eq!(
+            repo.merge_pr("subj", "j", "approve").unwrap(),
+            MergeOutcome::Merged
+        );
+        assert_eq!(
+            read(&repo, "main", "wiki/p.md").as_deref(),
+            Some("reviewed\n"),
+            "merge lands the reviewed snapshot, not the post-submit edit"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// merge_pr detects a real conflict (main changed the same page after snapshot) and
+    /// writes nothing.
+    #[test]
+    fn merge_pr_detects_conflict_and_writes_nothing() {
+        let (repo, dir) = temp_repo("merge-conflict");
+        // seed main with p = base
+        repo.ensure_branch_exists("user/d").unwrap();
+        repo.write_file("user/d", "wiki/p.md", b"base\n", "edit", "d")
+            .unwrap();
+        repo.create_pr_snapshot("user/d", "subd").unwrap();
+        repo.merge_pr("subd", "d", "seed").unwrap();
+
+        // user E snapshots p = mine (based on p = base)
+        repo.ensure_branch_exists("user/e").unwrap();
+        repo.write_file("user/e", "wiki/p.md", b"mine\n", "edit", "e")
+            .unwrap();
+        repo.create_pr_snapshot("user/e", "sube").unwrap();
+
+        // meanwhile main advances p = theirs via user F
+        repo.ensure_branch_exists("user/f").unwrap();
+        repo.write_file("user/f", "wiki/p.md", b"theirs\n", "edit", "f")
+            .unwrap();
+        repo.create_pr_snapshot("user/f", "subf").unwrap();
+        repo.merge_pr("subf", "f", "land theirs").unwrap();
+
+        let main_before = tip(&git(&dir), "main");
+        match repo.merge_pr("sube", "e", "land mine").unwrap() {
+            MergeOutcome::Conflict(paths) => {
+                assert!(
+                    paths.iter().any(|p| p.contains("p.md")),
+                    "conflict names p.md"
+                )
+            }
+            other => panic!("expected conflict, got {other:?}"),
+        }
+        assert_eq!(
+            tip(&git(&dir), "main"),
+            main_before,
+            "main untouched on conflict"
+        );
+        assert_eq!(
+            read(&repo, "main", "wiki/p.md").as_deref(),
+            Some("theirs\n")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// rebase_onto_main: up-to-date, updated (main advanced a different page), conflict.
+    #[test]
+    fn rebase_onto_main_outcomes() {
+        let (repo, dir) = temp_repo("rebase");
+        repo.ensure_branch_exists("user/g").unwrap();
+        assert_eq!(
+            repo.rebase_onto_main("user/g").unwrap(),
+            RebaseOutcome::UpToDate,
+            "fresh branch == main"
+        );
+
+        // main advances a DIFFERENT page
+        repo.ensure_branch_exists("user/h").unwrap();
+        repo.write_file("user/h", "wiki/other.md", b"other\n", "edit", "h")
+            .unwrap();
+        repo.create_pr_snapshot("user/h", "subh").unwrap();
+        repo.merge_pr("subh", "h", "land other").unwrap();
+
+        repo.write_file("user/g", "wiki/p.md", b"mine\n", "edit", "g")
+            .unwrap();
+        assert_eq!(
+            repo.rebase_onto_main("user/g").unwrap(),
+            RebaseOutcome::Updated
+        );
+        assert_eq!(
+            read(&repo, "user/g", "wiki/other.md").as_deref(),
+            Some("other\n")
+        );
+        assert_eq!(
+            read(&repo, "user/g", "wiki/p.md").as_deref(),
+            Some("mine\n")
+        );
+
+        // conflict: main changes p; user/g already changed p differently
+        repo.ensure_branch_exists("user/i").unwrap();
+        repo.write_file("user/i", "wiki/p.md", b"theirs\n", "edit", "i")
+            .unwrap();
+        repo.create_pr_snapshot("user/i", "subi").unwrap();
+        repo.merge_pr("subi", "i", "land theirs p").unwrap();
+        match repo.rebase_onto_main("user/g").unwrap() {
+            RebaseOutcome::Conflict(paths) => {
+                assert!(paths.iter().any(|p| p.contains("p.md")))
+            }
+            other => panic!("expected conflict, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Regression for the old `merge_to_main` self-deadlock (it held the "main" lock then
+    /// called `write_file("main", …)`, re-acquiring the same non-reentrant lock). The new
+    /// merge never nests locks; run it on a worker thread with a timeout so a regression
+    /// fails fast instead of hanging the suite.
+    #[test]
+    fn full_cycle_does_not_deadlock() {
+        let (repo, dir) = temp_repo("deadlock");
+        repo.ensure_branch_exists("user/x").unwrap();
+        repo.write_file("user/x", "wiki/p.md", b"hi\n", "edit", "x")
+            .unwrap();
+        repo.create_pr_snapshot("user/x", "subx").unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        let r2 = Arc::clone(&repo);
+        std::thread::spawn(move || {
+            let _ = tx.send(r2.merge_pr("subx", "x", "approve"));
+        });
+        match rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(Ok(MergeOutcome::Merged)) => {}
+            Ok(other) => panic!("unexpected merge result: {other:?}"),
+            Err(_) => panic!("merge_pr deadlocked (timed out after 10s)"),
+        }
+        assert_eq!(read(&repo, "main", "wiki/p.md").as_deref(), Some("hi\n"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// cleanup_submission removes the pr/{id} branch and the frozen base ref.
+    #[test]
+    fn cleanup_removes_submission_refs() {
+        let (repo, dir) = temp_repo("cleanup");
+        repo.ensure_branch_exists("user/k").unwrap();
+        repo.write_file("user/k", "wiki/p.md", b"x\n", "edit", "k")
+            .unwrap();
+        repo.create_pr_snapshot("user/k", "subk").unwrap();
+        let g = git(&dir);
+        assert!(g.find_branch("pr/subk", BranchType::Local).is_ok());
+        repo.cleanup_submission("subk");
+        assert!(g.find_branch("pr/subk", BranchType::Local).is_err());
+        assert!(g.refname_to_id("refs/cowiki/base/subk").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
