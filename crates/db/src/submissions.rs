@@ -14,6 +14,12 @@ pub struct Submission {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub reviewed_by: Option<Uuid>,
     pub reviewed_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Display name of the submitting user (joined in read queries; absent on writes).
+    #[sqlx(default)]
+    pub author_name: Option<String>,
+    /// Display name of the reviewer, when reviewed (joined in read queries).
+    #[sqlx(default)]
+    pub reviewer_name: Option<String>,
 }
 
 pub async fn create(
@@ -42,9 +48,11 @@ pub async fn list_pending_for_workspace(
     workspace_slug: &str,
 ) -> sqlx::Result<Vec<Submission>> {
     sqlx::query_as::<_, Submission>(
-        "SELECT * FROM submissions \
-         WHERE status IN ('pending', 'approved', 'rejected', 'merged') AND workspace_slug = $1 \
-         ORDER BY created_at DESC",
+        "SELECT s.*, u.name AS author_name, r.name AS reviewer_name FROM submissions s \
+         JOIN users u ON u.id = s.user_id \
+         LEFT JOIN users r ON r.id = s.reviewed_by \
+         WHERE s.status IN ('pending', 'approved', 'rejected', 'merged') AND s.workspace_slug = $1 \
+         ORDER BY s.created_at DESC",
     )
     .bind(workspace_slug)
     .fetch_all(pool)
@@ -56,14 +64,19 @@ pub async fn list_pending_for_workspace(
 }
 
 pub async fn find_by_id(pool: &PgPool, id: Uuid) -> sqlx::Result<Option<Submission>> {
-    sqlx::query_as::<_, Submission>("SELECT * FROM submissions WHERE id = $1")
-        .bind(id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!("DB find submission by id failed: {e}");
-            e
-        })
+    sqlx::query_as::<_, Submission>(
+        "SELECT s.*, u.name AS author_name, r.name AS reviewer_name FROM submissions s \
+         JOIN users u ON u.id = s.user_id \
+         LEFT JOIN users r ON r.id = s.reviewed_by \
+         WHERE s.id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("DB find submission by id failed: {e}");
+        e
+    })
 }
 
 pub async fn update_status(

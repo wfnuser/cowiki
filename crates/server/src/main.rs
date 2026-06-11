@@ -217,6 +217,15 @@ async fn main() {
             "/api/workspaces/{ws_slug}/folders",
             post(routes::pages::create_folder_ws),
         )
+        // Path ops on the caller's draft branch (files & folders under wiki/ only)
+        .route(
+            "/api/workspaces/{ws_slug}/paths/rename",
+            post(routes::pages::rename_path_ws),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/paths/delete",
+            post(routes::pages::delete_path_ws),
+        )
         .route(
             "/api/workspaces/{ws_slug}/pages/{*slug}",
             get(routes::pages::get_page_ws),

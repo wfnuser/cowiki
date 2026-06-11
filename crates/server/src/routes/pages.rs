@@ -173,8 +173,14 @@ pub async fn get_page_ws(
 pub async fn write_page_ws(
     State(state): State<Arc<AppState>>,
     Path(ws_slug): Path<String>,
+    headers: axum::http::HeaderMap,
     Json(input): Json<WritePage>,
 ) -> Result<Json<serde_json::Value>> {
+    // Writes go through membership + write permission and only ever land on the caller's
+    // own draft branch; main changes exclusively via merge_pr.
+    let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
+    crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
+    require_own_branch(&input.branch, guard.user.id)?;
     let repo = state
         .repo_manager
         .get(&ws_slug)
@@ -187,7 +193,7 @@ pub async fn write_page_ws(
         &path,
         input.body.as_bytes(),
         &format!("edit: {}", input.slug),
-        &input.branch,
+        &guard.user.name,
     )
     .map_err(|e| AppError::Internal(e.to_string()))?;
     Ok(Json(serde_json::json!({"ok": true, "slug": input.slug})))
@@ -196,8 +202,12 @@ pub async fn write_page_ws(
 pub async fn create_folder_ws(
     State(state): State<Arc<AppState>>,
     Path(ws_slug): Path<String>,
+    headers: axum::http::HeaderMap,
     Json(input): Json<CreateFolder>,
 ) -> Result<Json<serde_json::Value>> {
+    let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
+    crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
+    require_own_branch(&input.branch, guard.user.id)?;
     let repo = state
         .repo_manager
         .get(&ws_slug)
@@ -224,7 +234,7 @@ pub async fn create_folder_ws(
         &index_path,
         body.as_bytes(),
         &format!("create folder: {}", input.name),
-        &input.branch,
+        &guard.user.name,
     )
     .map_err(|e| AppError::Internal(e.to_string()))?;
     Ok(Json(
@@ -393,4 +403,101 @@ fn list_pages_from_repo(
 
     let tree = build_level(&items, "", branch);
     Ok(Json(tree))
+}
+
+// ── Path operations: rename / delete (files and folders under wiki/) ──
+
+/// Validate a repo path for destructive ops: must be inside `wiki/` (so `sources/` and
+/// other special trees are untouchable), no traversal, no empty segments, and never the
+/// `wiki` root itself.
+fn validate_wiki_path(p: &str) -> Result<()> {
+    let ok = p.starts_with("wiki/")
+        && p.len() > 5
+        && !p.ends_with('/')
+        && p.split('/')
+            .all(|seg| !seg.is_empty() && seg != "." && seg != "..");
+    if !ok {
+        return Err(AppError::BadRequest(format!(
+            "invalid path '{p}': only paths inside wiki/ can be modified"
+        )));
+    }
+    Ok(())
+}
+
+/// Mutating ops only touch the caller's own draft branch — never main, pr/* snapshots,
+/// or other users' branches (all writes flow to main exclusively through merge_pr).
+pub(crate) fn require_own_branch(branch: &str, user_id: uuid::Uuid) -> Result<()> {
+    if branch != format!("user/{user_id}") {
+        return Err(AppError::Forbidden(
+            "writes are only allowed on your own draft branch".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+pub struct RenamePathRequest {
+    pub branch: String,
+    pub from: String,
+    pub to: String,
+}
+
+pub async fn rename_path_ws(
+    State(state): State<Arc<AppState>>,
+    Path(ws_slug): Path<String>,
+    headers: axum::http::HeaderMap,
+    Json(input): Json<RenamePathRequest>,
+) -> Result<Json<serde_json::Value>> {
+    let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
+    crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
+    require_own_branch(&input.branch, guard.user.id)?;
+    validate_wiki_path(&input.from)?;
+    validate_wiki_path(&input.to)?;
+
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
+        .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
+    ensure_user_branch_if_needed(&repo, &input.branch)?;
+    repo.rename_path(
+        &input.branch,
+        &input.from,
+        &input.to,
+        &format!("rename: {} -> {}", input.from, input.to),
+        &guard.user.name,
+    )
+    .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+#[derive(Deserialize)]
+pub struct DeletePathRequest {
+    pub branch: String,
+    pub path: String,
+}
+
+pub async fn delete_path_ws(
+    State(state): State<Arc<AppState>>,
+    Path(ws_slug): Path<String>,
+    headers: axum::http::HeaderMap,
+    Json(input): Json<DeletePathRequest>,
+) -> Result<Json<serde_json::Value>> {
+    let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
+    crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
+    require_own_branch(&input.branch, guard.user.id)?;
+    validate_wiki_path(&input.path)?;
+
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
+        .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
+    ensure_user_branch_if_needed(&repo, &input.branch)?;
+    repo.delete_path(
+        &input.branch,
+        &input.path,
+        &format!("delete: {}", input.path),
+        &guard.user.name,
+    )
+    .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    Ok(Json(serde_json::json!({"ok": true})))
 }
