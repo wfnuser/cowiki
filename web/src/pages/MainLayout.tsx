@@ -21,7 +21,7 @@ import {
   compile, submit, renameWorkspace,
   deleteWorkspace,
   listPublicWorkspaces, joinWorkspace,
-  listSources, getSource, listReviews,
+  listSources, getSource, listReviews, syncBranch,
   type Workspace, type PageMeta, type PageFull, type SourceItem, type SourceContent,
 } from '../api';
 import { AddSourceDialog } from '@/components/AddSourceDialog';
@@ -90,6 +90,7 @@ export function MainLayout() {
   }, [message]);
   const [searchQuery, setSearchQuery] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   // Team space management state
   const [showInviteDialog, setShowInviteDialog] = useState<Workspace | null>(null);
@@ -388,6 +389,30 @@ export function MainLayout() {
     }
   };
 
+  // Sync the user's draft branch with main (rebase). Conflicts are surfaced for now;
+  // proper in-app resolution is a follow-up.
+  const handleSync = async () => {
+    if (!activeWorkspace) return;
+    setSyncing(true);
+    setMessage(null);
+    try {
+      const res = await syncBranch(activeWorkspace.slug, userBranch);
+      if (res.status === 'conflict') {
+        setMessage({ text: `Conflict with main — resolve: ${res.conflicts.join(', ')}`, type: 'error' });
+      } else {
+        setMessage({
+          text: res.status === 'updated' ? 'Synced with main.' : 'Already up to date.',
+          type: 'success',
+        });
+        if (res.status === 'updated') loadWorkspaces();
+      }
+    } catch (e) {
+      setMessage({ text: e instanceof Error ? e.message : 'Sync failed', type: 'error' });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   // Tab navigation
   const handleTabChange = (tab: NavTab) => {
     if (!activeWorkspace) return;
@@ -633,6 +658,18 @@ export function MainLayout() {
                 </div>
 
 
+
+                {/* Sync draft branch with main */}
+                {activeWorkspace && (
+                  <button
+                    onClick={handleSync}
+                    disabled={syncing}
+                    style={{ ...headerBtnStyle, opacity: syncing ? 0.4 : 1 }}
+                    title="Sync your draft with the latest main"
+                  >
+                    <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} /> Sync
+                  </button>
+                )}
 
                 {/* Wiki-specific actions */}
                 {activeTab === 'wiki' && (activeView?.kind === 'page' || activeView?.kind === 'source') && (
