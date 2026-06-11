@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::error::{AppError, Result};
-use crate::routes::auth::extract_user;
+
 use crate::AppState;
 use cowiki_core::models::DuplicateWarning;
 
@@ -30,7 +30,13 @@ pub async fn submit(
     headers: axum::http::HeaderMap,
     Json(input): Json<SubmitRequest>,
 ) -> Result<Json<SubmitResponse>> {
-    let user = extract_user(&state.db, &headers).await?;
+    // Membership + write permission, and the branch must be the caller's own draft —
+    // submit force-rewrites the named ref (rebase), so an arbitrary branch here would
+    // let any user rewrite another user's branch or a frozen pr/* snapshot.
+    let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
+    crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
+    super::pages::require_own_branch(&input.branch, guard.user.id)?;
+    let user = guard.user.clone();
     let repo = state
         .repo_manager
         .get(&ws_slug)
@@ -129,7 +135,10 @@ pub async fn submit(
 
         // Personal Space: snapshot the whole branch and merge straight to main. One
         // writer, so this never conflicts — every submit is effectively a commit.
-        let pr_id = format!("personal-{}", input.branch.replace('/', "-"));
+        // Unique per submit: a branch-derived id would collide across concurrent submits
+        // (double-click/retry) — one request's cleanup would delete the ref the other is
+        // about to merge.
+        let pr_id = format!("personal-{}", uuid::Uuid::new_v4());
         repo.create_pr_snapshot(&input.branch, &pr_id)
             .map_err(|e| AppError::Internal(e.to_string()))?;
         let outcome = repo
@@ -219,7 +228,12 @@ pub async fn rebase(
     headers: axum::http::HeaderMap,
     Json(input): Json<RebaseRequest>,
 ) -> Result<Json<RebaseResponse>> {
-    let _user = extract_user(&state.db, &headers).await?;
+    // Same gate as submit: members with write permission only, and only on the caller's
+    // own draft branch — rebase force-rewrites the ref, so pr/*, main, and other users'
+    // branches must be unreachable from here.
+    let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
+    crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
+    super::pages::require_own_branch(&input.branch, guard.user.id)?;
     let repo = state
         .repo_manager
         .get(&ws_slug)
