@@ -1,0 +1,10 @@
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  resolve: {
+    extensions: ['.ts', '.js', '.json'],
+  },
+  test: {
+    include: ['tests/**/*.test.ts'],
+  },
+});
