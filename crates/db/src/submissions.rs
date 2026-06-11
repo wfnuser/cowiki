@@ -82,6 +82,17 @@ pub async fn update_status(
     .await
 }
 
+/// Replace a submission's summary (used by the background AI-summary task; submit stores a
+/// diff-based placeholder immediately so it never blocks on the LLM).
+pub async fn update_summary(pool: &PgPool, id: Uuid, summary: &str) -> sqlx::Result<()> {
+    sqlx::query("UPDATE submissions SET summary = $2 WHERE id = $1")
+        .bind(id)
+        .bind(summary)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

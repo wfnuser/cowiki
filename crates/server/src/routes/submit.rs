@@ -93,7 +93,10 @@ pub async fn submit(
         }
     }
 
-    let diff_desc = diffs
+    // Submit returns immediately with a diff-based summary; the AI one-liner is generated
+    // in the background after the submission is created (see below), so a slow or
+    // unreachable LLM never blocks submit.
+    let summary = diffs
         .iter()
         .map(|d| {
             if d.is_new() {
@@ -104,18 +107,6 @@ pub async fn submit(
         })
         .collect::<Vec<_>>()
         .join("\n");
-
-    let summary = match state
-        .compiler
-        .generate_summary(&format!("Submission changes:\n{diff_desc}"))
-        .await
-    {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!("summary generation failed, falling back to diff description: {e}");
-            diff_desc
-        }
-    };
 
     if input.skip_review {
         // Authorization: skip_review only allowed for personal workspaces (private + owner)
@@ -175,6 +166,30 @@ pub async fn submit(
     .await?;
     repo.create_pr_snapshot(&input.branch, &submission.id.to_string())
         .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    // Replace the diff-based placeholder summary with an AI one-liner in the background, so
+    // submit itself never waits on the LLM. Failure just leaves the placeholder in place.
+    {
+        let state = state.clone();
+        let sub_id = submission.id;
+        let content = summary.clone();
+        tokio::spawn(async move {
+            match state
+                .compiler
+                .generate_summary(&format!("Submission changes:\n{content}"))
+                .await
+            {
+                Ok(s) => {
+                    if let Err(e) =
+                        cowiki_db::submissions::update_summary(&state.db, sub_id, &s).await
+                    {
+                        tracing::warn!("failed to store async summary for {sub_id}: {e}");
+                    }
+                }
+                Err(e) => tracing::warn!("async summary generation failed for {sub_id}: {e}"),
+            }
+        });
+    }
 
     Ok(Json(SubmitResponse {
         submission_id: submission.id,
