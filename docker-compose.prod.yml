@@ -3,6 +3,9 @@ services:
     image: cowiki-backend:latest
     build: .
     restart: unless-stopped
+    # Run as the host owner of the bind-mounted data dir (/opt/cowiki/data is
+    # 1000:1001) so the container can create per-user git repos under /data.
+    user: "1000:1001"
     env_file: .env
     ports:
       - "127.0.0.1:3000:3000"
