@@ -606,3 +606,23 @@ export async function rejectTransfer(transferId: string): Promise<TransferRespon
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
+
+export interface SyncResult {
+  /** "up_to_date" | "updated" | "conflict" */
+  status: string;
+  conflicts: string[];
+}
+
+/** Rebase a draft branch onto main (the "Sync with main" button). */
+export async function syncBranch(workspaceSlug: string, branch: string): Promise<SyncResult> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/rebase`, {
+    method: 'POST',
+    headers: h({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ branch }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
+  return res.json();
+}

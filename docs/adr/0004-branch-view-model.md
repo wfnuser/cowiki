@@ -1,4 +1,4 @@
-# Branch View Model — unresolved design problem
+# Branch View, Submission & Merge Model
 
 ## The Problem
 
@@ -40,10 +40,40 @@ User's branch is a full copy of main at the time they branched. Any page they ha
 
 ## Decision
 
-Not decided yet. Current implementation uses approach A (overlay) as a temporary solution. The search indexing problem needs to be solved before adding PostgreSQL FTS.
+We adopt approach **C (working copy)** for the view, plus a concrete **submission + merge lifecycle**. Together these resolve all four problems above.
+
+### View — read the user's branch directly (approach C)
+
+A user always sees **their own `user/{id}` branch**, nothing else. The branch is a full tree (it was forked from `main`), so:
+
+- **Which version (1):** always the branch's version — no "try branch, fall back to main" hack.
+- **Search (2):** index the branch's tree (the user's effective view) — no cross-branch dedup.
+- **Page identity (4):** a page is its slug on the user's branch; `main` is just where merged content lands.
+
+Pages the user hasn't touched stay equal to `main` because the branch is kept current by **rebasing onto `main`** (see lifecycle). Staleness (3) is therefore a rebase concern, not a view concern.
+
+### Branches
+
+- **`user/{id}`** — the user's long-lived working branch (what they see and edit). Every write re-commits with `parent = merge-base(user/{id}, main)`, so the branch carries **exactly one in-progress working commit** on top of `main` — not a pile of autosave commits. Continuing a task keeps amending that one commit.
+- **`pr/{submission-id}`** — a **snapshot branch** created at submit time, kept separate from the live `user/{id}` so review is stable. It is the unit that gets reviewed and merged.
+
+### Lifecycle
+
+1. **Edit** → amend the single working commit on `user/{id}`.
+2. **Submit** (whole branch; user chooses when, typically after finishing one task) → rebase the work onto the current `main`, then snapshot it as `pr/{id}` with a frozen base commit `S`.
+3. **Review changes** → made through the **review UI** against `pr/{id}`: a single review-fix commit `R` is added on top of `S` and **amended** across further change requests. `S` never moves, so `S` vs `R` is always a clean "what review changed" diff.
+4. **Merge** → squash `S + R` into one commit, rebase onto the current `main`, **fast-forward**. `main` stays **linear** — no two-parent merge commits. A rebase conflict returns **409** for the author to resolve.
+5. **After merge** → `user/{id}` is rebased onto the new `main` (lazily, on next access). Because the merged content came from this user, this is usually a no-op or trivial; genuine conflicts are surfaced for the user to resolve.
+
+### Deliberately out of scope (for now)
+
+- **No branch switching in the main editing UI.** A user only ever edits `user/{id}` directly; editing a PR happens inside the review screen, against `pr/{id}`.
+- **One in-flight submission per branch** (matches the "finish a task, then submit" workflow). Concurrent PRs per user are not supported yet.
 
 ## Impact
 
-- Search should index the user's "effective view" (overlay of main + their drafts)
-- Avoid surfacing duplicate versions of the same page
-- Need a rebase/sync mechanism for stale drafts
+- View reads a single branch — no overlay/dedup logic; search indexes the user's branch tree.
+- Replaces the placeholder reviewer-authored re-commit (no conflict detection) with a real rebase + squash merge; see #56.
+- A submission references the frozen `pr/{id}` snapshot, **not** the live `user/{id}` tip — edits made after submit can never silently change what was reviewed.
+- `main` history is linear: one squash commit per merged submission, authored by the submitter.
+- Stale drafts (problem 3) are resolved by rebasing `user/{id}` onto `main`; conflicts are the user's to resolve.

@@ -37,6 +37,18 @@ pub async fn submit(
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     super::pages::ensure_user_branch_if_needed(&repo, &input.branch)?;
 
+    // Mandatory pre-submit rebase: bring the branch up to date with main. A conflict
+    // blocks submit — the author rebases (resolves) first, then resubmits.
+    if let cowiki_core::git::RebaseOutcome::Conflict(paths) =
+        repo.rebase_onto_main(&input.branch)
+            .map_err(|e| AppError::Internal(e.to_string()))?
+    {
+        return Err(AppError::Conflict(format!(
+            "your branch conflicts with main; rebase and resolve first: {}",
+            paths.join(", ")
+        )));
+    }
+
     let diffs = match repo.diff_files(&input.branch, &input.page_slugs) {
         Ok(d) => d,
         Err(e) => {
@@ -81,7 +93,10 @@ pub async fn submit(
         }
     }
 
-    let diff_desc = diffs
+    // Submit returns immediately with a diff-based summary; the AI one-liner is generated
+    // in the background after the submission is created (see below), so a slow or
+    // unreachable LLM never blocks submit.
+    let summary = diffs
         .iter()
         .map(|d| {
             if d.is_new() {
@@ -92,18 +107,6 @@ pub async fn submit(
         })
         .collect::<Vec<_>>()
         .join("\n");
-
-    let summary = match state
-        .compiler
-        .generate_summary(&format!("Submission changes:\n{diff_desc}"))
-        .await
-    {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!("summary generation failed, falling back to diff description: {e}");
-            diff_desc
-        }
-    };
 
     if input.skip_review {
         // Authorization: skip_review only allowed for personal workspaces (private + owner)
@@ -124,19 +127,23 @@ pub async fn submit(
             ));
         }
 
-        // Personal Space: merge directly to main, no review needed
-        let file_paths: Vec<String> = input
-            .page_slugs
-            .iter()
-            .map(|s| format!("wiki/{s}.md"))
-            .collect();
-        repo.merge_to_main(
-            &input.branch,
-            &file_paths,
-            &user.name,
-            &format!("commit: {summary}"),
-        )
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+        // Personal Space: snapshot the whole branch and merge straight to main. One
+        // writer, so this never conflicts — every submit is effectively a commit.
+        let pr_id = format!("personal-{}", input.branch.replace('/', "-"));
+        repo.create_pr_snapshot(&input.branch, &pr_id)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        let outcome = repo
+            .merge_pr(&pr_id, &user.name, &format!("commit: {summary}"))
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        repo.cleanup_submission(&pr_id);
+        if let cowiki_core::git::MergeOutcome::Conflict(paths) = outcome {
+            return Err(AppError::Conflict(format!(
+                "branch conflicts with main: {}",
+                paths.join(", ")
+            )));
+        }
+        // Catch the branch up so its untouched pages reflect the new main.
+        let _ = repo.rebase_onto_main(&input.branch);
 
         return Ok(Json(SubmitResponse {
             submission_id: uuid::Uuid::nil(),
@@ -145,7 +152,9 @@ pub async fn submit(
         }));
     }
 
-    // Team Space: create a review submission
+    // Team Space: create a review submission, then freeze its reviewable snapshot
+    // (`pr/{id}`) from the just-rebased branch. Review and merge read the snapshot, never
+    // the live branch, so edits after submit can't change what was reviewed.
     let submission = cowiki_db::submissions::create(
         &state.db,
         user.id,
@@ -155,10 +164,75 @@ pub async fn submit(
         &ws_slug,
     )
     .await?;
+    repo.create_pr_snapshot(&input.branch, &submission.id.to_string())
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    // Replace the diff-based placeholder summary with an AI one-liner in the background, so
+    // submit itself never waits on the LLM. Failure just leaves the placeholder in place.
+    {
+        let state = state.clone();
+        let sub_id = submission.id;
+        let content = summary.clone();
+        tokio::spawn(async move {
+            match state
+                .compiler
+                .generate_summary(&format!("Submission changes:\n{content}"))
+                .await
+            {
+                Ok(s) => {
+                    if let Err(e) =
+                        cowiki_db::submissions::update_summary(&state.db, sub_id, &s).await
+                    {
+                        tracing::warn!("failed to store async summary for {sub_id}: {e}");
+                    }
+                }
+                Err(e) => tracing::warn!("async summary generation failed for {sub_id}: {e}"),
+            }
+        });
+    }
 
     Ok(Json(SubmitResponse {
         submission_id: submission.id,
         summary,
         duplicates,
     }))
+}
+
+#[derive(Deserialize)]
+pub struct RebaseRequest {
+    pub branch: String,
+}
+
+#[derive(Serialize)]
+pub struct RebaseResponse {
+    /// "up_to_date" | "updated" | "conflict"
+    pub status: String,
+    pub conflicts: Vec<String>,
+}
+
+/// Bring a user branch up to date with `main` (the "sync with main" button). Returns the
+/// outcome; on conflict the branch is left untouched and the conflicting paths are listed
+/// so the UI can guide the author to resolve.
+pub async fn rebase(
+    State(state): State<Arc<AppState>>,
+    Path(ws_slug): Path<String>,
+    headers: axum::http::HeaderMap,
+    Json(input): Json<RebaseRequest>,
+) -> Result<Json<RebaseResponse>> {
+    let _user = extract_user(&state.db, &headers).await?;
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
+        .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
+    super::pages::ensure_user_branch_if_needed(&repo, &input.branch)?;
+
+    let (status, conflicts) = match repo
+        .rebase_onto_main(&input.branch)
+        .map_err(|e| AppError::Internal(e.to_string()))?
+    {
+        cowiki_core::git::RebaseOutcome::UpToDate => ("up_to_date".to_string(), Vec::new()),
+        cowiki_core::git::RebaseOutcome::Updated => ("updated".to_string(), Vec::new()),
+        cowiki_core::git::RebaseOutcome::Conflict(paths) => ("conflict".to_string(), paths),
+    };
+    Ok(Json(RebaseResponse { status, conflicts }))
 }
