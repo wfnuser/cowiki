@@ -54,14 +54,14 @@ pub async fn submit(
     let mut embeddings = Vec::new();
     for slug in &input.page_slugs {
         let path = format!("wiki/{slug}.md");
-        if let Some(content) = repo
+        let content = repo
             .read_file(&input.branch, &path)
             .map_err(|e| AppError::Internal(e.to_string()))?
-        {
-            let text = String::from_utf8_lossy(&content);
-            if let Ok(emb) = state.compiler.embed(&text).await {
-                embeddings.push((slug.clone(), emb));
-            }
+            .ok_or_else(|| AppError::BadRequest(format!("page {slug} not found")))?;
+        let text = String::from_utf8_lossy(&content);
+        super::pages::require_page_title(&text)?;
+        if let Ok(emb) = state.compiler.embed(&text).await {
+            embeddings.push((slug.clone(), emb));
         }
     }
 

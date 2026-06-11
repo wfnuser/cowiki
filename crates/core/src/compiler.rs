@@ -49,7 +49,7 @@ Be concise. One concept per page. Use clear headings. Attribute claims to source
             .split("===PAGE_BREAK===")
             .filter(|s: &&str| !s.trim().is_empty())
             .map(|raw: &str| parse_compiled_page(raw.trim()))
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(pages)
     }
@@ -81,8 +81,8 @@ Be concise. One concept per page. Use clear headings. Attribute claims to source
     }
 }
 
-fn parse_compiled_page(raw: &str) -> Page {
-    let mut title = "Untitled".to_string();
+fn parse_compiled_page(raw: &str) -> Result<Page, String> {
+    let mut title: Option<String> = None;
     let mut summary = String::new();
     let mut sources = Vec::new();
     let mut body = raw.to_string();
@@ -104,11 +104,14 @@ fn parse_compiled_page(raw: &str) -> Page {
             for line in fm.lines() {
                 let trimmed = line.trim();
                 if trimmed.starts_with("title:") {
-                    title = trimmed
+                    let parsed = trimmed
                         .trim_start_matches("title:")
                         .trim()
                         .trim_matches('"')
                         .to_string();
+                    if !parsed.trim().is_empty() {
+                        title = Some(parsed);
+                    }
                     in_sources = false;
                 } else if trimmed.starts_with("summary:") {
                     summary = trimmed
@@ -128,6 +131,7 @@ fn parse_compiled_page(raw: &str) -> Page {
         }
     }
 
+    let title = title.ok_or_else(|| "compiled page missing frontmatter.title".to_string())?;
     let slug = title
         .to_lowercase()
         .replace(|c: char| !c.is_alphanumeric() && c != ' ', "")
@@ -135,12 +139,12 @@ fn parse_compiled_page(raw: &str) -> Page {
         .collect::<Vec<_>>()
         .join("-");
 
-    Page {
+    Ok(Page {
         slug,
         title,
         summary,
         body,
         sources,
         created_at: chrono::Utc::now().to_rfc3339(),
-    }
+    })
 }

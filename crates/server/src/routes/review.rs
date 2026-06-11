@@ -107,6 +107,15 @@ pub async fn review_action(
                 .map(|s| format!("wiki/{s}.md"))
                 .collect();
 
+            for (slug, path) in submission.page_slugs.iter().zip(file_paths.iter()) {
+                let content = repo
+                    .read_file(&submission.source_branch, path)
+                    .map_err(|e| AppError::Internal(e.to_string()))?
+                    .ok_or_else(|| AppError::BadRequest(format!("page {slug} not found")))?;
+                let text = String::from_utf8_lossy(&content);
+                super::pages::require_page_title(&text)?;
+            }
+
             repo.merge_to_main(
                 &submission.source_branch,
                 &file_paths,
@@ -123,12 +132,13 @@ pub async fn review_action(
                     .map_err(|e| AppError::Internal(e.to_string()))?
                 {
                     let text = String::from_utf8_lossy(&content);
+                    let (title, summary) = super::pages::require_page_title(&text)?;
                     let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
                     if let Err(e) = cowiki_db::pages::upsert(
                         &state.db,
                         slug,
-                        slug,
-                        "",
+                        &title,
+                        &summary,
                         "main",
                         &hash,
                         None,
