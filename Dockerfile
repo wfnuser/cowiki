@@ -33,8 +33,11 @@ RUN find crates -name '*.rs' -exec touch {} + \
 # Stage 2: Runtime
 FROM debian:bookworm-slim
 
+# git CLI is required at runtime: WikiRepo::rename_master_to_main shells out to
+# `git branch -m master main`, so without it new repos stay on 'master' and the
+# code fails with "cannot locate local branch 'main'".
 RUN apt-get update && apt-get install -y \
-    ca-certificates libssl3 libgit2-1.5 \
+    ca-certificates libssl3 libgit2-1.5 git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/cowiki-server /usr/local/bin/cowiki-server
