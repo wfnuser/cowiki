@@ -124,7 +124,7 @@ pub async fn review_action(
                 {
                     let text = String::from_utf8_lossy(&content);
                     let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
-                    cowiki_db::pages::upsert(
+                    if let Err(e) = cowiki_db::pages::upsert(
                         &state.db,
                         slug,
                         slug,
@@ -135,7 +135,9 @@ pub async fn review_action(
                         guard.user.id,
                     )
                     .await
-                    .ok();
+                    {
+                        tracing::warn!("failed to index merged page '{slug}' for search: {e}");
+                    }
                 }
             }
 
