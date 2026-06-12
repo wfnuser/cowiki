@@ -299,7 +299,10 @@ async fn main() {
             delete(routes::comments::delete_comment),
         )
         // Search
-        .route("/api/search", get(routes::search::search))
+        .route(
+            "/api/workspaces/{ws_slug}/search",
+            get(routes::search::search),
+        )
         // API Keys — multi-key management
         .route("/api/keys", get(routes::keys::list_keys))
         .route("/api/keys", post(routes::keys::create_key))

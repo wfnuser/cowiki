@@ -80,6 +80,8 @@ export interface SearchResult {
   title: string;
   summary: string;
   similarity: number;
+  /** "draft" (your branch) or "main" */
+  source: string;
 }
 
 export interface Workspace {
@@ -402,8 +404,9 @@ export async function createFolder(name: string, branch: string, parent: string 
 
 // ── Search ──
 
-export async function search(q: string, branch = 'main'): Promise<SearchResult[]> {
-  const res = await fetch(`${BASE}/search?q=${encodeURIComponent(q)}&branch=${branch}`, { headers: h() });
+/** Workspace-scoped semantic search: your draft branch + merged main (never others' drafts). */
+export async function searchWorkspace(workspaceSlug: string, q: string, limit = 8): Promise<SearchResult[]> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/search?q=${encodeURIComponent(q)}&limit=${limit}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Request failed: ${res.status}`);
