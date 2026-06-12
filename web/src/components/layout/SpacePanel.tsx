@@ -176,11 +176,8 @@ export function SpacePanel({
         >
           <Search size={13} style={{ flexShrink: 0 }} />
           <span style={{ flex: 1 }}>Search…</span>
-          <span style={{
-            fontSize: 10.5, padding: '1px 5px', borderRadius: 4,
-            border: `1px solid ${C.line}`, background: C.panel, color: C.faint,
-          }}>
-            ⌘K
+          <span style={{ fontSize: 11.5, color: C.faint, opacity: 0.75, letterSpacing: '0.04em' }}>
+            ⌘ K
           </span>
         </button>
 

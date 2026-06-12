@@ -179,16 +179,14 @@ export function SearchModal({
           {loading && <span style={{ fontSize: 12, color: C.faint, flexShrink: 0 }}>Searching…</span>}
         </div>
 
-        {/* Results */}
-        <div ref={listRef} style={{ flex: 1, overflowY: 'auto', paddingBottom: 6 }}>
+        {/* Results — fixed minimum height so the panel never collapses to a sliver */}
+        <div ref={listRef} style={{ flex: 1, minHeight: 200, overflowY: 'auto', paddingBottom: 6 }}>
           {!q.trim() ? (
-            <div style={{ padding: '28px 18px', textAlign: 'center', color: C.faint, fontSize: 13.5 }}>
-              Search pages by title or content in this space
-            </div>
-          ) : rows.length === 0 && !loading ? (
-            <div style={{ padding: '28px 18px', textAlign: 'center', color: C.faint, fontSize: 13.5 }}>
-              No results for “{q}”
-            </div>
+            <Empty>Search pages by title or content in this space</Empty>
+          ) : rows.length === 0 && loading ? (
+            <Empty>Searching…</Empty>
+          ) : rows.length === 0 ? (
+            <Empty>No results for “{q}”</Empty>
           ) : (
             <>
               {rows.length > 0 && rows[0].kind === 'keyword' &&
@@ -269,6 +267,18 @@ export function SearchModal({
       </div>
     </div>,
     document.body
+  );
+}
+
+/** Vertically-centered placeholder for the fixed-height results area. */
+function Empty({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      height: '100%', minHeight: 200, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      color: C.faint, fontSize: 13.5, padding: '0 18px', textAlign: 'center',
+    }}>
+      {children}
+    </div>
   );
 }
 
