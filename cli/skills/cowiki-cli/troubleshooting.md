@@ -63,6 +63,29 @@ npx @cowiki/cli <command>
 # See https://docs.npmjs.com/resolving-eacces-permissions-errors
 ```
 
+## "npm install -g fails (package not found or other errors)"
+
+**Cause:** The package may not be published to the npm registry, or there may be dependency resolution issues.
+
+**Fix:**
+```bash
+# Option 1: Clone the repo and link locally
+cd cli
+npm install
+npm link
+
+# Verify installation
+cowiki --version
+
+# Option 2: If npm install fails within the local directory
+cd cli
+rm -rf node_modules package-lock.json
+npm install
+npm link
+```
+
+`npm link` creates a global symlink to the local build, so `cowiki` will be available system-wide. This is also the recommended approach for development.
+
 ## "WARNING: Server URL is not HTTPS"
 
 **Cause:** Using HTTP (not HTTPS) with a remote server. API keys sent in cleartext.

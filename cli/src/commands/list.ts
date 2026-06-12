@@ -8,7 +8,8 @@ import type { GlobalOpts } from '../shared.js';
 export function registerListCommand(program: Command): void {
   program
     .command('list')
-    .description('List wiki pages')
+    .description('List wiki pages (supports --dir for wiki/entities/concepts/all)')
+    .option('--dir <dir>', 'Directory: wiki (default), entities, concepts, all')
     .action(async (opts, cmd) => {
       const globalOpts = cmd.parent?.optsWithGlobals() as GlobalOpts;
       const config = loadConfig(globalOpts?.server)
@@ -17,7 +18,7 @@ export function registerListCommand(program: Command): void {
       const branch = await resolveUserBranch(client);
 
       try {
-        const pages = await client.listPages(ws, branch);
+        const pages = await client.listPages(ws, branch, opts.dir);
 
         if (globalOpts.json) {
           printJson(pages);

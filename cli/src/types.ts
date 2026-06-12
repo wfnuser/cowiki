@@ -38,11 +38,19 @@ export interface WritePageRequest {
   slug: string;
   body: string;
   branch: string;
+  /** Content directory: "wiki" (default), "entities", "concepts" */
+  path?: string;
+  /** Page title — server will prepend YAML frontmatter */
+  title?: string;
+  /** Page summary for YAML frontmatter */
+  summary?: string;
 }
 
 export interface WriteResponse {
   ok: boolean;
   slug: string;
+  /** Full path including directory, e.g. "entities/my-page" */
+  path: string;
 }
 
 // ── Workspaces ────────────────────────────────────────

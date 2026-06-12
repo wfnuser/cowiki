@@ -29,7 +29,7 @@ cowiki key revoke <id>                   # Revoke a key
 ```
 
 ### `cowiki ingest`
-Add a source document to the wiki.
+Add a source document to the wiki. Use with `cowiki compile` for the cloud compile workflow (Path 1). See SKILL.md for the dual-path workflow.
 
 ```bash
 cowiki ingest -w <ws> --type url --content "https://example.com/doc"
@@ -39,7 +39,7 @@ cat file.md | cowiki ingest -w <ws> --type text   # from stdin
 ```
 
 ### `cowiki compile`
-Compile sources into wiki pages.
+Compile sources into wiki pages. Triggers cloud-side agent (Path 1). For local agent compile, use `cowiki write` (Path 2).
 
 ```bash
 cowiki compile -w <ws>
@@ -47,12 +47,15 @@ cowiki compile -w <ws> --timeout 300
 ```
 
 ### `cowiki write`
-Write a wiki page.
+Create or edit a wiki page. Primary tool for local agent output (Path 2). Use `--path` to target entities/, concepts/, or wiki/. Use `--title` to set the page title (server prepends YAML frontmatter). For large external sources, prefer `cowiki ingest` → `cowiki compile`.
 
 ```bash
 cowiki write -w <ws> my-page --body "# Hello"
+cowiki write -w <ws> my-page --title "My Page" --body "content here"
 cowiki write -w <ws> my-page --title "My Page"  # opens $EDITOR
 echo "# content" | cowiki write -w <ws> my-page  # from stdin
+cowiki write -w <ws> my-page --path entities --title "Entity" --body "..."
+cowiki write -w <ws> my-page --path concepts --title "Concept" --body "..."
 ```
 
 ### `cowiki search`
@@ -70,6 +73,8 @@ Read a wiki page.
 cowiki read -w <ws> my-page
 cowiki read -w <ws> my-page --no-pager
 cowiki read -w <ws> my-page --json
+cowiki read -w <ws> my-entity --dir entities    # read from entities/
+cowiki read -w <ws> my-concept --dir concepts   # read from concepts/
 ```
 
 ### `cowiki list`
@@ -77,6 +82,9 @@ List wiki pages in a workspace.
 
 ```bash
 cowiki list -w <ws>
+cowiki list -w <ws> --dir entities               # list entities/ only
+cowiki list -w <ws> --dir concepts               # list concepts/ only
+cowiki list -w <ws> --dir all                    # list all directories
 ```
 
 ### `cowiki workspaces`

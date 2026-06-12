@@ -138,16 +138,20 @@ export class CowikiClient {
 
   // ── Pages (workspace-scoped) ──────────────────────
 
-  async listPages(ws: string, branch: string): Promise<PageMeta[]> {
-    return this.get(
-      `/api/workspaces/${urlencode(ws)}/pages?branch=${urlencode(branch)}`,
-    );
+  async listPages(ws: string, branch: string, dir?: string): Promise<PageMeta[]> {
+    let url = `/api/workspaces/${urlencode(ws)}/pages?branch=${urlencode(branch)}`;
+    if (dir) {
+      url += `&dir=${urlencode(dir)}`;
+    }
+    return this.get(url);
   }
 
-  async getPage(ws: string, slug: string, branch: string): Promise<PageFull> {
-    return this.get(
-      `/api/workspaces/${urlencode(ws)}/pages/${urlencode(slug)}?branch=${urlencode(branch)}`,
-    );
+  async getPage(ws: string, slug: string, branch: string, dir?: string): Promise<PageFull> {
+    let url = `/api/workspaces/${urlencode(ws)}/pages/${urlencode(slug)}?branch=${urlencode(branch)}`;
+    if (dir) {
+      url += `&dir=${urlencode(dir)}`;
+    }
+    return this.get(url);
   }
 
   async writePage(ws: string, req: WritePageRequest): Promise<WriteResponse> {

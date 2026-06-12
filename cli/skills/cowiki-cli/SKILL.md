@@ -75,6 +75,57 @@ These files are available offline after install. See each for details:
 
 ---
 
+## Content Workflow: Two Paths
+
+cowiki supports a multi-directory wiki structure:
+- `wiki/` — general knowledge pages
+- `entities/` — extracted entities (people, projects, events)
+- `concepts/` — patterns, decisions, conventions
+
+Use `--path` (write) or `--dir` (read, list) to target a directory. Default is `wiki/`.
+
+### Path 1: Cloud Compile
+
+For external URLs, large documents, or structured content that benefits from AI parsing:
+
+```bash
+# 1. Ingest source
+cowiki ingest -w <ws> --type url --content "<url>"
+
+# 2. Compile sources into wiki pages (cloud-side agent)
+cowiki compile -w <ws> [--timeout 300]
+
+# 3. Verify results
+cowiki list -w <ws>
+cowiki read -w <ws> <page>
+```
+
+The cloud agent handles source parsing, entity extraction, and page generation. Always writes to `wiki/`.
+
+### Path 2: Local Agent Compile
+
+For content that needs cross-references to existing wiki pages, or simple text that doesn't warrant cloud AI:
+
+```bash
+# 1. Gather context
+cowiki list -w <ws> --dir all          # see all directories
+cowiki read -w <ws> <related-page>     # read existing pages
+
+# 2. Analyze and structure (agent's discretion):
+#    - Extract entities → entities/
+#    - Extract concepts → concepts/
+#    - Build [[cross-references]] to existing pages
+
+# 3. Write to appropriate directories
+cowiki write -w <ws> <slug> --path entities --body "..."
+cowiki write -w <ws> <slug> --path concepts --body "..."
+cowiki write -w <ws> <slug> --body "..."              # defaults to wiki/
+```
+
+Use your judgment — skip compile for simple content. For large external sources, prefer Path 1 (ingest → compile).
+
+---
+
 ## Security Notes
 
 - **Never leak API keys.** `.env` in `.gitignore`.

@@ -359,6 +359,7 @@ dependencies = [
  "sha2",
  "similar",
  "sqlx",
+ "tempfile",
  "thiserror",
  "tokio",
  "tracing",
