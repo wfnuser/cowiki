@@ -163,6 +163,7 @@ pub async fn review_action(
                             &hash,
                             None,
                             guard.user.id,
+                            &ws_slug,
                         )
                         .await
                         {

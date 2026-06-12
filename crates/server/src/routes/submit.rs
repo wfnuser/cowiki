@@ -86,7 +86,9 @@ pub async fn submit(
     // Check for duplicates
     let mut duplicates = Vec::new();
     for (slug, emb) in &embeddings {
-        if let Ok(similar) = cowiki_db::pages::find_similar(&state.db, emb, "main", 3, 0.85).await {
+        if let Ok(similar) =
+            cowiki_db::pages::find_similar(&state.db, emb, "main", 3, 0.85, Some(&ws_slug)).await
+        {
             for (page, score) in similar {
                 if page.slug != *slug {
                     duplicates.push(cowiki_core::models::DuplicateWarning {
