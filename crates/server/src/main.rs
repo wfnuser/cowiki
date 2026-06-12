@@ -21,6 +21,8 @@ pub struct AppState {
     pub config: config::Config,
     pub repo_manager: cowiki_core::git::WikiRepoManager, // per-workspace repos
     pub compiler: Compiler,
+    /// Pending OAuth CSRF nonces → minted-at, swept on insert (single-instance).
+    pub oauth_states: std::sync::Mutex<HashMap<String, std::time::Instant>>,
 }
 
 // ── Usage endpoint response ──
@@ -91,6 +93,7 @@ async fn main() {
         config,
         repo_manager,
         compiler,
+        oauth_states: std::sync::Mutex::new(HashMap::new()),
     });
 
     // Background task: expire stale invitations every hour
