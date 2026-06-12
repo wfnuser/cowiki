@@ -75,11 +75,25 @@ export interface ReviewDetail {
   comments: ReviewComment[];
 }
 
-export interface SearchResult {
+export interface KeywordHit {
+  slug: string;
+  title: string;
+  snippet: string;
+  title_match: boolean;
+}
+
+export interface SemanticHit {
   slug: string;
   title: string;
   summary: string;
   similarity: number;
+  /** "draft" (your branch) or "main" */
+  source: string;
+}
+
+export interface SearchResponse {
+  keyword: KeywordHit[];
+  semantic: SemanticHit[];
 }
 
 export interface Workspace {
@@ -402,8 +416,14 @@ export async function createFolder(name: string, branch: string, parent: string 
 
 // ── Search ──
 
-export async function search(q: string, branch = 'main'): Promise<SearchResult[]> {
-  const res = await fetch(`${BASE}/search?q=${encodeURIComponent(q)}&branch=${branch}`, { headers: h() });
+/** Workspace-scoped search: keyword (full-text over your view) and/or semantic. */
+export async function searchWorkspace(
+  workspaceSlug: string,
+  q: string,
+  mode: 'all' | 'keyword' | 'semantic' = 'all',
+  limit = 12,
+): Promise<SearchResponse> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/search?q=${encodeURIComponent(q)}&limit=${limit}&mode=${mode}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Request failed: ${res.status}`);

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  Compass, FileText, Search,
+  Compass,
   Upload, Zap, ArrowUpRight, MoreHorizontal, RefreshCw,
   CheckCircle2, Clock, Pencil,
 } from 'lucide-react';
@@ -89,7 +89,6 @@ export function MainLayout() {
     const t = setTimeout(() => setMessage(null), 4000);
     return () => clearTimeout(t);
   }, [message]);
-  const [searchQuery, setSearchQuery] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [editingPage, setEditingPage] = useState(false);
@@ -512,27 +511,6 @@ export function MainLayout() {
     setNewSlug(name.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim());
   };
 
-  // Client-side search
-  const searchResults = searchQuery.trim() ? (() => {
-    const q = searchQuery.toLowerCase();
-    const results: { workspace: Workspace; page: PageMeta }[] = [];
-    for (const ws of workspaces) {
-      const pages = spacePages[ws.id] || [];
-      for (const p of pages) {
-        if (p.title.toLowerCase().includes(q) || p.summary.toLowerCase().includes(q) || p.slug.toLowerCase().includes(q)) {
-          results.push({ workspace: ws, page: p });
-        }
-        if (p.children) {
-          for (const child of p.children) {
-            if (child.title.toLowerCase().includes(q) || child.summary.toLowerCase().includes(q) || child.slug.toLowerCase().includes(q)) {
-              results.push({ workspace: ws, page: child });
-            }
-          }
-        }
-      }
-    }
-    return results;
-  })() : null;
 
   // Strip frontmatter from page body
   const renderBody = (body: string) => {
@@ -700,26 +678,6 @@ export function MainLayout() {
 
               {/* Right: actions */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                {/* Search */}
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px',
-                  background: C.panel, border: `1px solid ${C.line}`, borderRadius: 6,
-                  minWidth: 160,
-                }}>
-                  <Search size={13} color={C.faint} />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search..."
-                    style={{
-                      background: 'transparent', border: 'none', outline: 'none', fontSize: 12,
-                      color: C.ink, width: 120,
-                    }}
-                  />
-                </div>
-
-
 
                 {/* Sync draft branch with main */}
                 {activeWorkspace && (
@@ -803,41 +761,8 @@ export function MainLayout() {
 
             {/* Content */}
             <div style={{ flex: 1, padding: '36px 56px 56px' }}>
-              {/* Search results */}
-              {searchResults ? (
-                <div>
-                  <h1 className="page-title page-title--compact">
-                    Search: "{searchQuery}"
-                  </h1>
-                  {searchResults.length === 0 ? (
-                    <p style={{ color: C.muted, fontSize: 13 }}>No results found.</p>
-                  ) : (
-                    <div>
-                      {searchResults.map((r) => (
-                        <button
-                          key={`${r.workspace.id}-${r.page.slug}`}
-                          onClick={() => { setSearchQuery(''); selectPage(r.workspace, r.page.slug); }}
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                            padding: '8px 12px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                            background: 'transparent', textAlign: 'left',
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = C.rail; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                        >
-                          <FileText size={16} color={C.faint} />
-                          <div>
-                            <div style={{ fontSize: 14, color: C.ink }}>{r.page.title || r.page.slug}</div>
-                            <div style={{ fontSize: 12, color: C.muted }}>{r.workspace.name}{r.page.summary && ` -- ${r.page.summary}`}</div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-              /* Review detail */
-              ) : activeView?.kind === 'review-detail' ? (
+              {/* Review detail */}
+              {activeView?.kind === 'review-detail' ? (
                 <ReviewDetail
                   workspaceSlug={activeView.workspaceSlug}
                   submissionId={activeView.submissionId}

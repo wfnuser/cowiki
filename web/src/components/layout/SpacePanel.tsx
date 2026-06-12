@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ChevronRight, FileText, Folder, Upload, Wand2,
   MoreHorizontal, Plus, FolderPlus, Settings, BookOpen, GitPullRequest, Users, Activity,
-  CheckCircle2, Clock, FileCode, Pencil, Trash2,
+  CheckCircle2, Clock, FileCode, Pencil, Trash2, Search,
 } from 'lucide-react';
 import type { Workspace, PageMeta, SourceItem } from '../../api';
+import { SearchModal } from '../SearchModal';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -60,6 +61,19 @@ export function SpacePanel({
   onCompile,
   onSettings,
 }: SpacePanelProps) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const hasWorkspace = !!workspace;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && hasWorkspace) {
+        e.preventDefault();
+        setSearchOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [hasWorkspace]);
+
   if (!workspace) {
     return (
       <aside style={panelStyle}>
@@ -150,8 +164,25 @@ export function SpacePanel({
 
       {/* Tree content — always visible regardless of active tab */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 8px' }}>
+        {/* Search — opens the palette (⌘K) */}
+        <button
+          onClick={() => setSearchOpen(true)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7, width: 'calc(100% - 4px)',
+            margin: '10px 2px 0', padding: '7px 10px',
+            background: C.rail, borderRadius: 8, border: `1px solid ${C.lineSoft}`,
+            cursor: 'pointer', color: C.faint, fontSize: 13, textAlign: 'left',
+          }}
+        >
+          <Search size={13} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1 }}>Search…</span>
+          <span style={{ fontSize: 11.5, color: C.faint, opacity: 0.75, letterSpacing: '0.04em' }}>
+            ⌘ K
+          </span>
+        </button>
+
         {/* Wiki Space header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 10px', margin: '16px 0 8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 10px', margin: '12px 0 8px' }}>
           <span style={{ fontSize: 11.5, fontWeight: 600, color: C.faint, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
             Wiki Space
           </span>
@@ -171,37 +202,47 @@ export function SpacePanel({
             </DropdownMenu>
           </div>
 
-          {/* Sources section */}
-          <SourcesSection
-            sources={sources}
-            activeSource={activeTab === 'wiki' ? activeSource : null}
-            onSelectSource={onSelectSource}
-            onSelectPage={onSelectPage}
-            onShowIngest={onShowIngest}
-            onCompile={onCompile}
-          />
-
-          {/* Page tree */}
-          {pages.length === 0 ? (
-            <div style={{ padding: '8px 8px', fontSize: 12, color: C.faint, fontStyle: 'italic' }}>
-              No pages yet
-            </div>
-          ) : (
-            pages.map((p) => (
-              <PageTreeItem
-                key={p.slug}
-                page={p}
-                activePage={activeTab === 'wiki' ? activePage : null}
-                depth={0}
+          <>
+              {/* Sources section */}
+              <SourcesSection
+                sources={sources}
+                activeSource={activeTab === 'wiki' ? activeSource : null}
+                onSelectSource={onSelectSource}
                 onSelectPage={onSelectPage}
-                onAddPageInFolder={onAddPageInFolder}
-                onAddFolderInFolder={onAddFolderInFolder}
-                onRenamePath={onRenamePath}
-                onDeletePath={onDeletePath}
+                onShowIngest={onShowIngest}
+                onCompile={onCompile}
               />
-            ))
-          )}
+
+              {/* Page tree */}
+              {pages.length === 0 ? (
+                <div style={{ padding: '8px 8px', fontSize: 12, color: C.faint, fontStyle: 'italic' }}>
+                  No pages yet
+                </div>
+              ) : (
+                pages.map((p) => (
+                  <PageTreeItem
+                    key={p.slug}
+                    page={p}
+                    activePage={activeTab === 'wiki' ? activePage : null}
+                    depth={0}
+                    onSelectPage={onSelectPage}
+                    onAddPageInFolder={onAddPageInFolder}
+                    onAddFolderInFolder={onAddFolderInFolder}
+                    onRenamePath={onRenamePath}
+                    onDeletePath={onDeletePath}
+                  />
+                ))
+              )}
+            </>
       </div>
+
+      <SearchModal
+        workspaceSlug={workspace.slug}
+        workspaceName={workspace.name}
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onSelectPage={onSelectPage}
+      />
 
       {/* Space settings moved into nav items above */}
     </aside>
