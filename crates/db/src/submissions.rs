@@ -184,6 +184,7 @@ mod tests {
             include_str!("migrations/009_review_comments.sql"),
             include_str!("migrations/010_notifications.sql"),
             include_str!("migrations/010_invitation_reject_status.sql"),
+            include_str!("migrations/011_pages_workspace_scope.sql"),
         ] {
             let _ = sqlx::raw_sql(m).execute(&pool).await;
         }

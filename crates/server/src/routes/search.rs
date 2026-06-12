@@ -34,8 +34,11 @@ pub async fn search(
         .await
         .map_err(AppError::Internal)?;
 
+    // TODO(#44): this global search route is not workspace-scoped. Passing None
+    // searches across all workspaces on the branch; scope it once search becomes
+    // workspace/branch-aware.
     let results =
-        cowiki_db::pages::find_similar(&state.db, &embedding, &branch, limit, 0.3).await?;
+        cowiki_db::pages::find_similar(&state.db, &embedding, &branch, limit, 0.3, None).await?;
 
     Ok(Json(
         results

@@ -44,12 +44,13 @@ pub async fn compile_ws(
         .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     super::pages::ensure_user_branch_if_needed(&repo, &input.branch)?;
-    do_compile(&state, &repo, &input.branch).await
+    do_compile(&state, &repo, &ws_slug, &input.branch).await
 }
 
 async fn do_compile(
     state: &AppState,
     repo: &cowiki_core::git::WikiRepo,
+    ws_slug: &str,
     branch: &str,
 ) -> Result<Json<CompileResponse>> {
     // 1. Load compile state
@@ -147,6 +148,7 @@ async fn do_compile(
                     &hash,
                     Some(&emb),
                     default_user.id,
+                    ws_slug,
                 )
                 .await
                 {
