@@ -15,6 +15,10 @@ cp .env.example .env
 cargo run --release help 
 ```
 
+## For Agents
+
+Read and install cowiki-cli skill for me: file://cli/skill.md, and setup cowiki.
+
 ## Commands
 
 | Command | Description |
