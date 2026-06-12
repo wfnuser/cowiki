@@ -2,6 +2,56 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+/// Canonical submission lifecycle states — the single source of truth for the
+/// status strings used across the DB and handlers (the frontend mirrors these
+/// in `web/src/lib/review.ts`). Extending: add a variant + update `as_str`,
+/// `FromStr`, and `ACTIVE` (and the DB CHECK if one is added).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubmissionStatus {
+    Pending,
+    Approved,
+    Rejected,
+    Merged,
+    /// Reserved for the changes-requested review flow (#10) — defined, not yet wired.
+    ChangesRequested,
+}
+
+impl SubmissionStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Approved => "approved",
+            Self::Rejected => "rejected",
+            Self::Merged => "merged",
+            Self::ChangesRequested => "changes_requested",
+        }
+    }
+
+    /// States shown in the review queue.
+    pub const ACTIVE: &'static [SubmissionStatus] =
+        &[Self::Pending, Self::Approved, Self::Rejected, Self::Merged];
+}
+
+impl std::str::FromStr for SubmissionStatus {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(Self::Pending),
+            "approved" => Ok(Self::Approved),
+            "rejected" => Ok(Self::Rejected),
+            "merged" => Ok(Self::Merged),
+            "changes_requested" => Ok(Self::ChangesRequested),
+            other => Err(format!("invalid submission status: {other}")),
+        }
+    }
+}
+
+impl std::fmt::Display for SubmissionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Submission {
     pub id: Uuid,
@@ -47,20 +97,27 @@ pub async fn list_pending_for_workspace(
     pool: &PgPool,
     workspace_slug: &str,
 ) -> sqlx::Result<Vec<Submission>> {
-    sqlx::query_as::<_, Submission>(
+    // IN-clause built from the canonical ACTIVE list (static, no injection risk).
+    let in_list = SubmissionStatus::ACTIVE
+        .iter()
+        .map(|s| format!("'{}'", s.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let query = format!(
         "SELECT s.*, u.name AS author_name, r.name AS reviewer_name FROM submissions s \
          JOIN users u ON u.id = s.user_id \
          LEFT JOIN users r ON r.id = s.reviewed_by \
-         WHERE s.status IN ('pending', 'approved', 'rejected', 'merged') AND s.workspace_slug = $1 \
-         ORDER BY s.created_at DESC",
-    )
-    .bind(workspace_slug)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("DB list submissions for workspace failed: {e}");
-        e
-    })
+         WHERE s.status IN ({in_list}) AND s.workspace_slug = $1 \
+         ORDER BY s.created_at DESC"
+    );
+    sqlx::query_as::<_, Submission>(&query)
+        .bind(workspace_slug)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("DB list submissions for workspace failed: {e}");
+            e
+        })
 }
 
 pub async fn find_by_id(pool: &PgPool, id: Uuid) -> sqlx::Result<Option<Submission>> {
@@ -82,14 +139,14 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> sqlx::Result<Option<Submissi
 pub async fn update_status(
     pool: &PgPool,
     id: Uuid,
-    status: &str,
+    status: SubmissionStatus,
     reviewer_id: Uuid,
 ) -> sqlx::Result<Submission> {
     sqlx::query_as::<_, Submission>(
         "UPDATE submissions SET status = $2, reviewed_by = $3, reviewed_at = now() WHERE id = $1 RETURNING *",
     )
     .bind(id)
-    .bind(status)
+    .bind(status.as_str())
     .bind(reviewer_id)
     .fetch_one(pool)
     .await
@@ -215,13 +272,13 @@ mod tests {
         .await
         .unwrap();
 
-        update_status(&pool, approved.id, "approved", user)
+        update_status(&pool, approved.id, SubmissionStatus::Approved, user)
             .await
             .unwrap();
-        update_status(&pool, merged.id, "merged", user)
+        update_status(&pool, merged.id, SubmissionStatus::Merged, user)
             .await
             .unwrap();
-        update_status(&pool, rejected.id, "rejected", user)
+        update_status(&pool, rejected.id, SubmissionStatus::Rejected, user)
             .await
             .unwrap();
 

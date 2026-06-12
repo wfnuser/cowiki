@@ -87,12 +87,19 @@ pub async fn review_action(
     let guard = guard::require_membership(&state, &headers, &ws_slug).await?;
     guard::require(&guard, Permission::EditContent)?;
 
+    use cowiki_db::submissions::SubmissionStatus;
     match input.action.as_str() {
         "approve" => {
-            cowiki_db::submissions::update_status(&state.db, id, "approved", guard.user.id).await?;
+            cowiki_db::submissions::update_status(
+                &state.db,
+                id,
+                SubmissionStatus::Approved,
+                guard.user.id,
+            )
+            .await?;
         }
         "merge" => {
-            if submission.status != "approved" {
+            if submission.status != SubmissionStatus::Approved.as_str() {
                 return Err(AppError::BadRequest(
                     "submission must be approved before merge".into(),
                 ));
@@ -135,8 +142,13 @@ pub async fn review_action(
                 cowiki_core::git::MergeOutcome::Merged => {}
                 cowiki_core::git::MergeOutcome::Conflict(paths) => {
                     repo.cleanup_submission(&submission.id.to_string());
-                    cowiki_db::submissions::update_status(&state.db, id, "rejected", guard.user.id)
-                        .await?;
+                    cowiki_db::submissions::update_status(
+                        &state.db,
+                        id,
+                        SubmissionStatus::Rejected,
+                        guard.user.id,
+                    )
+                    .await?;
                     return Err(AppError::Conflict(format!(
                         "main has moved and this snapshot now conflicts ({}); submission closed — sync your branch and submit again",
                         paths.join(", ")
@@ -176,14 +188,26 @@ pub async fn review_action(
             repo.cleanup_submission(&submission.id.to_string());
             let _ = repo.rebase_onto_main(&submission.source_branch);
 
-            cowiki_db::submissions::update_status(&state.db, id, "merged", guard.user.id).await?;
+            cowiki_db::submissions::update_status(
+                &state.db,
+                id,
+                SubmissionStatus::Merged,
+                guard.user.id,
+            )
+            .await?;
         }
         "reject" => {
             // Drop the snapshot refs; the author keeps their changes on `source_branch`.
             if let Ok(repo) = state.repo_manager.get(&ws_slug) {
                 repo.cleanup_submission(&submission.id.to_string());
             }
-            cowiki_db::submissions::update_status(&state.db, id, "rejected", guard.user.id).await?;
+            cowiki_db::submissions::update_status(
+                &state.db,
+                id,
+                SubmissionStatus::Rejected,
+                guard.user.id,
+            )
+            .await?;
         }
         _ => return Err(AppError::BadRequest("invalid action".into())),
     }
@@ -218,7 +242,10 @@ pub async fn edit_review(
     let guard = guard::require_membership(&state, &headers, &ws_slug).await?;
     guard::require(&guard, Permission::EditContent)?;
 
-    if submission.status == "merged" || submission.status == "rejected" {
+    use cowiki_db::submissions::SubmissionStatus;
+    if submission.status == SubmissionStatus::Merged.as_str()
+        || submission.status == SubmissionStatus::Rejected.as_str()
+    {
         return Err(AppError::BadRequest(
             "submission is closed; cannot edit".into(),
         ));
@@ -240,8 +267,14 @@ pub async fn edit_review(
     .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // A post-approval edit must be re-reviewed: reset to pending so it can't merge unseen.
-    if submission.status == "approved" {
-        cowiki_db::submissions::update_status(&state.db, id, "pending", guard.user.id).await?;
+    if submission.status == SubmissionStatus::Approved.as_str() {
+        cowiki_db::submissions::update_status(
+            &state.db,
+            id,
+            SubmissionStatus::Pending,
+            guard.user.id,
+        )
+        .await?;
     }
 
     Ok(Json(serde_json::json!({"ok": true})))

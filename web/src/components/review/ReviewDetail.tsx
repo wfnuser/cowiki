@@ -8,13 +8,8 @@ import { DiffView } from './DiffView';
 import { C, fonts } from '@/lib/design';
 import { timeAgo } from '../../lib/time';
 import { AvatarBadge } from '@/components/ui/avatar-badge';
+import { statusBadge } from '@/lib/review';
 
-const statusBadge: Record<string, { bg: string; fg: string; label: string }> = {
-  pending: { bg: C.amberSoft, fg: C.amber, label: 'Review needed' },
-  approved: { bg: C.greenSoft, fg: C.green, label: 'Approved' },
-  rejected: { bg: C.accentSoft, fg: C.accent, label: 'Changes requested' },
-  merged: { bg: C.blueSoft, fg: C.blue, label: 'Merged' },
-};
 
 export function ReviewDetail({
   workspaceSlug,
