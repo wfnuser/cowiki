@@ -67,7 +67,7 @@ export function SpacePanel({
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && hasWorkspace) {
         e.preventDefault();
-        setSearchOpen(true);
+        setSearchOpen((o) => !o);
       }
     };
     window.addEventListener('keydown', onKey);

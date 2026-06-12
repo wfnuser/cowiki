@@ -72,6 +72,20 @@ export function SearchModal({
     }
   }, [open]);
 
+  // Esc must close no matter where focus is (the input handler only covers the
+  // input itself — clicking anywhere in the panel used to strand Esc).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
   // Debounced fetch.
   useEffect(() => {
     if (!open) return;
