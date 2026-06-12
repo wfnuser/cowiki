@@ -1,6 +1,20 @@
 import { describe, test, expect, vi } from 'vitest';
 import { CowikiClient } from '../src/client.js';
 
+// Helper to capture the URL that fetch was called with
+function captureFetchUrl(): { url: string } {
+  const captured: { url: string } = { url: '' };
+  vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+    captured.url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    const resp = new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return Promise.resolve(resp);
+  });
+  return captured;
+}
+
 describe('CowikiClient', () => {
   test('constructs with base URL', () => {
     const client = new CowikiClient('http://localhost:3000');
@@ -45,5 +59,51 @@ describe('CowikiClient', () => {
     new CowikiClient('http://example.com');
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+});
+
+describe('listPages URL construction', () => {
+  test('without dir — omits dir param', async () => {
+    const cap = captureFetchUrl();
+    const client = new CowikiClient('http://localhost:3000');
+    await client.listPages('myws', 'main');
+    expect(cap.url).toContain('/api/workspaces/myws/pages?branch=main');
+    expect(cap.url).not.toContain('&dir=');
+    vi.restoreAllMocks();
+  });
+
+  test('with dir=entities — appends dir param', async () => {
+    const cap = captureFetchUrl();
+    const client = new CowikiClient('http://localhost:3000');
+    await client.listPages('myws', 'main', 'entities');
+    expect(cap.url).toContain('&dir=entities');
+    vi.restoreAllMocks();
+  });
+
+  test('with dir=all — URL-encodes correctly', async () => {
+    const cap = captureFetchUrl();
+    const client = new CowikiClient('http://localhost:3000');
+    await client.listPages('myws', 'user/abc', 'all');
+    expect(cap.url).toContain('&dir=all');
+    vi.restoreAllMocks();
+  });
+});
+
+describe('getPage URL construction', () => {
+  test('without dir — omits dir param', async () => {
+    const cap = captureFetchUrl();
+    const client = new CowikiClient('http://localhost:3000');
+    await client.getPage('myws', 'my-page', 'main');
+    expect(cap.url).toContain('/api/workspaces/myws/pages/my-page?branch=main');
+    expect(cap.url).not.toContain('&dir=');
+    vi.restoreAllMocks();
+  });
+
+  test('with dir=concepts — appends dir param', async () => {
+    const cap = captureFetchUrl();
+    const client = new CowikiClient('http://localhost:3000');
+    await client.getPage('myws', 'my-concept', 'main', 'concepts');
+    expect(cap.url).toContain('&dir=concepts');
+    vi.restoreAllMocks();
   });
 });
