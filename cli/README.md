@@ -17,7 +17,7 @@ cargo run --release help
 
 ## For Agents
 
-Read and install cowiki-cli skill for me: file://cli/skill.md, and setup cowiki.
+Read and install cowiki-cli skill for me: [file://cli/skill.md](https://github.com/wfnuser/cowiki/blob/8a2c4d7586e7ab2a1560c5d32cd38d48949247ae/cli/skills/cowiki-cli/SKILL.md), and setup cowiki.
 
 ## Commands
 
@@ -25,10 +25,10 @@ Read and install cowiki-cli skill for me: file://cli/skill.md, and setup cowiki.
 |---------|-------------|
 | `cowiki ingest` | Add a source (URL, text, or file) |
 | `cowiki compile` | Compile sources into wiki pages with LLM |
-| `cowiki write` | Create or edit a page |
+| `cowiki write` | Create or edit a page (use `--path entities|concepts` for multi-dir wiki) |
 | `cowiki search` | Semantic search across the wiki |
-| `cowiki read` | Read a page (with pager) |
-| `cowiki list` | List pages on a branch |
+| `cowiki read` | Read a page with pager (use `--dir entities|concepts` for multi-dir wiki) |
+| `cowiki list` | List pages on a branch (use `--dir entities|concepts|all` for multi-dir wiki) |
 | `cowiki workspaces` | List available workspaces |
 | `cowiki submit` | Submit pages for review |
 | `cowiki review` | Review submissions (approve/reject) |
@@ -90,6 +90,31 @@ cowiki workspaces
 ```
 
 Your personal workspace slug matches your user ID. Team workspace slugs are the URL-friendly names shown in the web UI sidebar (e.g., `engineering-wiki`).
+
+### Multi-Directory Wiki
+
+cowiki supports three content directories beyond the default `wiki/`:
+
+| Directory | Purpose | Example |
+|-----------|---------|---------|
+| `wiki/` | General knowledge pages (default) | `cowiki write architecture --body "..."` |
+| `entities/` | Extracted entities (people, projects, events) | `cowiki write alice --path entities --body "..."` |
+| `concepts/` | Patterns, decisions, conventions | `cowiki write error-handling --path concepts --body "..."` |
+
+```bash
+# Write to different directories
+cowiki write my-project -w mywiki --path entities --body "# My Project"
+cowiki write error-pattern -w mywiki --path concepts --body "# Error Pattern"
+
+# List specific directories
+cowiki list -w mywiki --dir entities          # entities only
+cowiki list -w mywiki --dir concepts          # concepts only
+cowiki list -w mywiki --dir all               # all directories merged
+
+# Read from specific directories
+cowiki read my-project -w mywiki --dir entities
+cowiki read error-pattern -w mywiki --dir concepts
+```
 
 ## Usage Examples
 
