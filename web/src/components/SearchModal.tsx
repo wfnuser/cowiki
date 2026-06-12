@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { FileText, Search, Sparkles, CornerDownLeft } from 'lucide-react';
+import { FileText, Search, Sparkles, CornerDownLeft, X } from 'lucide-react';
 import { searchWorkspace, type SearchResponse } from '../api';
 import { C, fonts } from '@/lib/design';
 
@@ -176,7 +176,21 @@ export function SearchModal({
               fontSize: 15.5, color: C.ink, fontFamily: 'inherit',
             }}
           />
-          {loading && <span style={{ fontSize: 12, color: C.faint, flexShrink: 0 }}>Searching…</span>}
+          {q && (
+            <button
+              onClick={() => { setQ(''); inputRef.current?.focus(); }}
+              aria-label="Clear search"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+                background: 'transparent', border: 'none', cursor: 'pointer', color: C.faint,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = C.rail; e.currentTarget.style.color = C.muted; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.faint; }}
+            >
+              <X size={15} />
+            </button>
+          )}
         </div>
 
         {/* Results — fixed minimum height so the panel never collapses to a sliver */}
