@@ -51,6 +51,13 @@ pub async fn list_for_submission(
     .await
 }
 
+pub async fn find_by_id(pool: &PgPool, id: Uuid) -> sqlx::Result<Option<ReviewComment>> {
+    sqlx::query_as::<_, ReviewComment>("SELECT * FROM review_comments WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+}
+
 pub async fn resolve(pool: &PgPool, id: Uuid) -> sqlx::Result<ReviewComment> {
     sqlx::query_as::<_, ReviewComment>(
         "UPDATE review_comments SET resolved = TRUE, updated_at = now() WHERE id = $1 RETURNING *",
