@@ -31,7 +31,7 @@ cowiki setup
 cowiki setup --api-key cw_xxx --server https://cowiki.example.com
 ```
 
-Configuration is stored in `~/.cowiki-cli/.env`. Alternatively, use env vars:
+Configuration is stored in `~/.cowiki-cli/config`. Alternatively, use env vars:
 
 - `COWIKI_BASE_URL` — server base URL
 - `COWIKI_API_KEY` — API key for authentication
@@ -212,7 +212,7 @@ cowiki search "topic" --json | jq '.[].slug'
 
 ## Configuration
 
-Credentials and defaults are stored in `~/.cowiki-cli/.env`:
+Credentials and defaults are stored in `~/.cowiki-cli/config`:
 
 ```env
 COWIKI_BASE_URL=https://api.cowiki.app   # or http://localhost:3000 for local dev
@@ -246,7 +246,7 @@ cowiki completions fish | source
 
 - **Pure HTTP client** — zero dependency on `cowiki_core` or `cowiki_db`
 - **Workspace-aware** — `--workspace`/`-w` routes to per-workspace API endpoints
-- **Stateless except auth** — only `~/.cowiki-cli/.env` persisted
+- **Stateless except auth** — only `~/.cowiki-cli/config` persisted
 - **TypeScript** — Node.js runtime, native `fetch` for HTTP
 - **Dual output** — human-friendly tables by default, `--json` for scripting
 

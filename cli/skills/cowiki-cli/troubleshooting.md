@@ -32,7 +32,7 @@ npx @cowiki/cli <command>
 2. Copy the API key from the dialog
 3. Run `cowiki setup --api-key <key>` to save it
 4. Or run `cowiki setup` to manually enter an API key
-5. Check that `COWIKI_API_KEY` is set in `~/.cowiki-cli/.env`
+5. Check that `COWIKI_API_KEY` is set in `~/.cowiki-cli/config`
 
 ## "Workspace required. Use -w <slug>."
 

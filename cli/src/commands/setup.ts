@@ -14,7 +14,7 @@ export function registerSetupCommand(program: Command): void {
     .command('setup')
     .description('Interactive configuration wizard')
     .option('--api-key <key>', 'Set API key directly (non-interactive, for scripting/tests)')
-    .option('--env-path <path>', 'Path to .env file', DEFAULT_ENV_PATH)
+    .option('--env-path <path>', 'Path to the CLI config file', DEFAULT_ENV_PATH)
     .action(async (opts, cmd) => {
       const globalOpts = cmd.parent?.optsWithGlobals() as GlobalOpts;
       const config = loadConfig(globalOpts?.server);
@@ -45,9 +45,9 @@ export function registerSetupCommand(program: Command): void {
 
       // ── Interactive mode ──
 
-      // Check if .env already exists
+      // Check if a config file already exists
       if (fs.existsSync(envPath)) {
-        printWarning('A .env file already exists.');
+        printWarning('A config file already exists.');
         const overwrite = await confirm({
           message: 'Overwrite existing configuration?',
           default: false,
@@ -87,7 +87,7 @@ export function registerSetupCommand(program: Command): void {
         }
       }
 
-      // 3. Write .env
+      // 3. Write config
       writeEnvFile({
         COWIKI_BASE_URL: serverUrl,
         COWIKI_API_KEY: apiKey,

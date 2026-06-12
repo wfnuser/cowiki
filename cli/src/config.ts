@@ -5,7 +5,10 @@ import path from 'node:path';
 import { ConfigError } from './error.js';
 
 const DEFAULT_ENV_DIR = path.join(os.homedir(), '.cowiki-cli');
-export const DEFAULT_ENV_PATH = path.join(DEFAULT_ENV_DIR, '.env');
+/** User-level CLI config (KEY=VALUE lines). `.env` is the legacy name — read as a
+ *  fallback so existing setups keep working; writes always go to `config`. */
+export const DEFAULT_ENV_PATH = path.join(DEFAULT_ENV_DIR, 'config');
+export const LEGACY_ENV_PATH = path.join(DEFAULT_ENV_DIR, '.env');
 
 export interface CliConfig {
   baseUrl: string;
@@ -14,12 +17,14 @@ export interface CliConfig {
 }
 
 /**
- * Load config from ~/.cowiki-cli/.env and environment variables.
- * Priority: serverOverride > COWIKI_BASE_URL env var > .env > default
+ * Load config from ~/.cowiki-cli/config (legacy ~/.cowiki-cli/.env as fallback)
+ * and environment variables.
+ * Priority: serverOverride > COWIKI_BASE_URL env var > config file > default
  */
 export function loadConfig(serverOverride?: string): CliConfig {
-  // Load .env from ~/.cowiki-cli/.env (silently skip if absent)
-  dotenv.config({ path: DEFAULT_ENV_PATH, override: false });
+  // Silently skip absent files; real env vars always win (override: false).
+  const configPath = fs.existsSync(DEFAULT_ENV_PATH) ? DEFAULT_ENV_PATH : LEGACY_ENV_PATH;
+  dotenv.config({ path: configPath, override: false });
 
   const baseUrl = serverOverride || process.env.COWIKI_BASE_URL || 'https://api.cowiki.app';
   const frontendUrl = process.env.COWIKI_FRONTEND_URL || 'http://localhost:5173';
@@ -39,9 +44,10 @@ export function validateConfig(config: CliConfig): void {
 }
 
 /**
- * Write or update entries in the .env file.
- * Preserves existing entries, adds/updates the given key-value pairs.
- * Default path: ~/.cowiki-cli/.env
+ * Write or update entries in the config file.
+ * Preserves existing entries (seeding from the legacy .env on first write so old
+ * setups migrate transparently), adds/updates the given key-value pairs.
+ * Default path: ~/.cowiki-cli/config
  */
 export function writeEnvFile(
   updates: Record<string, string>,
@@ -50,8 +56,13 @@ export function writeEnvFile(
   fs.mkdirSync(path.dirname(envPath), { recursive: true });
 
   let existing: Record<string, string> = {};
-  if (fs.existsSync(envPath)) {
-    const content = fs.readFileSync(envPath, 'utf-8');
+  // First write at the new location migrates values from the legacy .env.
+  const readPath =
+    !fs.existsSync(envPath) && envPath === DEFAULT_ENV_PATH && fs.existsSync(LEGACY_ENV_PATH)
+      ? LEGACY_ENV_PATH
+      : envPath;
+  if (fs.existsSync(readPath)) {
+    const content = fs.readFileSync(readPath, 'utf-8');
     for (const line of content.split('\n')) {
       const trimmed = line.trim();
       if (trimmed && !trimmed.startsWith('#')) {

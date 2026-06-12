@@ -2,7 +2,7 @@
 
 ## Config File
 
-The CLI reads configuration from `~/.cowiki-cli/.env` by default.
+The CLI reads configuration from `~/.cowiki-cli/config` by default.
 
 ```env
 COWIKI_BASE_URL=https://cowiki.example.com
@@ -15,7 +15,7 @@ COWIKI_API_KEY=cw_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 1. CLI flag (`--server <url>`)
 2. Environment variable (`COWIKI_BASE_URL`, `COWIKI_API_KEY`)
-3. `~/.cowiki-cli/.env` file
+3. `~/.cowiki-cli/config` file
 4. No defaults — you must configure a server and API key
 
 ## Setting Up
@@ -28,7 +28,7 @@ Interactive wizard that guides you through configuration:
 cowiki setup
 ```
 
-This is the recommended way to set up the CLI. It validates your credentials and saves them to `~/.cowiki-cli/.env`.
+This is the recommended way to set up the CLI. It validates your credentials and saves them to `~/.cowiki-cli/config`.
 
 ### Alternative: Environment Variables
 
@@ -39,12 +39,12 @@ export COWIKI_API_KEY=cw_xxx
 
 ### Alternative: Manual
 
-Create `~/.cowiki-cli/.env` manually:
+Create `~/.cowiki-cli/config` manually:
 
 ```bash
 mkdir -p ~/.cowiki-cli
-echo "COWIKI_BASE_URL=https://cowiki.example.com" > ~/.cowiki-cli/.env
-echo "COWIKI_API_KEY=cw_xxx" >> ~/.cowiki-cli/.env
+echo "COWIKI_BASE_URL=https://cowiki.example.com" > ~/.cowiki-cli/config
+echo "COWIKI_API_KEY=cw_xxx" >> ~/.cowiki-cli/config
 ```
 
 ## Workspace Selection
