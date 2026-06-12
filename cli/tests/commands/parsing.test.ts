@@ -137,7 +137,7 @@ describe('search flags', () => {
   test('accepts --limit', () => {
     const p = makeProgram();
     registerSearchCommand(p);
-    expect(() => parseArgs(p, ['search', 'test-query', '--limit', '20'])).not.toThrow();
+    expect(() => parseArgs(p, ['search', 'test-query', '--limit', '20', '-w', 'testws'])).not.toThrow();
   });
 });
 
