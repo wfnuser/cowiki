@@ -24,12 +24,12 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@inquirer/prompts": "^5",
     "chalk": "^5",
     "cli-table3": "^0.6",
     "commander": "^12",
     "dotenv": "^16",
-    "ora": "^8",
-    "@inquirer/prompts": "^5"
+    "ora": "^8"
   },
   "devDependencies": {
     "@types/node": "^20",

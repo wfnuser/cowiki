@@ -10,9 +10,10 @@ import type { GlobalOpts } from '../shared.js';
 export function registerReadCommand(program: Command): void {
   program
     .command('read')
-    .description('Read a wiki page')
+    .description('Read a wiki page (supports --dir for wiki/entities/concepts)')
     .argument('<slug>', 'Page slug to read')
     .option('--no-pager', 'Print directly to stdout instead of using a pager')
+    .option('--dir <dir>', 'Directory: wiki (default), entities, concepts')
     .action(async (slug, opts, cmd) => {
       const globalOpts = cmd.parent?.optsWithGlobals() as GlobalOpts;
       const config = loadConfig(globalOpts?.server)
@@ -21,7 +22,7 @@ export function registerReadCommand(program: Command): void {
       const branch = await resolveUserBranch(client);
 
       try {
-        const page = await client.getPage(ws, slug, branch);
+        const page = await client.getPage(ws, slug, branch, opts.dir);
 
         if (globalOpts.json) {
           printJson(page);

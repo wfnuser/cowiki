@@ -11,11 +11,12 @@ import type { WritePageRequest } from '../types.js';
 export function registerWriteCommand(program: Command): void {
   program
     .command('write')
-    .description('Write a wiki page')
+    .description('Write a wiki page (supports --path for wiki/entities/concepts)')
     .argument('<slug>', 'Page slug')
     .option('--title <title>', 'Page title')
     .option('--body <body>', 'Page body (inline or from stdin)')
     .option('--summary <summary>', 'Change summary')
+    .option('--path <path>', 'Target directory: wiki (default), entities, concepts')
     .action(async (slug, opts, cmd) => {
       const globalOpts = cmd.parent?.optsWithGlobals() as GlobalOpts;
       const config = loadConfig(globalOpts?.server)
@@ -26,6 +27,9 @@ export function registerWriteCommand(program: Command): void {
       const body = resolveBody(slug, opts.title, opts.body);
 
       const req: WritePageRequest = { slug, body, branch };
+      if (opts.path) req.path = opts.path;
+      if (opts.title) req.title = opts.title;
+      if (opts.summary) req.summary = opts.summary;
 
       try {
         const resp = await client.writePage(ws, req);
