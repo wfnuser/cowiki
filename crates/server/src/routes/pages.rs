@@ -85,8 +85,45 @@ pub(crate) fn parse_frontmatter(content: &str) -> (Option<String>, String) {
     (None, String::new())
 }
 
+/// Strict frontmatter parsing: only checks the YAML frontmatter block for a
+/// non-empty `title:` field. No heading/slug fallback — use this for write
+/// validation where a frontmatter title is mandatory.
+pub(crate) fn parse_frontmatter_strict(content: &str) -> (Option<String>, String) {
+    if !content.starts_with("---") {
+        return (None, String::new());
+    }
+    let parts: Vec<&str> = content.splitn(3, "---").collect();
+    if parts.len() < 3 {
+        return (None, String::new());
+    }
+    let fm = parts[1];
+    let title = fm
+        .lines()
+        .find(|l| l.trim().starts_with("title:"))
+        .map(|l| {
+            l.trim()
+                .trim_start_matches("title:")
+                .trim()
+                .trim_matches('"')
+                .to_string()
+        })
+        .filter(|title| !title.trim().is_empty());
+    let summary = fm
+        .lines()
+        .find(|l| l.trim().starts_with("summary:"))
+        .map(|l| {
+            l.trim()
+                .trim_start_matches("summary:")
+                .trim()
+                .trim_matches('"')
+                .to_string()
+        })
+        .unwrap_or_default();
+    (title, summary)
+}
+
 pub(crate) fn require_page_title(content: &str) -> Result<(String, String)> {
-    let (title, summary) = parse_frontmatter(content);
+    let (title, summary) = parse_frontmatter_strict(content);
     let title = title.ok_or_else(|| {
         AppError::BadRequest("wiki pages require non-empty frontmatter.title".into())
     })?;

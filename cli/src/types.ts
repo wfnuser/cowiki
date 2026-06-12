@@ -96,11 +96,24 @@ export interface CompiledPage {
 
 // ── Search ────────────────────────────────────────────
 
-export interface SearchResult {
+export interface KeywordHit {
+  slug: string;
+  title: string;
+  snippet: string;
+  title_match: boolean;
+}
+
+export interface SemanticHit {
   slug: string;
   title: string;
   summary: string;
   similarity: number;
+  source: string; // "draft" or "main"
+}
+
+export interface SearchResponse {
+  keyword: KeywordHit[];
+  semantic: SemanticHit[];
 }
 
 // ── Submit ────────────────────────────────────────────

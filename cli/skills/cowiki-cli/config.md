@@ -5,39 +5,45 @@
 The CLI reads configuration from `~/.cowiki-cli/.env` by default.
 
 ```env
-COWIKI_BASE_URL=http://localhost:3000
+COWIKI_BASE_URL=https://cowiki.example.com
 COWIKI_API_KEY=cw_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
+
+> **Note:** `http://localhost:3000` is only appropriate for local development against a locally-running cowiki server. For production use, set `COWIKI_BASE_URL` to your actual server URL.
 
 ## Configuration Priority
 
 1. CLI flag (`--server <url>`)
 2. Environment variable (`COWIKI_BASE_URL`, `COWIKI_API_KEY`)
 3. `~/.cowiki-cli/.env` file
-4. Defaults (`http://localhost:3000`, no API key)
+4. No defaults — you must configure a server and API key
 
 ## Setting Up
 
-### Option A: `cowiki setup`
-Interactive wizard that creates the config file:
+### Primary: `cowiki setup`
+
+Interactive wizard that guides you through configuration:
 
 ```bash
 cowiki setup
 ```
 
-### Option B: `cowiki setup --api-key`
-Non-interactive setup with a pre-obtained API key:
+This is the recommended way to set up the CLI. It validates your credentials and saves them to `~/.cowiki-cli/.env`.
+
+### Alternative: Environment Variables
 
 ```bash
-cowiki setup --api-key cw_xxx --server http://localhost:3000
+export COWIKI_BASE_URL=https://cowiki.example.com
+export COWIKI_API_KEY=cw_xxx
 ```
 
-### Option C: Manual
+### Alternative: Manual
+
 Create `~/.cowiki-cli/.env` manually:
 
 ```bash
 mkdir -p ~/.cowiki-cli
-echo "COWIKI_BASE_URL=http://localhost:3000" > ~/.cowiki-cli/.env
+echo "COWIKI_BASE_URL=https://cowiki.example.com" > ~/.cowiki-cli/.env
 echo "COWIKI_API_KEY=cw_xxx" >> ~/.cowiki-cli/.env
 ```
 

@@ -11,7 +11,7 @@ import type {
   IngestResponse,
   CompileRequest,
   CompileResponse,
-  SearchResult,
+  SearchResponse,
   SubmitRequest,
   SubmitResponse,
   Submission,
@@ -170,11 +170,11 @@ export class CowikiClient {
     return this.post(`/api/workspaces/${urlencode(ws)}/compile`, req);
   }
 
-  // ── Search ────────────────────────────────────────
+  // ── Search (workspace-scoped) ─────────────────────
 
-  async search(query: string, limit: number, branch: string): Promise<SearchResult[]> {
+  async search(ws: string, query: string, limit: number): Promise<SearchResponse> {
     return this.get(
-      `/api/search?q=${urlencode(query)}&limit=${limit}&branch=${urlencode(branch)}`,
+      `/api/workspaces/${urlencode(ws)}/search?q=${urlencode(query)}&limit=${limit}`,
     );
   }
 

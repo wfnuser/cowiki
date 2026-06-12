@@ -36,39 +36,42 @@ If Node.js is not installed or < 18, tell the user to install Node.js 18+.
 Ask the user:
 
 > "cowiki CLI can be installed in two ways:
-> 1. **Global** (`npm install -g @cowiki/cli`) — available everywhere, recommended for regular use
-> 2. **Local** (`npm install @cowiki/cli` in current project) — scoped to this project only
+> 1. **Dev install** (`cd cli && npm install && npm run build && npm link`) — from the repo source, for local development
+> 2. **Global** (`npm install -g @cowiki/cli`) — published package, available everywhere
 > 
 > Which do you prefer?"
 
 Wait for the user's choice before proceeding.
 
-**Global install:**
+**Dev install (from repo source):**
 ```bash
-cowiki --version 2>/dev/null || npm install -g @cowiki/cli
+cd cli && npm install && npm run build && npm link
 ```
 
-**Local install (current project):**
+**Global install (published package):**
 ```bash
-npm install @cowiki/cli
-# Then use via: npx cowiki
+cowiki --version 2>/dev/null || npm install -g @cowiki/cli
 ```
 
 ## Step 3: Get API Key
 
 **STOP HERE — you must ask the user for their API key before proceeding.**
 
-Ask the user to sign in to cowiki and paste their API key. The user opens the login page in their browser, completes GitHub OAuth, copies the API key from the dialog, and pastes it into chat.
+Ask the user to sign in to cowiki and get an API key. The user opens the login page in their browser, completes GitHub OAuth, and copies the API key from the dialog.
 
 **Do NOT proceed to Step 4 until the user has provided their API key.**
 
-Once the user pastes their key, run:
+Once the user has their key, ask them to run:
 
 ```bash
-cowiki setup --api-key <pasted_key> --server http://localhost:3000
+cowiki setup --api-key <their-key> --server <server-url>
 ```
 
-This validates the key and saves it to `~/.cowiki-cli/.env`.
+This interactive wizard validates the key and saves it to `~/.cowiki-cli/.env`.
+
+Alternatively, the user can set environment variables:
+- `COWIKI_BASE_URL` — server base URL (defaults to `http://localhost:3000` for local dev)
+- `COWIKI_API_KEY` — API key for authentication
 
 ## Step 4: Verify
 
@@ -86,10 +89,10 @@ COWIKI_PKG=$(npm root -g)/@cowiki/cli
 ls "$COWIKI_PKG/skills/cowiki-cli/"
 ```
 
-**For local install**, they are at:
+**For dev install**, they are at the repo path:
 
 ```bash
-ls node_modules/@cowiki/cli/skills/cowiki-cli/
+ls cli/skills/cowiki-cli/
 ```
 
 These files are available offline after install:
