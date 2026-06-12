@@ -25,7 +25,7 @@ Read and install cowiki-cli skill for me: [file://cli/skill.md](https://github.c
 |---------|-------------|
 | `cowiki ingest` | Add a source (URL, text, or file) |
 | `cowiki compile` | Compile sources into wiki pages with LLM |
-| `cowiki write` | Create or edit a page (use `--path entities|concepts` for multi-dir wiki) |
+| `cowiki write` | Create or edit a page (use `--dir entities|concepts` for multi-dir wiki) |
 | `cowiki search` | Semantic search across the wiki |
 | `cowiki read` | Read a page with pager (use `--dir entities|concepts` for multi-dir wiki) |
 | `cowiki list` | List pages on a branch (use `--dir entities|concepts|all` for multi-dir wiki) |
@@ -98,13 +98,13 @@ cowiki supports three content directories beyond the default `wiki/`:
 | Directory | Purpose | Example |
 |-----------|---------|---------|
 | `wiki/` | General knowledge pages (default) | `cowiki write architecture --body "..."` |
-| `entities/` | Extracted entities (people, projects, events) | `cowiki write alice --path entities --body "..."` |
-| `concepts/` | Patterns, decisions, conventions | `cowiki write error-handling --path concepts --body "..."` |
+| `entities/` | Extracted entities (people, projects, events) | `cowiki write alice --dir entities --body "..."` |
+| `concepts/` | Patterns, decisions, conventions | `cowiki write error-handling --dir concepts --body "..."` |
 
 ```bash
 # Write to different directories
-cowiki write my-project -w mywiki --path entities --body "# My Project"
-cowiki write error-pattern -w mywiki --path concepts --body "# Error Pattern"
+cowiki write my-project -w mywiki --dir entities --body "# My Project"
+cowiki write error-pattern -w mywiki --dir concepts --body "# Error Pattern"
 
 # List specific directories
 cowiki list -w mywiki --dir entities          # entities only

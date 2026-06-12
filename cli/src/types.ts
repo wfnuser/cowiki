@@ -38,8 +38,8 @@ export interface WritePageRequest {
   slug: string;
   body: string;
   branch: string;
-  /** Content directory: "wiki" (default), "entities", "concepts" */
-  path?: string;
+  /** Content directory: "wiki" (default), "entities", "concepts", or subdir */
+  dir?: string;
   /** Page title — server will prepend YAML frontmatter */
   title?: string;
   /** Page summary for YAML frontmatter */

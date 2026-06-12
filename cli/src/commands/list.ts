@@ -9,7 +9,7 @@ export function registerListCommand(program: Command): void {
   program
     .command('list')
     .description('List wiki pages (supports --dir for wiki/entities/concepts/all)')
-    .option('--dir <dir>', 'Directory: wiki (default), entities, concepts, all')
+    .option('--dir <dir>', 'Directory: wiki (default), entities, concepts, all, or subdir like wiki/messi')
     .action(async (opts, cmd) => {
       const globalOpts = cmd.parent?.optsWithGlobals() as GlobalOpts;
       const config = loadConfig(globalOpts?.server)

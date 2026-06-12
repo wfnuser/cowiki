@@ -13,7 +13,7 @@ export function registerReadCommand(program: Command): void {
     .description('Read a wiki page (supports --dir for wiki/entities/concepts)')
     .argument('<slug>', 'Page slug to read')
     .option('--no-pager', 'Print directly to stdout instead of using a pager')
-    .option('--dir <dir>', 'Directory: wiki (default), entities, concepts')
+    .option('--dir <dir>', 'Directory: wiki (default), entities, concepts, or subdir like wiki/messi')
     .action(async (slug, opts, cmd) => {
       const globalOpts = cmd.parent?.optsWithGlobals() as GlobalOpts;
       const config = loadConfig(globalOpts?.server)

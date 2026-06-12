@@ -9,17 +9,32 @@ use crate::git::WikiRepo;
 /// Known content directories. String + whitelist, not enum — easy to extend.
 const CONTENT_DIRS: &[&str] = &["wiki", "entities", "concepts"];
 
-/// Validate a content directory name against the known whitelist.
+/// Validate a content directory path against the known whitelist.
+/// Accepts top-level dirs ("wiki", "entities", "concepts") and
+/// subdirectory paths under them ("wiki/messi", "entities/people").
 /// Accepts with or without trailing slash.
 pub fn validate_dir(dir: &str) -> Result<&str, String> {
     let dir = dir.trim_end_matches('/');
-    if CONTENT_DIRS.contains(&dir) {
-        Ok(dir)
-    } else {
-        Err(format!(
-            "unknown content dir: {dir}. valid: {CONTENT_DIRS:?}"
-        ))
+    if dir.is_empty() {
+        return Err("dir must not be empty".into());
     }
+    if dir.contains("..") {
+        return Err(format!("dir contains path traversal: {dir}"));
+    }
+    // Check exact match
+    if CONTENT_DIRS.contains(&dir) {
+        return Ok(dir);
+    }
+    // Check subdirectory under a known content dir
+    for root in CONTENT_DIRS {
+        if dir.starts_with(&format!("{root}/")) {
+            return Ok(dir);
+        }
+    }
+    Err(format!(
+        "unknown content dir: {dir}. valid: {} or subdirs under them",
+        CONTENT_DIRS.join(", ")
+    ))
 }
 
 /// Validate a page slug against path traversal and injection attacks.
@@ -88,11 +103,7 @@ pub fn read_page(
 }
 
 /// List pages in a content directory (flat).
-pub fn list_pages(
-    repo: &WikiRepo,
-    branch: &str,
-    dir: &str,
-) -> Result<Vec<String>, String> {
+pub fn list_pages(repo: &WikiRepo, branch: &str, dir: &str) -> Result<Vec<String>, String> {
     let dir = validate_dir(dir)?;
     repo.list_files(branch, dir)
         .map_err(|e| format!("list error: {e}"))
@@ -112,10 +123,7 @@ pub fn list_pages_recursive(
 /// List across all content directories (recursive).
 /// Returns an error only if ALL directories fail; individual
 /// directory failures (e.g., empty dir not yet created) are tolerated.
-pub fn list_all_dirs(
-    repo: &WikiRepo,
-    branch: &str,
-) -> Result<Vec<String>, String> {
+pub fn list_all_dirs(repo: &WikiRepo, branch: &str) -> Result<Vec<String>, String> {
     let mut all = Vec::new();
     let mut errors: Vec<String> = Vec::new();
     for dir in CONTENT_DIRS {
@@ -138,8 +146,7 @@ mod tests {
 
     fn temp_repo() -> (WikiRepo, tempfile::TempDir) {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let repo = WikiRepo::open_or_init(&tmp.path().to_string_lossy())
-            .expect("open_or_init");
+        let repo = WikiRepo::open_or_init(&tmp.path().to_string_lossy()).expect("open_or_init");
         (repo, tmp)
     }
 
@@ -165,15 +172,25 @@ mod tests {
 
         let body = String::from_utf8_lossy(&content);
         assert!(body.contains("Guide"), "body should contain title: {body}");
-        assert!(body.contains("content here"), "body should contain content: {body}");
+        assert!(
+            body.contains("content here"),
+            "body should contain content: {body}"
+        );
     }
 
     #[test]
     fn test_nested_path_deeply_nested() {
         let (repo, _tmp) = temp_repo();
 
-        write_page(&repo, "main", "wiki", "a/b/c/d/deep-page", b"# Deep", "test")
-            .expect("deeply nested write should succeed");
+        write_page(
+            &repo,
+            "main",
+            "wiki",
+            "a/b/c/d/deep-page",
+            b"# Deep",
+            "test",
+        )
+        .expect("deeply nested write should succeed");
 
         let content = read_page(&repo, "main", "wiki", "a/b/c/d/deep-page")
             .expect("read should succeed")
@@ -186,8 +203,15 @@ mod tests {
     fn test_nested_path_entities_dir() {
         let (repo, _tmp) = temp_repo();
 
-        write_page(&repo, "main", "entities", "people/alice", b"# Alice", "test")
-            .expect("nested entities write should succeed");
+        write_page(
+            &repo,
+            "main",
+            "entities",
+            "people/alice",
+            b"# Alice",
+            "test",
+        )
+        .expect("nested entities write should succeed");
 
         let content = read_page(&repo, "main", "entities", "people/alice")
             .expect("read should succeed")
@@ -201,19 +225,11 @@ mod tests {
         let (repo, _tmp) = temp_repo();
 
         // Write to a path where neither intermediate dirs exist
-        write_page(
-            &repo,
-            "main",
-            "wiki",
-            "foo/bar/baz/qux",
-            b"# Qux",
-            "test",
-        )
-        .expect("nested write with mkdir -p should succeed");
+        write_page(&repo, "main", "wiki", "foo/bar/baz/qux", b"# Qux", "test")
+            .expect("nested write with mkdir -p should succeed");
 
         // Recursive listing should find the nested file
-        let files = list_pages_recursive(&repo, "main", "wiki")
-            .expect("list should succeed");
+        let files = list_pages_recursive(&repo, "main", "wiki").expect("list should succeed");
 
         assert!(
             files.iter().any(|f| f.contains("foo/bar/baz/qux.md")),
@@ -229,9 +245,18 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_dir_subdirectory() {
+        assert!(validate_dir("wiki/messi").is_ok());
+        assert!(validate_dir("entities/people").is_ok());
+        assert!(validate_dir("concepts/patterns/error").is_ok());
+        assert!(validate_dir("wiki/a/b/c").is_ok());
+    }
+
+    #[test]
     fn test_validate_dir_trailing_slash() {
         assert!(validate_dir("wiki/").is_ok());
         assert!(validate_dir("entities/").is_ok());
+        assert!(validate_dir("wiki/messi/").is_ok());
     }
 
     #[test]
@@ -240,6 +265,7 @@ mod tests {
         assert!(validate_dir("").is_err());
         assert!(validate_dir("../etc").is_err());
         assert!(validate_dir("all").is_err());
+        assert!(validate_dir("wiki/../etc").is_err());
     }
 
     #[test]
