@@ -55,10 +55,13 @@ export function SearchModal({
   onSelectPage: (slug: string) => void;
 }) {
   const [q, setQ] = useState('');
-  const [res, setRes] = useState<SearchResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [kw, setKw] = useState<SearchResponse['keyword'] | null>(null);
+  const [sem, setSem] = useState<SearchResponse['semantic'] | null>(null);
+  const [kwLoading, setKwLoading] = useState(false);
+  const [semLoading, setSemLoading] = useState(false);
   const [sel, setSel] = useState(0);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const kwTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const semTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -66,7 +69,8 @@ export function SearchModal({
   useEffect(() => {
     if (open) {
       setQ('');
-      setRes(null);
+      setKw(null);
+      setSem(null);
       setSel(0);
       setTimeout(() => inputRef.current?.focus(), 30);
     }
@@ -86,39 +90,50 @@ export function SearchModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  // Debounced fetch.
+  // Two parallel debounced fetches: keyword is a fast local scan (short debounce,
+  // renders first); semantic needs an embedding round-trip (longer debounce, fills
+  // in below when ready) — same pattern as the old inline sidebar search.
   useEffect(() => {
     if (!open) return;
-    clearTimeout(timer.current);
+    clearTimeout(kwTimer.current);
+    clearTimeout(semTimer.current);
     if (!q.trim()) {
-      setRes(null);
-      setLoading(false);
+      setKw(null);
+      setSem(null);
+      setKwLoading(false);
+      setSemLoading(false);
       return;
     }
-    setLoading(true);
-    timer.current = setTimeout(() => {
-      searchWorkspace(workspaceSlug, q.trim())
-        .then((r) => { setRes(r); setSel(0); })
-        .catch(() => setRes({ keyword: [], semantic: [] }))
-        .finally(() => setLoading(false));
-    }, 250);
-    return () => clearTimeout(timer.current);
+    setKwLoading(true);
+    kwTimer.current = setTimeout(() => {
+      searchWorkspace(workspaceSlug, q.trim(), 'keyword')
+        .then((r) => { setKw(r.keyword); setSel(0); })
+        .catch(() => setKw([]))
+        .finally(() => setKwLoading(false));
+    }, 120);
+    setSemLoading(true);
+    semTimer.current = setTimeout(() => {
+      searchWorkspace(workspaceSlug, q.trim(), 'semantic')
+        .then((r) => setSem(r.semantic))
+        .catch(() => setSem([]))
+        .finally(() => setSemLoading(false));
+    }, 300);
+    return () => { clearTimeout(kwTimer.current); clearTimeout(semTimer.current); };
   }, [q, open, workspaceSlug]);
 
   // Flattened rows for keyboard navigation (semantic deduped against keyword).
   const rows: Row[] = useMemo(() => {
-    if (!res) return [];
-    const out: Row[] = res.keyword.map((h) => ({
+    const out: Row[] = (kw ?? []).map((h) => ({
       kind: 'keyword', slug: h.slug, title: h.title, snippet: h.snippet, titleMatch: h.title_match,
     }));
-    const seen = new Set(res.keyword.map((h) => h.slug));
-    for (const h of res.semantic) {
+    const seen = new Set((kw ?? []).map((h) => h.slug));
+    for (const h of sem ?? []) {
       if (!seen.has(h.slug)) {
         out.push({ kind: 'semantic', slug: h.slug, title: h.title, summary: h.summary, source: h.source });
       }
     }
     return out;
-  }, [res]);
+  }, [kw, sem]);
   const semStart = rows.findIndex((r) => r.kind === 'semantic');
 
   const pick = useCallback((row: Row | undefined) => {
@@ -211,7 +226,7 @@ export function SearchModal({
         <div ref={listRef} style={{ flex: 1, minHeight: 200, overflowY: 'auto', paddingBottom: 6 }}>
           {!q.trim() ? (
             <Empty>Search pages by title or content in this space</Empty>
-          ) : rows.length === 0 && loading ? (
+          ) : rows.length === 0 && (kwLoading || semLoading) ? (
             <Empty>Searching…</Empty>
           ) : rows.length === 0 ? (
             <Empty>No results for “{q}”</Empty>
@@ -277,6 +292,12 @@ export function SearchModal({
                   </div>
                 </div>
               ))}
+              {semLoading && semStart === -1 && (
+                <>
+                  {sectionLabel(<Sparkles size={11} />, 'Semantic')}
+                  <div style={{ padding: '4px 18px 8px', fontSize: 12.5, color: C.faint }}>Searching…</div>
+                </>
+              )}
             </>
           )}
         </div>

@@ -416,9 +416,14 @@ export async function createFolder(name: string, branch: string, parent: string 
 
 // ── Search ──
 
-/** Workspace-scoped search: keyword (full-text over your view) + semantic. */
-export async function searchWorkspace(workspaceSlug: string, q: string, limit = 12): Promise<SearchResponse> {
-  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/search?q=${encodeURIComponent(q)}&limit=${limit}`, { headers: h() });
+/** Workspace-scoped search: keyword (full-text over your view) and/or semantic. */
+export async function searchWorkspace(
+  workspaceSlug: string,
+  q: string,
+  mode: 'all' | 'keyword' | 'semantic' = 'all',
+  limit = 12,
+): Promise<SearchResponse> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/search?q=${encodeURIComponent(q)}&limit=${limit}&mode=${mode}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Request failed: ${res.status}`);

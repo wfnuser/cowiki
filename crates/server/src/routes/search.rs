@@ -12,6 +12,9 @@ use crate::AppState;
 pub struct SearchParams {
     pub q: String,
     pub limit: Option<i64>,
+    /// "keyword" | "semantic" | "all" (default). The palette fires keyword and
+    /// semantic as two parallel requests so fast keyword hits render first.
+    pub mode: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -97,6 +100,9 @@ pub async fn search(
         }));
     }
     let q_lower = q.to_lowercase();
+    let mode = params.mode.as_deref().unwrap_or("all");
+    let want_keyword = mode != "semantic";
+    let want_semantic = mode != "keyword";
 
     let repo = state
         .repo_manager
@@ -107,9 +113,12 @@ pub async fn search(
 
     // ── Keyword: scan the user's branch tree (their effective view) ──
     let mut keyword: Vec<KeywordHit> = Vec::new();
-    let files = repo
-        .list_files_recursive(&user_branch, "wiki")
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let files = if want_keyword {
+        repo.list_files_recursive(&user_branch, "wiki")
+            .map_err(|e| AppError::Internal(e.to_string()))?
+    } else {
+        Vec::new()
+    };
     for path in files {
         if keyword.len() >= limit * 2 {
             break; // enough candidates; title matches are sorted first below
@@ -156,7 +165,7 @@ pub async fn search(
 
     // ── Semantic: best-effort (indexed pages only; tolerate embedder failure) ──
     let mut semantic: Vec<SemanticHit> = Vec::new();
-    if q.chars().count() >= 2 {
+    if want_semantic && q.chars().count() >= 2 {
         if let Ok(embedding) = state.compiler.embed(&q).await {
             let drafts = cowiki_db::pages::find_similar(
                 &state.db,
