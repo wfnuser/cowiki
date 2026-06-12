@@ -215,7 +215,7 @@ cowiki search "topic" --json | jq '.[].slug'
 Credentials and defaults are stored in `~/.cowiki-cli/.env`:
 
 ```env
-COWIKI_BASE_URL=http://localhost:3000
+COWIKI_BASE_URL=https://api.cowiki.app   # or http://localhost:3000 for local dev
 COWIKI_API_KEY=your-api-key
 ```
 

@@ -70,7 +70,7 @@ cowiki setup --api-key <their-key> --server <server-url>
 This interactive wizard validates the key and saves it to `~/.cowiki-cli/.env`.
 
 Alternatively, the user can set environment variables:
-- `COWIKI_BASE_URL` — server base URL (defaults to `http://localhost:3000` for local dev)
+- `COWIKI_BASE_URL` — **your** server URL, set by you during `cowiki setup` (falls back to the hosted `https://api.cowiki.app` if unset; use `http://localhost:3000` for local dev)
 - `COWIKI_API_KEY` — API key for authentication
 
 ## Step 4: Verify

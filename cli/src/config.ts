@@ -21,7 +21,7 @@ export function loadConfig(serverOverride?: string): CliConfig {
   // Load .env from ~/.cowiki-cli/.env (silently skip if absent)
   dotenv.config({ path: DEFAULT_ENV_PATH, override: false });
 
-  const baseUrl = serverOverride || process.env.COWIKI_BASE_URL || 'http://localhost:3000';
+  const baseUrl = serverOverride || process.env.COWIKI_BASE_URL || 'https://api.cowiki.app';
   const frontendUrl = process.env.COWIKI_FRONTEND_URL || 'http://localhost:5173';
   const apiKey = process.env.COWIKI_API_KEY || undefined;
 
@@ -69,4 +69,7 @@ export function writeEnvFile(
   // Write back
   const lines = Object.entries(existing).map(([k, v]) => `${k}=${v}`);
   fs.writeFileSync(envPath, lines.join('\n') + '\n', { mode: 0o600 });
+  // `mode` only applies when the file is created — an existing file keeps its old
+  // (possibly world-readable) bits, so tighten explicitly: this file holds the API key.
+  fs.chmodSync(envPath, 0o600);
 }

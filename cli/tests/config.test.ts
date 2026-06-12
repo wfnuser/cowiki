@@ -5,29 +5,23 @@ import path from 'node:path';
 import os from 'node:os';
 
 describe('loadConfig', () => {
-  test('returns defaults when no env vars set', () => {
-    // Save and clear env vars
+  test('env vars take precedence (deterministic regardless of ~/.cowiki-cli/.env)', () => {
+    // The pure fallback (https://api.cowiki.app) can't be asserted hermetically:
+    // loadConfig reads the developer's real ~/.cowiki-cli/.env via dotenv. Setting
+    // the vars explicitly is deterministic because dotenv uses override: false.
     const savedUrl = process.env.COWIKI_BASE_URL;
     const savedKey = process.env.COWIKI_API_KEY;
-    delete process.env.COWIKI_BASE_URL;
-    delete process.env.COWIKI_API_KEY;
-
-    // Temporarily rename .env so dotenv doesn't load it
-    const envPath = path.join(process.cwd(), '.env');
-    const bakPath = path.join(process.cwd(), '.env.bak');
-    let hadEnv = false;
     try {
-      if (fs.existsSync(envPath)) {
-        fs.renameSync(envPath, bakPath);
-        hadEnv = true;
-      }
+      process.env.COWIKI_BASE_URL = 'http://localhost:3000';
+      process.env.COWIKI_API_KEY = 'cw_hermetic_test';
       const config = loadConfig();
       expect(config.baseUrl).toBe('http://localhost:3000');
-      expect(config.apiKey).toBeUndefined();
+      expect(config.apiKey).toBe('cw_hermetic_test');
     } finally {
-      if (hadEnv) fs.renameSync(bakPath, envPath);
       if (savedUrl) process.env.COWIKI_BASE_URL = savedUrl;
+      else delete process.env.COWIKI_BASE_URL;
       if (savedKey) process.env.COWIKI_API_KEY = savedKey;
+      else delete process.env.COWIKI_API_KEY;
     }
   });
 

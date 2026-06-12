@@ -4,7 +4,7 @@
 
 | Flag | Description |
 |------|-------------|
-| `--server <URL>` | Override server URL (default: `http://localhost:3000`) |
+| `--server <URL>` | Override server URL (default: `https://api.cowiki.app`) |
 | `-w, --workspace <slug>` | Target workspace (required for page/ingest/compile/submit/review) |
 | `--json` | Machine-readable JSON output |
 
@@ -15,7 +15,7 @@ Interactive configuration wizard. Prompts for server URL and API key.
 
 ```bash
 cowiki setup
-cowiki setup --api-key cw_xxx --server http://localhost:3000   # non-interactive
+cowiki setup --api-key cw_xxx --server https://api.cowiki.app   # non-interactive (use http://localhost:3000 for local dev)
 cowiki setup --env-path /custom/path/.env                        # custom path
 ```
 

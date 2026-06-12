@@ -20,7 +20,7 @@ npx @cowiki/cli <command>
 
 **Fix:**
 1. Check `COWIKI_BASE_URL` in `.env` or `--server` flag
-2. Verify the server is running: `curl http://localhost:3000/api/health`
+2. Verify the server is reachable: `curl $COWIKI_BASE_URL/api/health` (default `https://api.cowiki.app/api/health`)
 3. Check network connectivity
 
 ## "API error (HTTP 401): Unauthorized"

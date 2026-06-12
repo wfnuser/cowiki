@@ -9,7 +9,7 @@ COWIKI_BASE_URL=https://cowiki.example.com
 COWIKI_API_KEY=cw_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-> **Note:** `http://localhost:3000` is only appropriate for local development against a locally-running cowiki server. For production use, set `COWIKI_BASE_URL` to your actual server URL.
+> **Note:** the CLI talks to whichever server **you** configure via `COWIKI_BASE_URL` (or `cowiki setup --server`). If unset, it falls back to the hosted `https://api.cowiki.app`; for local development use `http://localhost:3000`.
 
 ## Configuration Priority
 
