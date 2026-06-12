@@ -71,7 +71,10 @@ pub(crate) fn parse_frontmatter(content: &str) -> (Option<String>, String) {
     // Fallback: first Markdown heading (# Title or ## Title)
     for line in content.lines() {
         let trimmed = line.trim();
-        if let Some(title) = trimmed.strip_prefix("# ").or_else(|| trimmed.strip_prefix("## ")) {
+        if let Some(title) = trimmed
+            .strip_prefix("# ")
+            .or_else(|| trimmed.strip_prefix("## "))
+        {
             let title = title.trim().to_string();
             if !title.is_empty() {
                 return (Some(title), String::new());
@@ -166,8 +169,7 @@ pub async fn list_pages_ws(
         return list_pages_all_dirs(&repo, &branch);
     }
 
-    cowiki_core::wiki_fs::validate_dir(dir)
-        .map_err(|e| AppError::BadRequest(e))?;
+    cowiki_core::wiki_fs::validate_dir(dir).map_err(|e| AppError::BadRequest(e))?;
 
     let files = cowiki_core::wiki_fs::list_pages_recursive(&repo, &branch, dir)
         .map_err(|e| AppError::Internal(e))?;
@@ -192,8 +194,7 @@ pub async fn get_page_ws(
             "dir=all is only supported for listing. Use a specific directory to read.".into(),
         ));
     }
-    cowiki_core::wiki_fs::validate_dir(dir)
-        .map_err(|e| AppError::BadRequest(e))?;
+    cowiki_core::wiki_fs::validate_dir(dir).map_err(|e| AppError::BadRequest(e))?;
     let content = cowiki_core::wiki_fs::read_page(&repo, &branch, dir, &slug)
         .map_err(|e| AppError::Internal(e))?
         .ok_or_else(|| AppError::NotFound(format!("page {slug} not found in {dir}")))?;
@@ -231,13 +232,15 @@ pub async fn write_page_ws(
             "dir=all is only supported for listing. Use a specific directory to write.".into(),
         ));
     }
-    cowiki_core::wiki_fs::validate_dir(dir)
-        .map_err(|e| AppError::BadRequest(e))?;
+    cowiki_core::wiki_fs::validate_dir(dir).map_err(|e| AppError::BadRequest(e))?;
 
     // If title is provided, prepend YAML frontmatter to the body
     let final_body = if let Some(ref title) = input.title {
         let summary = input.summary.as_deref().unwrap_or("");
-        format!("---\ntitle: \"{}\"\nsummary: \"{}\"\n---\n\n{}", title, summary, input.body)
+        format!(
+            "---\ntitle: \"{}\"\nsummary: \"{}\"\n---\n\n{}",
+            title, summary, input.body
+        )
     } else {
         input.body.clone()
     };
@@ -253,7 +256,9 @@ pub async fn write_page_ws(
         &guard.user.name,
     )
     .map_err(|e| AppError::Internal(e.to_string()))?;
-    Ok(Json(serde_json::json!({"ok": true, "slug": input.slug, "path": format!("{dir}/{}", input.slug)})))
+    Ok(Json(
+        serde_json::json!({"ok": true, "slug": input.slug, "path": format!("{dir}/{}", input.slug)}),
+    ))
 }
 
 pub async fn create_folder_ws(
@@ -353,7 +358,6 @@ fn list_pages_from_dir(
     dir: &str,
     files: &[String],
 ) -> Result<Json<Vec<PageListItem>>> {
-
     // Collect all items: pages and folder _index metadata
     struct RawItem {
         slug: String,

@@ -88,7 +88,10 @@ fn test_write_read_nested_path_in_wiki() {
 
     let (resp2, status2) = api_request(
         "GET",
-        &format!("/workspaces/personal-nested-wiki-test/pages/{}?branch=main&dir=wiki", slug),
+        &format!(
+            "/workspaces/personal-nested-wiki-test/pages/{}?branch=main&dir=wiki",
+            slug
+        ),
         None,
         &api_key,
     );
@@ -96,7 +99,10 @@ fn test_write_read_nested_path_in_wiki() {
 
     let page: serde_json::Value = serde_json::from_str(&resp2).expect("invalid JSON from read");
     assert_eq!(page["slug"], slug);
-    assert!(page["body"].as_str().unwrap().contains("约会前准备"), "body should contain content");
+    assert!(
+        page["body"].as_str().unwrap().contains("约会前准备"),
+        "body should contain content"
+    );
 }
 
 // ── Default dir=wiki on read ─────────────────────────────────
@@ -133,7 +139,12 @@ fn test_read_nested_path_default_dir() {
 fn test_write_read_nested_in_entities() {
     let (_uid, api_key) = register_user("nested-entities-test");
 
-    let body = write_body("people/alice", "Alice - Software engineer", "main", "entities");
+    let body = write_body(
+        "people/alice",
+        "Alice - Software engineer",
+        "main",
+        "entities",
+    );
     let (resp, status) = api_request(
         "POST",
         "/workspaces/personal-nested-entities-test/pages",
@@ -160,7 +171,12 @@ fn test_write_read_nested_in_entities() {
 fn test_write_read_nested_in_concepts() {
     let (_uid, api_key) = register_user("nested-concepts-test");
 
-    let body = write_body("patterns/error/handle", "Error Handling Pattern", "main", "concepts");
+    let body = write_body(
+        "patterns/error/handle",
+        "Error Handling Pattern",
+        "main",
+        "concepts",
+    );
     let (resp, status) = api_request(
         "POST",
         "/workspaces/personal-nested-concepts-test/pages",
@@ -211,7 +227,10 @@ fn test_list_all_includes_nested_pages() {
     assert!(tree.is_array());
     let tree_str = serde_json::to_string(&tree).unwrap();
     assert!(tree_str.contains("wiki"), "should contain wiki folder");
-    assert!(tree_str.contains("entities"), "should contain entities folder");
+    assert!(
+        tree_str.contains("entities"),
+        "should contain entities folder"
+    );
 }
 
 // ── Reject invalid dir ────────────────────────────────────────

@@ -88,11 +88,7 @@ pub fn read_page(
 }
 
 /// List pages in a content directory (flat).
-pub fn list_pages(
-    repo: &WikiRepo,
-    branch: &str,
-    dir: &str,
-) -> Result<Vec<String>, String> {
+pub fn list_pages(repo: &WikiRepo, branch: &str, dir: &str) -> Result<Vec<String>, String> {
     let dir = validate_dir(dir)?;
     repo.list_files(branch, dir)
         .map_err(|e| format!("list error: {e}"))
@@ -112,10 +108,7 @@ pub fn list_pages_recursive(
 /// List across all content directories (recursive).
 /// Returns an error only if ALL directories fail; individual
 /// directory failures (e.g., empty dir not yet created) are tolerated.
-pub fn list_all_dirs(
-    repo: &WikiRepo,
-    branch: &str,
-) -> Result<Vec<String>, String> {
+pub fn list_all_dirs(repo: &WikiRepo, branch: &str) -> Result<Vec<String>, String> {
     let mut all = Vec::new();
     let mut errors: Vec<String> = Vec::new();
     for dir in CONTENT_DIRS {
@@ -138,8 +131,7 @@ mod tests {
 
     fn temp_repo() -> (WikiRepo, tempfile::TempDir) {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let repo = WikiRepo::open_or_init(&tmp.path().to_string_lossy())
-            .expect("open_or_init");
+        let repo = WikiRepo::open_or_init(&tmp.path().to_string_lossy()).expect("open_or_init");
         (repo, tmp)
     }
 
@@ -165,15 +157,25 @@ mod tests {
 
         let body = String::from_utf8_lossy(&content);
         assert!(body.contains("Guide"), "body should contain title: {body}");
-        assert!(body.contains("content here"), "body should contain content: {body}");
+        assert!(
+            body.contains("content here"),
+            "body should contain content: {body}"
+        );
     }
 
     #[test]
     fn test_nested_path_deeply_nested() {
         let (repo, _tmp) = temp_repo();
 
-        write_page(&repo, "main", "wiki", "a/b/c/d/deep-page", b"# Deep", "test")
-            .expect("deeply nested write should succeed");
+        write_page(
+            &repo,
+            "main",
+            "wiki",
+            "a/b/c/d/deep-page",
+            b"# Deep",
+            "test",
+        )
+        .expect("deeply nested write should succeed");
 
         let content = read_page(&repo, "main", "wiki", "a/b/c/d/deep-page")
             .expect("read should succeed")
@@ -186,8 +188,15 @@ mod tests {
     fn test_nested_path_entities_dir() {
         let (repo, _tmp) = temp_repo();
 
-        write_page(&repo, "main", "entities", "people/alice", b"# Alice", "test")
-            .expect("nested entities write should succeed");
+        write_page(
+            &repo,
+            "main",
+            "entities",
+            "people/alice",
+            b"# Alice",
+            "test",
+        )
+        .expect("nested entities write should succeed");
 
         let content = read_page(&repo, "main", "entities", "people/alice")
             .expect("read should succeed")
@@ -201,19 +210,11 @@ mod tests {
         let (repo, _tmp) = temp_repo();
 
         // Write to a path where neither intermediate dirs exist
-        write_page(
-            &repo,
-            "main",
-            "wiki",
-            "foo/bar/baz/qux",
-            b"# Qux",
-            "test",
-        )
-        .expect("nested write with mkdir -p should succeed");
+        write_page(&repo, "main", "wiki", "foo/bar/baz/qux", b"# Qux", "test")
+            .expect("nested write with mkdir -p should succeed");
 
         // Recursive listing should find the nested file
-        let files = list_pages_recursive(&repo, "main", "wiki")
-            .expect("list should succeed");
+        let files = list_pages_recursive(&repo, "main", "wiki").expect("list should succeed");
 
         assert!(
             files.iter().any(|f| f.contains("foo/bar/baz/qux.md")),
