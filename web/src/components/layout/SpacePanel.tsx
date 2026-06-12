@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ChevronRight, FileText, Folder, Upload, Wand2,
   MoreHorizontal, Plus, FolderPlus, Settings, BookOpen, GitPullRequest, Users, Activity,
-  CheckCircle2, Clock, FileCode, Pencil, Trash2, Search, Sparkles, X,
+  CheckCircle2, Clock, FileCode, Pencil, Trash2, Search,
 } from 'lucide-react';
-import { searchWorkspace, type Workspace, type PageMeta, type SourceItem, type SearchResult } from '../../api';
+import type { Workspace, PageMeta, SourceItem } from '../../api';
+import { SearchModal } from '../SearchModal';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -60,11 +61,18 @@ export function SpacePanel({
   onCompile,
   onSettings,
 }: SpacePanelProps) {
-  const [query, setQuery] = useState('');
-  const wsId = workspace?.id;
+  const [searchOpen, setSearchOpen] = useState(false);
+  const hasWorkspace = !!workspace;
   useEffect(() => {
-    setQuery('');
-  }, [wsId]);
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && hasWorkspace) {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [hasWorkspace]);
 
   if (!workspace) {
     return (
@@ -156,13 +164,30 @@ export function SpacePanel({
 
       {/* Tree content — always visible regardless of active tab */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 8px' }}>
-        {/* Search — filters the tree instantly; semantic results follow (debounced) */}
-        <PanelSearch workspaceSlug={workspace.slug} onSelectPage={onSelectPage} query={query} setQuery={setQuery} />
+        {/* Search — opens the palette (⌘K) */}
+        <button
+          onClick={() => setSearchOpen(true)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7, width: 'calc(100% - 4px)',
+            margin: '10px 2px 0', padding: '7px 10px',
+            background: C.rail, borderRadius: 8, border: `1px solid ${C.lineSoft}`,
+            cursor: 'pointer', color: C.faint, fontSize: 13, textAlign: 'left',
+          }}
+        >
+          <Search size={13} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1 }}>Search…</span>
+          <span style={{
+            fontSize: 10.5, padding: '1px 5px', borderRadius: 4,
+            border: `1px solid ${C.line}`, background: C.panel, color: C.faint,
+          }}>
+            ⌘K
+          </span>
+        </button>
 
         {/* Wiki Space header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 10px', margin: '12px 0 8px' }}>
           <span style={{ fontSize: 11.5, fontWeight: 600, color: C.faint, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-            {query.trim() ? 'Results' : 'Wiki Space'}
+            Wiki Space
           </span>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -180,17 +205,7 @@ export function SpacePanel({
             </DropdownMenu>
           </div>
 
-          {query.trim() ? (
-            <>
-              <TitleMatches pages={pages} query={query} onSelectPage={(slug) => { setQuery(''); onSelectPage(slug); }} />
-              <SemanticResults
-                workspaceSlug={workspace.slug}
-                query={query}
-                onSelectPage={(slug) => { setQuery(''); onSelectPage(slug); }}
-              />
-            </>
-          ) : (
-            <>
+          <>
               {/* Sources section */}
               <SourcesSection
                 sources={sources}
@@ -222,177 +237,18 @@ export function SpacePanel({
                 ))
               )}
             </>
-          )}
       </div>
+
+      <SearchModal
+        workspaceSlug={workspace.slug}
+        workspaceName={workspace.name}
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onSelectPage={onSelectPage}
+      />
 
       {/* Space settings moved into nav items above */}
     </aside>
-  );
-}
-
-/* ── Sidebar search ── */
-function PanelSearch({
-  workspaceSlug,
-  onSelectPage,
-  query,
-  setQuery,
-}: {
-  workspaceSlug: string;
-  onSelectPage: (slug: string) => void;
-  query: string;
-  setQuery: (q: string) => void;
-}) {
-  void workspaceSlug;
-  void onSelectPage;
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 7, margin: '10px 2px 0',
-      padding: '6px 10px', background: C.rail, borderRadius: 8,
-      border: `1px solid ${C.lineSoft}`,
-    }}>
-      <Search size={13} color={C.faint} style={{ flexShrink: 0 }} />
-      <input
-        type="text"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Escape') setQuery(''); }}
-        placeholder="Search this space…"
-        style={{
-          flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
-          fontSize: 13, color: C.ink,
-        }}
-      />
-      {query && (
-        <button
-          onClick={() => setQuery('')}
-          aria-label="Clear search"
-          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', color: C.faint }}
-        >
-          <X size={13} />
-        </button>
-      )}
-    </div>
-  );
-}
-
-/** Instant title/slug/summary matches over the loaded tree (flattened). */
-function TitleMatches({
-  pages,
-  query,
-  onSelectPage,
-}: {
-  pages: PageMeta[];
-  query: string;
-  onSelectPage: (slug: string) => void;
-}) {
-  const q = query.trim().toLowerCase();
-  const flat: PageMeta[] = [];
-  const walk = (items: PageMeta[]) => {
-    for (const p of items) {
-      flat.push(p);
-      if (p.children?.length) walk(p.children);
-    }
-  };
-  walk(pages);
-  const matches = flat.filter((p) =>
-    p.title.toLowerCase().includes(q) || p.slug.toLowerCase().includes(q) || p.summary.toLowerCase().includes(q)
-  ).slice(0, 12);
-
-  if (matches.length === 0) {
-    return <div style={{ padding: '6px 10px', fontSize: 12.5, color: C.faint, fontStyle: 'italic' }}>No title matches</div>;
-  }
-  return (
-    <>
-      {matches.map((p) => (
-        <button
-          key={p.slug}
-          onClick={() => onSelectPage(p.kind === 'folder' ? `${p.slug.replace('/_index', '')}/_index` : p.slug)}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-            padding: '6px 10px', borderRadius: 6, border: 'none', cursor: 'pointer',
-            background: 'transparent', color: C.ink2, fontSize: 13.5, textAlign: 'left',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = C.rail; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-        >
-          {p.kind === 'folder' ? <Folder size={14} style={{ flexShrink: 0 }} /> : <FileText size={14} style={{ flexShrink: 0 }} />}
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.title || p.slug}</span>
-        </button>
-      ))}
-    </>
-  );
-}
-
-/** Debounced semantic hits from the workspace-scoped search API (draft ∪ main). */
-function SemanticResults({
-  workspaceSlug,
-  query,
-  onSelectPage,
-}: {
-  workspaceSlug: string;
-  query: string;
-  onSelectPage: (slug: string) => void;
-}) {
-  const [hits, setHits] = useState<SearchResult[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  useEffect(() => {
-    setHits(null);
-    if (query.trim().length < 2) return;
-    setLoading(true);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      searchWorkspace(workspaceSlug, query.trim())
-        .then((r) => setHits(r))
-        .catch(() => setHits([]))
-        .finally(() => setLoading(false));
-    }, 350);
-    return () => clearTimeout(timer.current);
-  }, [workspaceSlug, query]);
-
-  if (query.trim().length < 2) return null;
-  return (
-    <div style={{ marginTop: 10 }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 5, padding: '0 10px', marginBottom: 4,
-        fontSize: 11, fontWeight: 600, color: C.faint, textTransform: 'uppercase', letterSpacing: '0.07em',
-      }}>
-        <Sparkles size={11} /> Semantic
-      </div>
-      {loading && hits == null ? (
-        <div style={{ padding: '4px 10px', fontSize: 12.5, color: C.faint }}>Searching…</div>
-      ) : hits && hits.length === 0 ? (
-        <div style={{ padding: '4px 10px', fontSize: 12.5, color: C.faint, fontStyle: 'italic' }}>No semantic matches</div>
-      ) : (
-        hits?.map((h) => (
-          <button
-            key={`${h.source}-${h.slug}`}
-            onClick={() => onSelectPage(h.slug)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-              padding: '6px 10px', borderRadius: 6, border: 'none', cursor: 'pointer',
-              background: 'transparent', color: C.ink2, fontSize: 13.5, textAlign: 'left',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = C.rail; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-          >
-            <FileText size={14} style={{ flexShrink: 0 }} />
-            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {h.title || h.slug}
-            </span>
-            {h.source === 'draft' && (
-              <span style={{
-                fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 999,
-                background: C.accentSoft, color: C.accent, flexShrink: 0,
-              }}>
-                draft
-              </span>
-            )}
-          </button>
-        ))
-      )}
-    </div>
   );
 }
 

@@ -75,13 +75,25 @@ export interface ReviewDetail {
   comments: ReviewComment[];
 }
 
-export interface SearchResult {
+export interface KeywordHit {
+  slug: string;
+  title: string;
+  snippet: string;
+  title_match: boolean;
+}
+
+export interface SemanticHit {
   slug: string;
   title: string;
   summary: string;
   similarity: number;
   /** "draft" (your branch) or "main" */
   source: string;
+}
+
+export interface SearchResponse {
+  keyword: KeywordHit[];
+  semantic: SemanticHit[];
 }
 
 export interface Workspace {
@@ -404,8 +416,8 @@ export async function createFolder(name: string, branch: string, parent: string 
 
 // ── Search ──
 
-/** Workspace-scoped semantic search: your draft branch + merged main (never others' drafts). */
-export async function searchWorkspace(workspaceSlug: string, q: string, limit = 8): Promise<SearchResult[]> {
+/** Workspace-scoped search: keyword (full-text over your view) + semantic. */
+export async function searchWorkspace(workspaceSlug: string, q: string, limit = 12): Promise<SearchResponse> {
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/search?q=${encodeURIComponent(q)}&limit=${limit}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
