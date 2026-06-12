@@ -9,17 +9,32 @@ use crate::git::WikiRepo;
 /// Known content directories. String + whitelist, not enum — easy to extend.
 const CONTENT_DIRS: &[&str] = &["wiki", "entities", "concepts"];
 
-/// Validate a content directory name against the known whitelist.
+/// Validate a content directory path against the known whitelist.
+/// Accepts top-level dirs ("wiki", "entities", "concepts") and
+/// subdirectory paths under them ("wiki/messi", "entities/people").
 /// Accepts with or without trailing slash.
 pub fn validate_dir(dir: &str) -> Result<&str, String> {
     let dir = dir.trim_end_matches('/');
-    if CONTENT_DIRS.contains(&dir) {
-        Ok(dir)
-    } else {
-        Err(format!(
-            "unknown content dir: {dir}. valid: {CONTENT_DIRS:?}"
-        ))
+    if dir.is_empty() {
+        return Err("dir must not be empty".into());
     }
+    if dir.contains("..") {
+        return Err(format!("dir contains path traversal: {dir}"));
+    }
+    // Check exact match
+    if CONTENT_DIRS.contains(&dir) {
+        return Ok(dir);
+    }
+    // Check subdirectory under a known content dir
+    for root in CONTENT_DIRS {
+        if dir.starts_with(&format!("{root}/")) {
+            return Ok(dir);
+        }
+    }
+    Err(format!(
+        "unknown content dir: {dir}. valid: {} or subdirs under them",
+        CONTENT_DIRS.join(", ")
+    ))
 }
 
 /// Validate a page slug against path traversal and injection attacks.
@@ -230,9 +245,18 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_dir_subdirectory() {
+        assert!(validate_dir("wiki/messi").is_ok());
+        assert!(validate_dir("entities/people").is_ok());
+        assert!(validate_dir("concepts/patterns/error").is_ok());
+        assert!(validate_dir("wiki/a/b/c").is_ok());
+    }
+
+    #[test]
     fn test_validate_dir_trailing_slash() {
         assert!(validate_dir("wiki/").is_ok());
         assert!(validate_dir("entities/").is_ok());
+        assert!(validate_dir("wiki/messi/").is_ok());
     }
 
     #[test]
@@ -241,6 +265,7 @@ mod tests {
         assert!(validate_dir("").is_err());
         assert!(validate_dir("../etc").is_err());
         assert!(validate_dir("all").is_err());
+        assert!(validate_dir("wiki/../etc").is_err());
     }
 
     #[test]

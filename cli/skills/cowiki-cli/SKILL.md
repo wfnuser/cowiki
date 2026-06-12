@@ -31,12 +31,27 @@ If Node.js is not installed or < 18, tell the user to install Node.js 18+.
 
 ## Step 2: Install CLI
 
-```bash
-# Check if already installed
-cowiki --version
+**STOP HERE — ask the user for installation preference before proceeding.**
 
-# If not found, install globally
-npm install -g @cowiki/cli
+Ask the user:
+
+> "cowiki CLI can be installed in two ways:
+> 1. **Global** (`npm install -g @cowiki/cli`) — available everywhere, recommended for regular use
+> 2. **Local** (`npm install @cowiki/cli` in current project) — scoped to this project only
+> 
+> Which do you prefer?"
+
+Wait for the user's choice before proceeding.
+
+**Global install:**
+```bash
+cowiki --version 2>/dev/null || npm install -g @cowiki/cli
+```
+
+**Local install (current project):**
+```bash
+npm install @cowiki/cli
+# Then use via: npx cowiki
 ```
 
 ## Step 3: Get API Key
@@ -64,7 +79,20 @@ cowiki list -w <slug>         # list pages in a workspace
 
 ## Step 5: Local Skill Bundle
 
-These files are available offline after install. See each for details:
+**For global install**, the skill files are at the npm global package path:
+
+```bash
+COWIKI_PKG=$(npm root -g)/@cowiki/cli
+ls "$COWIKI_PKG/skills/cowiki-cli/"
+```
+
+**For local install**, they are at:
+
+```bash
+ls node_modules/@cowiki/cli/skills/cowiki-cli/
+```
+
+These files are available offline after install:
 
 | File | URL |
 |------|-----|
@@ -72,6 +100,7 @@ These files are available offline after install. See each for details:
 | commands.md | https://cowiki.app/skills/cowiki-cli/commands.md |
 | config.md | https://cowiki.app/skills/cowiki-cli/config.md |
 | troubleshooting.md | https://cowiki.app/skills/cowiki-cli/troubleshooting.md |
+| llm-co-wiki.md | https://cowiki.app/skills/cowiki-cli/llm-co-wiki.md |
 
 ---
 
@@ -82,7 +111,7 @@ cowiki supports a multi-directory wiki structure:
 - `entities/` — extracted entities (people, projects, events)
 - `concepts/` — patterns, decisions, conventions
 
-Use `--path` (write) or `--dir` (read, list) to target a directory. Default is `wiki/`.
+Use `--dir` (all commands) to target a directory. Default is `wiki/`.
 
 ### Path 1: Cloud Compile
 
@@ -104,7 +133,13 @@ The cloud agent handles source parsing, entity extraction, and page generation. 
 
 ### Path 2: Local Agent Compile
 
-For content that needs cross-references to existing wiki pages, or simple text that doesn't warrant cloud AI:
+For content that needs cross-references to existing wiki pages, entity extraction,
+concept formation, or simple text that doesn't warrant cloud AI.
+
+**Full workflow reference:** See `llm-co-wiki.md` for detailed entity extraction,
+concept formation, cross-referencing, and maintenance procedures.
+
+Quick start:
 
 ```bash
 # 1. Gather context
@@ -117,8 +152,8 @@ cowiki read -w <ws> <related-page>     # read existing pages
 #    - Build [[cross-references]] to existing pages
 
 # 3. Write to appropriate directories
-cowiki write -w <ws> <slug> --path entities --body "..."
-cowiki write -w <ws> <slug> --path concepts --body "..."
+cowiki write -w <ws> <slug> --dir entities --body "..."
+cowiki write -w <ws> <slug> --dir concepts --body "..."
 cowiki write -w <ws> <slug> --body "..."              # defaults to wiki/
 ```
 

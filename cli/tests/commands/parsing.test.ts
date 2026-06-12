@@ -93,26 +93,25 @@ describe('write flags', () => {
     expect(() => parseArgs(p, ['write', 'my-page', '--title', 'Test', '--body', '# Hello'])).not.toThrow();
   });
 
-  test('accepts --path option', () => {
+  test('accepts --dir option', () => {
     const p = makeProgram();
     registerWriteCommand(p);
-    expect(() => parseArgs(p, ['write', 'my-page', '--path', 'entities', '--body', '# Hi'])).not.toThrow();
+    expect(() => parseArgs(p, ['write', 'my-page', '--dir', 'entities', '--body', '# Hi'])).not.toThrow();
   });
 
-  test('accepts --path with concepts', () => {
+  test('accepts --dir with concepts', () => {
     const p = makeProgram();
     registerWriteCommand(p);
-    expect(() => parseArgs(p, ['write', 'my-page', '--path', 'concepts', '--body', '# Hi'])).not.toThrow();
+    expect(() => parseArgs(p, ['write', 'my-page', '--dir', 'concepts', '--body', '# Hi'])).not.toThrow();
   });
 
-  test('accepts nested slug with --path', () => {
+  test('accepts nested slug with --dir', () => {
     const p = makeProgram();
     registerWriteCommand(p);
-    // slug = "messy/mengnan-dating-guide" with nested path
     expect(() =>
       parseArgs(p, [
         'write', 'messy/hello',
-        '--path', 'wiki',
+        '--dir', 'wiki',
         '--title', 'hello',
         '--body', '# Hello',
       ])
@@ -123,7 +122,7 @@ describe('write flags', () => {
     const p = makeProgram();
     registerWriteCommand(p);
     expect(() =>
-      parseArgs(p, ['write', 'a/b/c/d/deep-page', '--path', 'wiki', '--body', '# Deep'])
+      parseArgs(p, ['write', 'a/b/c/d/deep-page', '--dir', 'wiki', '--body', '# Deep'])
     ).not.toThrow();
   });
 });

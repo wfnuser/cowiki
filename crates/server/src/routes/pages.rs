@@ -134,7 +134,7 @@ pub struct WritePage {
     pub body: String,
     pub branch: String,
     /// Content directory: "wiki" (default), "entities", "concepts"
-    pub path: Option<String>,
+    pub dir: Option<String>,
     /// Optional title — if set, server prepends YAML frontmatter
     pub title: Option<String>,
     /// Optional summary for YAML frontmatter
@@ -226,7 +226,7 @@ pub async fn write_page_ws(
         .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     ensure_user_branch_if_needed(&repo, &input.branch)?;
-    let dir = input.path.as_deref().unwrap_or("wiki");
+    let dir = input.dir.as_deref().unwrap_or("wiki");
     if dir == "all" {
         return Err(AppError::BadRequest(
             "dir=all is only supported for listing. Use a specific directory to write.".into(),

@@ -47,15 +47,16 @@ cowiki compile -w <ws> --timeout 300
 ```
 
 ### `cowiki write`
-Create or edit a wiki page. Primary tool for local agent output (Path 2). Use `--path` to target entities/, concepts/, or wiki/. Use `--title` to set the page title (server prepends YAML frontmatter). For large external sources, prefer `cowiki ingest` → `cowiki compile`.
+Create or edit a wiki page. Primary tool for local agent output (Path 2). Use `--dir` to target entities/, concepts/, wiki/, or a subdirectory like `wiki/messi`. Use `--title` to set the page title (server prepends YAML frontmatter). For large external sources, prefer `cowiki ingest` → `cowiki compile`.
 
 ```bash
 cowiki write -w <ws> my-page --body "# Hello"
 cowiki write -w <ws> my-page --title "My Page" --body "content here"
 cowiki write -w <ws> my-page --title "My Page"  # opens $EDITOR
 echo "# content" | cowiki write -w <ws> my-page  # from stdin
-cowiki write -w <ws> my-page --path entities --title "Entity" --body "..."
-cowiki write -w <ws> my-page --path concepts --title "Concept" --body "..."
+cowiki write -w <ws> my-page --dir entities --title "Entity" --body "..."
+cowiki write -w <ws> my-page --dir concepts --title "Concept" --body "..."
+cowiki write -w <ws> my-page --dir wiki/messi --title "Nested" --body "..."
 ```
 
 ### `cowiki search`

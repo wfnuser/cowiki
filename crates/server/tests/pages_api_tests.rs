@@ -58,7 +58,7 @@ fn register_user(name: &str) -> (String, String) {
 fn write_body(slug: &str, body: &str, branch: &str, path: &str) -> String {
     let escaped_body = body.replace('\\', "\\\\").replace('"', "\\\"");
     format!(
-        r#"{{"slug":"{}","body":"{}","branch":"{}","path":"{}"}}"#,
+        r#"{{"slug":"{}","body":"{}","branch":"{}","dir":"{}"}}"#,
         slug, escaped_body, branch, path
     )
 }
@@ -84,7 +84,7 @@ fn test_write_read_nested_path_in_wiki() {
     let json: serde_json::Value = serde_json::from_str(&resp).expect("invalid JSON from write");
     assert_eq!(json["ok"], true);
     assert_eq!(json["slug"], slug);
-    assert_eq!(json["path"], "wiki/messy/mengnan-dating-guide");
+    assert_eq!(json["dir"], "wiki/messy/mengnan-dating-guide");
 
     let (resp2, status2) = api_request(
         "GET",
