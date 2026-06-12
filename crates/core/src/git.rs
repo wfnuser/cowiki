@@ -326,14 +326,20 @@ impl WikiRepo {
             let repo = Repository::init(&path)?;
             fs::create_dir_all(path.join("wiki")).ok();
             fs::create_dir_all(path.join("sources")).ok();
+            fs::create_dir_all(path.join("entities")).ok();
+            fs::create_dir_all(path.join("concepts")).ok();
 
             fs::write(path.join("wiki/.gitkeep"), "").ok();
             fs::write(path.join("sources/.gitkeep"), "").ok();
+            fs::write(path.join("entities/.gitkeep"), "").ok();
+            fs::write(path.join("concepts/.gitkeep"), "").ok();
 
             let sig = Signature::now("cowiki", "cowiki@local")?;
             let mut index = repo.index()?;
             index.add_path(Path::new("wiki/.gitkeep"))?;
             index.add_path(Path::new("sources/.gitkeep"))?;
+            index.add_path(Path::new("entities/.gitkeep"))?;
+            index.add_path(Path::new("concepts/.gitkeep"))?;
             index.write()?;
             let tree_id = index.write_tree()?;
             let tree = repo.find_tree(tree_id)?;
