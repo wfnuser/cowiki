@@ -25,8 +25,15 @@ pub struct IngestResponse {
 pub async fn ingest_ws(
     State(state): State<Arc<AppState>>,
     Path(ws_slug): Path<String>,
+    headers: axum::http::HeaderMap,
     Json(input): Json<IngestRequest>,
 ) -> Result<Json<IngestResponse>> {
+    // Ingest writes a source file to the named branch — members with write
+    // permission only, and only onto the caller's own draft branch (previously
+    // this even allowed branch == "main").
+    let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
+    crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
+    super::pages::require_own_branch(&input.branch, guard.user.id)?;
     let repo = state
         .repo_manager
         .get(&ws_slug)

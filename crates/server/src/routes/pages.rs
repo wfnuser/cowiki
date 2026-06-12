@@ -191,13 +191,17 @@ pub struct CreateFolder {
 pub async fn list_pages_ws(
     State(state): State<Arc<AppState>>,
     Path(ws_slug): Path<String>,
+    headers: axum::http::HeaderMap,
     Query(params): Query<PageQueryParams>,
 ) -> Result<Json<Vec<PageListItem>>> {
+    let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
+    crate::routes::guard::require(&guard, crate::routes::guard::Permission::ViewContent)?;
     let repo = state
         .repo_manager
         .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     let branch = params.branch.unwrap_or_else(|| "main".into());
+    require_readable_branch(&branch, guard.user.id)?;
     ensure_user_branch_if_needed(&repo, &branch)?;
 
     let dir = params.dir.as_deref().unwrap_or("wiki");
@@ -216,14 +220,18 @@ pub async fn list_pages_ws(
 pub async fn get_page_ws(
     State(state): State<Arc<AppState>>,
     Path((ws_slug, raw_slug)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
     Query(params): Query<PageQueryParams>,
 ) -> Result<Json<PageResponse>> {
+    let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
+    crate::routes::guard::require(&guard, crate::routes::guard::Permission::ViewContent)?;
     let slug = raw_slug.strip_prefix('/').unwrap_or(&raw_slug).to_string();
     let repo = state
         .repo_manager
         .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     let branch = params.branch.unwrap_or_else(|| "main".into());
+    require_readable_branch(&branch, guard.user.id)?;
     ensure_user_branch_if_needed(&repo, &branch)?;
     let dir = params.dir.as_deref().unwrap_or("wiki");
     if dir == "all" {
@@ -528,6 +536,17 @@ fn validate_wiki_path(p: &str) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+/// Reads may target the shared `main` or the caller's own draft branch — never
+/// another user's branch (their un-reviewed drafts are private until submitted).
+pub(crate) fn require_readable_branch(branch: &str, user_id: uuid::Uuid) -> Result<()> {
+    if branch == "main" || branch == format!("user/{user_id}") {
+        return Ok(());
+    }
+    Err(AppError::Forbidden(
+        "reads are limited to main or your own draft branch".into(),
+    ))
 }
 
 /// Mutating ops only touch the caller's own draft branch — never main, pr/* snapshots,
