@@ -120,8 +120,10 @@ pub async fn review_action(
                 .map(|u| u.name)
                 .unwrap_or_else(|| guard.user.name.clone());
 
-            // Linear squash + rebase + fast-forward. A conflict with the current main
-            // means the author must rebase and resolve — surface it as 409.
+            // Linear squash + rebase + fast-forward. The snapshot is frozen, so a
+            // conflict with the now-advanced main can't be fixed in place — close this
+            // submission (refs cleaned up) and tell the author to sync & resubmit; the
+            // resubmit takes a fresh snapshot off the rebased branch.
             match repo
                 .merge_pr(
                     &submission.id.to_string(),
@@ -132,8 +134,11 @@ pub async fn review_action(
             {
                 cowiki_core::git::MergeOutcome::Merged => {}
                 cowiki_core::git::MergeOutcome::Conflict(paths) => {
+                    repo.cleanup_submission(&submission.id.to_string());
+                    cowiki_db::submissions::update_status(&state.db, id, "rejected", guard.user.id)
+                        .await?;
                     return Err(AppError::Conflict(format!(
-                        "merge conflicts with main; author must rebase and resolve: {}",
+                        "main has moved and this snapshot now conflicts ({}); submission closed — sync your branch and submit again",
                         paths.join(", ")
                     )));
                 }

@@ -156,6 +156,76 @@ fn set_path_in_tree(
     builder.write()
 }
 
+/// Insert an arbitrary object (blob or subtree) at `segments` inside `base_tree`,
+/// rebuilding only the touched subtrees in memory. `filemode` is `0o100644` for files
+/// and `0o040000` for trees. Returns the new tree oid.
+fn insert_entry_in_tree(
+    repo: &Repository,
+    base_tree: Option<&git2::Tree>,
+    segments: &[&str],
+    oid: git2::Oid,
+    filemode: i32,
+) -> Result<git2::Oid, git2::Error> {
+    let mut builder = repo.treebuilder(base_tree)?;
+    let existing = base_tree.and_then(|t| t.get_name(segments[0]));
+    if segments.len() == 1 {
+        builder.insert(segments[0], oid, filemode)?;
+    } else {
+        if existing.as_ref().and_then(|e| e.kind()) == Some(git2::ObjectType::Blob) {
+            return Err(git2::Error::from_str(&format!(
+                "cannot create directory over existing file '{}'",
+                segments[0]
+            )));
+        }
+        let sub_base = existing.and_then(|e| repo.find_tree(e.id()).ok());
+        let sub_oid = insert_entry_in_tree(repo, sub_base.as_ref(), &segments[1..], oid, filemode)?;
+        builder.insert(segments[0], sub_oid, 0o040000)?;
+    }
+    builder.write()
+}
+
+/// Remove the entry at `segments` from `base_tree`, rebuilding only the touched subtrees
+/// in memory and pruning subtrees that become empty. Returns the new tree oid, or `None`
+/// if the tree itself ended up empty (the caller then removes the parent entry).
+/// Errors if the path does not exist.
+fn remove_path_in_tree(
+    repo: &Repository,
+    base_tree: &git2::Tree,
+    segments: &[&str],
+) -> Result<Option<git2::Oid>, git2::Error> {
+    let mut builder = repo.treebuilder(Some(base_tree))?;
+    if segments.len() == 1 {
+        if base_tree.get_name(segments[0]).is_none() {
+            return Err(git2::Error::from_str(&format!(
+                "path component '{}' not found",
+                segments[0]
+            )));
+        }
+        builder.remove(segments[0])?;
+    } else {
+        let entry = base_tree.get_name(segments[0]).ok_or_else(|| {
+            git2::Error::from_str(&format!("path component '{}' not found", segments[0]))
+        })?;
+        let sub = repo
+            .find_tree(entry.id())
+            .map_err(|_| git2::Error::from_str(&format!("'{}' is not a directory", segments[0])))?;
+        match remove_path_in_tree(repo, &sub, &segments[1..])? {
+            Some(sub_oid) => {
+                builder.insert(segments[0], sub_oid, 0o040000)?;
+            }
+            None => {
+                builder.remove(segments[0])?;
+            }
+        }
+    }
+    let oid = builder.write()?;
+    if repo.find_tree(oid)?.len() == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(oid))
+    }
+}
+
 /// Create a commit object for `tree_oid` with the given parents, **without** moving any
 /// ref (the caller updates refs explicitly). Lock-free; returns the new commit oid.
 fn commit_tree(
@@ -355,6 +425,96 @@ impl WikiRepo {
         let blob = repo.blob(content)?;
         let segments: Vec<&str> = file_path.split('/').collect();
         let tree_oid = set_path_in_tree(&repo, Some(&tip.tree()?), &segments, blob)?;
+        let new_oid = commit_tree(&repo, tree_oid, message, author, &[&base])?;
+        repo.reference(&format!("refs/heads/{branch}"), new_oid, true, message)?;
+        Ok(())
+    }
+
+    /// Delete a file or an entire directory at `path` on `branch`, folded into the
+    /// branch's single working commit (same amend semantics as `write_file`). Deletions
+    /// flow through submit → snapshot → merge like any other change: the 3-way merge
+    /// propagates the removal, and a main-side edit to a deleted page conflicts.
+    pub fn delete_path(
+        &self,
+        branch: &str,
+        path: &str,
+        message: &str,
+        author: &str,
+    ) -> Result<(), git2::Error> {
+        let lock = self.branch_lock(branch);
+        let _guard = lock.write().unwrap();
+        let repo = self.repo()?;
+
+        let main_oid = repo
+            .find_branch("main", BranchType::Local)?
+            .get()
+            .peel_to_commit()?
+            .id();
+        let tip = repo
+            .find_branch(branch, BranchType::Local)?
+            .get()
+            .peel_to_commit()?;
+        let base_oid = repo
+            .merge_base(tip.id(), main_oid)
+            .unwrap_or_else(|_| tip.id());
+        let base = repo.find_commit(base_oid)?;
+
+        let segments: Vec<&str> = path.split('/').collect();
+        let tree_oid = remove_path_in_tree(&repo, &tip.tree()?, &segments)?
+            .unwrap_or_else(|| tip.tree().map(|t| t.id()).unwrap_or_else(|_| base_oid));
+        let new_oid = commit_tree(&repo, tree_oid, message, author, &[&base])?;
+        repo.reference(&format!("refs/heads/{branch}"), new_oid, true, message)?;
+        Ok(())
+    }
+
+    /// Rename/move a file or an entire directory from `from` to `to` on `branch`, folded
+    /// into the branch's single working commit. The object (blob or whole subtree) is
+    /// re-inserted at the new path, then removed from the old one — content unchanged.
+    pub fn rename_path(
+        &self,
+        branch: &str,
+        from: &str,
+        to: &str,
+        message: &str,
+        author: &str,
+    ) -> Result<(), git2::Error> {
+        let lock = self.branch_lock(branch);
+        let _guard = lock.write().unwrap();
+        let repo = self.repo()?;
+
+        let main_oid = repo
+            .find_branch("main", BranchType::Local)?
+            .get()
+            .peel_to_commit()?
+            .id();
+        let tip = repo
+            .find_branch(branch, BranchType::Local)?
+            .get()
+            .peel_to_commit()?;
+        let base_oid = repo
+            .merge_base(tip.id(), main_oid)
+            .unwrap_or_else(|_| tip.id());
+        let base = repo.find_commit(base_oid)?;
+        let tip_tree = tip.tree()?;
+
+        let entry = tip_tree
+            .get_path(Path::new(from))
+            .map_err(|_| git2::Error::from_str(&format!("'{from}' not found")))?;
+        let (oid, mode) = match entry.kind() {
+            Some(git2::ObjectType::Blob) => (entry.id(), 0o100644),
+            Some(git2::ObjectType::Tree) => (entry.id(), 0o040000),
+            _ => return Err(git2::Error::from_str(&format!("'{from}' is not movable"))),
+        };
+        if tip_tree.get_path(Path::new(to)).is_ok() {
+            return Err(git2::Error::from_str(&format!("'{to}' already exists")));
+        }
+
+        let to_segments: Vec<&str> = to.split('/').collect();
+        let with_new = insert_entry_in_tree(&repo, Some(&tip_tree), &to_segments, oid, mode)?;
+        let from_segments: Vec<&str> = from.split('/').collect();
+        let with_new_tree = repo.find_tree(with_new)?;
+        let tree_oid =
+            remove_path_in_tree(&repo, &with_new_tree, &from_segments)?.unwrap_or(with_new);
         let new_oid = commit_tree(&repo, tree_oid, message, author, &[&base])?;
         repo.reference(&format!("refs/heads/{branch}"), new_oid, true, message)?;
         Ok(())
@@ -614,6 +774,10 @@ impl WikiRepo {
     ) -> Result<MergeOutcome, git2::Error> {
         let lock = self.branch_lock("main");
         let _guard = lock.write().unwrap();
+        // Also hold the PR-branch lock so a concurrent review-fix can't move the tip
+        // mid-merge. Lock order is always main → pr (no caller takes pr → main).
+        let pr_lock = self.branch_lock(&format!("pr/{id}"));
+        let _pr_guard = pr_lock.write().unwrap();
         let repo = self.repo()?;
 
         let main_commit = repo
@@ -1005,6 +1169,121 @@ mod tests {
         repo.cleanup_submission("subk");
         assert!(g.find_branch("pr/subk", BranchType::Local).is_err());
         assert!(g.refname_to_id("refs/cowiki/base/subk").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// delete_path removes a page (and prunes emptied directories), keeps the branch at a
+    /// single working commit, and the deletion survives snapshot + merge into main.
+    #[test]
+    fn delete_page_flows_through_merge() {
+        let (repo, dir) = temp_repo("delete");
+        // land a nested page on main first
+        repo.ensure_branch_exists("user/d1").unwrap();
+        repo.write_file("user/d1", "wiki/guides/a.md", b"a\n", "edit", "d")
+            .unwrap();
+        repo.write_file("user/d1", "wiki/keep.md", b"keep\n", "edit", "d")
+            .unwrap();
+        repo.create_pr_snapshot("user/d1", "s1").unwrap();
+        repo.merge_pr("s1", "d", "land").unwrap();
+        let _ = repo.rebase_onto_main("user/d1");
+
+        // delete the nested page on the branch
+        repo.delete_path("user/d1", "wiki/guides/a.md", "delete a", "d")
+            .unwrap();
+        assert!(read(&repo, "user/d1", "wiki/guides/a.md").is_none());
+        assert_eq!(
+            read(&repo, "user/d1", "wiki/keep.md").as_deref(),
+            Some("keep\n")
+        );
+        // still a single working commit on top of main
+        let g = git(&dir);
+        let c = g
+            .find_branch("user/d1", BranchType::Local)
+            .unwrap()
+            .get()
+            .peel_to_commit()
+            .unwrap();
+        assert_eq!(c.parent_count(), 1);
+        assert_eq!(c.parent_id(0).unwrap(), tip(&g, "main"));
+
+        // deletion lands on main through snapshot + merge
+        repo.create_pr_snapshot("user/d1", "s2").unwrap();
+        assert_eq!(
+            repo.merge_pr("s2", "d", "rm").unwrap(),
+            MergeOutcome::Merged
+        );
+        assert!(read(&repo, "main", "wiki/guides/a.md").is_none());
+        assert_eq!(
+            read(&repo, "main", "wiki/keep.md").as_deref(),
+            Some("keep\n")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// delete_path on a directory removes the whole subtree.
+    #[test]
+    fn delete_folder_removes_subtree() {
+        let (repo, dir) = temp_repo("delete-folder");
+        repo.ensure_branch_exists("user/d2").unwrap();
+        repo.write_file("user/d2", "wiki/proj/_index.md", b"i\n", "e", "d")
+            .unwrap();
+        repo.write_file("user/d2", "wiki/proj/x.md", b"x\n", "e", "d")
+            .unwrap();
+        repo.write_file("user/d2", "wiki/other.md", b"o\n", "e", "d")
+            .unwrap();
+        repo.delete_path("user/d2", "wiki/proj", "rm folder", "d")
+            .unwrap();
+        assert!(read(&repo, "user/d2", "wiki/proj/_index.md").is_none());
+        assert!(read(&repo, "user/d2", "wiki/proj/x.md").is_none());
+        assert_eq!(
+            read(&repo, "user/d2", "wiki/other.md").as_deref(),
+            Some("o\n")
+        );
+        // deleting a missing path errors
+        assert!(repo
+            .delete_path("user/d2", "wiki/proj", "again", "d")
+            .is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// rename_path moves a file and an entire folder subtree, refusing to overwrite.
+    #[test]
+    fn rename_file_and_folder() {
+        let (repo, dir) = temp_repo("rename");
+        repo.ensure_branch_exists("user/r").unwrap();
+        repo.write_file("user/r", "wiki/old.md", b"body\n", "e", "r")
+            .unwrap();
+        repo.rename_path("user/r", "wiki/old.md", "wiki/new.md", "mv", "r")
+            .unwrap();
+        assert!(read(&repo, "user/r", "wiki/old.md").is_none());
+        assert_eq!(
+            read(&repo, "user/r", "wiki/new.md").as_deref(),
+            Some("body\n")
+        );
+
+        // folder move keeps children
+        repo.write_file("user/r", "wiki/dir/a.md", b"a\n", "e", "r")
+            .unwrap();
+        repo.write_file("user/r", "wiki/dir/sub/b.md", b"b\n", "e", "r")
+            .unwrap();
+        repo.rename_path("user/r", "wiki/dir", "wiki/moved", "mv dir", "r")
+            .unwrap();
+        assert!(read(&repo, "user/r", "wiki/dir/a.md").is_none());
+        assert_eq!(
+            read(&repo, "user/r", "wiki/moved/a.md").as_deref(),
+            Some("a\n")
+        );
+        assert_eq!(
+            read(&repo, "user/r", "wiki/moved/sub/b.md").as_deref(),
+            Some("b\n")
+        );
+
+        // refuses to overwrite an existing target
+        repo.write_file("user/r", "wiki/exists.md", b"x\n", "e", "r")
+            .unwrap();
+        assert!(repo
+            .rename_path("user/r", "wiki/new.md", "wiki/exists.md", "mv", "r")
+            .is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

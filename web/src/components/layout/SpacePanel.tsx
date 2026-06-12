@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   ChevronRight, FileText, Folder, Upload, Wand2,
   MoreHorizontal, Plus, FolderPlus, Settings, BookOpen, GitPullRequest, Users, Activity,
-  CheckCircle2, Clock, FileCode,
+  CheckCircle2, Clock, FileCode, Pencil, Trash2,
 } from 'lucide-react';
 import type { Workspace, PageMeta, SourceItem } from '../../api';
 import {
@@ -29,6 +29,9 @@ interface SpacePanelProps {
   onNewFolder: () => void;
   onAddPageInFolder: (folderPath: string) => void;
   onAddFolderInFolder: (parentPath: string) => void;
+  /** path is the repo path: wiki/<slug>.md for pages, wiki/<dir> for folders */
+  onRenamePath: (path: string, isFolder: boolean, title: string) => void;
+  onDeletePath: (path: string, isFolder: boolean, title: string) => void;
   onShowIngest: () => void;
   onCompile: () => void;
   onSettings?: () => void;
@@ -51,6 +54,8 @@ export function SpacePanel({
   onNewFolder,
   onAddPageInFolder,
   onAddFolderInFolder,
+  onRenamePath,
+  onDeletePath,
   onShowIngest,
   onCompile,
   onSettings,
@@ -191,6 +196,8 @@ export function SpacePanel({
                 onSelectPage={onSelectPage}
                 onAddPageInFolder={onAddPageInFolder}
                 onAddFolderInFolder={onAddFolderInFolder}
+                onRenamePath={onRenamePath}
+                onDeletePath={onDeletePath}
               />
             ))
           )}
@@ -305,6 +312,8 @@ function PageTreeItem({
   onSelectPage,
   onAddPageInFolder,
   onAddFolderInFolder,
+  onRenamePath,
+  onDeletePath,
 }: {
   page: PageMeta;
   activePage: string | null;
@@ -312,10 +321,13 @@ function PageTreeItem({
   onSelectPage: (slug: string) => void;
   onAddPageInFolder: (folderPath: string) => void;
   onAddFolderInFolder: (parentPath: string) => void;
+  onRenamePath: (path: string, isFolder: boolean, title: string) => void;
+  onDeletePath: (path: string, isFolder: boolean, title: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const pl = depth * 14;
   const isActive = activePage === page.slug;
+  const title = page.title || page.slug;
 
   if (page.kind === 'folder') {
     const folderPath = 'wiki/' + page.slug.replace('/_index', '');
@@ -329,32 +341,36 @@ function PageTreeItem({
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.background = C.rail;
-            const btn = e.currentTarget.querySelector('[data-folder-add]') as HTMLElement | null;
+            const btn = e.currentTarget.querySelector('[data-row-menu]') as HTMLElement | null;
             if (btn) btn.style.opacity = '1';
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = 'transparent';
-            const btn = e.currentTarget.querySelector('[data-folder-add]') as HTMLElement | null;
+            const btn = e.currentTarget.querySelector('[data-row-menu]') as HTMLElement | null;
             if (btn) btn.style.opacity = '0';
           }}
         >
           <span onClick={() => setOpen(!open)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, userSelect: 'none', minWidth: 0 }}>
             <ChevronRight size={12} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', flexShrink: 0 }} />
             <Folder size={14} style={{ flexShrink: 0 }} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{page.title || page.slug}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
           </span>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button data-folder-add onClick={(e) => e.stopPropagation()} style={{
+              <button data-row-menu onClick={(e) => e.stopPropagation()} style={{
                 background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: C.faint, display: 'flex',
                 opacity: 0, transition: 'opacity 0.1s',
               }}>
-                <Plus size={13} />
+                <MoreHorizontal size={13} />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-40">
+            <DropdownMenuContent align="end" className="w-44">
               <DropdownMenuItem onClick={() => onAddPageInFolder(folderPath)}><FileText size={14} className="mr-2" /> New Page</DropdownMenuItem>
               <DropdownMenuItem onClick={() => onAddFolderInFolder(folderPath)}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onRenamePath(folderPath, true, title)}><Pencil size={14} className="mr-2" /> Rename</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onDeletePath(folderPath, true, title)} className="text-red-600 focus:text-red-600">
+                <Trash2 size={14} className="mr-2" /> Delete folder
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -367,32 +383,58 @@ function PageTreeItem({
             onSelectPage={onSelectPage}
             onAddPageInFolder={onAddPageInFolder}
             onAddFolderInFolder={onAddFolderInFolder}
+            onRenamePath={onRenamePath}
+            onDeletePath={onDeletePath}
           />
         ))}
       </>
     );
   }
 
+  const pagePath = `wiki/${page.slug}.md`;
   return (
-    <button
-      onClick={() => onSelectPage(page.slug)}
+    <div
       style={{
-        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+        display: 'flex', alignItems: 'center', gap: 8,
         padding: '6px 10px', paddingLeft: 10 + pl, borderRadius: 6,
-        border: 'none', cursor: 'pointer', textAlign: 'left',
+        cursor: 'pointer', fontSize: 14,
         background: isActive ? 'rgba(0,0,0,0.05)' : 'transparent',
-        color: isActive ? C.ink : C.ink2, fontSize: 14,
+        color: isActive ? C.ink : C.ink2,
         fontWeight: isActive ? 550 : 400,
         boxShadow: isActive ? '0 1px 2px rgba(0,0,0,0.04)' : 'none',
       }}
-      onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = C.rail; }}
-      onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
+      onMouseEnter={(e) => {
+        if (!isActive) e.currentTarget.style.background = C.rail;
+        const btn = e.currentTarget.querySelector('[data-row-menu]') as HTMLElement | null;
+        if (btn) btn.style.opacity = '1';
+      }}
+      onMouseLeave={(e) => {
+        if (!isActive) e.currentTarget.style.background = 'transparent';
+        const btn = e.currentTarget.querySelector('[data-row-menu]') as HTMLElement | null;
+        if (btn) btn.style.opacity = '0';
+      }}
     >
-      <FileText size={14} />
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {page.title || page.slug}
+      <span onClick={() => onSelectPage(page.slug)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+        <FileText size={14} style={{ flexShrink: 0 }} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
       </span>
-    </button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button data-row-menu onClick={(e) => e.stopPropagation()} style={{
+            background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: C.faint, display: 'flex',
+            opacity: 0, transition: 'opacity 0.1s',
+          }}>
+            <MoreHorizontal size={13} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuItem onClick={() => onRenamePath(pagePath, false, title)}><Pencil size={14} className="mr-2" /> Rename</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onDeletePath(pagePath, false, title)} className="text-red-600 focus:text-red-600">
+            <Trash2 size={14} className="mr-2" /> Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 }
 

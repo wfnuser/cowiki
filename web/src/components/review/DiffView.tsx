@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { MessageSquare, Check, ChevronDown, ChevronRight, Send, X, FileText } from 'lucide-react';
+import { MessageSquare, Check, ChevronDown, ChevronRight, Send, X, FileText, Pencil } from 'lucide-react';
 import type { FileDiff, DiffHunk, DiffLine, ReviewComment } from '../../api';
 import { C, fonts } from '@/lib/design';
 import { timeAgo } from '../../lib/time';
@@ -285,6 +285,7 @@ function FileDiffCard({
   onResolve,
   onUnresolve,
   onReply,
+  onEditSave,
 }: {
   file: FileDiff;
   comments: ReviewComment[];
@@ -292,9 +293,14 @@ function FileDiffCard({
   onResolve?: (id: string) => void;
   onUnresolve?: (id: string) => void;
   onReply?: (body: string, parentId: string) => void;
+  onEditSave?: (path: string, content: string) => Promise<void>;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [composingLine, setComposingLine] = useState<number | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const status = fileStatus(file);
   const sc = statusColors[status];
   const fileComments = comments.filter((c) => c.file_path === file.path);
@@ -303,6 +309,27 @@ function FileDiffCard({
     onAddComment?.(file.path, lineNumber, body);
     setComposingLine(null);
   }, [file.path, onAddComment]);
+
+  const startEdit = () => {
+    setDraft(file.new_content ?? '');
+    setEditError(null);
+    setEditing(true);
+    setCollapsed(false);
+  };
+
+  const saveEdit = async () => {
+    if (!onEditSave || saving) return;
+    setSaving(true);
+    setEditError(null);
+    try {
+      await onEditSave(file.path, draft);
+      setEditing(false);
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
@@ -330,7 +357,67 @@ function FileDiffCard({
           {' '}
           <span style={{ color: C.red }}>-{file.deletions}</span>
         </span>
+        {onEditSave && file.new_content != null && !editing && (
+          <button
+            onClick={(e) => { e.stopPropagation(); startEdit(); }}
+            title="Edit this file in the review (amends the submission snapshot)"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 6,
+              border: `1px solid ${C.line}`, background: '#fff', color: C.ink2,
+              fontSize: 12, fontWeight: 550, cursor: 'pointer',
+            }}
+          >
+            <Pencil size={12} /> Edit
+          </button>
+        )}
       </div>
+
+      {/* Review-fix editor (edits the pr snapshot; S stays frozen, R is amended) */}
+      {editing && (
+        <div style={{ borderBottom: `1px solid ${C.line}` }}>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            spellCheck={false}
+            autoFocus
+            style={{
+              display: 'block', width: '100%', minHeight: 280, padding: '12px 16px',
+              border: 'none', outline: 'none', resize: 'vertical', boxSizing: 'border-box',
+              fontFamily: mono, fontSize: 13, lineHeight: 1.6, color: C.ink, background: '#fff',
+            }}
+          />
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+            background: C.bg, borderTop: `1px solid ${C.lineSoft}`,
+          }}>
+            <span style={{ fontSize: 12, color: C.faint }}>
+              Saves as a review fix on this submission — the diff below updates to include it.
+            </span>
+            {editError && <span style={{ fontSize: 12, color: C.red }}>{editError}</span>}
+            <button
+              onClick={() => setEditing(false)}
+              disabled={saving}
+              style={{
+                marginLeft: 'auto', padding: '5px 12px', borderRadius: 6, fontSize: 12.5, fontWeight: 550,
+                border: `1px solid ${C.line}`, background: '#fff', color: C.ink2, cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={saveEdit}
+              disabled={saving || draft === (file.new_content ?? '')}
+              style={{
+                padding: '5px 14px', borderRadius: 6, fontSize: 12.5, fontWeight: 600,
+                border: 'none', background: draft !== (file.new_content ?? '') ? C.accent : C.faint,
+                color: '#fff', cursor: 'pointer', opacity: saving ? 0.6 : 1,
+              }}
+            >
+              {saving ? 'Saving…' : 'Save review fix'}
+            </button>
+          </div>
+        </div>
+      )}
       {/* Diff body */}
       {!collapsed && (
         <div style={{ overflowX: 'auto' }}>
@@ -381,6 +468,7 @@ export function DiffView({
   onResolve,
   onUnresolve,
   onReply,
+  onEditSave,
 }: {
   diffs: FileDiff[];
   comments?: ReviewComment[];
@@ -388,6 +476,7 @@ export function DiffView({
   onResolve?: (id: string) => void;
   onUnresolve?: (id: string) => void;
   onReply?: (body: string, parentId: string) => void;
+  onEditSave?: (path: string, content: string) => Promise<void>;
 }) {
   if (!diffs.length) {
     return <p style={{ color: C.muted, fontSize: 14 }}>No file changes.</p>;
@@ -404,6 +493,7 @@ export function DiffView({
           onResolve={onResolve}
           onUnresolve={onUnresolve}
           onReply={onReply}
+          onEditSave={onEditSave}
         />
       ))}
     </div>
