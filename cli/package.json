@@ -1,0 +1,41 @@
+{
+  "name": "@cowiki/cli",
+  "version": "0.1.0",
+  "description": "CLI client for cowiki - collaborative wiki",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "cowiki": "./dist/index.js"
+  },
+  "files": [
+    "dist/",
+    "skills/",
+    "skill.md"
+  ],
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^5",
+    "chalk": "^5",
+    "cli-table3": "^0.6",
+    "commander": "^12",
+    "dotenv": "^16",
+    "ora": "^8"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsup": "^8",
+    "tsx": "^4",
+    "typescript": "^5",
+    "vitest": "^1"
+  }
+}

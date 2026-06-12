@@ -7,8 +7,10 @@ use crate::error::{AppError, Result};
 use crate::AppState;
 
 #[derive(Deserialize)]
-pub struct ListParams {
+pub struct PageQueryParams {
     pub branch: Option<String>,
+    /// Content directory: "wiki" (default), "entities", "concepts", "all"
+    pub dir: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -34,6 +36,59 @@ pub struct PageResponse {
 }
 
 pub(crate) fn parse_frontmatter(content: &str) -> (Option<String>, String) {
+    if content.starts_with("---") {
+        let parts: Vec<&str> = content.splitn(3, "---").collect();
+        if parts.len() >= 3 {
+            let fm = parts[1];
+            let title = fm
+                .lines()
+                .find(|l| l.trim().starts_with("title:"))
+                .map(|l| {
+                    l.trim()
+                        .trim_start_matches("title:")
+                        .trim()
+                        .trim_matches('"')
+                        .to_string()
+                })
+                .filter(|title| !title.trim().is_empty());
+            let summary = fm
+                .lines()
+                .find(|l| l.trim().starts_with("summary:"))
+                .map(|l| {
+                    l.trim()
+                        .trim_start_matches("summary:")
+                        .trim()
+                        .trim_matches('"')
+                        .to_string()
+                })
+                .unwrap_or_default();
+            if title.is_some() {
+                return (title, summary);
+            }
+        }
+    }
+
+    // Fallback: first Markdown heading (# Title or ## Title)
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(title) = trimmed
+            .strip_prefix("# ")
+            .or_else(|| trimmed.strip_prefix("## "))
+        {
+            let title = title.trim().to_string();
+            if !title.is_empty() {
+                return (Some(title), String::new());
+            }
+        }
+    }
+
+    (None, String::new())
+}
+
+/// Strict frontmatter parsing: only checks the YAML frontmatter block for a
+/// non-empty `title:` field. No heading/slug fallback — use this for write
+/// validation where a frontmatter title is mandatory.
+pub(crate) fn parse_frontmatter_strict(content: &str) -> (Option<String>, String) {
     if !content.starts_with("---") {
         return (None, String::new());
     }
@@ -68,7 +123,7 @@ pub(crate) fn parse_frontmatter(content: &str) -> (Option<String>, String) {
 }
 
 pub(crate) fn require_page_title(content: &str) -> Result<(String, String)> {
-    let (title, summary) = parse_frontmatter(content);
+    let (title, summary) = parse_frontmatter_strict(content);
     let title = title.ok_or_else(|| {
         AppError::BadRequest("wiki pages require non-empty frontmatter.title".into())
     })?;
@@ -115,6 +170,12 @@ pub struct WritePage {
     pub slug: String,
     pub body: String,
     pub branch: String,
+    /// Content directory: "wiki" (default), "entities", "concepts"
+    pub dir: Option<String>,
+    /// Optional title — if set, server prepends YAML frontmatter
+    pub title: Option<String>,
+    /// Optional summary for YAML frontmatter
+    pub summary: Option<String>,
 }
 
 /// Create a folder (directory with _index.md)
@@ -130,7 +191,7 @@ pub struct CreateFolder {
 pub async fn list_pages_ws(
     State(state): State<Arc<AppState>>,
     Path(ws_slug): Path<String>,
-    Query(params): Query<ListParams>,
+    Query(params): Query<PageQueryParams>,
 ) -> Result<Json<Vec<PageListItem>>> {
     let repo = state
         .repo_manager
@@ -138,13 +199,24 @@ pub async fn list_pages_ws(
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     let branch = params.branch.unwrap_or_else(|| "main".into());
     ensure_user_branch_if_needed(&repo, &branch)?;
-    list_pages_from_repo(&repo, &branch)
+
+    let dir = params.dir.as_deref().unwrap_or("wiki");
+
+    if dir == "all" {
+        return list_pages_all_dirs(&repo, &branch);
+    }
+
+    cowiki_core::wiki_fs::validate_dir(dir).map_err(|e| AppError::BadRequest(e))?;
+
+    let files = cowiki_core::wiki_fs::list_pages_recursive(&repo, &branch, dir)
+        .map_err(|e| AppError::Internal(e))?;
+    list_pages_from_dir(&repo, &branch, dir, &files)
 }
 
 pub async fn get_page_ws(
     State(state): State<Arc<AppState>>,
     Path((ws_slug, raw_slug)): Path<(String, String)>,
-    Query(params): Query<ListParams>,
+    Query(params): Query<PageQueryParams>,
 ) -> Result<Json<PageResponse>> {
     let slug = raw_slug.strip_prefix('/').unwrap_or(&raw_slug).to_string();
     let repo = state
@@ -153,11 +225,16 @@ pub async fn get_page_ws(
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     let branch = params.branch.unwrap_or_else(|| "main".into());
     ensure_user_branch_if_needed(&repo, &branch)?;
-    let path = format!("wiki/{slug}.md");
-    let content = repo
-        .read_file(&branch, &path)
-        .map_err(|e| AppError::Internal(e.to_string()))?
-        .ok_or_else(|| AppError::NotFound(format!("page {slug} not found")))?;
+    let dir = params.dir.as_deref().unwrap_or("wiki");
+    if dir == "all" {
+        return Err(AppError::BadRequest(
+            "dir=all is only supported for listing. Use a specific directory to read.".into(),
+        ));
+    }
+    cowiki_core::wiki_fs::validate_dir(dir).map_err(|e| AppError::BadRequest(e))?;
+    let content = cowiki_core::wiki_fs::read_page(&repo, &branch, dir, &slug)
+        .map_err(|e| AppError::Internal(e))?
+        .ok_or_else(|| AppError::NotFound(format!("page {slug} not found in {dir}")))?;
     let body = String::from_utf8_lossy(&content).into_owned();
     let (title, summary) = parse_frontmatter(&body);
     let title = title.unwrap_or_else(|| fallback_title_from_content_or_slug(&body, &slug));
@@ -186,17 +263,39 @@ pub async fn write_page_ws(
         .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     ensure_user_branch_if_needed(&repo, &input.branch)?;
-    require_page_title(&input.body)?;
-    let path = format!("wiki/{}.md", input.slug);
-    repo.write_file(
+    let dir = input.dir.as_deref().unwrap_or("wiki");
+    if dir == "all" {
+        return Err(AppError::BadRequest(
+            "dir=all is only supported for listing. Use a specific directory to write.".into(),
+        ));
+    }
+    cowiki_core::wiki_fs::validate_dir(dir).map_err(|e| AppError::BadRequest(e))?;
+
+    // If title is provided, prepend YAML frontmatter to the body
+    let final_body = if let Some(ref title) = input.title {
+        let summary = input.summary.as_deref().unwrap_or("");
+        format!(
+            "---\ntitle: \"{}\"\nsummary: \"{}\"\n---\n\n{}",
+            title, summary, input.body
+        )
+    } else {
+        input.body.clone()
+    };
+
+    require_page_title(&final_body)?;
+
+    cowiki_core::wiki_fs::write_page(
+        &repo,
         &input.branch,
-        &path,
-        input.body.as_bytes(),
-        &format!("edit: {}", input.slug),
+        dir,
+        &input.slug,
+        final_body.as_bytes(),
         &guard.user.name,
     )
     .map_err(|e| AppError::Internal(e.to_string()))?;
-    Ok(Json(serde_json::json!({"ok": true, "slug": input.slug})))
+    Ok(Json(
+        serde_json::json!({"ok": true, "slug": input.slug, "path": format!("{dir}/{}", input.slug)}),
+    ))
 }
 
 pub async fn create_folder_ws(
@@ -255,15 +354,47 @@ pub(crate) fn ensure_user_branch_if_needed(
     Ok(())
 }
 
-/// Internal: list pages from a specific repo instance
-fn list_pages_from_repo(
+/// Given a full directory path and a parent directory, returns the immediate
+/// child directory relative to parent. Returns None if the item is not under
+/// the parent or is directly at the parent level.
+///
+/// Examples:
+/// - ("entities/projects", "") → Some("entities")
+/// - ("entities/projects/alpha", "entities") → Some("entities/projects")
+/// - ("wiki/page", "") → Some("wiki")
+fn immediate_child_dir(item_dir: &str, parent_dir: &str) -> Option<String> {
+    if item_dir.is_empty() {
+        return None;
+    }
+    if parent_dir.is_empty() {
+        // Top level: first segment is the child dir
+        let first = item_dir.split('/').next().unwrap_or("");
+        if first.is_empty() {
+            None
+        } else {
+            Some(first.to_string())
+        }
+    } else if item_dir == parent_dir {
+        None // same directory, not a child
+    } else if let Some(rest) = item_dir.strip_prefix(&format!("{parent_dir}/")) {
+        let next = rest.split('/').next().unwrap_or("");
+        if next.is_empty() {
+            None
+        } else {
+            Some(format!("{parent_dir}/{next}"))
+        }
+    } else {
+        None // not under parent_dir
+    }
+}
+
+/// Internal: list pages from a specific directory, building a tree.
+fn list_pages_from_dir(
     repo: &cowiki_core::git::WikiRepo,
     branch: &str,
+    dir: &str,
+    files: &[String],
 ) -> Result<Json<Vec<PageListItem>>> {
-    let files = repo
-        .list_files_recursive(branch, "wiki")
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-
     // Collect all items: pages and folder _index metadata
     struct RawItem {
         slug: String,
@@ -275,8 +406,9 @@ fn list_pages_from_repo(
 
     let mut items: Vec<RawItem> = Vec::new();
 
-    for file_path in &files {
-        let rel = file_path.strip_prefix("wiki/").unwrap_or(file_path);
+    for file_path in files {
+        let prefix = format!("{dir}/");
+        let rel = file_path.strip_prefix(&prefix).unwrap_or(file_path);
         let slug = rel.strip_suffix(".md").unwrap_or(rel).to_string();
         let (title, summary) = match repo.read_file(branch, file_path) {
             Ok(Some(content)) => {
@@ -335,35 +467,9 @@ fn list_pages_from_repo(
         // Find subdirectories (folders that have _index or have children at this level)
         let mut subdirs: Vec<String> = Vec::new();
         for item in items {
-            if !item.dir.is_empty() {
-                // Check if this item's immediate parent is our current directory
-                let expected_parent = if parent_dir.is_empty() {
-                    // Top level: subdirs are single-segment dirs
-                    if !item.dir.contains('/') {
-                        item.dir.clone()
-                    } else {
-                        item.dir.split('/').next().unwrap_or("").to_string()
-                    }
-                } else {
-                    // Nested: subdirs start with parent_dir + "/"
-                    if item.dir.starts_with(&format!("{parent_dir}/")) || item.dir == parent_dir {
-                        let rest = item
-                            .dir
-                            .strip_prefix(&format!("{parent_dir}/"))
-                            .unwrap_or("");
-                        if rest.is_empty() {
-                            continue; // same dir
-                        }
-                        let next_segment = rest.split('/').next().unwrap_or("");
-                        format!("{parent_dir}/{next_segment}")
-                    } else if parent_dir.is_empty() && !item.dir.contains('/') {
-                        item.dir.clone()
-                    } else {
-                        continue;
-                    }
-                };
-                if !expected_parent.is_empty() && !subdirs.contains(&expected_parent) {
-                    subdirs.push(expected_parent);
+            if let Some(child) = immediate_child_dir(&item.dir, parent_dir) {
+                if !subdirs.contains(&child) {
+                    subdirs.push(child);
                 }
             }
         }
@@ -500,4 +606,40 @@ pub async fn delete_path_ws(
     )
     .map_err(|e| AppError::BadRequest(e.to_string()))?;
     Ok(Json(serde_json::json!({"ok": true})))
+}
+
+/// List pages across all content directories, building a merged tree
+/// where each directory becomes a top-level folder node.
+fn list_pages_all_dirs(
+    repo: &cowiki_core::git::WikiRepo,
+    branch: &str,
+) -> Result<Json<Vec<PageListItem>>> {
+    let mut tree: Vec<PageListItem> = Vec::new();
+
+    for dir in cowiki_core::wiki_fs::all_dirs() {
+        let files = match cowiki_core::wiki_fs::list_pages_recursive(repo, branch, dir) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+
+        if files.is_empty() {
+            continue;
+        }
+
+        // Build the subtree for this directory using the shared helper
+        let subtree_json = list_pages_from_dir(repo, branch, dir, &files)?;
+        let children = subtree_json.0;
+
+        let dir_node = PageListItem {
+            slug: format!("{dir}/_index"),
+            title: dir.to_string(),
+            summary: String::new(),
+            branch: branch.into(),
+            kind: "folder".into(),
+            children,
+        };
+        tree.push(dir_node);
+    }
+
+    Ok(Json(tree))
 }
