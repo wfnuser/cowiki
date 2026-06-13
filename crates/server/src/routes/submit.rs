@@ -37,31 +37,26 @@ pub async fn submit(
     crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
     super::pages::require_own_branch(&input.branch, guard.user.id)?;
     let user = guard.user.clone();
-    let repo = state
-        .repo_manager
-        .get(&ws_slug)
-        .map_err(|e| {
-            tracing::error!(
-                ws_slug = %ws_slug,
-                error = %e,
-                "submit: failed to get repo"
-            );
-            AppError::Internal(format!("repo error: {e}"))
-        })?;
+    let repo = state.repo_manager.get(&ws_slug).map_err(|e| {
+        tracing::error!(
+            ws_slug = %ws_slug,
+            error = %e,
+            "submit: failed to get repo"
+        );
+        AppError::Internal(format!("repo error: {e}"))
+    })?;
     super::pages::ensure_user_branch_if_needed(&repo, &input.branch)?;
 
     // Mandatory pre-submit rebase: bring the branch up to date with main. A conflict
     // blocks submit — the author rebases (resolves) first, then resubmits.
-    let rebase_result = repo
-        .rebase_onto_main(&input.branch)
-        .map_err(|e| {
-            tracing::error!(
-                branch = %input.branch,
-                error = %e,
-                "submit: rebase failed"
-            );
-            AppError::Internal(e.to_string())
-        })?;
+    let rebase_result = repo.rebase_onto_main(&input.branch).map_err(|e| {
+        tracing::error!(
+            branch = %input.branch,
+            error = %e,
+            "submit: rebase failed"
+        );
+        AppError::Internal(e.to_string())
+    })?;
     if let cowiki_core::git::RebaseOutcome::Conflict(paths) = &rebase_result {
         return Err(AppError::Conflict(format!(
             "your branch conflicts with main; rebase and resolve first: {}",
@@ -130,8 +125,7 @@ pub async fn submit(
     // Check for duplicates
     let mut duplicates = Vec::new();
     for (slug, emb) in &embeddings {
-        match cowiki_db::pages::find_similar(&state.db, emb, "main", 3, 0.85, Some(&ws_slug))
-            .await
+        match cowiki_db::pages::find_similar(&state.db, emb, "main", 3, 0.85, Some(&ws_slug)).await
         {
             Ok(similar) => {
                 for (page, score) in similar {
