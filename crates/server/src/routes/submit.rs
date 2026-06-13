@@ -40,15 +40,29 @@ pub async fn submit(
     let repo = state
         .repo_manager
         .get(&ws_slug)
-        .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
+        .map_err(|e| {
+            tracing::error!(
+                ws_slug = %ws_slug,
+                error = %e,
+                "submit: failed to get repo"
+            );
+            AppError::Internal(format!("repo error: {e}"))
+        })?;
     super::pages::ensure_user_branch_if_needed(&repo, &input.branch)?;
 
     // Mandatory pre-submit rebase: bring the branch up to date with main. A conflict
     // blocks submit — the author rebases (resolves) first, then resubmits.
-    if let cowiki_core::git::RebaseOutcome::Conflict(paths) =
-        repo.rebase_onto_main(&input.branch)
-            .map_err(|e| AppError::Internal(e.to_string()))?
-    {
+    let rebase_result = repo
+        .rebase_onto_main(&input.branch)
+        .map_err(|e| {
+            tracing::error!(
+                branch = %input.branch,
+                error = %e,
+                "submit: rebase failed"
+            );
+            AppError::Internal(e.to_string())
+        })?;
+    if let cowiki_core::git::RebaseOutcome::Conflict(paths) = &rebase_result {
         return Err(AppError::Conflict(format!(
             "your branch conflicts with main; rebase and resolve first: {}",
             paths.join(", ")
@@ -68,35 +82,74 @@ pub async fn submit(
         }
     };
 
-    // Generate embeddings for dedup
+    // Generate embeddings for dedup.
+    // _index slugs represent folders; they may be synthetic (no backing .md file)
+    // when the folder exists but has no _index.md. Skip them gracefully.
     let mut embeddings = Vec::new();
     for slug in &input.page_slugs {
         let path = format!("wiki/{slug}.md");
-        let content = repo
-            .read_file(&input.branch, &path)
-            .map_err(|e| AppError::Internal(e.to_string()))?
-            .ok_or_else(|| AppError::BadRequest(format!("page {slug} not found")))?;
+        let content = match repo.read_file(&input.branch, &path) {
+            Ok(Some(c)) => c,
+            Ok(None) => {
+                if slug.ends_with("/_index") {
+                    continue;
+                }
+                tracing::error!(
+                    slug = %slug,
+                    branch = %input.branch,
+                    "submit: page not found"
+                );
+                return Err(AppError::BadRequest(format!("page {slug} not found")));
+            }
+            Err(e) => {
+                tracing::error!(
+                    slug = %slug,
+                    branch = %input.branch,
+                    error = %e,
+                    "submit: failed to read page file"
+                );
+                return Err(AppError::Internal(e.to_string()));
+            }
+        };
         let text = String::from_utf8_lossy(&content);
         super::pages::require_page_title(&text)?;
-        if let Ok(emb) = state.compiler.embed(&text).await {
-            embeddings.push((slug.clone(), emb));
+        match state.compiler.embed(&text).await {
+            Ok(emb) => {
+                embeddings.push((slug.clone(), emb));
+            }
+            Err(e) => {
+                tracing::warn!(
+                    slug = %slug,
+                    error = %e,
+                    "submit: embedding failed, skipping dedup"
+                );
+            }
         }
     }
 
     // Check for duplicates
     let mut duplicates = Vec::new();
     for (slug, emb) in &embeddings {
-        if let Ok(similar) =
-            cowiki_db::pages::find_similar(&state.db, emb, "main", 3, 0.85, Some(&ws_slug)).await
+        match cowiki_db::pages::find_similar(&state.db, emb, "main", 3, 0.85, Some(&ws_slug))
+            .await
         {
-            for (page, score) in similar {
-                if page.slug != *slug {
-                    duplicates.push(cowiki_core::models::DuplicateWarning {
-                        new_slug: slug.clone(),
-                        existing_slug: page.slug,
-                        similarity: score,
-                    });
+            Ok(similar) => {
+                for (page, score) in similar {
+                    if page.slug != *slug {
+                        duplicates.push(cowiki_core::models::DuplicateWarning {
+                            new_slug: slug.clone(),
+                            existing_slug: page.slug,
+                            similarity: score,
+                        });
+                    }
                 }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    slug = %slug,
+                    error = %e,
+                    "submit: duplicate check failed"
+                );
             }
         }
     }
@@ -119,15 +172,38 @@ pub async fn submit(
     if input.skip_review {
         // Authorization: skip_review only allowed for personal workspaces (private + owner)
         let ws = cowiki_db::workspaces::find_by_slug(&state.db, &ws_slug)
-            .await?
-            .ok_or_else(|| AppError::NotFound("workspace not found".into()))?;
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    ws_slug = %ws_slug,
+                    error = %e,
+                    "submit: failed to find workspace"
+                );
+                e
+            })?
+            .ok_or_else(|| {
+                tracing::error!(
+                    ws_slug = %ws_slug,
+                    "submit: workspace not found"
+                );
+                AppError::NotFound("workspace not found".into())
+            })?;
         if ws.visibility != "private" {
             return Err(AppError::Forbidden(
                 "skip_review is only allowed for personal (private) workspaces".into(),
             ));
         }
         let role = cowiki_db::workspaces::get_member_role(&state.db, ws.id, user.id)
-            .await?
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    ws_id = %ws.id,
+                    user_id = %user.id,
+                    error = %e,
+                    "submit: failed to get member role"
+                );
+                e
+            })?
             .unwrap_or_default();
         if role != "owner" {
             return Err(AppError::Forbidden(
@@ -142,12 +218,33 @@ pub async fn submit(
         // about to merge.
         let pr_id = format!("personal-{}", uuid::Uuid::new_v4());
         repo.create_pr_snapshot(&input.branch, &pr_id)
-            .map_err(|e| AppError::Internal(e.to_string()))?;
+            .map_err(|e| {
+                tracing::error!(
+                    pr_id = %pr_id,
+                    branch = %input.branch,
+                    error = %e,
+                    "submit: failed to create PR snapshot"
+                );
+                AppError::Internal(e.to_string())
+            })?;
         let outcome = repo
             .merge_pr(&pr_id, &user.name, &format!("commit: {summary}"))
-            .map_err(|e| AppError::Internal(e.to_string()))?;
+            .map_err(|e| {
+                tracing::error!(
+                    pr_id = %pr_id,
+                    error = %e,
+                    "submit: merge_pr failed"
+                );
+                AppError::Internal(e.to_string())
+            })?;
+        tracing::debug!(pr_id = %pr_id, "submit: cleaning up submission");
         repo.cleanup_submission(&pr_id);
-        if let cowiki_core::git::MergeOutcome::Conflict(paths) = outcome {
+        if let cowiki_core::git::MergeOutcome::Conflict(paths) = &outcome {
+            tracing::warn!(
+                pr_id = %pr_id,
+                conflicts = ?paths,
+                "submit: merge conflict"
+            );
             return Err(AppError::Conflict(format!(
                 "branch conflicts with main: {}",
                 paths.join(", ")
@@ -174,9 +271,26 @@ pub async fn submit(
         &input.branch,
         &ws_slug,
     )
-    .await?;
+    .await
+    .map_err(|e| {
+        tracing::error!(
+            user_id = %user.id,
+            ws_slug = %ws_slug,
+            error = %e,
+            "submit: failed to create submission in db"
+        );
+        e
+    })?;
     repo.create_pr_snapshot(&input.branch, &submission.id.to_string())
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+        .map_err(|e| {
+            tracing::error!(
+                submission_id = %submission.id,
+                branch = %input.branch,
+                error = %e,
+                "submit: failed to create PR snapshot"
+            );
+            AppError::Internal(e.to_string())
+        })?;
 
     // Replace the diff-based placeholder summary with an AI one-liner in the background, so
     // submit itself never waits on the LLM. Failure just leaves the placeholder in place.
@@ -185,6 +299,10 @@ pub async fn submit(
         let sub_id = submission.id;
         let content = summary.clone();
         tokio::spawn(async move {
+            tracing::debug!(
+                submission_id = %sub_id,
+                "submit: spawning background summary generation"
+            );
             match state
                 .compiler
                 .generate_summary(&format!("Submission changes:\n{content}"))
@@ -197,7 +315,9 @@ pub async fn submit(
                         tracing::warn!("failed to store async summary for {sub_id}: {e}");
                     }
                 }
-                Err(e) => tracing::warn!("async summary generation failed for {sub_id}: {e}"),
+                Err(e) => {
+                    tracing::warn!("async summary generation failed for {sub_id}: {e}");
+                }
             }
         });
     }

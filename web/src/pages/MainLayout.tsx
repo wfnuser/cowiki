@@ -179,6 +179,36 @@ export function MainLayout() {
     return ws.visibility === 'private' && ws.role === 'owner';
   }
 
+  // Merge two page trees recursively. When a folder exists in both main and draft,
+  // merge their children so new draft pages appear alongside existing main pages.
+  // Pure draft-only items (pages or folders) are appended.
+  function mergePageTrees(main: PageMeta[], draft: PageMeta[]): PageMeta[] {
+    const mainBySlug = new Map(main.map((p) => [p.slug, p]));
+    const result = main.map((p) => ({ ...p, children: [...(p.children || [])] }));
+
+    for (const dp of draft) {
+      const existing = mainBySlug.get(dp.slug);
+      if (existing && existing.kind === 'folder' && dp.kind === 'folder') {
+        const idx = result.findIndex((p) => p.slug === dp.slug);
+        if (idx !== -1) {
+          result[idx] = {
+            ...result[idx],
+            children: mergePageTrees(result[idx].children || [], dp.children || []),
+          };
+        }
+      } else if (!existing) {
+        result.push(dp);
+      }
+    }
+
+    result.sort((a, b) => {
+      if (a.kind === 'folder' && b.kind !== 'folder') return -1;
+      if (a.kind !== 'folder' && b.kind === 'folder') return 1;
+      return (a.title || a.slug).localeCompare(b.title || b.slug);
+    });
+    return result;
+  }
+
   // Load pages for a space
   const loadSpacePages = async (ws: Workspace) => {
     if (ws.visibility === 'private') {
@@ -186,14 +216,16 @@ export function MainLayout() {
       setSpacePages((prev) => ({ ...prev, [ws.id]: pages }));
     } else {
       const [mainPages, draftPages] = await Promise.all([
-        listPages('main', ws.slug),
+        listPages('main', ws.slug).catch(() => [] as PageMeta[]),
         listPages(userBranch, ws.slug).catch(() => [] as PageMeta[]),
       ]);
-      const mainSlugs = new Set(mainPages.map((p) => p.slug));
-      const merged = [
-        ...mainPages,
-        ...draftPages.filter((p) => !mainSlugs.has(p.slug)),
-      ];
+      let merged: PageMeta[];
+      try {
+        merged = mergePageTrees(mainPages, draftPages);
+      } catch (e) {
+        console.error('mergePageTrees failed:', e);
+        merged = [];
+      }
       setSpacePages((prev) => ({ ...prev, [ws.id]: merged }));
     }
   };

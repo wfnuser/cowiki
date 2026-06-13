@@ -24,6 +24,8 @@ export interface PageMeta {
   title: string;
   summary: string;
   branch: string;
+  kind?: string; // "page" | "folder"
+  children?: PageMeta[];
 }
 
 export interface PageFull {
