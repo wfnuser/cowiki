@@ -100,7 +100,10 @@ Submit pages for review.
 
 ```bash
 cowiki submit -w <ws> page1 page2
+cowiki submit -w <ws> page1 page2 --dir wiki/research   # submit pages in a subdirectory
 cowiki submit -w <ws> --all --yes
+cowiki submit -w <ws> --all --dir entities --yes        # submit all pages in entities/
+cowiki submit -w <ws> --all --dir all --yes             # submit all pages in all dirs
 ```
 
 ### `cowiki review`
