@@ -51,11 +51,21 @@ pub async fn list_for_submission(
     .await
 }
 
-pub async fn find_by_id(pool: &PgPool, id: Uuid) -> sqlx::Result<Option<ReviewComment>> {
-    sqlx::query_as::<_, ReviewComment>("SELECT * FROM review_comments WHERE id = $1")
-        .bind(id)
-        .fetch_optional(pool)
-        .await
+/// Look up a comment scoped to its submission. The `(id, submission_id)` predicate
+/// pushes the submission-binding check into the query, so a comment id from another
+/// submission/workspace simply returns None — callers can't forget to validate it.
+pub async fn find_by_id_and_submission(
+    pool: &PgPool,
+    id: Uuid,
+    submission_id: Uuid,
+) -> sqlx::Result<Option<ReviewComment>> {
+    sqlx::query_as::<_, ReviewComment>(
+        "SELECT * FROM review_comments WHERE id = $1 AND submission_id = $2",
+    )
+    .bind(id)
+    .bind(submission_id)
+    .fetch_optional(pool)
+    .await
 }
 
 pub async fn resolve(pool: &PgPool, id: Uuid) -> sqlx::Result<ReviewComment> {

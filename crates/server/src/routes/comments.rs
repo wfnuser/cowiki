@@ -39,22 +39,18 @@ async fn guard_submission(
     Ok(guard)
 }
 
-/// Load a comment and check it actually hangs off the submission in the path
-/// (prevents cross-submission/workspace comment ids smuggled into the URL).
+/// Load a comment scoped to the submission in the path. The binding check lives
+/// in the SQL predicate (`find_by_id_and_submission`), so a comment id belonging
+/// to another submission/workspace returns NotFound rather than relying on a
+/// caller-side comparison that could be forgotten.
 async fn load_bound_comment(
     state: &Arc<AppState>,
     submission_id: uuid::Uuid,
     comment_id: uuid::Uuid,
 ) -> Result<cowiki_db::review_comments::ReviewComment> {
-    let comment = cowiki_db::review_comments::find_by_id(&state.db, comment_id)
+    cowiki_db::review_comments::find_by_id_and_submission(&state.db, comment_id, submission_id)
         .await?
-        .ok_or_else(|| AppError::NotFound("comment not found".into()))?;
-    if comment.submission_id != submission_id {
-        return Err(AppError::NotFound(
-            "comment not found on this submission".into(),
-        ));
-    }
-    Ok(comment)
+        .ok_or_else(|| AppError::NotFound("comment not found on this submission".into()))
 }
 
 /// List all comments for a submission — any member can read.
@@ -108,7 +104,10 @@ pub async fn create_comment(
     Ok(Json(comment))
 }
 
-/// Resolve a comment thread — reviewers/editors only.
+/// Resolve a comment thread. Intentionally a moderation action, not an
+/// ownership one: any member with EditContent can resolve/unresolve any thread
+/// (not just its author), mirroring how editors curate a review. The thread is
+/// still bound to the submission via `load_bound_comment`.
 pub async fn resolve_comment(
     State(state): State<Arc<AppState>>,
     Path((ws_slug, submission_id, comment_id)): Path<(String, uuid::Uuid, uuid::Uuid)>,
