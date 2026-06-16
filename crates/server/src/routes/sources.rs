@@ -56,7 +56,7 @@ pub async fn list_sources(
 ) -> Result<Json<Vec<SourceItem>>> {
     let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
     crate::routes::guard::require(&guard, crate::routes::guard::Permission::ViewContent)?;
-    super::pages::require_readable_branch(&params.branch, guard.user.id)?;
+    super::guard::require_readable_branch(&params.branch, guard.user.id)?;
     let repo = state
         .repo_manager
         .get(&ws_slug)
@@ -98,7 +98,7 @@ pub async fn get_source(
 ) -> Result<Json<SourceContent>> {
     let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
     crate::routes::guard::require(&guard, crate::routes::guard::Permission::ViewContent)?;
-    super::pages::require_readable_branch(&params.branch, guard.user.id)?;
+    super::guard::require_readable_branch(&params.branch, guard.user.id)?;
     super::validate_source_filename(&filename)?;
 
     let repo = state

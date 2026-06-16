@@ -44,7 +44,7 @@ pub async fn compile_ws(
     // only, and only onto the caller's own draft branch.
     let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
     crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
-    super::pages::require_own_branch(&input.branch, guard.user.id)?;
+    super::guard::require_own_branch(&input.branch, guard.user.id)?;
     let repo = state
         .repo_manager
         .get(&ws_slug)

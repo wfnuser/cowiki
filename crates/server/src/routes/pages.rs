@@ -201,7 +201,7 @@ pub async fn list_pages_ws(
         .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     let branch = params.branch.unwrap_or_else(|| "main".into());
-    require_readable_branch(&branch, guard.user.id)?;
+    crate::routes::guard::require_readable_branch(&branch, guard.user.id)?;
     ensure_user_branch_if_needed(&repo, &branch)?;
 
     let dir = params.dir.as_deref().unwrap_or("wiki");
@@ -231,7 +231,7 @@ pub async fn get_page_ws(
         .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     let branch = params.branch.unwrap_or_else(|| "main".into());
-    require_readable_branch(&branch, guard.user.id)?;
+    crate::routes::guard::require_readable_branch(&branch, guard.user.id)?;
     ensure_user_branch_if_needed(&repo, &branch)?;
     let dir = params.dir.as_deref().unwrap_or("wiki");
     if dir == "all" {
@@ -265,7 +265,7 @@ pub async fn write_page_ws(
     // own draft branch; main changes exclusively via merge_pr.
     let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
     crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
-    require_own_branch(&input.branch, guard.user.id)?;
+    crate::routes::guard::require_own_branch(&input.branch, guard.user.id)?;
     let repo = state
         .repo_manager
         .get(&ws_slug)
@@ -314,7 +314,7 @@ pub async fn create_folder_ws(
 ) -> Result<Json<serde_json::Value>> {
     let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
     crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
-    require_own_branch(&input.branch, guard.user.id)?;
+    crate::routes::guard::require_own_branch(&input.branch, guard.user.id)?;
     let repo = state
         .repo_manager
         .get(&ws_slug)
@@ -538,28 +538,6 @@ fn validate_wiki_path(p: &str) -> Result<()> {
     Ok(())
 }
 
-/// Reads may target the shared `main` or the caller's own draft branch — never
-/// another user's branch (their un-reviewed drafts are private until submitted).
-pub(crate) fn require_readable_branch(branch: &str, user_id: uuid::Uuid) -> Result<()> {
-    if branch == "main" || branch == format!("user/{user_id}") {
-        return Ok(());
-    }
-    Err(AppError::Forbidden(
-        "reads are limited to main or your own draft branch".into(),
-    ))
-}
-
-/// Mutating ops only touch the caller's own draft branch — never main, pr/* snapshots,
-/// or other users' branches (all writes flow to main exclusively through merge_pr).
-pub(crate) fn require_own_branch(branch: &str, user_id: uuid::Uuid) -> Result<()> {
-    if branch != format!("user/{user_id}") {
-        return Err(AppError::Forbidden(
-            "writes are only allowed on your own draft branch".into(),
-        ));
-    }
-    Ok(())
-}
-
 #[derive(Deserialize)]
 pub struct RenamePathRequest {
     pub branch: String,
@@ -575,7 +553,7 @@ pub async fn rename_path_ws(
 ) -> Result<Json<serde_json::Value>> {
     let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
     crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
-    require_own_branch(&input.branch, guard.user.id)?;
+    crate::routes::guard::require_own_branch(&input.branch, guard.user.id)?;
     validate_wiki_path(&input.from)?;
     validate_wiki_path(&input.to)?;
 
@@ -609,7 +587,7 @@ pub async fn delete_path_ws(
 ) -> Result<Json<serde_json::Value>> {
     let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
     crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
-    require_own_branch(&input.branch, guard.user.id)?;
+    crate::routes::guard::require_own_branch(&input.branch, guard.user.id)?;
     validate_wiki_path(&input.path)?;
 
     let repo = state
