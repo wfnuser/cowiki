@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Check, X } from 'lucide-react';
 import { C, fonts } from '@/lib/design';
+import { MarkdownCodeEditor } from './MarkdownCodeEditor';
 
 /**
  * In-page markdown editor with GitHub-style Write / Preview tabs.
@@ -110,17 +111,10 @@ export function PageEditor({
 
       {/* Body */}
       {tab === 'write' ? (
-        <textarea
+        <MarkdownCodeEditor
           value={body}
-          onChange={(e) => setBody(e.target.value)}
-          spellCheck={false}
-          autoFocus
-          style={{
-            display: 'block', width: '100%', minHeight: 460, padding: '16px 20px',
-            border: 'none', outline: 'none', resize: 'vertical', boxSizing: 'border-box',
-            fontFamily: fonts.mono, fontSize: 13.5, lineHeight: 1.65, color: C.ink,
-            background: C.panel,
-          }}
+          onChange={setBody}
+          onSubmit={() => { void handleSave(); }}
         />
       ) : (
         <div className="prose" style={{ padding: '16px 24px', minHeight: 460 }}>
