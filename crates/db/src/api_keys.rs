@@ -75,6 +75,21 @@ pub async fn revoke(pool: &PgPool, key_id: Uuid, user_id: Uuid) -> sqlx::Result<
     Ok(result.rows_affected() > 0)
 }
 
+/// Revoke all of a user's active keys with the given name. Returns how many were
+/// revoked. Used to prevent unbounded accumulation of auto-minted keys (e.g. each
+/// GitHub sign-in mints one) — revoke the prior batch before minting the next.
+pub async fn revoke_by_name(pool: &PgPool, user_id: Uuid, name: &str) -> sqlx::Result<u64> {
+    let result = sqlx::query(
+        "UPDATE api_keys SET revoked_at = now() WHERE user_id = $1 AND name = $2 AND revoked_at IS NULL"
+    )
+    .bind(user_id)
+    .bind(name)
+    .execute(pool)
+    .await
+    .map_err(|e| { tracing::error!("DB revoke_by_name failed: {e}"); e })?;
+    Ok(result.rows_affected())
+}
+
 /// Look up an active key by its SHA-256 hash. Returns (ApiKey, user_id) or None.
 /// Used by the auth fallback path — MUST filter revoked_at IS NULL.
 pub async fn find_by_key_hash(

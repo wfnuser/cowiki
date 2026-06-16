@@ -128,8 +128,46 @@ fn generate_api_key() -> String {
 }
 
 /// SHA-256 hex digest used for at-rest storage of the primary API key.
+///
+/// No salt: API keys are `cw_<uuid-v4>` — ~122 bits of uniform entropy — so
+/// rainbow tables and brute force are infeasible regardless of salting (the same
+/// rationale as the secondary `api_keys` table). If the key format ever changes
+/// to something lower-entropy, switch to a salted KDF here.
 pub fn hash_api_key(raw_key: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(raw_key.as_bytes());
     format!("{:x}", hasher.finalize())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hash_api_key;
+
+    #[test]
+    fn hash_is_deterministic() {
+        assert_eq!(hash_api_key("cw_abc"), hash_api_key("cw_abc"));
+    }
+
+    #[test]
+    fn hash_differs_for_different_keys() {
+        assert_ne!(hash_api_key("cw_abc"), hash_api_key("cw_xyz"));
+    }
+
+    #[test]
+    fn hash_is_sha256_hex() {
+        let h = hash_api_key("cw_abc");
+        assert_eq!(h.len(), 64, "sha-256 hex digest is 64 chars");
+        assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
+        // Known vector: SHA-256("cw_abc")
+        assert_eq!(
+            hash_api_key("cw_abc"),
+            "a9a662a565ab7b0cfdb7609f7ad91d6f569b9d58ab8d7b30f6584c0e3417439a"
+        );
+    }
+
+    #[test]
+    fn hash_does_not_contain_raw_key() {
+        // The stored digest must not leak the plaintext.
+        assert!(!hash_api_key("cw_secret123").contains("cw_secret123"));
+    }
 }

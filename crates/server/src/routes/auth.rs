@@ -222,7 +222,10 @@ pub async fn github_callback(
         }
         // The primary key is stored hashed and can't be recovered — mint a fresh
         // secondary key for this sign-in instead of rotating the primary (which
-        // would log out the user's other sessions/agents).
+        // would log out the user's other sessions/agents). Revoke the previous
+        // "GitHub sign-in" key first so repeated logins don't accumulate keys
+        // unboundedly — each sign-in supersedes the last (one active login key).
+        let _ = cowiki_db::api_keys::revoke_by_name(&state.db, existing.id, "GitHub sign-in").await;
         let minted = cowiki_db::api_keys::create(&state.db, existing.id, "GitHub sign-in").await?;
         (existing, minted.raw_key)
     } else {
@@ -254,8 +257,6 @@ pub async fn extract_user(
     db: &sqlx::PgPool,
     headers: &axum::http::HeaderMap,
 ) -> Result<cowiki_db::users::User> {
-    use sha2::{Digest, Sha256};
-
     let auth_header = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -270,12 +271,9 @@ pub async fn extract_user(
         return Ok(user);
     }
 
-    // Fallback: secondary keys (SHA-256 hashed in api_keys.key_hash)
-    let key_hash: String = {
-        let mut hasher = Sha256::new();
-        hasher.update(api_key.as_bytes());
-        format!("{:x}", hasher.finalize())
-    };
+    // Fallback: secondary keys (SHA-256 hashed in api_keys.key_hash). Use the same
+    // canonical hash function as the primary key so the two paths can't drift.
+    let key_hash = cowiki_db::users::hash_api_key(api_key);
 
     if let Some((_key, user_id)) = cowiki_db::api_keys::find_by_key_hash(db, &key_hash).await? {
         // Touch last_used_at (fire-and-forget)

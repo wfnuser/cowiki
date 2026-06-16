@@ -21,7 +21,13 @@ pub struct AppState {
     pub config: config::Config,
     pub repo_manager: cowiki_core::git::WikiRepoManager, // per-workspace repos
     pub compiler: Compiler,
-    /// Pending OAuth CSRF nonces → minted-at, swept on insert (single-instance).
+    /// Pending OAuth CSRF nonces → minted-at, swept on insert.
+    ///
+    /// In-process only: this does NOT survive a restart and is NOT shared across
+    /// instances behind a load balancer — a login started on instance A can't
+    /// complete its callback on instance B. Fine for the current single-instance
+    /// deploy; multi-instance needs a shared store (Redis/DB) or a signed,
+    /// self-validating state token. Tracked with the account-system redesign (#12).
     pub oauth_states: std::sync::Mutex<HashMap<String, std::time::Instant>>,
 }
 
