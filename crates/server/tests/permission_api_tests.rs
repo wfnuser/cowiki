@@ -45,12 +45,21 @@ fn api_request(method: &str, path: &str, body: Option<&str>, api_key: &str) -> (
 
 /// Helper: register a test user and return (user_id, api_key)
 fn register_user(name: &str) -> (String, String) {
-    let body = format!(r#"{{"name":"{}"}}"#, name);
+    // Usernames are globally unique, so suffix with a random fragment — otherwise
+    // re-running the suite (or two tests sharing a base name) collides on the
+    // second register with "name already taken".
+    let unique = format!(
+        "{}-{}",
+        name,
+        uuid::Uuid::new_v4().to_string().split('-').next().unwrap()
+    );
+    let body = format!(r#"{{"name":"{}"}}"#, unique);
     let (resp, status) = api_request("POST", "/auth/register", Some(&body), "");
     assert_eq!(status, 200, "register failed: {}", resp);
 
     let json: serde_json::Value = serde_json::from_str(&resp).expect("invalid JSON from register");
-    let user_id = json["id"].as_str().unwrap().to_string();
+    // Response shape: { "user": { "id": ... }, "api_key": ... } — id is nested.
+    let user_id = json["user"]["id"].as_str().unwrap().to_string();
     let api_key = json["api_key"].as_str().unwrap().to_string();
     (user_id, api_key)
 }
@@ -187,15 +196,30 @@ fn test_invite_with_invalid_role_rejected() {
 
     create_workspace(&key_a, "Invite Role WS", &slug, "public");
 
-    // Invalid role
+    // Invalid role. Invite is a batch endpoint: it returns 200 with per-item
+    // results, and an invalid role surfaces as a failed item (not a top-level 400).
     let body = r#"{"invitations":[{"user":"new@test.com","role":"admin"}]}"#;
-    let (_resp, status) = api_request(
+    let (resp, status) = api_request(
         "POST",
         &format!("/workspaces/{}/invite", slug),
         Some(body),
         &key_a,
     );
-    assert_eq!(status, 400, "invalid role should be rejected");
+    assert_eq!(status, 200, "batch invite returns 200: {resp}");
+    let json: serde_json::Value = serde_json::from_str(&resp).unwrap();
+    assert_eq!(
+        json["failed"].as_i64(),
+        Some(1),
+        "invalid role item fails: {resp}"
+    );
+    assert_eq!(json["sent"].as_i64(), Some(0), "nothing sent: {resp}");
+    assert!(
+        json["results"][0]["reason"]
+            .as_str()
+            .unwrap_or("")
+            .contains("invalid role"),
+        "failure reason names invalid role: {resp}"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -268,7 +292,7 @@ fn test_remove_member_owner_only() {
         return;
     }
     let (_uid_a, key_a) = register_user("testuser-rm-a");
-    let (_uid_b, key_b) = register_user("testuser-rm-b");
+    let (user_b_id, key_b) = register_user("testuser-rm-b");
     let slug = format!(
         "perm-rm-{}",
         uuid::Uuid::new_v4().to_string().split('-').next().unwrap()
@@ -277,20 +301,7 @@ fn test_remove_member_owner_only() {
     create_workspace(&key_a, "Remove Test WS", &slug, "public");
     join_workspace(&key_b, &slug);
 
-    // Get user_b's ID from member list
-    let (resp, _) = api_request(
-        "GET",
-        &format!("/workspaces/{}/members", slug),
-        None,
-        &key_a,
-    );
-    let members: Vec<serde_json::Value> = serde_json::from_str(&resp).unwrap();
-    let user_b_id = members
-        .iter()
-        .find(|m| m["name"].as_str() == Some("testuser-rm-b"))
-        .map(|m| m["id"].as_str().unwrap())
-        .expect("user_b should be in member list");
-
+    // user_b's id comes straight from register — no brittle lookup by name.
     // Writer tries to remove → 403
     let body = format!(r#"{{"user_id":"{}"}}"#, user_b_id);
     let (_resp, status) = api_request(
@@ -318,7 +329,7 @@ fn test_change_role_owner_only() {
         return;
     }
     let (_uid_a, key_a) = register_user("testuser-cr-a");
-    let (_uid_b, key_b) = register_user("testuser-cr-b");
+    let (user_b_id, key_b) = register_user("testuser-cr-b");
     let slug = format!(
         "perm-cr-{}",
         uuid::Uuid::new_v4().to_string().split('-').next().unwrap()
@@ -327,20 +338,7 @@ fn test_change_role_owner_only() {
     create_workspace(&key_a, "ChangeRole WS", &slug, "public");
     join_workspace(&key_b, &slug);
 
-    // Get user_b's ID
-    let (resp, _) = api_request(
-        "GET",
-        &format!("/workspaces/{}/members", slug),
-        None,
-        &key_a,
-    );
-    let members: Vec<serde_json::Value> = serde_json::from_str(&resp).unwrap();
-    let user_b_id = members
-        .iter()
-        .find(|m| m["name"].as_str() == Some("testuser-cr-b"))
-        .map(|m| m["id"].as_str().unwrap())
-        .expect("user_b should be in member list");
-
+    // user_b's id comes straight from register — no brittle lookup by name.
     // Writer tries to change role → 403
     let body = format!(r#"{{"user_id":"{}","role":"viewer"}}"#, user_b_id);
     let (_resp, status) = api_request(
