@@ -297,8 +297,8 @@ export async function listMembers(workspaceSlug: string): Promise<MemberInfo[]> 
 
 // ── Pages ──
 
-export async function listPages(branch = 'main', workspaceSlug: string): Promise<PageMeta[]> {
-  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages?branch=${branch}`, { headers: h() });
+export async function listPages(branch = 'main', workspaceSlug: string, dir = 'all'): Promise<PageMeta[]> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages?branch=${encodeURIComponent(branch)}&dir=${encodeURIComponent(dir)}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Request failed: ${res.status}`);
@@ -306,8 +306,8 @@ export async function listPages(branch = 'main', workspaceSlug: string): Promise
   return res.json();
 }
 
-export async function getPage(slug: string, branch = 'main', workspaceSlug: string): Promise<PageFull> {
-  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages/${slug}?branch=${branch}`, { headers: h() });
+export async function getPage(slug: string, branch = 'main', workspaceSlug: string, dir = 'wiki'): Promise<PageFull> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages/${encodeURIComponent(slug)}?branch=${encodeURIComponent(branch)}&dir=${encodeURIComponent(dir)}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Request failed: ${res.status}`);
@@ -315,11 +315,11 @@ export async function getPage(slug: string, branch = 'main', workspaceSlug: stri
   return res.json();
 }
 
-export async function writePage(slug: string, body: string, branch: string, workspaceSlug: string): Promise<void> {
+export async function writePage(slug: string, body: string, branch: string, workspaceSlug: string, dir = 'wiki'): Promise<void> {
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ slug, body, branch }),
+    body: JSON.stringify({ slug, body, branch, dir }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

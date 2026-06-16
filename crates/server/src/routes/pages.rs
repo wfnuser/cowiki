@@ -513,18 +513,19 @@ fn list_pages_from_dir(
 
 // ── Path operations: rename / delete (files and folders under wiki/) ──
 
-/// Validate a repo path for destructive ops: must be inside `wiki/` (so `sources/` and
-/// other special trees are untouchable), no traversal, no empty segments, and never the
-/// `wiki` root itself.
+/// Validate a repo path for destructive ops: must be inside a known content directory
+/// (`wiki/`, `entities/`, `concepts/`), no traversal, no empty segments, and never the
+/// root itself.
 fn validate_wiki_path(p: &str) -> Result<()> {
-    let ok = p.starts_with("wiki/")
-        && p.len() > 5
+    let allowed = cowiki_core::wiki_fs::all_dirs();
+    let ok = allowed.iter().any(|d| p.starts_with(&format!("{d}/")))
         && !p.ends_with('/')
         && p.split('/')
             .all(|seg| !seg.is_empty() && seg != "." && seg != "..");
     if !ok {
         return Err(AppError::BadRequest(format!(
-            "invalid path '{p}': only paths inside wiki/ can be modified"
+            "invalid path '{p}': paths must be inside one of {:?}",
+            allowed
         )));
     }
     Ok(())
