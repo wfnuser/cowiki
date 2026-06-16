@@ -561,6 +561,9 @@ export interface Notification {
   title: string;
   body: string | null;
   workspace_id: string | null;
+  /** Joined workspace name/slug for display + per-space filtering; null when cross-space. */
+  workspace_name: string | null;
+  workspace_slug: string | null;
   link: string | null;
   read: boolean;
   created_at: string;
@@ -581,6 +584,11 @@ export async function notificationUnreadCount(): Promise<number> {
 
 export async function markNotificationRead(id: string): Promise<void> {
   const res = await fetch(`${BASE}/notifications/${id}/read`, { method: 'POST', headers: h() });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+export async function markNotificationUnread(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/notifications/${id}/unread`, { method: 'POST', headers: h() });
   if (!res.ok) throw new Error(await res.text());
 }
 

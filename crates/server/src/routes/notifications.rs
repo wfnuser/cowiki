@@ -15,6 +15,10 @@ pub struct NotificationResponse {
     pub title: String,
     pub body: Option<String>,
     pub workspace_id: Option<String>,
+    /// Workspace name/slug (joined) for display and the per-space filter; null for
+    /// cross-space notifications with no associated workspace.
+    pub workspace_name: Option<String>,
+    pub workspace_slug: Option<String>,
     pub link: Option<String>,
     pub read: bool,
     pub created_at: String,
@@ -27,6 +31,8 @@ fn notif_response(n: &cowiki_db::notifications::Notification) -> NotificationRes
         title: n.title.clone(),
         body: n.body.clone(),
         workspace_id: n.workspace_id.map(|id| id.to_string()),
+        workspace_name: n.workspace_name.clone(),
+        workspace_slug: n.workspace_slug.clone(),
         link: n.link.clone(),
         read: n.read,
         created_at: n.created_at.to_rfc3339(),
@@ -68,6 +74,17 @@ pub async fn mark_read(
 ) -> Result<Json<serde_json::Value>> {
     let user = extract_user(&state.db, &headers).await?;
     cowiki_db::notifications::mark_read(&state.db, notification_id, user.id).await?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+/// POST /api/notifications/{id}/unread
+pub async fn mark_unread(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Path(notification_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>> {
+    let user = extract_user(&state.db, &headers).await?;
+    cowiki_db::notifications::mark_unread(&state.db, notification_id, user.id).await?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
