@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Compass,
   Upload, Zap, ArrowUpRight, MoreHorizontal, RefreshCw,
-  CheckCircle2, Clock, Pencil,
+  CheckCircle2, Clock, Pencil, PanelRightOpen, PanelRightClose,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -18,13 +18,15 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   listWorkspaces, listPages, getPage, createWorkspace, writePage, createFolder,
-  compile, submit, renameWorkspace,
+  submit, renameWorkspace,
   deleteWorkspace,
   listPublicWorkspaces, joinWorkspace,
   listSources, getSource, listReviews, syncBranch, renamePath, deletePath,
   type Workspace, type PageMeta, type PageFull, type SourceItem, type SourceContent,
 } from '../api';
 import { AddSourceDialog } from '@/components/AddSourceDialog';
+import { AgentDrawer } from '@/components/AgentDrawer';
+import { useCompileStream } from '@/hooks/useCompileStream';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { getStoredAuth, clearAuth } from '../auth';
 import { SpaceRail } from '../components/layout/SpaceRail';
@@ -79,7 +81,6 @@ export function MainLayout() {
   const [newSlug, setNewSlug] = useState('');
   const [creating, setCreating] = useState(false);
   const [showIngest, setShowIngest] = useState(false);
-  const [compiling, setCompiling] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showRename, setShowRename] = useState<Workspace | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -354,24 +355,27 @@ export function MainLayout() {
     }
   };
 
-  // Compile
-  const handleCompile = async () => {
+  // Compile — SSE-driven real-time visibility via CompileDrawer
+  const compileStream = useCompileStream(activeWorkspace?.slug || '');
+
+  const handleCompile = () => {
     if (!activeWorkspace) return;
-    const ws = activeWorkspace;
-    setCompiling(true);
     setMessage(null);
-    try {
-      const res = await compile(userBranch, ws.slug);
-      const count = res.pages?.length || 0;
-      const skipped = res.skipped || 0;
-      setMessage({ text: `Compiled ${count} page(s)${skipped > 0 ? `, ${skipped} skipped` : ''}`, type: 'success' });
-      loadSpacePages(ws);
-      loadSpaceSources(ws);
-    } catch {
-      setMessage({ text: 'Compilation failed', type: 'error' });
-    } finally {
-      setCompiling(false);
+    // If already streaming, just reopen the drawer
+    if (compileStream.isCompiling) {
+      compileStream.openDrawer();
+      return;
     }
+    // Guard: don't start compile if there are no sources
+    const sources = spaceSources[activeWorkspace.id];
+    if (!sources || sources.length === 0) {
+      setMessage({ text: 'No sources to compile. Add a source first.', type: 'error' });
+      return;
+    }
+    compileStream.startCompile(userBranch).then(() => {
+      loadSpacePages(activeWorkspace);
+      loadSpaceSources(activeWorkspace);
+    });
   };
 
   // Submit pages for review (or direct commit for personal)
@@ -712,11 +716,20 @@ export function MainLayout() {
                     </button>
                     <button
                       onClick={handleCompile}
-                      disabled={compiling}
-                      style={{ ...headerBtnStyle, opacity: compiling ? 0.4 : 1 }}
+                      style={headerBtnStyle}
                     >
-                      {compiling ? <RefreshCw size={13} className="animate-spin" /> : <Zap size={13} color="#e2590b" />}
-                      {compiling ? 'Compiling...' : 'Compile'}
+                      {compileStream.isCompiling ? <RefreshCw size={13} className="animate-spin" /> : <Zap size={13} color="#e2590b" />}
+                      {compileStream.isCompiling ? 'Compiling...' : 'Compile'}
+                    </button>
+                    <button
+                      onClick={() => compileStream.isOpen ? compileStream.closeDrawer() : compileStream.openDrawer()}
+                      style={headerBtnStyle}
+                      title={compileStream.isOpen ? '关闭 Agent 面板' : '打开 Agent 面板'}
+                    >
+                      {compileStream.isOpen
+                        ? <PanelRightClose size={13} color={C.accent} />
+                        : <PanelRightOpen size={13} />
+                      }
                     </button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -879,6 +892,22 @@ export function MainLayout() {
               )}
             </div>
           </main>
+
+          {/* Agent Drawer — flex-push side panel */}
+          {activeWorkspace && (
+            <AgentDrawer
+              open={compileStream.isOpen}
+              onClose={compileStream.closeDrawer}
+              events={compileStream.events}
+              isCompiling={compileStream.isCompiling}
+              status={compileStream.status}
+              isPinned={compileStream.isPinned}
+              onTogglePin={compileStream.togglePin}
+              countdown={compileStream.countdown}
+              isReconnecting={compileStream.isReconnecting}
+              mode={compileStream.mode}
+            />
+          )}
         </div>
       </TooltipProvider>
 

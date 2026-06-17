@@ -206,10 +206,10 @@ pub async fn list_pages_ws(
         return list_pages_all_dirs(&repo, &branch);
     }
 
-    cowiki_core::wiki_fs::validate_dir(dir).map_err(|e| AppError::BadRequest(e))?;
+    cowiki_core::wiki_fs::validate_dir(dir).map_err(AppError::BadRequest)?;
 
     let files = cowiki_core::wiki_fs::list_pages_recursive(&repo, &branch, dir)
-        .map_err(|e| AppError::Internal(e))?;
+        .map_err(AppError::Internal)?;
     list_pages_from_dir(&repo, &branch, dir, &files)
 }
 
@@ -231,9 +231,9 @@ pub async fn get_page_ws(
             "dir=all is only supported for listing. Use a specific directory to read.".into(),
         ));
     }
-    cowiki_core::wiki_fs::validate_dir(dir).map_err(|e| AppError::BadRequest(e))?;
+    cowiki_core::wiki_fs::validate_dir(dir).map_err(AppError::BadRequest)?;
     let content = cowiki_core::wiki_fs::read_page(&repo, &branch, dir, &slug)
-        .map_err(|e| AppError::Internal(e))?
+        .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound(format!("page {slug} not found in {dir}")))?;
     let body = String::from_utf8_lossy(&content).into_owned();
     let (title, summary) = parse_frontmatter(&body);
@@ -269,7 +269,7 @@ pub async fn write_page_ws(
             "dir=all is only supported for listing. Use a specific directory to write.".into(),
         ));
     }
-    cowiki_core::wiki_fs::validate_dir(dir).map_err(|e| AppError::BadRequest(e))?;
+    cowiki_core::wiki_fs::validate_dir(dir).map_err(AppError::BadRequest)?;
 
     // If title is provided, prepend YAML frontmatter to the body
     let final_body = if let Some(ref title) = input.title {

@@ -10,6 +10,13 @@ pub struct WikiRepo {
     write_locks: RwLock<HashMap<String, Arc<RwLock<()>>>>,
 }
 
+impl WikiRepo {
+    /// Return the filesystem path of this repo.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FileDiff {
     pub path: String,
@@ -219,7 +226,7 @@ fn remove_path_in_tree(
         }
     }
     let oid = builder.write()?;
-    if repo.find_tree(oid)?.len() == 0 {
+    if repo.find_tree(oid)?.is_empty() {
         Ok(None)
     } else {
         Ok(Some(oid))
@@ -373,7 +380,9 @@ impl WikiRepo {
     }
 
     pub fn ensure_user_branch(&self, user_id: &str) -> Result<String, git2::Error> {
-        let branch_name = format!("user/{user_id}");
+        // Strip "user/" prefix if caller already included it
+        let id = user_id.strip_prefix("user/").unwrap_or(user_id);
+        let branch_name = format!("user/{id}");
         self.ensure_branch_exists(&branch_name)
     }
 

@@ -53,7 +53,7 @@ Server runtime settings (shared by `cowiki-server` via `cowiki-utils` crate).
 | Field | Type | Default | Env Var | Description |
 |-------|------|---------|---------|-------------|
 | `port` | integer | `3000` | `COWIKI_PORT` | HTTP server port (cowiki-server) |
-| `data_dir` | string | `"./data"` | `COWIKI_DATA_DIR` | Data directory for git repo and wiki files |
+| `data_dir` | string | `"./data"` | `COWIKI_DATA_DIR` | Workspace data root (organized by space slug: `data/{workspace}/repo/`) |
 
 Example:
 ```toml
@@ -62,10 +62,31 @@ port = 3000
 data_dir = "./data"
 ```
 
+#### Data Directory Structure
+
+```
+$COWIKI_DATA_DIR/
+  personal-xx/                   ← Personal workspace
+    repo/                        ← Git repo (bare)
+      wiki/                      ← Wiki pages
+      sources/                   ← Extracted source folders
+      agents/                    ← Agent instances (state only)
+        compiler/
+      entities/
+      concepts/
+  general-xx/                    ← Team workspace
+    repo/
+      wiki/
+      sources/
+      agents/
+        compiler/
+        reviewer/
+```
+
 ```bash
 # Start REST API on port 3000
 cowiki-server &
-# Start MCP server on port 8080 (configured via cowiki-mcp-server/.env)
+# Start MCP server on port 9380 (configured via cowiki-mcp-server/.env)
 cd cowiki-mcp-server && cargo run &
 ```
 

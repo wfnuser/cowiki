@@ -49,11 +49,9 @@ struct ChoiceMessage {
 }
 
 #[derive(Deserialize)]
-#[allow(dead_code)]
 struct UsageInfo {
     prompt_tokens: u32,
     completion_tokens: u32,
-    total_tokens: u32,
 }
 
 impl OpenAILlm {

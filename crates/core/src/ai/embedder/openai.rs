@@ -36,10 +36,8 @@ struct EmbeddingData {
 }
 
 #[derive(Deserialize)]
-#[allow(dead_code)]
 struct EmbedUsageInfo {
     prompt_tokens: u32,
-    total_tokens: u32,
 }
 
 // ── Batch request ──
@@ -70,6 +68,28 @@ impl OpenAIEmbedder {
     /// Get a clone of the Arc<Mutex<>> tracker for sharing.
     pub fn tracker_arc(&self) -> Arc<Mutex<TokenUsageTracker>> {
         Arc::clone(&self.tracker)
+    }
+
+    /// Some models (e.g. nvidia/nv-embed-v1) reject the `dimensions` field.
+    /// For these, we request a full embedding and truncate client-side.
+    fn skip_dimensions_param(&self) -> bool {
+        self.config.model.contains("nv-embed")
+    }
+
+    /// Truncate a vector to the configured dimension by taking the first N elements.
+    /// The HNSW index dimension is immutable at creation time, so truncation is the
+    /// correct approach — not rebuilding the index.
+    fn truncate_vector(&self, mut vector: Vec<f32>) -> Vec<f32> {
+        if self.config.dimension > 0 && vector.len() > self.config.dimension as usize {
+            tracing::debug!(
+                "truncating embedding from {} to {} dimensions for model {}",
+                vector.len(),
+                self.config.dimension,
+                self.config.model,
+            );
+            vector.truncate(self.config.dimension as usize);
+        }
+        vector
     }
 
     async fn try_embed_inner(
@@ -196,22 +216,26 @@ impl OpenAIEmbedder {
 impl Embedder for OpenAIEmbedder {
     async fn embed(&self, text: &str, is_query: bool) -> Result<EmbedResult, String> {
         let _ = is_query;
-        let dimensions = if self.config.dimension > 0 {
+        // nvidia/nv-embed-v1 rejects the `dimensions` field — skip it and truncate client-side
+        let dimensions = if self.config.dimension > 0 && !self.skip_dimensions_param() {
             Some(self.config.dimension)
         } else {
             None
         };
-        let result = self.try_embed_inner(text, dimensions).await;
-        match (result, dimensions) {
-            (Err(e), Some(dim)) => {
-                tracing::warn!(
-                    "Embedder dimension={dim} failed for model {}, retrying without dimensions: {e}",
-                    self.config.model
-                );
-                self.try_embed_inner(text, None).await
-            }
-            (r, _) => r,
+        let mut result = self.try_embed_inner(text, dimensions).await;
+        // If dimensions was sent and failed, retry without it (for non-nv-embed models)
+        if let (Err(e), Some(dim)) = (&result, dimensions) {
+            tracing::warn!(
+                "Embedder dimension={dim} failed for model {}, retrying without dimensions: {e}",
+                self.config.model
+            );
+            result = self.try_embed_inner(text, None).await;
         }
+        // Truncate to configured dimension if needed (for models that return longer vectors)
+        if let Ok(ref mut r) = result {
+            r.vector = self.truncate_vector(std::mem::take(&mut r.vector));
+        }
+        result
     }
 
     async fn embed_batch(
@@ -220,22 +244,25 @@ impl Embedder for OpenAIEmbedder {
         is_query: bool,
     ) -> Result<Vec<EmbedResult>, String> {
         let _ = is_query;
-        let dimensions = if self.config.dimension > 0 {
+        let dimensions = if self.config.dimension > 0 && !self.skip_dimensions_param() {
             Some(self.config.dimension)
         } else {
             None
         };
-        let result = self.try_embed_batch_inner(texts, dimensions).await;
-        match (result, dimensions) {
-            (Err(e), Some(dim)) => {
-                tracing::warn!(
-                    "Embedder batch dimension={dim} failed for model {}, retrying without dimensions: {e}",
-                    self.config.model
-                );
-                self.try_embed_batch_inner(texts, None).await
-            }
-            (r, _) => r,
+        let mut result = self.try_embed_batch_inner(texts, dimensions).await;
+        if let (Err(e), Some(dim)) = (&result, dimensions) {
+            tracing::warn!(
+                "Embedder batch dimension={dim} failed for model {}, retrying without dimensions: {e}",
+                self.config.model
+            );
+            result = self.try_embed_batch_inner(texts, None).await;
         }
+        if let Ok(ref mut results) = result {
+            for r in results.iter_mut() {
+                r.vector = self.truncate_vector(std::mem::take(&mut r.vector));
+            }
+        }
+        result
     }
 
     fn usage_snapshot(&self) -> HashMap<String, TokenUsage> {

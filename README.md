@@ -48,6 +48,14 @@ CoWiki makes LLM Wiki multiplayer:
 ## Quick Start
 
 ```bash
+# for ubuntu
+sudo apt install fd-find ripgrep
+
+npm install -g @earendil-works/pi-coding-agent
+pi install npm:pi-mcp-adapter
+
+npm install -g @anthropic-ai/claude-code
+
 # Clone
 git clone https://github.com/wfnuser/cowiki.git
 cd cowiki

@@ -3,9 +3,11 @@ use axum::Router;
 use clap::Parser;
 use cowiki_core::ai::embedder::{create_embedder, EmbedderConfig};
 use cowiki_core::ai::llm::{create_llm, LlmConfig};
-use cowiki_core::compiler::Compiler;
+use cowiki_core::compile::Compiler;
+use cowiki_core::gateway::WikiFsGateway;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
 use tracing::Level;
@@ -19,8 +21,12 @@ use config::CliArgs;
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub config: config::Config,
-    pub repo_manager: cowiki_core::git::WikiRepoManager, // per-workspace repos
+    pub repo_manager: cowiki_core::git::WikiRepoManager,
     pub compiler: Compiler,
+    /// WikiFsGateway for tool execution
+    pub wiki_fs_gateway: Arc<WikiFsGateway>,
+    /// Global AgentManager (single instance for all workspaces)
+    pub agent_manager: Arc<cowiki_agents::manager::AgentManager>,
 }
 
 // ── Usage endpoint response ──
@@ -40,6 +46,52 @@ async fn get_usage(
     })
 }
 
+// ── Agent events SSE ──────────────────────────────────────────
+
+async fn agent_events(
+    axum::extract::Path(_ws): axum::extract::Path<String>,
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> axum::response::Sse<
+    impl tokio_stream::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+> {
+    let (tx, rx) = tokio::sync::mpsc::channel::<
+        Result<axum::response::sse::Event, std::convert::Infallible>,
+    >(64);
+
+    let agent_mgr = Arc::clone(&state.agent_manager);
+    let mut event_rx = agent_mgr.subscribe_events();
+
+    tokio::spawn(async move {
+        // Send initial connected message
+        let _ = tx
+            .send(Ok(axum::response::sse::Event::default().data(
+                r#"{"type":"connected","message":"Agent events stream established"}"#,
+            )))
+            .await;
+
+        loop {
+            match event_rx.recv().await {
+                Ok(event) => {
+                    if let Ok(json) = serde_json::to_string(&event) {
+                        let _ = tx
+                            .send(Ok(axum::response::sse::Event::default().data(json)))
+                            .await;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(skipped = n, "SSE event lag");
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    break;
+                }
+            }
+        }
+    });
+
+    axum::response::Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
+        .keep_alive(axum::response::sse::KeepAlive::default())
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
@@ -57,9 +109,37 @@ async fn main() {
         .expect("failed to run migrations");
     tracing::info!("database connected and migrations applied");
 
-    // Git repos (one per workspace, created lazily)
+    // Git repos
     let repo_manager = cowiki_core::git::WikiRepoManager::new(&config.server.data_dir);
     tracing::info!("wiki repos dir: {}", config.server.data_dir);
+
+    // Validate pi binary availability
+    let pi_binary = std::env::var("PI_BINARY").unwrap_or_else(|_| "pi".into());
+    match which::which(&pi_binary) {
+        Ok(path) => {
+            tracing::info!("pi binary found at {}", path.display());
+        }
+        Err(_) => {
+            tracing::warn!(
+                "pi binary '{}' NOT found on PATH. Agent-based compile will fail.",
+                pi_binary
+            );
+        }
+    }
+
+    // Validate claude binary
+    let claude_binary = std::env::var("CLAUDE_BINARY").unwrap_or_else(|_| "claude".into());
+    match which::which(&claude_binary) {
+        Ok(path) => {
+            tracing::info!("claude binary found at {}", path.display());
+        }
+        Err(_) => {
+            tracing::warn!(
+                "claude binary '{}' NOT found on PATH. Claude agent will be unavailable.",
+                claude_binary
+            );
+        }
+    }
 
     let llm = create_llm(LlmConfig {
         provider: config.llm.provider.clone(),
@@ -78,22 +158,48 @@ async fn main() {
         dimension: config.embedder.dimension,
     });
 
-    // Compiler
     let compiler = Compiler::new(llm, embedder);
 
     let port = config.server.port.to_string();
+    let data_dir = config.server.data_dir.clone();
 
-    // Clone db for background task before moving into AppState
     let expire_db = db.clone();
+
+    let wiki_fs_gateway = Arc::new(WikiFsGateway::new(&data_dir).with_db(db.clone()));
+
+    // Create global AgentManager (single instance for all workspaces)
+    let mcp_port = std::env::var("COWIKI_MCP_PORT").unwrap_or_else(|_| "9380".into());
+    let default_workspace_path = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join(&data_dir)
+        .join("default")
+        .join("repo");
+    let agent_manager = Arc::new(cowiki_agents::manager::AgentManager::new(
+        format!("http://127.0.0.1:{}/mcp/sse", mcp_port),
+        default_workspace_path,
+        cowiki_utils::LlmConfig {
+            provider: config.llm.provider.clone(),
+            model: config.llm.model.clone(),
+            api_key: config.llm.api_key.clone(),
+            api_base: config.llm.api_base.clone(),
+            temperature: config.llm.temperature,
+            max_tokens: config.llm.max_tokens,
+        },
+    ));
+
+    // MCP server is started separately (see crates/mcp for standalone binary).
+    // In e2e tests: cargo run --bin cowiki-mcp & before cowiki server.
 
     let state = Arc::new(AppState {
         db,
         config,
         repo_manager,
         compiler,
+        wiki_fs_gateway,
+        agent_manager,
     });
 
-    // Background task: expire stale invitations every hour
+    // Background task: expire stale invitations
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
@@ -107,7 +213,6 @@ async fn main() {
 
     let app = Router::new()
         .route("/api/health", get(|| async { "ok" }))
-        // Usage
         .route("/api/usage", get(get_usage))
         // Auth
         .route("/api/auth/register", post(routes::auth::register))
@@ -144,7 +249,6 @@ async fn main() {
             "/api/workspaces/{slug}/members",
             get(routes::workspace::list_members),
         )
-        // Invitations (batch invite, list, resend, revoke, accept, reject, pending)
         .route(
             "/api/workspaces/{slug}/invitations",
             get(routes::workspace::list_invitations),
@@ -169,7 +273,6 @@ async fn main() {
             "/api/invitations/{id}/reject",
             post(routes::workspace::reject_invitation),
         )
-        // Member management (Manager+)
         .route(
             "/api/workspaces/{slug}/members/remove",
             post(routes::workspace::remove_member),
@@ -178,7 +281,6 @@ async fn main() {
             "/api/workspaces/{slug}/members/role",
             post(routes::workspace::change_member_role),
         )
-        // Ownership transfer
         .route(
             "/api/workspaces/{slug}/transfer-ownership",
             post(routes::transfers::initiate_transfer),
@@ -199,12 +301,11 @@ async fn main() {
             "/api/transfers/{id}",
             delete(routes::transfers::cancel_transfer),
         )
-        // Workspace deletion (Owner only)
         .route(
             "/api/workspaces/{slug}",
             delete(routes::workspace::delete_workspace),
         )
-        // Pages (workspace-scoped — uses per-workspace repo)
+        // Pages
         .route(
             "/api/workspaces/{ws_slug}/pages",
             get(routes::pages::list_pages_ws),
@@ -217,7 +318,6 @@ async fn main() {
             "/api/workspaces/{ws_slug}/folders",
             post(routes::pages::create_folder_ws),
         )
-        // Path ops on the caller's draft branch (files & folders under wiki/ only)
         .route(
             "/api/workspaces/{ws_slug}/paths/rename",
             post(routes::pages::rename_path_ws),
@@ -249,17 +349,16 @@ async fn main() {
             "/api/workspaces/{ws_slug}/sources/{filename}",
             get(routes::sources::get_source),
         )
-        // Submit (workspace-scoped)
+        // Submit
         .route(
             "/api/workspaces/{ws_slug}/submit",
             post(routes::submit::submit),
         )
-        // Rebase / sync a branch onto main (the "sync with main" button)
         .route(
             "/api/workspaces/{ws_slug}/rebase",
             post(routes::submit::rebase),
         )
-        // Reviews (workspace-scoped)
+        // Reviews
         .route(
             "/api/workspaces/{ws_slug}/reviews",
             get(routes::review::list_reviews),
@@ -272,12 +371,10 @@ async fn main() {
             "/api/workspaces/{ws_slug}/reviews/{id}",
             post(routes::review::review_action),
         )
-        // Review-requested change: edit the submission's pr/{id} snapshot
         .route(
             "/api/workspaces/{ws_slug}/reviews/{id}/edit",
             post(routes::review::edit_review),
         )
-        // Review comments
         .route(
             "/api/workspaces/{ws_slug}/reviews/{submission_id}/comments",
             get(routes::comments::list_comments),
@@ -303,11 +400,11 @@ async fn main() {
             "/api/workspaces/{ws_slug}/search",
             get(routes::search::search),
         )
-        // API Keys — multi-key management
+        // API Keys
         .route("/api/keys", get(routes::keys::list_keys))
         .route("/api/keys", post(routes::keys::create_key))
         .route("/api/keys/{id}", delete(routes::keys::revoke_key))
-        // User search (for invite autocomplete)
+        // User search
         .route("/api/users/search", get(routes::users::search_users))
         // Notifications
         .route(
@@ -326,6 +423,8 @@ async fn main() {
             "/api/notifications/{id}/read",
             post(routes::notifications::mark_read),
         )
+        // Agent events SSE
+        .route("/api/agents/{ws}/events", get(agent_events))
         .layer(
             TraceLayer::new_for_http()
                 .on_request(DefaultOnRequest::new().level(Level::INFO))

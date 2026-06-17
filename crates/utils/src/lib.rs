@@ -7,6 +7,8 @@ use clap::Parser;
 use serde::Deserialize;
 use std::path::PathBuf;
 
+pub mod token_usage;
+
 // ── CLI args (reusable) ───────────────────────────────────────
 
 /// Common CLI arguments for cowiki binaries.
@@ -276,7 +278,7 @@ impl CowikiConfig {
                     .mcp_server
                     .as_ref()
                     .and_then(|m| m.port)
-                    .unwrap_or(8080),
+                    .unwrap_or(9380),
                 api_url: toml
                     .mcp_server
                     .as_ref()
@@ -296,7 +298,7 @@ impl CowikiConfig {
         let mcp_port: u16 = std::env::var("COWIKI_MCP_PORT")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(8080);
+            .unwrap_or(9380);
 
         let llm_api_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
         let llm_api_base =
@@ -372,7 +374,7 @@ mod tests {
     fn test_env_config_defaults() {
         let config = CowikiConfig::from_env();
         assert_eq!(config.server.port, 3000, "COWIKI_PORT default");
-        assert_eq!(config.mcp.port, 8080, "COWIKI_MCP_PORT default");
+        assert_eq!(config.mcp.port, 9380, "COWIKI_MCP_PORT default");
         assert_eq!(config.llm.provider, "openai");
         assert_eq!(config.embedder.dimension, 1536);
     }
@@ -383,7 +385,7 @@ mod tests {
         std::env::set_var("COWIKI_PORT", "4000");
         let config = CowikiConfig::from_env();
         assert_eq!(config.server.port, 4000);
-        assert_eq!(config.mcp.port, 8080, "MCP port unchanged");
+        assert_eq!(config.mcp.port, 9380, "MCP port unchanged");
         std::env::remove_var("COWIKI_PORT");
     }
 

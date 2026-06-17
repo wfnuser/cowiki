@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "html",
+  "title": "sketch-2026-06-17-agent-drawer.html",
+  "entry": "sketch-2026-06-17-agent-drawer.html",
+  "renderer": "html",
+  "status": "complete",
+  "exports": [
+    "html",
+    "pdf",
+    "zip"
+  ],
+  "createdAt": "2026-06-17T13:14:42.198Z",
+  "updatedAt": "2026-06-17T13:14:42.198Z",
+  "metadata": {
+    "inferred": true,
+    "reconciled": true
+  }
+}

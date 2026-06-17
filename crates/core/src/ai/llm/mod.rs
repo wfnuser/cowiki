@@ -41,7 +41,7 @@ pub trait Llm: Send + Sync {
 /// Dispatches to the correct provider implementation based on `config.provider`.
 pub fn create_llm(config: LlmConfig) -> Box<dyn Llm> {
     match config.provider.as_str() {
-        "openai" => Box::new(openai::OpenAILlm::new(config)),
+        "openai" | "deepseek" => Box::new(openai::OpenAILlm::new(config)),
         other => panic!("unsupported LLM provider: {other}"),
     }
 }

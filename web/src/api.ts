@@ -355,6 +355,20 @@ export async function compile(branch: string, workspaceSlug: string) {
   return res.json();
 }
 
+/** Fire-and-forget compile — triggers the agent but doesn't wait for body. */
+export async function compileAsync(branch: string, workspaceSlug: string): Promise<void> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/compile`, {
+    method: 'POST',
+    headers: h({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ branch }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
+  // Intentionally not parsing body — SSE stream carries the real result
+}
+
 // ── Submit & Review ──
 
 export async function submit(branch: string, pageSlugs: string[], skipReview: boolean, workspaceSlug: string) {
