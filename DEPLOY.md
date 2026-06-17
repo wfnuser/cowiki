@@ -144,6 +144,6 @@ Caddy obtains TLS certificates automatically on first request.
   deploying to a new machine, check `id <deploy-user>` — if its uid/gid is not
   `1000:1001`, update the `user:` line (or `chown` the data dir to match), or the
   auth route returns 500 with `mkdir ... Permission denied`.
-- **MCP server** (port 8080) is **not** deployed publicly — no auth yet. Keep internal.
+- **MCP server** (port 9380) is **not** deployed publicly — no auth yet. Keep internal.
 - **Migrate PostgreSQL to managed later**: change `DATABASE_URL` in `/opt/cowiki/.env`,
   `pg_dump | pg_restore` the data, restart. Nothing else changes.

@@ -7,7 +7,7 @@ cowiki 通过 **Model Context Protocol (MCP)** 向 AI Agent 暴露 wiki 功能�
 MCP 服务是**独立进程**，作为 MCP→REST 代理：MCP 工具通过 HTTP 调用 cowiki-server 的 REST API，零业务逻辑重复。
 
 ```
-MCP Client ──→ rmcp-server (:8080) ──→ cowiki-server REST API (:3000) ──→ core/db
+MCP Client ──→ rmcp-server (:9380) ──→ cowiki-server REST API (:3000) ──→ core/db
               (rmcp + hyper)            (axum)
 ```
 
@@ -17,7 +17,7 @@ MCP Client ──→ rmcp-server (:8080) ──→ cowiki-server REST API (:3000
 
 - **Transport**: Streamable HTTP（MCP 协议 2025-03-26）
 - **SDK**: rmcp v1.7 (`modelcontextprotocol/rust-sdk`)
-- **端点**: `http://localhost:8080/mcp`
+- **端点**: `http://localhost:9380/mcp`
 - **认证**: `Authorization: Bearer <api_key>`
 
 ## 快速开始
@@ -36,7 +36,7 @@ cd cowiki-mcp-server && cargo run
 
 MCP server 通过 `COWIKI_BASE_URL` 环境变量连接到后端 REST API（默认 `http://localhost:3000`）。
 
-> **注意**：MCP server 使用独立的 `.env` 文件配置（见 `cowiki-mcp-server/.env.example`），不再读取根目录的 `cowiki.conf`。端口默认为 `8080`，后端 API 地址默认为 `http://localhost:3000`。
+> **注意**：MCP server 使用独立的 `.env` 文件配置（见 `cowiki-mcp-server/.env.example`），不再读取根目录的 `cowiki.conf`。端口默认为 `9380`，后端 API 地址默认为 `http://localhost:3000`。
 
 ### 获取 API Key
 
@@ -54,7 +54,7 @@ curl -X POST http://localhost:3000/api/auth/register \
 ### 初始化 MCP 会话
 
 ```bash
-curl -X POST http://localhost:8080/mcp \
+curl -X POST http://localhost:9380/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer cw_xxxxxxxxxx" \
@@ -73,7 +73,7 @@ curl -X POST http://localhost:8080/mcp \
 ### 调用工具
 
 ```bash
-curl -X POST http://localhost:8080/mcp \
+curl -X POST http://localhost:9380/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "Mcp-Session-Id: d56b1486-5495-4373-9a55-9544cdc30701" \
@@ -220,7 +220,7 @@ curl -X POST http://localhost:8080/mcp \
 {
   "servers": {
     "cowiki": {
-      "url": "http://localhost:8080/mcp",
+      "url": "http://localhost:9380/mcp",
       "type": "http",
       "headers": {
         "Authorization": "Bearer cw_your_api_key_here"
@@ -236,7 +236,7 @@ curl -X POST http://localhost:8080/mcp \
 {
   "mcpServers": {
     "cowiki": {
-      "url": "http://localhost:8080/mcp",
+      "url": "http://localhost:9380/mcp",
       "headers": {
         "Authorization": "Bearer cw_your_api_key_here"
       }
@@ -247,7 +247,7 @@ curl -X POST http://localhost:8080/mcp \
 
 ### 通用 MCP Client
 
-- **端点**: `http://localhost:8080/mcp`
+- **端点**: `http://localhost:9380/mcp`
 - **协议**: MCP 2025-03-26 (Streamable HTTP)
 - **认证**: `Authorization: Bearer <api_key>`
 
@@ -279,7 +279,7 @@ MCP server 已在代码层面自动去除尾部斜杠，但建议配置文件中
 
 **现象**：VS Code 或其他 MCP 客户端报：
 ```
-Error sending message to http://localhost:8080/: TypeError: fetch failed
+Error sending message to http://localhost:9380/: TypeError: fetch failed
 ```
 
 **原因**：MCP server 进程未运行或已崩溃。
@@ -302,7 +302,7 @@ API Key 可通过 `POST /api/auth/register` 获取。
 
 MCP server 启动日志会打印后端地址：
 ```
-MCP server on 0.0.0.0:8080, backend: http://localhost:3000
+MCP server on 0.0.0.0:9380, backend: http://localhost:3000
 ```
 
 确认 cowiki-server 在该地址正常运行：
@@ -345,7 +345,7 @@ MCP 服务器与主服务共用 `cowiki.conf` 配置文件（通过 `cowiki-util
 | `COWIKI_MCP_PORT` 环境变量 | 最高 |
 | `COWIKI_MCP_PORT` 环境变量 | 高 |
 | `--port` CLI 参数 | 中 |
-| 默认值 | 8080 |
+| 默认值 | 9380 |
 
 ```bash
 # 方式 1: 环境变量指定端口
@@ -354,7 +354,7 @@ COWIKI_MCP_PORT=9090 cd cowiki-mcp-server && cargo run
 # 方式 2: CLI 参数指定端口
 cd cowiki-mcp-server && cargo run -- --port 9090
 
-# 方式 3: 使用默认端口 8080
+# 方式 3: 使用默认端口 9380
 cd cowiki-mcp-server && cargo run
 
 # 启动主服务器 (端口 3000)

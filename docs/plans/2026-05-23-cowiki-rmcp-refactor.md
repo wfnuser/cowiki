@@ -20,7 +20,7 @@
 |------|-----------|-----------|
 | MCP 协议 | 手写 ~1200 行 | `rmcp::StreamableHttpService` (~50 行) |
 | HTTP 框架 | axum | **hyper** (via `TowerToHyperService`) |
-| 端口 | 3000 (与主服务共用) | **8080** (独立进程) |
+| 端口 | 3000 (与主服务共用) | **9380** (独立进程) |
 | Tool 定义 | 手写 HashMap dispatch | `#[tool_router(server_handler)]` 宏 |
 | Session | 手写 DashMap | `rmcp::LocalSessionManager` |
 | 代码量 | ~1200 行协议代码 | ~200 行工具逻辑 |
@@ -45,7 +45,7 @@ crates/rmcp-server/
 │   ├── cowiki-core
 │   └── cowiki-db
 ├── src/
-│   ├── main.rs              # hyper 启动, 端口 8080
+│   ├── main.rs              # hyper 启动, 端口 9380
 │   ├── server.rs            # CowikiServer struct, 持有 AppState
 │   └── tools/
 │       ├── mod.rs           # 工具模块声明
@@ -64,7 +64,7 @@ crates/rmcp-server/
 ### 2.2 数据流
 
 ```
-MCP Client (VS Code / Claude)          rmcp-server (hyper :8080)
+MCP Client (VS Code / Claude)          rmcp-server (hyper :9380)
      │                                        │
      │── POST /mcp (initialize) ─────────────→│ StreamableHttpService
      │   Authorization: Bearer cw_xxx          │   ├─ auth (Bearer → User lookup)
@@ -107,7 +107,7 @@ let service = TowerToHyperService::new(
         StreamableHttpServerConfig::default(),
     )
 );
-let listener = TcpListener::bind("0.0.0.0:8080").await?;
+let listener = TcpListener::bind("0.0.0.0:9380").await?;
 loop {
     let (stream, _) = listener.accept().await?;
     let svc = service.clone();
@@ -158,7 +158,7 @@ loop {
   ├── /api/auth/*   认证
   └── (MCP 已移除)
 
-:8080 — cowiki-rmcp-server (hyper + rmcp)
+:9380 — cowiki-rmcp-server (hyper + rmcp)
   └── /mcp          MCP Streamable HTTP
        ├── POST     JSON-RPC 请求
        ├── GET      SSE 流

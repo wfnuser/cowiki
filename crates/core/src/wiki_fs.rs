@@ -7,7 +7,7 @@
 use crate::git::WikiRepo;
 
 /// Known content directories. String + whitelist, not enum — easy to extend.
-const CONTENT_DIRS: &[&str] = &["wiki", "entities", "concepts"];
+const CONTENT_DIRS: &[&str] = &["wiki", "entities", "concepts", "sources"];
 
 /// Validate a content directory path against the known whitelist.
 /// Accepts top-level dirs ("wiki", "entities", "concepts") and
@@ -100,6 +100,21 @@ pub fn read_page(
     let path = format!("{dir}/{slug}.md");
     repo.read_file(branch, &path)
         .map_err(|e| format!("read error: {e}"))
+}
+
+/// Remove a page from a content directory.
+pub fn remove_page(
+    repo: &WikiRepo,
+    branch: &str,
+    dir: &str,
+    slug: &str,
+    author: &str,
+) -> Result<(), String> {
+    let dir = validate_dir(dir)?;
+    validate_slug(slug)?;
+    let path = format!("{dir}/{slug}.md");
+    repo.delete_path(branch, &path, &format!("remove: {slug}"), author)
+        .map_err(|e| format!("remove error: {e}"))
 }
 
 /// List pages in a content directory (flat).
@@ -321,6 +336,7 @@ mod tests {
         assert!(dirs.contains(&"wiki"));
         assert!(dirs.contains(&"entities"));
         assert!(dirs.contains(&"concepts"));
-        assert_eq!(dirs.len(), 3);
+        assert!(dirs.contains(&"sources"));
+        assert_eq!(dirs.len(), 4);
     }
 }
