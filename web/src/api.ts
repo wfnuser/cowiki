@@ -19,6 +19,10 @@ export interface PageMeta {
 
 export interface PageFull extends PageMeta {
   body: string;
+  /** Last editor of the page (git history), for the byline. */
+  edited_by?: string | null;
+  /** Unix timestamp (seconds) of that last edit. */
+  edited_at?: number | null;
 }
 
 export interface Submission {

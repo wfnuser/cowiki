@@ -34,6 +34,7 @@ import { ReviewDetail } from '../components/review/ReviewDetail';
 import { MembersView } from '../components/views/MembersView';
 import { InviteDialog } from '../components/InviteDialog';
 import { PageEditor } from '../components/PageEditor';
+import { PageByline } from '../components/PageByline';
 import { TransferDialog } from '../components/TransferDialog';
 import { CommentsProvider, CommentsPanel, CommentsHeaderToggle, commentMarkdownComponents } from '../components/PageCommentsLayer';
 import { C } from '@/lib/design';
@@ -881,6 +882,7 @@ export function MainLayout() {
                   // scroll. Opening it shrinks the doc from the right only.
                   <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'stretch' }}>
                     <article ref={articleRef} className="prose" style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '36px 48px 56px 56px' }}>
+                      <PageByline name={activeView.content.edited_by} editedAt={activeView.content.edited_at} />
                       <ReactMarkdown remarkPlugins={[remarkGfm]} components={commentMarkdownComponents}>
                         {renderBody(activeView.content.body)}
                       </ReactMarkdown>

@@ -33,6 +33,10 @@ pub struct PageResponse {
     pub summary: String,
     pub body: String,
     pub branch: String,
+    /// Last editor of this page on `branch` (from git history), for the byline.
+    pub edited_by: Option<String>,
+    /// Unix timestamp of that last edit.
+    pub edited_at: Option<i64>,
 }
 
 pub(crate) fn parse_frontmatter(content: &str) -> (Option<String>, String) {
@@ -246,12 +250,19 @@ pub async fn get_page_ws(
     let body = String::from_utf8_lossy(&content).into_owned();
     let (title, summary) = parse_frontmatter(&body);
     let title = title.unwrap_or_else(|| fallback_title_from_content_or_slug(&body, &slug));
+    // Best-effort: who last edited this page and when (for the byline).
+    let edited = repo
+        .last_commit_for(&branch, &format!("{dir}/{slug}.md"))
+        .ok()
+        .flatten();
     Ok(Json(PageResponse {
         slug,
         title,
         summary,
         body,
         branch,
+        edited_by: edited.as_ref().map(|(name, _)| name.clone()),
+        edited_at: edited.map(|(_, ts)| ts),
     }))
 }
 
