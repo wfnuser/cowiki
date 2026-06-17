@@ -307,6 +307,27 @@ async fn main() {
             "/api/workspaces/{ws_slug}/reviews/{submission_id}/comments/{comment_id}",
             delete(routes::comments::delete_comment),
         )
+        // Document comments (inline page comments)
+        .route(
+            "/api/workspaces/{ws_slug}/page-comments",
+            get(routes::page_comments::list_comments),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/page-comments",
+            post(routes::page_comments::create_comment),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/page-comments/{comment_id}/resolve",
+            post(routes::page_comments::resolve_comment),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/page-comments/{comment_id}/unresolve",
+            post(routes::page_comments::unresolve_comment),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/page-comments/{comment_id}",
+            delete(routes::page_comments::delete_comment),
+        )
         // Search
         .route(
             "/api/workspaces/{ws_slug}/search",
