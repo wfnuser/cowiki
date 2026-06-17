@@ -81,5 +81,10 @@ pub async fn run_migrations(pool: &PgPool, embedding_dim: u32) -> sqlx::Result<(
         tracing::error!("DB error: {e}");
         e
     })?;
+    let sql14 = include_str!("migrations/012_rename_page_slugs_to_paths.sql");
+    sqlx::raw_sql(sql14).execute(pool).await.map_err(|e| {
+        tracing::error!("DB error: {e}");
+        e
+    })?;
     Ok(())
 }

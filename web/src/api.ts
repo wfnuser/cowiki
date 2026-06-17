@@ -10,6 +10,7 @@ function h(extra: Record<string, string> = {}): Record<string, string> {
 
 export interface PageMeta {
   slug: string;
+  path: string;
   title: string;
   summary: string;
   branch: string;
@@ -26,7 +27,7 @@ export interface Submission {
   user_id: string;
   status: string;
   summary: string;
-  page_slugs: string[];
+  paths: string[];
   source_branch: string;
   created_at: string;
   reviewed_by: string | null;
@@ -357,11 +358,11 @@ export async function compile(branch: string, workspaceSlug: string) {
 
 // ── Submit & Review ──
 
-export async function submit(branch: string, pageSlugs: string[], skipReview: boolean, workspaceSlug: string) {
+export async function submit(branch: string, paths: string[], skipReview: boolean, workspaceSlug: string) {
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/submit`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ branch, page_slugs: pageSlugs, skip_review: skipReview }),
+    body: JSON.stringify({ branch, paths, skip_review: skipReview }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

@@ -12,7 +12,7 @@ pub struct Page {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DuplicateWarning {
-    pub new_slug: String,
-    pub existing_slug: String,
+    pub new_path: String,
+    pub existing_path: String,
     pub similarity: f64,
 }

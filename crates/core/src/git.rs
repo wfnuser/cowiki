@@ -633,12 +633,12 @@ impl WikiRepo {
         Ok(())
     }
 
-    pub fn diff_files(&self, branch: &str, slugs: &[String]) -> Result<Vec<FileDiff>, git2::Error> {
+    pub fn diff_files(&self, branch: &str, paths: &[String]) -> Result<Vec<FileDiff>, git2::Error> {
         let mut diffs = Vec::new();
-        for slug in slugs {
-            let path = format!("wiki/{slug}.md");
-            let main_content = self.read_file("main", &path)?;
-            let branch_content = self.read_file(branch, &path)?;
+        for p in paths {
+            let file_path = format!("{p}.md");
+            let main_content = self.read_file("main", &file_path)?;
+            let branch_content = self.read_file(branch, &file_path)?;
             let old_str = main_content
                 .as_ref()
                 .map(|b| String::from_utf8_lossy(b).into_owned());
@@ -650,7 +650,7 @@ impl WikiRepo {
                 new_str.as_deref().unwrap_or(""),
             );
             diffs.push(FileDiff {
-                path,
+                path: file_path,
                 old_content: old_str,
                 new_content: new_str,
                 hunks,
@@ -1290,6 +1290,122 @@ mod tests {
         assert!(repo
             .rename_path("user/r", "wiki/new.md", "wiki/exists.md", "mv", "r")
             .is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// diff_files accepts full repo paths (no hardcoded wiki/ prefix), so pages
+    /// from entities/ and concepts/ are diffed against the correct files.
+    #[test]
+    fn diff_files_uses_full_repo_paths() {
+        let (repo, dir) = temp_repo("diff-paths");
+        repo.ensure_branch_exists("user/a").unwrap();
+
+        // Write pages in different content directories
+        repo.write_file("user/a", "wiki/home.md", b"wiki page\n", "edit", "a")
+            .unwrap();
+        repo.write_file(
+            "user/a",
+            "entities/people/alice.md",
+            b"alice entity\n",
+            "edit",
+            "a",
+        )
+        .unwrap();
+        repo.write_file(
+            "user/a",
+            "concepts/patterns/error-handling.md",
+            b"error handling concept\n",
+            "edit",
+            "a",
+        )
+        .unwrap();
+
+        // diff_files with full repo paths (no .md extension per design)
+        let paths: Vec<String> = vec![
+            "wiki/home".into(),
+            "entities/people/alice".into(),
+            "concepts/patterns/error-handling".into(),
+        ];
+        let diffs = repo.diff_files("user/a", &paths).unwrap();
+        assert_eq!(diffs.len(), 3);
+
+        // Each path in the diff should carry the full .md file path
+        let diff_paths: Vec<&str> = diffs.iter().map(|d| d.path.as_str()).collect();
+        assert!(diff_paths.contains(&"wiki/home.md"));
+        assert!(diff_paths.contains(&"entities/people/alice.md"));
+        assert!(diff_paths.contains(&"concepts/patterns/error-handling.md"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// list_pages with dir=entities only returns pages under entities/,
+    /// not wiki/ or concepts/.
+    #[test]
+    fn list_pages_scoped_to_directory() {
+        let (repo, dir) = temp_repo("list-scoped");
+        repo.ensure_branch_exists("user/b").unwrap();
+
+        repo.write_file("user/b", "wiki/home.md", b"wiki\n", "e", "b")
+            .unwrap();
+        repo.write_file("user/b", "entities/alice.md", b"alice\n", "e", "b")
+            .unwrap();
+        repo.write_file(
+            "user/b",
+            "entities/people/bob.md",
+            b"bob\n",
+            "e",
+            "b",
+        )
+        .unwrap();
+
+        // list_pages_recursive under entities/
+        let entities_files =
+            crate::wiki_fs::list_pages_recursive(&repo, "user/b", "entities").unwrap();
+        assert_eq!(entities_files.len(), 2);
+        assert!(entities_files.iter().any(|f| f == "entities/alice.md"));
+        assert!(entities_files.iter().any(|f| f == "entities/people/bob.md"));
+
+        // list_pages_recursive under wiki/
+        let wiki_files =
+            crate::wiki_fs::list_pages_recursive(&repo, "user/b", "wiki").unwrap();
+        assert_eq!(wiki_files.len(), 1);
+        assert!(wiki_files.iter().any(|f| f == "wiki/home.md"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// write_file + read_file work with multi-directory paths — no hardcoded
+    /// assumptions about the content root.
+    #[test]
+    fn read_write_multi_directory() {
+        let (repo, dir) = temp_repo("multi-dir-rw");
+        repo.ensure_branch_exists("user/c").unwrap();
+
+        let test_cases = vec![
+            ("wiki/team-home.md", "team home content"),
+            ("entities/people/alice.md", "alice content"),
+            ("concepts/patterns/error-handling.md", "error handling content"),
+            ("wiki/research/ai-safety.md", "nested wiki page"),
+            ("entities/orgs/acme.md", "org entity"),
+        ];
+
+        for (file_path, content) in &test_cases {
+            repo.write_file("user/c", file_path, content.as_bytes(), "add", "c")
+                .unwrap();
+        }
+
+        for (file_path, expected) in &test_cases {
+            let got = repo
+                .read_file("user/c", file_path)
+                .unwrap()
+                .map(|b| String::from_utf8_lossy(&b).into_owned());
+            assert_eq!(
+                got.as_deref(),
+                Some(*expected),
+                "read_file({file_path}) should match written content"
+            );
+        }
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

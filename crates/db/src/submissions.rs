@@ -58,7 +58,7 @@ pub struct Submission {
     pub user_id: Uuid,
     pub status: String,
     pub summary: String,
-    pub page_slugs: Vec<String>,
+    pub paths: Vec<String>,
     pub source_branch: String,
     pub workspace_slug: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -76,17 +76,17 @@ pub async fn create(
     pool: &PgPool,
     user_id: Uuid,
     summary: &str,
-    page_slugs: &[String],
+    paths: &[String],
     source_branch: &str,
     workspace_slug: &str,
 ) -> sqlx::Result<Submission> {
     sqlx::query_as::<_, Submission>(
-        "INSERT INTO submissions (user_id, summary, page_slugs, source_branch, workspace_slug) \
+        "INSERT INTO submissions (user_id, summary, paths, source_branch, workspace_slug) \
          VALUES ($1, $2, $3, $4, $5) RETURNING *",
     )
     .bind(user_id)
     .bind(summary)
-    .bind(page_slugs)
+    .bind(paths)
     .bind(source_branch)
     .bind(workspace_slug)
     .fetch_one(pool)
@@ -185,6 +185,7 @@ mod tests {
             include_str!("migrations/010_notifications.sql"),
             include_str!("migrations/010_invitation_reject_status.sql"),
             include_str!("migrations/011_pages_workspace_scope.sql"),
+            include_str!("migrations/012_rename_page_slugs_to_paths.sql"),
         ] {
             let _ = sqlx::raw_sql(m).execute(&pool).await;
         }

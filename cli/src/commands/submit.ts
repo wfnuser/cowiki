@@ -5,7 +5,22 @@ import { CowikiClient } from '../client.js';
 import { printSuccess, printError, printInfo, printJson, printWarning } from '../output.js';
 import { resolveUserBranch, requireWorkspace } from '../shared.js';
 import type { GlobalOpts } from '../shared.js';
-import type { SubmitRequest } from '../types.js';
+import type { SubmitRequest, PageMeta } from '../types.js';
+
+const KNOWN_DIRS = ['wiki', 'entities', 'concepts'];
+
+/** Flatten a page tree to a list of repo paths, skipping folders and _index */
+function flattenPaths(pages: PageMeta[]): string[] {
+  const paths: string[] = [];
+  for (const p of pages) {
+    if (p.kind === 'folder' && p.children && p.children.length > 0) {
+      paths.push(...flattenPaths(p.children));
+    } else if (p.kind !== 'folder') {
+      paths.push(p.path);
+    }
+  }
+  return paths;
+}
 
 export function registerSubmitCommand(program: Command): void {
   program
@@ -13,6 +28,7 @@ export function registerSubmitCommand(program: Command): void {
     .description('Submit pages for review')
     .argument('[slugs...]', 'Page slugs to submit')
     .option('--all', 'Submit all pages on the branch')
+    .option('--dir <dir>', 'Content directory (wiki, entities, concepts). Default: wiki', 'wiki')
     .option('-y, --yes', 'Skip confirmation prompt')
     .action(async (slugs, opts, cmd) => {
       const globalOpts = cmd.parent?.optsWithGlobals() as GlobalOpts;
@@ -21,25 +37,34 @@ export function registerSubmitCommand(program: Command): void {
       const client = new CowikiClient(config.baseUrl, config.apiKey);
       const branch = await resolveUserBranch(client);
 
-      // Resolve page slugs
-      let pageSlugs: string[];
+      const dir = opts.dir || 'wiki';
+
+      // Resolve page paths
+      let pagePaths: string[];
       if (opts.all) {
-        const pages = await client.listPages(ws, branch);
+        const pages = await client.listPages(ws, branch, dir === 'all' ? 'all' : dir);
         if (pages.length === 0) {
-          printInfo(`no pages on branch "${branch}"`);
+          printInfo(`no pages on branch "${branch}" in ${dir}`);
           return;
         }
-        pageSlugs = pages.map((p) => p.slug);
+        pagePaths = flattenPaths(pages);
       } else if (!slugs || slugs.length === 0) {
         printError('No slugs specified. Provide slugs or use --all.');
         process.exit(1);
       } else {
-        pageSlugs = slugs;
+        // Convert slugs to paths, respecting --dir
+        pagePaths = slugs.map((slug: string) => {
+          // If slug already starts with a known dir, pass through as-is
+          if (KNOWN_DIRS.some(d => slug.startsWith(`${d}/`))) {
+            return slug;
+          }
+          return `${dir}/${slug}`;
+        });
       }
 
       // Show summary
       printInfo(
-        `Submitting ${pageSlugs.length} page(s) from branch "${branch}": ${pageSlugs.join(', ')}`,
+        `Submitting ${pagePaths.length} page(s) from branch "${branch}": ${pagePaths.join(', ')}`,
       );
 
       // Confirm
@@ -54,7 +79,7 @@ export function registerSubmitCommand(program: Command): void {
         }
       }
 
-      const req: SubmitRequest = { branch, page_slugs: pageSlugs };
+      const req: SubmitRequest = { branch, paths: pagePaths };
 
       try {
         const resp = await client.submit(ws, req);
@@ -69,7 +94,7 @@ export function registerSubmitCommand(program: Command): void {
             printWarning('Duplicate warnings:');
             for (const dup of resp.duplicates) {
               console.error(
-                `  ${dup.new_slug} ↔ ${dup.existing_slug} (${(dup.similarity * 100).toFixed(1)}%)`,
+                `  ${dup.new_path} ↔ ${dup.existing_path} (${(dup.similarity * 100).toFixed(1)}%)`,
               );
             }
           }

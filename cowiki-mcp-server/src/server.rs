@@ -122,7 +122,7 @@ pub struct ListParams {} // no params — always main
 pub struct SearchParams { pub query: String, pub limit: Option<i64>, }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct SubmitParams { pub page_slugs: Vec<String>, }
+pub struct SubmitParams { pub paths: Vec<String>, }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ReviewGetParams { pub id: String, }
@@ -254,7 +254,7 @@ impl CowikiServer {
     async fn cowiki_submit(&self, ctx: RequestContext<RoleServer>, Parameters(p): Parameters<SubmitParams>) -> Result<CallToolResult, ErrorData> {
         let auth = self.bearer(&ctx)?;
         let branch = self.user_branch(&auth).await?;
-        self.post(&auth, "api/submit", &serde_json::json!({"page_slugs": p.page_slugs, "branch": branch})).await.and_then(Self::json_result)
+        self.post(&auth, "api/submit", &serde_json::json!({"paths": p.paths, "branch": branch})).await.and_then(Self::json_result)
     }
 
     #[tool(description = "List all pending submissions in the review queue")]

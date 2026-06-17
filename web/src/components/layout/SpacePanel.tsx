@@ -27,7 +27,7 @@ interface SpacePanelProps {
   reviewCount: number;
   isPersonal: boolean;
   isOwner: boolean;
-  onSelectPage: (slug: string) => void;
+  onSelectPage: (slug: string, path?: string) => void;
   onSelectSource: (filename: string) => void;
   onNewPage: (dir?: ContentDir) => void;
   onNewFolder: (dir?: ContentDir) => void;
@@ -438,7 +438,7 @@ function SourceEntry({
   source: SourceItem;
   active: boolean;
   onSelect: () => void;
-  onSelectPage?: (slug: string) => void;
+  onSelectPage?: (slug: string, path?: string) => void;
 }) {
   return (
     <div>
@@ -495,7 +495,7 @@ function PageTreeItem({
   dir: ContentDir;
   activePage: string | null;
   depth: number;
-  onSelectPage: (slug: string) => void;
+  onSelectPage: (slug: string, path?: string) => void;
   onAddPageInFolder: (folderPath: string) => void;
   onAddFolderInFolder: (parentPath: string) => void;
   onRenamePath: (path: string, isFolder: boolean, title: string) => void;
@@ -600,7 +600,7 @@ function PageTreeItem({
         if (btn) btn.style.opacity = '0';
       }}
     >
-      <span onClick={() => onSelectPage(page.slug)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+      <span onClick={() => onSelectPage(page.slug, page.path)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
         <FileText size={14} style={{ flexShrink: 0 }} />
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
       </span>
