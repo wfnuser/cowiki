@@ -321,9 +321,7 @@ pub async fn create_folder_ws(
         .collect::<Vec<_>>()
         .join("-");
     let parent = input.parent.as_deref().ok_or_else(|| {
-        AppError::BadRequest(
-            "parent is required (e.g. wiki, entities, entities/people)".into(),
-        )
+        AppError::BadRequest("parent is required (e.g. wiki, entities, entities/people)".into())
     })?;
     let dir = format!("{parent}/{slug}");
     let index_path = format!("{dir}/_index.md");
@@ -450,7 +448,12 @@ fn list_pages_from_dir(
     }
 
     // Build tree recursively
-    fn build_level(items: &[RawItem], parent_dir: &str, branch: &str, dir: &str) -> Vec<PageListItem> {
+    fn build_level(
+        items: &[RawItem],
+        parent_dir: &str,
+        branch: &str,
+        dir: &str,
+    ) -> Vec<PageListItem> {
         let mut result: Vec<PageListItem> = Vec::new();
 
         // Find pages directly in this directory (not _index)

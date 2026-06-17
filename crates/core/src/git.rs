@@ -1349,14 +1349,8 @@ mod tests {
             .unwrap();
         repo.write_file("user/b", "entities/alice.md", b"alice\n", "e", "b")
             .unwrap();
-        repo.write_file(
-            "user/b",
-            "entities/people/bob.md",
-            b"bob\n",
-            "e",
-            "b",
-        )
-        .unwrap();
+        repo.write_file("user/b", "entities/people/bob.md", b"bob\n", "e", "b")
+            .unwrap();
 
         // list_pages_recursive under entities/
         let entities_files =
@@ -1366,8 +1360,7 @@ mod tests {
         assert!(entities_files.iter().any(|f| f == "entities/people/bob.md"));
 
         // list_pages_recursive under wiki/
-        let wiki_files =
-            crate::wiki_fs::list_pages_recursive(&repo, "user/b", "wiki").unwrap();
+        let wiki_files = crate::wiki_fs::list_pages_recursive(&repo, "user/b", "wiki").unwrap();
         assert_eq!(wiki_files.len(), 1);
         assert!(wiki_files.iter().any(|f| f == "wiki/home.md"));
 
@@ -1384,7 +1377,10 @@ mod tests {
         let test_cases = vec![
             ("wiki/team-home.md", "team home content"),
             ("entities/people/alice.md", "alice content"),
-            ("concepts/patterns/error-handling.md", "error handling content"),
+            (
+                "concepts/patterns/error-handling.md",
+                "error handling content",
+            ),
             ("wiki/research/ai-safety.md", "nested wiki page"),
             ("entities/orgs/acme.md", "org entity"),
         ];
