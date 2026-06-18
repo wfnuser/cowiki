@@ -83,7 +83,7 @@ cargo build -p cowiki-server 2>&1 | tail -1
 pass "Binaries built"
 
 info "Step 2: starting MCP server on :$MCP_PORT..."
-NO_COLOR=1 RUST_LOG=info cargo run -p cowiki-mcp -- --port "127.0.0.1:$MCP_PORT" | tee "$ROOT"/tmp/cowiki-e2e-mcp.log 2>&1 &
+NO_COLOR=1 RUST_LOG=info cargo run -p cowiki-mcp -- --port "$MCP_PORT" | tee "$ROOT"/tmp/cowiki-e2e-mcp.log 2>&1 &
 MCP_PID=$!
 sleep 1
 if kill -0 "$MCP_PID" 2>/dev/null; then
@@ -208,7 +208,8 @@ START=$(date +%s)
 COMPILE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
     "$API/workspaces/$WORKSPACE/compile" \
     -H "Content-Type: application/json" \
-    -d "{\"branch\":\"$BRANCH\",\"mode\":\"$COMPILE_MODE\"}" \
+    -H "Authorization: Bearer $API_KEY" \
+    -d "{\"branch\":\"$BRANCH\"}" \
     --max-time "$TIMEOUT")
 COMPILE_HTTP=$(echo "$COMPILE_RESPONSE" | tail -1)
 COMPILE_BODY=$(echo "$COMPILE_RESPONSE" | sed '$d')

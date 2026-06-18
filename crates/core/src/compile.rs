@@ -22,22 +22,6 @@ use crate::models::Page;
 #[derive(Deserialize)]
 pub struct CompileRequest {
     pub branch: String,
-    #[serde(default)]
-    pub mode: Option<CompileMode>,
-}
-
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum CompileMode {
-    Auto,
-    Pipeline,
-    Agent,
-}
-
-impl Default for CompileMode {
-    fn default() -> Self {
-        CompileMode::Auto
-    }
 }
 
 #[derive(Serialize)]
@@ -150,7 +134,6 @@ pub async fn do_compile(
     wiki_fs_gateway: &crate::gateway::WikiFsGateway,
     db: &sqlx::PgPool,
     branch: &str,
-    mode: Option<CompileMode>,
 ) -> Result<CompileResponse, String> {
     let mut compile_state = load_state(repo, branch);
 
@@ -158,7 +141,7 @@ pub async fn do_compile(
         .list_files(branch, "sources")
         .map_err(|e| format!("list sources: {e}"))?;
 
-    tracing::warn!(branch = %branch, count = source_files.len(), files = ?source_files, "compile: listed sources");
+    tracing::debug!(branch = %branch, count = source_files.len(), files = ?source_files, "compile: listed sources");
 
     if source_files.is_empty() {
         return Ok(CompileResponse {
@@ -194,58 +177,24 @@ pub async fn do_compile(
         });
     }
 
-    let mode = mode.unwrap_or(CompileMode::Auto);
-    let all_simple_md = new_sources
-        .iter()
-        .all(|(name, _)| !name.contains('/') && name.ends_with(".md"));
-    let use_pipeline = match mode {
-        CompileMode::Pipeline => true,
-        CompileMode::Agent => false,
-        CompileMode::Auto => all_simple_md,
-    };
-
     let source_scope: Vec<String> = new_sources
         .iter()
         .map(|(name, _)| format!("sources/{}", name))
         .collect();
 
-    let result_pages = if use_pipeline {
-        // Pipeline delegates to agent since compile_fixed has moved to
-        // the cowiki_compiler harness (AgentHandle). For now, just use
-        // the agent path directly.
-        tracing::info!(
-            count = new_sources.len(),
-            ?mode,
-            "compile: pipeline mode -> delegating to agent"
-        );
-        compile_via_agent(
-            dispatcher,
-            compiler,
-            repo,
-            wiki_fs_gateway,
-            db,
-            branch,
-            ws_slug,
-            &new_sources,
-            &source_scope,
-            &mut compile_state,
-        )
-        .await?
-    } else {
-        compile_via_agent(
-            dispatcher,
-            compiler,
-            repo,
-            wiki_fs_gateway,
-            db,
-            branch,
-            ws_slug,
-            &new_sources,
-            &source_scope,
-            &mut compile_state,
-        )
-        .await?
-    };
+    let result_pages = compile_via_agent(
+        dispatcher,
+        compiler,
+        repo,
+        wiki_fs_gateway,
+        db,
+        branch,
+        ws_slug,
+        &new_sources,
+        &source_scope,
+        &mut compile_state,
+    )
+    .await?;
 
     save_state(repo, branch, &compile_state);
     Ok(CompileResponse {
@@ -330,7 +279,7 @@ async fn index_compiled_pages(
         tracing::info!(page = i + 1, total, slug = %slug, "embedding page");
         match compiler.embed(&format!("{}\n{}", title, summary)).await {
             Ok(emb) => {
-                let _ = cowiki_db::pages::upsert(
+                if let Err(e) = cowiki_db::pages::upsert(
                     db,
                     &slug,
                     &title,
@@ -341,7 +290,11 @@ async fn index_compiled_pages(
                     default_user.id,
                     ws_slug,
                 )
-                .await;
+                .await
+                {
+                    tracing::warn!(slug = %slug, error = %e,
+                        "page written to git but DB upsert failed — page not searchable");
+                }
             }
             Err(e) => tracing::warn!("embed failed for '{}': {e}", slug),
         }

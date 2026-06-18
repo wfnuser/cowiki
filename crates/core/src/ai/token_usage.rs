@@ -6,16 +6,16 @@ use std::collections::HashMap;
 /// Mirrors OpenViking's models/vlm/token_usage.py TokenUsage.
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct TokenUsage {
-    pub prompt_tokens: u32,
-    pub completion_tokens: u32,
-    pub total_tokens: u32,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub total_tokens: u64,
     pub call_count: u64,
     pub last_updated: Option<DateTime<Utc>>,
 }
 
 impl TokenUsage {
     /// Record a new API call's token usage.
-    pub fn update(&mut self, prompt_tokens: u32, completion_tokens: u32) {
+    pub fn update(&mut self, prompt_tokens: u64, completion_tokens: u64) {
         self.prompt_tokens += prompt_tokens;
         self.completion_tokens += completion_tokens;
         self.total_tokens = self.prompt_tokens + self.completion_tokens;
@@ -33,7 +33,7 @@ pub struct TokenUsageTracker {
 
 impl TokenUsageTracker {
     /// Record token usage for a specific model.
-    pub fn record(&mut self, model: &str, prompt_tokens: u32, completion_tokens: u32) {
+    pub fn record(&mut self, model: &str, prompt_tokens: u64, completion_tokens: u64) {
         self.usage_by_model
             .entry(model.to_string())
             .or_default()

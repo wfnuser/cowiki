@@ -30,20 +30,23 @@ pub struct TaskRequest {
 
 /// Kill an agent process: SIGTERM → wait → SIGKILL.
 pub async fn stop_agent(manager: &AgentManager, name: &str) -> Result<(), AgentError> {
-    let mut child = {
+    let proc_entry = {
         let mut procs = manager.processes.write().await;
-        if let Some(proc) = procs.get_mut(name) {
-            if matches!(proc.status, AgentStatus::Stopped) {
-                return Ok(());
-            }
-            proc.status = AgentStatus::Stopped;
-            proc.child.take()
-        } else {
-            return Ok(());
-        }
+        procs.remove(name)
     };
 
-    if let Some(ref mut c) = child {
+    let mut proc = match proc_entry {
+        Some(p) => p,
+        None => return Ok(()),
+    };
+
+    if matches!(proc.status, AgentStatus::Stopped) {
+        return Ok(());
+    }
+    proc.status = AgentStatus::Stopped;
+
+    // Try child handle first, fall back to PID
+    if let Some(ref mut c) = proc.child {
         tracing::info!(%name, "sending SIGTERM to agent");
         let _ = c.start_kill();
         sleep(Duration::from_secs(SHUTDOWN_GRACE_PERIOD_SECS)).await;
@@ -55,9 +58,20 @@ pub async fn stop_agent(manager: &AgentManager, name: &str) -> Result<(), AgentE
             }
             Err(e) => tracing::error!(%name, error = %e, "failed to check agent status"),
         }
+    } else if let Some(pid) = proc.pid {
+        tracing::info!(%name, pid, "sending SIGTERM to agent (by PID)");
+        // Send SIGTERM via command
+        let pid_str = pid.to_string();
+        let _ = tokio::process::Command::new("kill")
+            .arg(&pid_str)
+            .spawn();
+        sleep(Duration::from_secs(SHUTDOWN_GRACE_PERIOD_SECS)).await;
+        let _ = tokio::process::Command::new("kill")
+            .arg("-9")
+            .arg(&pid_str)
+            .spawn();
     }
 
-    manager.remove_process(name).await;
     tracing::info!(%name, "agent stopped");
     Ok(())
 }

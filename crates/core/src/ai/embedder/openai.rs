@@ -138,7 +138,7 @@ impl OpenAIEmbedder {
 
         if let Some(u) = &resp.usage {
             if let Ok(mut tracker) = self.tracker.lock() {
-                tracker.record(&self.config.model, u.prompt_tokens, 0);
+                tracker.record(&self.config.model, u.prompt_tokens as u64, 0);
             }
         }
 
@@ -196,7 +196,7 @@ impl OpenAIEmbedder {
 
         if let Some(u) = &resp.usage {
             if let Ok(mut tracker) = self.tracker.lock() {
-                tracker.record(&self.config.model, u.prompt_tokens, 0);
+                tracker.record(&self.config.model, u.prompt_tokens as u64, 0);
             }
         }
 
@@ -207,6 +207,23 @@ impl OpenAIEmbedder {
                 vector: d.embedding,
             })
             .collect();
+
+        if results.len() != texts.len() {
+            return Err(format!(
+                "embedder batch: expected {} embeddings, got {}",
+                texts.len(),
+                results.len()
+            ));
+        }
+
+        // Guard against zero-length embeddings
+        for (i, r) in results.iter().enumerate() {
+            if r.vector.is_empty() {
+                return Err(format!(
+                    "embedder batch: empty embedding at index {i}"
+                ));
+            }
+        }
 
         Ok(results)
     }

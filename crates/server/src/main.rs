@@ -1,6 +1,5 @@
 use axum::routing::{delete, get, post};
 use axum::Router;
-use clap::Parser;
 use cowiki_core::ai::embedder::{create_embedder, EmbedderConfig};
 use cowiki_core::ai::llm::{create_llm, LlmConfig};
 use cowiki_core::compile::Compiler;
@@ -15,8 +14,6 @@ use tracing::Level;
 mod config;
 mod error;
 mod routes;
-
-use config::CliArgs;
 
 pub struct AppState {
     pub db: sqlx::PgPool,
@@ -38,28 +35,40 @@ struct UsageResponse {
 }
 
 async fn get_usage(
+    headers: axum::http::HeaderMap,
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
-) -> axum::Json<UsageResponse> {
-    axum::Json(UsageResponse {
+) -> Result<axum::Json<UsageResponse>, crate::error::AppError> {
+    // Require authenticated user (any valid API key)
+    let _user = crate::routes::auth::extract_user(&state.db, &headers).await?;
+
+    Ok(axum::Json(UsageResponse {
         llm: state.compiler.llm_usage(),
         embedder: state.compiler.embedder_usage(),
-    })
+    }))
 }
 
 // ── Agent events SSE ──────────────────────────────────────────
 
 async fn agent_events(
-    axum::extract::Path(_ws): axum::extract::Path<String>,
+    axum::extract::Path(ws): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
-) -> axum::response::Sse<
-    impl tokio_stream::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+) -> Result<
+    axum::response::Sse<
+        impl tokio_stream::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+    >,
+    crate::error::AppError,
 > {
+    // Auth: require workspace membership
+    let _guard = crate::routes::guard::require_membership(&state, &headers, &ws).await?;
+
     let (tx, rx) = tokio::sync::mpsc::channel::<
         Result<axum::response::sse::Event, std::convert::Infallible>,
     >(64);
 
     let agent_mgr = Arc::clone(&state.agent_manager);
     let mut event_rx = agent_mgr.subscribe_events();
+    let ws_filter = ws.clone();
 
     tokio::spawn(async move {
         // Send initial connected message
@@ -72,6 +81,10 @@ async fn agent_events(
         loop {
             match event_rx.recv().await {
                 Ok(event) => {
+                    // Filter by workspace — only relay events for this workspace
+                    if !ws_filter.is_empty() && !event_workspace_matches(&event, &ws_filter) {
+                        continue;
+                    }
                     if let Ok(json) = serde_json::to_string(&event) {
                         let _ = tx
                             .send(Ok(axum::response::sse::Event::default().data(json)))
@@ -88,8 +101,21 @@ async fn agent_events(
         }
     });
 
-    axum::response::Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
-        .keep_alive(axum::response::sse::KeepAlive::default())
+    Ok(axum::response::Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
+        .keep_alive(axum::response::sse::KeepAlive::default()))
+}
+
+/// Check if an AgentEvent's workspace field matches the given workspace slug.
+fn event_workspace_matches(event: &cowiki_agents::stream::AgentEvent, ws: &str) -> bool {
+    let event_ws = match event {
+        cowiki_agents::stream::AgentEvent::TaskStarted { workspace, .. }
+        | cowiki_agents::stream::AgentEvent::ToolStart { workspace, .. }
+        | cowiki_agents::stream::AgentEvent::ToolEnd { workspace, .. }
+        | cowiki_agents::stream::AgentEvent::TaskCompleted { workspace, .. }
+        | cowiki_agents::stream::AgentEvent::AgentStopped { workspace, .. } => workspace,
+    };
+    // Match on workspace slug or path suffix (e.g. "data/default/repo" ends with "/default/repo")
+    event_ws == ws || event_ws.ends_with(&format!("/{ws}/repo")) || event_ws == &format!("data/{ws}/repo")
 }
 
 #[tokio::main]
@@ -97,8 +123,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
     dotenvy::dotenv().ok();
 
-    let cli_args = CliArgs::parse();
-    let config = config::Config::load(Some(cli_args));
+    let config = config::Config::load();
 
     // Database
     let db = cowiki_db::create_pool(&config.database.url)
@@ -168,7 +193,7 @@ async fn main() {
     let wiki_fs_gateway = Arc::new(WikiFsGateway::new(&data_dir).with_db(db.clone()));
 
     // Create global AgentManager (single instance for all workspaces)
-    let mcp_port = std::env::var("COWIKI_MCP_PORT").unwrap_or_else(|_| "9380".into());
+    let mcp_port = config.mcp.port;
     let default_workspace_path = std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .join(&data_dir)
@@ -176,6 +201,7 @@ async fn main() {
         .join("repo");
     let agent_manager = Arc::new(cowiki_agents::manager::AgentManager::new(
         format!("http://127.0.0.1:{}/mcp/sse", mcp_port),
+        config.mcp.auth_token.clone(),
         default_workspace_path,
         cowiki_utils::LlmConfig {
             provider: config.llm.provider.clone(),
@@ -185,6 +211,7 @@ async fn main() {
             temperature: config.llm.temperature,
             max_tokens: config.llm.max_tokens,
         },
+        config.agent.clone(),
     ));
 
     // MCP server is started separately (see crates/mcp for standalone binary).

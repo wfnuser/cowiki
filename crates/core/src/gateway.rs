@@ -171,6 +171,11 @@ impl WikiFsGateway {
         workspace: &str,
         branch: &str,
     ) -> ToolResult {
+        // Validate workspace slug before any filesystem access
+        if let Err(e) = validate_workspace_slug(workspace) {
+            return ToolResult::err(&e);
+        }
+
         let repo = match self
             .repo_manager
             .get(workspace)
@@ -283,23 +288,26 @@ impl WikiFsGateway {
                     Some(db) => db.clone(),
                     None => return ToolResult::err("search not configured — DB pool missing"),
                 };
-                // Postgres FTS — search across wiki_pages table
+                // Postgres FTS — search across pages table with workspace scope
                 let sql = r#"
-                    SELECT path, ts_rank(search_vector, query) AS rank
-                    FROM wiki_pages, plainto_tsquery('english', $1) AS query
-                    WHERE search_vector @@ query
+                    SELECT slug, ts_rank(tsv, query) AS rank
+                    FROM pages, plainto_tsquery('english', $1) AS query
+                    WHERE tsv @@ query
+                      AND workspace_slug = $2
                     ORDER BY rank DESC
                     LIMIT 20
                 "#;
                 // Run DB query. Use block_in_place to safely block in tokio context
                 // without the "Cannot start a runtime from within a runtime" panic.
                 let query_owned = query.to_string();
+                let ws_owned = workspace.to_string();
                 let rows_result: Result<Vec<(String, f64)>, sqlx::Error> =
                     tokio::task::block_in_place(|| {
                         let handle = tokio::runtime::Handle::current();
                         handle.block_on(async {
                             sqlx::query_as::<_, (String, f64)>(sql)
                                 .bind(&query_owned)
+                                .bind(&ws_owned)
                                 .fetch_all(&db)
                                 .await
                         })
@@ -310,7 +318,7 @@ impl WikiFsGateway {
                 };
                 let results: Vec<serde_json::Value> = rows
                     .into_iter()
-                    .map(|(path, rank)| serde_json::json!({"path": path, "rank": rank}))
+                    .map(|(slug, rank)| serde_json::json!({"slug": slug, "rank": rank}))
                     .collect();
                 ToolResult::ok(serde_json::json!({"results": results}))
             }
@@ -335,4 +343,12 @@ fn parse_file_path(path: &str) -> Result<(&str, &str), String> {
         return Err(format!("empty slug in path: {path}"));
     }
     Ok((dir, slug))
+}
+
+/// Validate workspace slug — reject empty, path traversal, or separator chars.
+fn validate_workspace_slug(slug: &str) -> Result<(), String> {
+    if slug.is_empty() || slug.contains("..") || slug.contains('/') || slug.contains('\\') {
+        return Err(format!("invalid workspace slug: {slug}"));
+    }
+    Ok(())
 }

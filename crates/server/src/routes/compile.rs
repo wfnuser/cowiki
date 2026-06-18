@@ -56,8 +56,14 @@ impl AgentDispatcher for AppState {
 pub async fn compile_ws(
     State(state): State<Arc<AppState>>,
     Path(ws_slug): Path<String>,
+    headers: axum::http::HeaderMap,
     Json(input): Json<CompileRequest>,
 ) -> Result<Json<CompileResponse>> {
+    // Auth: membership + EditContent + own branch only
+    let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
+    crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
+    super::pages::require_own_branch(&input.branch, guard.user.id)?;
+
     let repo = state
         .repo_manager
         .get(&ws_slug)
@@ -72,10 +78,9 @@ pub async fn compile_ws(
         &state.wiki_fs_gateway,
         &state.db,
         &input.branch,
-        input.mode,
     )
     .await
-    .map_err(|e| AppError::Internal(e))?;
+    .map_err(AppError::Internal)?;
 
     Ok(Json(result))
 }

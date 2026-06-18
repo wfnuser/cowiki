@@ -3,15 +3,20 @@
 //! pi runs in non-interactive mode (`-p`), calling MCP tools to operate on wiki.
 //! No stdout parsing needed — written_pages tracked by WikiFsGateway.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, RwLock};
 
 use super::{AgentContext, AgentHandle, AgentStart, AgentState};
+use crate::manager::AgentProcess;
 use crate::stream::AgentEvent;
+use crate::types::bridge::{AgentManifest, AgentStatus};
 use crate::types::error::AgentError;
 use crate::types::protocol::UsageInfo;
 
@@ -22,10 +27,25 @@ pub struct PiAgentHandle {
     pub llm: cowiki_utils::LlmConfig,
     /// Optional event channel for broadcasting tool_start/tool_end events
     pub event_tx: Option<broadcast::Sender<AgentEvent>>,
+    /// Hard timeout: kill agent if no stdout for this many seconds
+    pub hard_timeout_secs: u64,
+    /// Soft timeout: warn if total elapsed exceeds this many seconds
+    pub soft_timeout_secs: u64,
+    /// Optional process map for stop_agent support (inserted after spawn)
+    pub process_map: Option<Arc<RwLock<HashMap<String, AgentProcess>>>>,
+    /// Optional MCP auth token (COWIKI_MCP_AUTH_TOKEN) — written into .mcp.json
+    pub mcp_auth_token: Option<String>,
 }
 
 impl PiAgentHandle {
-    pub fn new(agent_home: PathBuf, mcp_url: String, llm: cowiki_utils::LlmConfig) -> Self {
+    pub fn new(
+        agent_home: PathBuf,
+        mcp_url: String,
+        llm: cowiki_utils::LlmConfig,
+        hard_timeout_secs: u64,
+        soft_timeout_secs: u64,
+        mcp_auth_token: Option<String>,
+    ) -> Self {
         let pi_binary = std::env::var("PI_BINARY")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("pi"));
@@ -35,12 +55,25 @@ impl PiAgentHandle {
             mcp_url,
             llm,
             event_tx: None,
+            hard_timeout_secs,
+            soft_timeout_secs,
+            process_map: None,
+            mcp_auth_token,
         }
     }
 
     /// Attach an event channel for broadcasting tool execution events.
     pub fn with_event_tx(mut self, tx: broadcast::Sender<AgentEvent>) -> Self {
         self.event_tx = Some(tx);
+        self
+    }
+
+    /// Attach a process map for stop_agent support.
+    pub fn with_process_map(
+        mut self,
+        map: Arc<RwLock<HashMap<String, AgentProcess>>>,
+    ) -> Self {
+        self.process_map = Some(map);
         self
     }
 
@@ -81,7 +114,7 @@ impl PiAgentHandle {
         write_skills(&self.agent_home, task_type).await?;
 
         // MCP config — pi-mcp-adapter auto-discovers .mcp.json
-        write_mcp_config(&self.agent_home, &self.mcp_url).await?;
+        write_mcp_config(&self.agent_home, &self.mcp_url, self.mcp_auth_token.as_deref()).await?;
 
         Ok(())
     }
@@ -192,102 +225,165 @@ impl AgentHandle for PiAgentHandle {
             .await
             .map_err(|e| AgentError::Transport(format!("flush pi stdin: {e}")))?;
 
-        // Parse stdout events (NDJSON)
+        // Parse stdout events (NDJSON) with hard/soft timeout
         let event_tx = self.event_tx.clone();
         let agent_name = "compiler".to_string();
         let task_id = ctx.execution_id.clone();
         let mut success = false;
         let mut rounds: u32 = 0;
+        let hard_timeout = std::time::Duration::from_secs(self.hard_timeout_secs);
+        let soft_timeout = std::time::Duration::from_secs(self.soft_timeout_secs);
+        let started_at = std::time::Instant::now();
+
+        // Register process for stop_agent support
+        if let Some(ref map) = self.process_map {
+            let pid = child.id();
+            let mut procs = map.write().await;
+            procs.insert(
+                agent_name.clone(),
+                AgentProcess {
+                    status: AgentStatus::Active,
+                    agent_id: task_id.clone(),
+                    last_active: Instant::now(),
+                    manifest: AgentManifest {
+                        agent: crate::types::bridge::AgentManifestEntry {
+                            name: agent_name.clone(),
+                            agent_type: "stdio".into(),
+                            task: ctx.task_type.clone(),
+                            mode: "function".into(),
+                        },
+                        state: None,
+                    },
+                    child: None,
+                    pid,
+                },
+            );
+        }
 
         if let Some(stdout) = child.stdout.take() {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let line = line.trim().to_string();
-                if line.is_empty() {
-                    continue;
-                }
+            loop {
+                tokio::select! {
+                    line = lines.next_line() => {
+                        match line {
+                            Ok(Some(line)) => {
+                                let line = line.trim().to_string();
+                                if line.is_empty() {
+                                    continue;
+                                }
 
-                match serde_json::from_str::<serde_json::Value>(&line) {
-                    Ok(event) => {
-                        let event_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                        match event_type {
-                            "response" => {
-                                let cmd =
-                                    event.get("command").and_then(|v| v.as_str()).unwrap_or("");
-                                let ok = event
-                                    .get("success")
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false);
-                                if !ok && cmd == "prompt" {
-                                    let err = event
-                                        .get("error")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("unknown");
-                                    tracing::error!(%err, "pi prompt rejected");
+                                match serde_json::from_str::<serde_json::Value>(&line) {
+                                    Ok(event) => {
+                                        let event_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                                        match event_type {
+                                            "response" => {
+                                                let cmd =
+                                                    event.get("command").and_then(|v| v.as_str()).unwrap_or("");
+                                                let ok = event
+                                                    .get("success")
+                                                    .and_then(|v| v.as_bool())
+                                                    .unwrap_or(false);
+                                                if !ok && cmd == "prompt" {
+                                                    let err = event
+                                                        .get("error")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("unknown");
+                                                    tracing::error!(%err, "pi prompt rejected");
+                                                }
+                                            }
+                                            "tool_execution_start" => {
+                                                let tool = event
+                                                    .get("toolName")
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("unknown");
+                                                let args = event.get("args").cloned();
+                                                tracing::info!(%tool, ?args, task_id=%task_id, "pi tool start");
+                                                if let Some(ref tx) = event_tx {
+                                                    let _ = tx.send(AgentEvent::ToolStart {
+                                                        workspace: ctx.workspace.clone(),
+                                                        agent: agent_name.clone(),
+                                                        task_id: task_id.clone(),
+                                                        tool: tool.to_string(),
+                                                        input: args,
+                                                    });
+                                                }
+                                            }
+                                            "tool_execution_end" => {
+                                                let tool = event
+                                                    .get("toolName")
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("unknown");
+                                                let is_error = event
+                                                    .get("isError")
+                                                    .and_then(|v| v.as_bool())
+                                                    .unwrap_or(false);
+                                                tracing::info!(%tool, is_error, task_id=%task_id, "pi tool end");
+                                                if let Some(ref tx) = event_tx {
+                                                    let _ = tx.send(AgentEvent::ToolEnd {
+                                                        workspace: ctx.workspace.clone(),
+                                                        agent: agent_name.clone(),
+                                                        task_id: task_id.clone(),
+                                                        tool: tool.to_string(),
+                                                        success: !is_error,
+                                                        summary: String::new(),
+                                                    });
+                                                }
+                                            }
+                                            "agent_end" => {
+                                                success = true;
+                                                let msgs = event.get("messages").and_then(|v| v.as_array());
+                                                if let Some(msgs) = msgs {
+                                                    rounds = msgs.len() as u32;
+                                                }
+                                                tracing::info!(rounds, task_id=%task_id, "pi agent end");
+                                                break;
+                                            }
+                                            "agent_start" => {
+                                                if let Some(ref tx) = event_tx {
+                                                    let _ = tx.send(AgentEvent::TaskStarted {
+                                                        workspace: ctx.workspace.clone(),
+                                                        agent: agent_name.clone(),
+                                                        task_id: task_id.clone(),
+                                                    });
+                                                }
+                                            }
+                                            _ => {
+                                                tracing::debug!(%event_type, ?event, "pi event");
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(%line, error=%e, "failed to parse pi stdout event");
+                                    }
                                 }
                             }
-                            "tool_execution_start" => {
-                                let tool = event
-                                    .get("toolName")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("unknown");
-                                let args = event.get("args").cloned();
-                                tracing::info!(%tool, ?args, task_id=%task_id, "pi tool start");
-                                if let Some(ref tx) = event_tx {
-                                    let _ = tx.send(AgentEvent::ToolStart {
-                                        agent: agent_name.clone(),
-                                        task_id: task_id.clone(),
-                                        tool: tool.to_string(),
-                                        input: args,
-                                    });
-                                }
-                            }
-                            "tool_execution_end" => {
-                                let tool = event
-                                    .get("toolName")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("unknown");
-                                let is_error = event
-                                    .get("isError")
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false);
-                                tracing::info!(%tool, is_error, task_id=%task_id, "pi tool end");
-                                if let Some(ref tx) = event_tx {
-                                    let _ = tx.send(AgentEvent::ToolEnd {
-                                        agent: agent_name.clone(),
-                                        task_id: task_id.clone(),
-                                        tool: tool.to_string(),
-                                        success: !is_error,
-                                        summary: String::new(),
-                                    });
-                                }
-                            }
-                            "agent_end" => {
-                                success = true;
-                                let msgs = event.get("messages").and_then(|v| v.as_array());
-                                if let Some(msgs) = msgs {
-                                    rounds = msgs.len() as u32;
-                                }
-                                tracing::info!(rounds, task_id=%task_id, "pi agent end");
+                            Ok(None) => break,  // stdout closed
+                            Err(e) => {
+                                tracing::error!(%e, "pi stdout read error");
                                 break;
-                            }
-                            "agent_start" => {
-                                if let Some(ref tx) = event_tx {
-                                    let _ = tx.send(AgentEvent::TaskStarted {
-                                        agent: agent_name.clone(),
-                                        task_id: task_id.clone(),
-                                    });
-                                }
-                            }
-                            _ => {
-                                tracing::debug!(%event_type, ?event, "pi event");
                             }
                         }
                     }
-                    Err(e) => {
-                        tracing::warn!(%line, error=%e, "failed to parse pi stdout event");
+                    _ = tokio::time::sleep(hard_timeout) => {
+                        // No output for hard_timeout_secs → kill agent
+                        tracing::error!(agent=%agent_name, task_id=%task_id, "hard timeout: no output for {}s", self.hard_timeout_secs);
+                        let _ = child.kill().await;
+                        // Clean up process map
+                        if let Some(ref map) = self.process_map {
+                            map.write().await.remove(&agent_name);
+                        }
+                        return Err(AgentError::Timeout);
                     }
+                    _ = tokio::time::sleep(soft_timeout.saturating_sub(started_at.elapsed())) => {
+                        // Total elapsed > soft_timeout_secs → warn only, keep running
+                        tracing::warn!(agent=%agent_name, task_id=%task_id, elapsed=?started_at.elapsed(),
+                            "soft timeout: agent still running after {}s, continuing...", self.soft_timeout_secs);
+                    }
+                }
+                // If agent_end was hit, break out of the outer loop
+                if success {
+                    break;
                 }
             }
         }
@@ -311,6 +407,11 @@ impl AgentHandle for PiAgentHandle {
             .wait()
             .await
             .map_err(|e| AgentError::Transport(format!("pi wait: {e}")))?;
+
+        // Clean up process map
+        if let Some(ref map) = self.process_map {
+            map.write().await.remove(&agent_name);
+        }
 
         tracing::info!(exit_code = ?status.code(), task_id=%task_id, "pi process exited");
 
@@ -362,13 +463,24 @@ fn build_prompt(user_input: &str, ctx: &AgentContext) -> String {
 
 // ── MCP config (.mcp.json for pi-mcp-adapter) ────────────────
 
-async fn write_mcp_config(home: &std::path::Path, mcp_url: &str) -> Result<(), AgentError> {
+async fn write_mcp_config(
+    home: &std::path::Path,
+    mcp_url: &str,
+    mcp_auth_token: Option<&str>,
+) -> Result<(), AgentError> {
+    let mut cowiki_config = serde_json::json!({
+        "url": mcp_url,
+        "lifecycle": "keep-alive",
+        "directTools": true
+    });
+    // If auth token is configured, add Authorization header
+    if let Some(token) = mcp_auth_token {
+        cowiki_config["headers"] = serde_json::json!({
+            "Authorization": format!("Bearer {}", token)
+        });
+    }
     let config = serde_json::json!({
-        "mcpServers": { "cowiki": {
-            "url": mcp_url,
-            "lifecycle": "keep-alive",
-            "directTools": true
-        }}
+        "mcpServers": { "cowiki": cowiki_config }
     });
     tokio::fs::write(
         home.join(".mcp.json"),

@@ -905,7 +905,6 @@ export function MainLayout() {
               onTogglePin={compileStream.togglePin}
               countdown={compileStream.countdown}
               isReconnecting={compileStream.isReconnecting}
-              mode={compileStream.mode}
             />
           )}
         </div>

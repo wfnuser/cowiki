@@ -506,6 +506,7 @@ dependencies = [
  "clap",
  "cowiki-core",
  "http 1.4.0",
+ "http-body-util",
  "hyper 1.9.0",
  "hyper-util",
  "rmcp",
@@ -562,7 +563,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "toml",
  "tracing",
  "uuid",
 ]

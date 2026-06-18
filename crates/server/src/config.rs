@@ -2,14 +2,14 @@
 //! Delegates to `cowiki_utils::CowikiConfig` for shared config,
 //! adds server-specific fields (GitHub OAuth).
 
-pub use cowiki_utils::CliArgs;
-
 #[derive(Debug, Clone)]
 pub struct Config {
     pub database: cowiki_utils::DatabaseConfig,
     pub server: cowiki_utils::ServerConfig,
     pub llm: cowiki_utils::LlmConfig,
     pub embedder: cowiki_utils::EmbedderConfig,
+    pub mcp: cowiki_utils::McpConfig,
+    pub agent: cowiki_utils::AgentConfig,
     pub auth: AuthConfig,
     pub frontend_url: String,
 }
@@ -22,8 +22,8 @@ pub struct AuthConfig {
 }
 
 impl Config {
-    pub fn load(args: Option<CliArgs>) -> Self {
-        let shared = cowiki_utils::CowikiConfig::load(args);
+    pub fn load() -> Self {
+        let shared = cowiki_utils::CowikiConfig::load(None);
 
         // GitHub OAuth: env vars only (loaded from .env via dotenvy). Single source of truth.
         let auth = AuthConfig {
@@ -38,6 +38,8 @@ impl Config {
             server: shared.server,
             llm: shared.llm,
             embedder: shared.embedder,
+            mcp: shared.mcp,
+            agent: shared.agent,
             auth,
             frontend_url: shared.frontend_url,
         }

@@ -12,9 +12,10 @@ use serde::Serialize;
 #[serde(tag = "type")]
 pub enum AgentEvent {
     /// A task was started
-    TaskStarted { agent: String, task_id: String },
+    TaskStarted { workspace: String, agent: String, task_id: String },
     /// An agent started calling a tool
     ToolStart {
+        workspace: String,
         agent: String,
         task_id: String,
         tool: String,
@@ -23,6 +24,7 @@ pub enum AgentEvent {
     },
     /// A tool call completed
     ToolEnd {
+        workspace: String,
         agent: String,
         task_id: String,
         tool: String,
@@ -31,11 +33,12 @@ pub enum AgentEvent {
     },
     /// A task completed
     TaskCompleted {
+        workspace: String,
         agent: String,
         task_id: String,
         success: bool,
         rounds: u32,
     },
     /// An agent stopped (idle timeout, crash, etc.)
-    AgentStopped { agent: String, reason: String },
+    AgentStopped { workspace: String, agent: String, reason: String },
 }

@@ -15,7 +15,6 @@ interface AgentDrawerProps {
   onTogglePin: () => void;
   countdown: number;
   isReconnecting: boolean;
-  mode: 'function' | 'stream' | null;
 }
 
 // ── Constants ────────────────────────────────────────────────────
@@ -24,8 +23,7 @@ const DRAWER_WIDTH = 400;
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-function getStatusText(status: StreamStatus, mode: 'function' | 'stream' | null): string {
-  if (mode === 'stream') return '🤖 compiler';
+function getStatusText(status: StreamStatus): string {
   switch (status) {
     case 'streaming': return 'COMPILING…';
     case 'done': return 'DONE';
@@ -34,8 +32,7 @@ function getStatusText(status: StreamStatus, mode: 'function' | 'stream' | null)
   }
 }
 
-function getStatusColor(status: StreamStatus, mode: 'function' | 'stream' | null): string {
-  if (mode === 'stream') return C.ink;
+function getStatusColor(status: StreamStatus): string {
   switch (status) {
     case 'streaming': return C.accent;
     case 'done': return C.green;
@@ -56,7 +53,6 @@ export function AgentDrawer({
   onTogglePin,
   countdown,
   isReconnecting,
-  mode,
 }: AgentDrawerProps) {
   return (
     <div
@@ -80,15 +76,15 @@ export function AgentDrawer({
         <span
           style={{
             fontFamily: 'var(--font-sans)',
-            fontSize: mode === 'stream' ? 13 : 12,
-            fontWeight: mode === 'stream' ? 600 : 500,
-            color: getStatusColor(status, mode),
-            letterSpacing: mode === 'stream' ? '0' : '0.04em',
-            textTransform: mode === 'stream' ? 'none' : ('uppercase' as const),
+            fontSize: 12,
+            fontWeight: 500,
+            color: getStatusColor(status),
+            letterSpacing: '0.04em',
+            textTransform: ('uppercase' as const),
             whiteSpace: 'nowrap',
           }}
         >
-          {getStatusText(status, mode)}
+          {getStatusText(status)}
         </span>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

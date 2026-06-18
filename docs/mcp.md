@@ -1,372 +1,137 @@
 # cowiki MCP Server
 
-cowiki 通过 **Model Context Protocol (MCP)** 向 AI Agent 暴露 wiki 功能。Agent 可以直接摄入源文档、编译页面、搜索知识、提交审核——全部通过 MCP 协议完成。
+cowiki 通过 **Model Context Protocol (MCP)** 向 AI Agent 暴露 wiki 操作能力。
+Agent（pi / claude）通过 MCP 协议直接在 workspace 内读写页面、搜索知识。
 
 ## 架构
 
-MCP 服务是**独立进程**，作为 MCP→REST 代理：MCP 工具通过 HTTP 调用 cowiki-server 的 REST API，零业务逻辑重复。
+MCP server 是**独立进程**，内嵌 `cowiki-core` 直接操作 git repo 和数据库，
+**不是 REST 代理**——工具调用不经过 cowiki-server HTTP API。
 
 ```
-MCP Client ──→ rmcp-server (:9380) ──→ cowiki-server REST API (:3000) ──→ core/db
-              (rmcp + hyper)            (axum)
+MCP Client ──→ rmcp-server (127.0.0.1:9380) ──→ WikiFsGateway ──→ git repo + Postgres
+              (rmcp + hyper)                    (cowiki-core)
 ```
 
-两个进程共享同一套认证（Bearer token 透传）。
-
-## 协议版本
+## 协议
 
 - **Transport**: Streamable HTTP（MCP 协议 2025-03-26）
-- **SDK**: rmcp v1.7 (`modelcontextprotocol/rust-sdk`)
-- **端点**: `http://localhost:9380/mcp`
-- **认证**: `Authorization: Bearer <api_key>`
+- **SDK**: rmcp v1.7
+- **端点**: `http://127.0.0.1:9380/mcp/sse`
+- **绑定**: 仅 loopback（`127.0.0.1`），不接受外部连接
+- **认证**: 可选 `COWIKI_MCP_AUTH_TOKEN` 共享密钥
+
+## 工具列表（5 个）
+
+Agent 通过 pi-mcp-adapter 的 `directTools` 模式直接调用以下工具，无需 `cowiki_` 前缀：
+
+| 工具 | 说明 | 关键参数 |
+|------|------|----------|
+| `cowiki_list` | 列出目录内容 | `dir`, `recursive`? |
+| `cowiki_read` | 读取单个页面或源文件 | `path` |
+| `cowiki_write` | 创建/更新页面（含 YAML frontmatter） | `path`, `body` |
+| `cowiki_remove` | 删除页面或文件 | `path` |
+| `cowiki_search` | 全文搜索（Postgres FTS） | `query`, `top_k`? |
+
+所有工具接收可选的 `_workspace`、`_branch`、`_execution_id` 上下文参数，
+由 pi 通过环境变量 `COWIKI_WORKSPACE`、`COWIKI_BRANCH`、`COWIKI_EXECUTION_ID` 自动注入。
+
+### 工具约束
+
+- `sources/` 目录只读——agent 不能写入或删除源文件
+- workspace slug 经过验证，阻止路径遍历（`../`、`/`、`\`）
+- 写入/删除操作自动记录到 `.cowiki/tracking.json`，供 compile 流程收集产出页面
 
 ## 快速开始
 
-### 启动服务
-
-确保 cowiki-server 已在 :3000 运行：
+### 启动
 
 ```bash
-# 终端 1: 启动 REST API
+# 1. 启动 cowiki server（REST API + 数据库）
 cargo run -p cowiki-server
 
-# 终端 2: 启动 MCP 代理
-cd cowiki-mcp-server && cargo run
+# 2. 启动 MCP server（独立进程）
+COWIKI_DATA_DIR=./data COWIKI_MCP_AUTH_TOKEN=my-secret cargo run --bin cowiki-mcp
 ```
 
-MCP server 通过 `COWIKI_BASE_URL` 环境变量连接到后端 REST API（默认 `http://localhost:3000`）。
+MCP server 通过 `COWIKI_DATA_DIR` 定位 git repo（默认 `./data`），
+端口通过 `COWIKI_MCP_PORT` 设置（默认 `9380`）。
 
-> **注意**：MCP server 使用独立的 `.env` 文件配置（见 `cowiki-mcp-server/.env.example`），不再读取根目录的 `cowiki.conf`。端口默认为 `9380`，后端 API 地址默认为 `http://localhost:3000`。
+### 认证配置
 
-### 获取 API Key
-
-通过 cowiki-server REST API 注册：
-
-```bash
-curl -X POST http://localhost:3000/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"my-agent","email":"agent@example.com"}'
-# → {"api_key": "cw_xxxxxxxxxx", ...}
-```
-
-> Dynamic Client Registration (DCR) 计划中，尚未实现。
-
-### 初始化 MCP 会话
-
-```bash
-curl -X POST http://localhost:9380/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -H "Authorization: Bearer cw_xxxxxxxxxx" \
-  -d '{
-    "jsonrpc": "2.0", "id": 1, "method": "initialize",
-    "params": {
-      "protocolVersion": "2025-03-26",
-      "capabilities": {},
-      "clientInfo": {"name": "my-agent", "version": "1.0"}
-    }
-  }'
-```
-
-响应包含 `Mcp-Session-Id` header。
-
-### 调用工具
-
-```bash
-curl -X POST http://localhost:9380/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -H "Mcp-Session-Id: d56b1486-5495-4373-9a55-9544cdc30701" \
-  -H "Authorization: Bearer cw_xxxxxxxxxx" \
-  -d '{
-    "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-    "params": {
-      "name": "cowiki_search",
-      "arguments": {"query": "machine learning", "limit": 5}
-    }
-  }'
-```
-
-> **注意**：非 `initialize` 请求也建议携带 `Authorization` header，MCP server 需要它来识别用户身份和解析个人空间分支。
-
----
-
-## 端点规范
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `POST` | `/mcp` | JSON-RPC 请求 |
-| `GET` | `/mcp` | SSE 流（需 session） |
-| `DELETE` | `/mcp` | 终止会话 |
-
-### POST /mcp 请求头
-
-| Header | 必填 | 说明 |
-|--------|:--:|------|
-| `Content-Type` | ✅ | `application/json` |
-| `Accept` | ✅ | `application/json, text/event-stream` |
-| `Authorization` | ✅ | `Bearer <api_key>`（所有请求均需） |
-| `Mcp-Session-Id` | 非 `initialize` 时 | 初始化返回的 session ID |
-
-### POST /mcp 响应规则
-
-| 请求内容 | HTTP 状态 |
-|----------|:--:|
-| 纯通知（无 `id`） | `202` |
-| `initialize` | `200` + `Mcp-Session-Id` header |
-| 其他请求 | `200` + JSON-RPC 响应 |
-| 认证失败 | `401` |
-| 无效 session | `404` |
-
----
-
-## 工具列表（27 个）
-
-所有工具的 Rust 实现位于 `cowiki-mcp-server/src/server.rs`，通过 `#[tool_router]` 宏注册。
-工具调用后端 `crates/server/src/routes/` 下的对应 REST 端点。
-
-### 知识操作
-
-| 工具 | 后端 API | 说明 | 关键参数 |
-|------|----------|------|------|
-| `cowiki_ingest` | `POST /api/ingest` | 摄入源文档到个人空间 | `source_type`, `content`, `filename`? |
-| `cowiki_compile` | `POST /api/compile` | 编译个人空间源文档为 wiki 页面 | （无） |
-| `cowiki_read` | `GET /api/pages/{slug}` | 读取 main 空间页面 | `slug` |
-| `cowiki_write` | `POST /api/pages` | 创建/编辑个人空间页面 | `slug`, `body`, `title`?, `summary`? |
-| `cowiki_list` | `GET /api/pages` | 列出 main 空间所有页面 | （无） |
-| `cowiki_search` | `GET /api/search` | 语义搜索 main 空间 | `query`, `limit`? |
-| `cowiki_submit` | `POST /api/submit` | 提交个人页面到审核队列 | `page_slugs` |
-
-> 所有工具无需传入 `branch` 参数 — 写入操作自动使用当前用户的个人空间 (`user/{user.id}`)，读取/搜索/列表默认使用 `main` 分支。
-
-### 审核操作
-
-| 工具 | 后端 API | 说明 | 关键参数 |
-|------|----------|------|------|
-| `cowiki_review_list` | `GET /api/reviews` | 待审核列表 | 无 |
-| `cowiki_review_get` | `GET /api/reviews/{id}` | 审核详情+diff | `id` |
-| `cowiki_review_decide` | `POST /api/reviews/{id}` | 批准/拒绝 | `id`, `action` |
-
-### 工作区管理
-
-| 工具 | 后端 API | 说明 | 关键参数 |
-|------|----------|------|------|
-| `cowiki_workspace_list` | `GET /api/workspaces` | 列出我的工作区 | 无 |
-| `cowiki_workspace_create` | `POST /api/workspaces` | 创建工作区 | `name`, `slug`, `visibility`? |
-| `cowiki_workspace_join` | `POST /api/workspaces/{slug}/join` | 加入公开工作区 | `workspace_slug` |
-| `cowiki_workspace_rename` | `POST /api/workspaces/{slug}/rename` | 重命名工作区 | `workspace_slug`, `name` |
-| `cowiki_workspace_delete` | `DELETE /api/workspaces/{slug}` | 删除工作区 | `workspace_slug` |
-
-### 成员管理
-
-| 工具 | 后端 API | 说明 | 关键参数 |
-|------|----------|------|------|
-| `cowiki_workspace_invite` | `POST /api/workspaces/{slug}/invite` | 邀请成员 | `workspace_slug`, `email`, `role`? |
-| `cowiki_workspace_members` | `GET /api/workspaces/{slug}/members` | 成员列表 | `workspace_slug` |
-| `cowiki_workspace_remove_member` | `POST /api/workspaces/{slug}/members/remove` | 移除成员 | `workspace_slug`, `user_id` |
-| `cowiki_workspace_change_role` | `POST /api/workspaces/{slug}/members/role` | 修改角色 | `workspace_slug`, `user_id`, `role` |
-
-### 邀请管理
-
-| 工具 | 后端 API | 说明 | 关键参数 |
-|------|----------|------|------|
-| `cowiki_invitation_list` | `GET /api/invitations/pending` | 待处理邀请 | 无 |
-| `cowiki_invitation_accept` | `POST /api/invitations/{id}/accept` | 接受邀请 | `invitation_id` |
-| `cowiki_invitation_reject` | `POST /api/invitations/{id}/reject` | 拒绝邀请 | `invitation_id` |
-
-### 工作区内 Wiki 操作
-
-| 工具 | 后端 API | 说明 | 关键参数 |
-|------|----------|------|------|
-| `cowiki_workspace_pages` | `GET /api/workspaces/{slug}/pages` | 列出工作区页面 | `workspace_slug` |
-| `cowiki_workspace_read` | `GET /api/workspaces/{slug}/pages/{page_slug}` | 读取工作区页面 | `workspace_slug`, `page_slug` |
-| `cowiki_workspace_write` | `POST /api/workspaces/{slug}/pages` | 创建/编辑工作区页面 | `workspace_slug`, `slug`, `body`, `title`?, `summary`? |
-| `cowiki_workspace_ingest` | `POST /api/workspaces/{slug}/ingest` | 摄入文档到工作区 | `workspace_slug`, `source_type`, `content`, `filename`? |
-| `cowiki_workspace_compile` | `POST /api/workspaces/{slug}/compile` | 编译工作区文档 | `workspace_slug` |
-
----
-
-## 典型工作流
-
-```
-个人空间:  ingest → compile → read → write → submit
-知识查询:  search → read → list
-参与审核:  review_list → review_get → review_decide
-工作区协作: workspace_list → workspace_create → workspace_invite → workspace_pages → workspace_write
-```
-
----
-
-## 错误码
-
-| JSON-RPC Code | 含义 | 常见原因 |
-|:------------:|------|------|
-| `-32700` | JSON 解析错误 | 请求体格式错误 |
-| `-32602` | 无效参数 | 工具参数类型/缺失 |
-| `-32603` | 服务器内部错误 | 后端 API 异常、网络不通、404 等 |
-| `-32001` | 未授权 / session 过期 | 缺少或无效 Authorization |
-| `-32002` | 资源未找到 | slug 不存在 |
-| `-32003` | 禁止访问 | 无权限操作 |
-
----
-
-## 配置 MCP 客户端
-
-### VS Code (mcp.json)
-
-在项目根目录或 `~/.vscode/mcp.json` 中配置：
-
-```json
-{
-  "servers": {
-    "cowiki": {
-      "url": "http://localhost:9380/mcp",
-      "type": "http",
-      "headers": {
-        "Authorization": "Bearer cw_your_api_key_here"
-      }
-    }
-  }
-}
-```
-
-### Claude Desktop
+当 `COWIKI_MCP_AUTH_TOKEN` 设置时，所有 MCP 请求必须携带 `Authorization: Bearer <token>`。
+cowiki server 启动时会读取同一环境变量，并自动将其注入 pi agent 的 `.mcp.json` 配置中：
 
 ```json
 {
   "mcpServers": {
     "cowiki": {
-      "url": "http://localhost:9380/mcp",
+      "url": "http://127.0.0.1:9380/mcp/sse",
+      "lifecycle": "keep-alive",
+      "directTools": true,
       "headers": {
-        "Authorization": "Bearer cw_your_api_key_here"
+        "Authorization": "Bearer my-secret"
       }
     }
   }
 }
 ```
 
-### 通用 MCP Client
+若不设置 `COWIKI_MCP_AUTH_TOKEN`，MCP server 接受所有 loopback 请求（开发环境适用）。
 
-- **端点**: `http://localhost:9380/mcp`
-- **协议**: MCP 2025-03-26 (Streamable HTTP)
-- **认证**: `Authorization: Bearer <api_key>`
+## 配置
 
----
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `COWIKI_MCP_PORT` | `9380` | MCP server 端口（仅端口号，总是绑 `127.0.0.1`） |
+| `COWIKI_DATA_DIR` | `./data` | Wiki repo 数据目录 |
+| `COWIKI_MCP_AUTH_TOKEN` | （空） | 可选共享密钥，设置后强制 Bearer 认证 |
+
+也支持 CLI 参数：
+
+```bash
+cargo run --bin cowiki-mcp -- --data-dir ./data --port 9380
+```
 
 ## 故障排查
 
-### MCP 工具返回 `-32603 API 404 Not Found`
+### MCP Client 连接失败
 
-**现象**：MCP server 日志中出现：
-```
-response error id=N error=ErrorData { code: ErrorCode(-32603),
-  message: "API 404 Not Found: null", ... }
-```
-
-**原因**：`api_url` 配置中的尾部斜杠与路径拼接产生双斜杠 `//`，导致后端 404。
-
-例如：`api_url = "http://localhost:3000/"` + 路径 `api/pages` → `http://localhost:3000//api/pages` → 404。
-
-**解决**：确保 `[mcp-server]` 配置段中的 `api_url` **不带尾部斜杠**：
-```toml
-[mcp-server]
-api_url = "http://localhost:3000"
-```
-
-MCP server 已在代码层面自动去除尾部斜杠，但建议配置文件中也保持一致。
-
-### MCP Client 报 `fetch failed`
-
-**现象**：VS Code 或其他 MCP 客户端报：
-```
-Error sending message to http://localhost:9380/: TypeError: fetch failed
-```
-
-**原因**：MCP server 进程未运行或已崩溃。
-
-**解决**：
 ```bash
 # 检查进程
 pgrep -f cowiki-mcp
 
-# 重启
-cd cowiki-mcp-server && cargo run
+# 确认端口监听
+ss -tlnp | grep 9380
+
+# 手动测试（无认证时）
+curl http://127.0.0.1:9380/mcp/sse
 ```
 
 ### 认证失败 (401)
 
-确保所有 MCP 请求（包括 `initialize`）都携带 `Authorization: Bearer <api_key>` header。
-API Key 可通过 `POST /api/auth/register` 获取。
+确认 cowiki server 和 MCP server 使用了相同的 `COWIKI_MCP_AUTH_TOKEN`。
+若 token 不匹配，检查 `.env` 文件中该环境变量是否一致。
 
-### 后端连接失败
+### 搜索无结果
 
-MCP server 启动日志会打印后端地址：
-```
-MCP server on 0.0.0.0:9380, backend: http://localhost:3000
-```
-
-确认 cowiki-server 在该地址正常运行：
-```bash
-curl http://localhost:3000/api/health
-# 应返回: ok
-```
-
----
+确认 Postgres FTS 索引已建立（migration 005），且 `pages` 表中有对应 workspace 的数据。
+MCP search 使用 `plainto_tsquery('english', ...)` 进行全文匹配。
 
 ## 代码结构
 
 ```
-cowiki-mcp-server/      # 独立 MCP→REST 代理（顶层，不在 workspace 中）
-├── Cargo.toml          # rmcp + reqwest (零 cowiki-core/db 依赖)
+crates/mcp/                  # 独立 MCP server crate
+├── Cargo.toml               # rmcp + hyper + cowiki-core（直连 git/DB）
 └── src/
-    ├── main.rs         # hyper 启动 + 独立 .env 配置
-    └── server.rs       # MCP→REST proxy (27 tools → HTTP API)
+    ├── main.rs              # CLI 入口 + 启动循环
+    └── lib.rs               # 5 tools（#[tool_router]）+ AuthLayer + start_mcp_server()
 
-crates/
-├── utils/              # 共享配置（仅 cowiki-server 使用）
-│   └── src/lib.rs
-└── server/             # axum REST API (唯一业务逻辑源)
+crates/core/
+└── src/
+    └── gateway.rs           # WikiFsGateway — 5 primitives（list/read/write/remove/search）
+                              # 含 workspace slug 验证 + FTS 搜索 SQL
 ```
 
-cowiki-mcp-server 不依赖 cowiki-core/db，每个 MCP 工具直接调用 `POST/GET http://localhost:3000/api/*`。
-
-MCP 协议处理由 rmcp SDK 负责（JSON-RPC、SSE、session），工具通过 `#[tool_router(server_handler)]` 宏声明式绑定。
-
----
-
-## 运行
-
-### 配置
-
-MCP 服务器与主服务共用 `cowiki.conf` 配置文件（通过 `cowiki-utils` crate），支持：
-
-| 配置方式 | 优先级 |
-|----------|--------|
-| `COWIKI_MCP_PORT` 环境变量 | 最高 |
-| `COWIKI_MCP_PORT` 环境变量 | 高 |
-| `--port` CLI 参数 | 中 |
-| 默认值 | 9380 |
-
-```bash
-# 方式 1: 环境变量指定端口
-COWIKI_MCP_PORT=9090 cd cowiki-mcp-server && cargo run
-
-# 方式 2: CLI 参数指定端口
-cd cowiki-mcp-server && cargo run -- --port 9090
-
-# 方式 3: 使用默认端口 9380
-cd cowiki-mcp-server && cargo run
-
-# 启动主服务器 (端口 3000)
-cargo run -p cowiki-server
-```
-
-### 运行测试
-
-```bash
-# 共享配置 crate 测试
-cargo test -p cowiki-utils
-
-# MCP 服务器测试（独立 crate）
-cd cowiki-mcp-server && cargo test
-```
+MCP server 是 cowiki workspace 的成员 crate，通过 `cowiki-core` 直接操作 git repo 和数据库，
+零 HTTP 代理开销。

@@ -143,11 +143,11 @@ impl Llm for OpenAILlm {
 
         let usage = resp.usage.map(|u| {
             if let Ok(mut tracker) = self.tracker.lock() {
-                tracker.record(&self.config.model, u.prompt_tokens, u.completion_tokens);
+                tracker.record(&self.config.model, u.prompt_tokens as u64, u.completion_tokens as u64);
             }
 
             let mut tu = TokenUsage::default();
-            tu.update(u.prompt_tokens, u.completion_tokens);
+            tu.update(u.prompt_tokens as u64, u.completion_tokens as u64);
             tu
         });
 

@@ -54,12 +54,18 @@ pub struct AgentManager {
 
     /// MCP server URL (e.g., "http://127.0.0.1:9380/mcp/sse")
     mcp_url: String,
+    /// Optional MCP auth token (COWIKI_MCP_AUTH_TOKEN env var)
+    mcp_auth_token: Option<String>,
     /// Workspace path ($COWIKI_DATA_DIR/{ws}/repo)
     pub workspace_path: PathBuf,
     /// LLM config for models.json generation
     pub llm: cowiki_utils::LlmConfig,
     /// Idle timeout for stream agents
     idle_timeout_secs: u64,
+    /// Agent runtime config (timeouts, concurrency)
+    pub agent_config: cowiki_utils::AgentConfig,
+    /// Per-workspace concurrency semaphores
+    concurrency: RwLock<HashMap<String, Arc<tokio::sync::Semaphore>>>,
 }
 
 /// A registered long-lived (Stream-mode) agent.
@@ -87,16 +93,28 @@ pub struct AgentProcess {
     pub manifest: AgentManifest,
     /// Process handle (spawn, wait, kill)
     pub child: Option<tokio::process::Child>,
+    /// OS process ID for external kill (nix signal)
+    pub pid: Option<u32>,
 }
 
 impl AgentManager {
     /// Create a new agent manager.
-    pub fn new(mcp_url: String, workspace_path: PathBuf, llm: cowiki_utils::LlmConfig) -> Self {
+    pub fn new(
+        mcp_url: String,
+        mcp_auth_token: Option<String>,
+        workspace_path: PathBuf,
+        llm: cowiki_utils::LlmConfig,
+        agent_config: cowiki_utils::AgentConfig,
+    ) -> Self {
         let (event_tx, _) = broadcast::channel(256);
 
         tracing::info!(
             mcp_url = %mcp_url,
+            has_auth = mcp_auth_token.is_some(),
             workspace = %workspace_path.display(),
+            hard_timeout = agent_config.hard_timeout_secs,
+            soft_timeout = agent_config.soft_timeout_secs,
+            max_concurrent = agent_config.max_concurrent_per_workspace,
             "created AgentManager (stdin/stdout mode)"
         );
 
@@ -105,9 +123,12 @@ impl AgentManager {
             registry: Arc::new(RwLock::new(HashMap::new())),
             event_tx,
             mcp_url,
+            mcp_auth_token,
             workspace_path,
             llm,
             idle_timeout_secs: 900,
+            agent_config,
+            concurrency: RwLock::new(HashMap::new()),
         }
     }
 
@@ -252,14 +273,34 @@ impl AgentManager {
         name: &str,
         task: process::TaskRequest,
     ) -> Result<AgentResponse, AgentError> {
+        // Per-workspace concurrency: acquire a slot before spawning
+        let sem = {
+            let mut map = self.concurrency.write().await;
+            map.entry(task.workspace.clone())
+                .or_insert_with(|| {
+                    Arc::new(tokio::sync::Semaphore::new(self.agent_config.max_concurrent_per_workspace))
+                })
+                .clone()
+        };
+        let _permit = sem.acquire().await.map_err(|_| {
+            AgentError::PoolExhausted {
+                task_type: task.task_type.clone(),
+            }
+        })?;
+
         let agent_home = self.workspace_path.join("agents").join(name);
         let handle = crate::harness::pi::PiAgentHandle::new(
             agent_home,
             self.mcp_url().to_string(),
             self.llm.clone(),
+            self.agent_config.hard_timeout_secs,
+            self.agent_config.soft_timeout_secs,
+            self.mcp_auth_token.clone(),
         )
-        .with_event_tx(self.event_tx.clone());
+        .with_event_tx(self.event_tx.clone())
+        .with_process_map(self.processes.clone());
 
+        let workspace = task.workspace.clone();
         let ctx = crate::harness::AgentContext {
             execution_id: Uuid::new_v4().to_string(),
             workspace: task.workspace,
@@ -278,6 +319,7 @@ impl AgentManager {
 
         // Emit task completion event
         self.broadcast_event(AgentEvent::TaskCompleted {
+            workspace,
             agent: name.to_string(),
             task_id: task.task_id.clone(),
             success: state.success,
@@ -336,6 +378,7 @@ impl AgentManager {
             let _ = agent.handle.close().await;
             self.broadcast_event(AgentEvent::AgentStopped {
                 agent: name.to_string(),
+                workspace: String::new(),
                 reason: "unregistered".into(),
             });
         }
@@ -366,6 +409,7 @@ impl AgentManager {
                         let _ = agent.handle.close().await;
                         mgr.broadcast_event(AgentEvent::AgentStopped {
                             agent: name.clone(),
+                            workspace: String::new(),
                             reason: "idle timeout".into(),
                         });
                         tracing::info!(%name, "stream agent reaped (idle timeout)");

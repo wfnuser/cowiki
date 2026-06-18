@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { compileAsync } from '../api';
+import { authHeaders } from '../auth';
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -14,13 +15,49 @@ export interface AgentEvent {
   rounds?: number;
   reason?: string;
   message?: string;
-  mode?: string;
+  workspace?: string;
 }
 
 export type StreamStatus = 'idle' | 'streaming' | 'done' | 'error';
 
 const AUTO_CLOSE_MS = 3000;
 const MAX_RECONNECT_ATTEMPTS = 3;
+
+/**
+ * Parse SSE text frames from a ReadableStream.
+ * Splits on double-newline to extract "data: <json>" frames.
+ */
+async function* parseSSEStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal: AbortSignal,
+): AsyncGenerator<AgentEvent> {
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    if (signal.aborted) break;
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    // Keep the last partial line in buffer
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('data: ')) {
+        const json = trimmed.slice(6);
+        try {
+          const event: AgentEvent = JSON.parse(json);
+          yield event;
+        } catch {
+          // skip malformed events
+        }
+      }
+    }
+  }
+}
 
 // ── Hook ────────────────────────────────────────────────────────
 
@@ -32,9 +69,8 @@ export function useCompileStream(wsSlug: string) {
   const [isOpen, setOpen] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [isReconnecting, setReconnecting] = useState(false);
-  const [mode, setMode] = useState<'function' | 'stream' | null>(null);
 
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const reconnectCount = useRef(0);
   const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -48,7 +84,7 @@ export function useCompileStream(wsSlug: string) {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      eventSourceRef.current?.close();
+      abortRef.current?.abort();
       if (autoCloseTimer.current) clearTimeout(autoCloseTimer.current);
       if (countdownInterval.current) clearInterval(countdownInterval.current);
     };
@@ -66,9 +102,9 @@ export function useCompileStream(wsSlug: string) {
     setCountdown(0);
   }, []);
 
-  const closeEventSource = useCallback(() => {
-    eventSourceRef.current?.close();
-    eventSourceRef.current = null;
+  const closeStream = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
     reconnectCount.current = 0;
     setReconnecting(false);
   }, []);
@@ -97,64 +133,72 @@ export function useCompileStream(wsSlug: string) {
   }, [clearTimers]);
 
   const connectSSE = useCallback(() => {
-    closeEventSource();
+    closeStream();
 
     const base = import.meta.env.VITE_API_BASE || '';
     const url = `${base}/api/agents/${wsSlug}/events`;
+    const abort = new AbortController();
+    abortRef.current = abort;
 
-    const es = new EventSource(url);
-    eventSourceRef.current = es;
+    // Use fetch + ReadableStream instead of EventSource so we can send
+    // the Authorization header (EventSource doesn't support custom headers).
+    fetch(url, {
+      headers: { ...authHeaders(), Accept: 'text/event-stream' },
+      signal: abort.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`SSE connection failed: ${response.status}`);
+        }
+        if (!response.body) {
+          throw new Error('SSE: no response body');
+        }
 
-    es.onmessage = (e) => {
-      try {
-        const event: AgentEvent = JSON.parse(e.data);
-        setEvents((prev) => [...prev, event]);
         setReconnecting(false);
+        reconnectCount.current = 0;
 
-        // Parse mode from connected event
-        if (event.type === 'connected' && event.mode) {
-          if (event.mode === 'function' || event.mode === 'stream') setMode(event.mode);
-        }
+        const reader = response.body.getReader();
+        for await (const event of parseSSEStream(reader, abort.signal)) {
+          setEvents((prev) => [...prev, event]);
+          setReconnecting(false);
 
-        switch (event.type) {
-          case 'TaskStarted':
-            setStatus('streaming');
-            break;
-          case 'TaskCompleted':
-            setStatus('done');
-            scheduleAutoClose();
-            break;
-          case 'AgentStopped':
-            if (event.reason && event.reason !== 'finished') {
-              setStatus('error');
-              setError(event.reason);
-            }
-            // Don't auto-close on error — keep drawer open
-            break;
-        }
-      } catch {
-        // ignore malformed events
-      }
-    };
-
-    es.onerror = () => {
-      es.close();
-      if (reconnectCount.current < MAX_RECONNECT_ATTEMPTS) {
-        reconnectCount.current++;
-        setReconnecting(true);
-        const delay = Math.min(1000 * Math.pow(2, reconnectCount.current - 1), 4000);
-        setTimeout(() => {
-          if (eventSourceRef.current === null) {
-            connectSSE();
+          switch (event.type) {
+            case 'TaskStarted':
+              setStatus('streaming');
+              break;
+            case 'TaskCompleted':
+              setStatus('done');
+              scheduleAutoClose();
+              break;
+            case 'AgentStopped':
+              if (event.reason && event.reason !== 'finished') {
+                setStatus('error');
+                setError(event.reason);
+              }
+              break;
           }
-        }, delay);
-      } else {
-        setReconnecting(false);
-        setStatus('error');
-        setError('Connection lost');
-      }
-    };
-  }, [wsSlug, closeEventSource, scheduleAutoClose]);
+        }
+      })
+      .catch((err: Error) => {
+        if (err.name === 'AbortError') return; // intentional close
+        if (reconnectCount.current < MAX_RECONNECT_ATTEMPTS) {
+          reconnectCount.current++;
+          setReconnecting(true);
+          const delay = Math.min(1000 * Math.pow(2, reconnectCount.current - 1), 4000);
+          setTimeout(() => {
+            if (abortRef.current === null) {
+              // Another connection was started — don't double-connect
+              return;
+            }
+            connectSSE();
+          }, delay);
+        } else {
+          setReconnecting(false);
+          setStatus('error');
+          setError('Connection lost');
+        }
+      });
+  }, [wsSlug, closeStream, scheduleAutoClose]);
 
   const startCompile = useCallback(async (branch: string) => {
     setEvents([]);
@@ -166,7 +210,6 @@ export function useCompileStream(wsSlug: string) {
     clearTimers();
 
     // Connect SSE first so we don't miss events
-    setMode(null); // Reset mode — will be set by connected event
     connectSSE();
 
     // Fire-and-forget POST — SSE carries the real result
@@ -213,6 +256,5 @@ export function useCompileStream(wsSlug: string) {
     togglePin,
     countdown,
     isReconnecting,
-    mode,
   };
 }

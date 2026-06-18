@@ -7,6 +7,12 @@
 //! Workspace/branch passed per-tool-call via optional _workspace/_branch params.
 //! pi sets these from COWIKI_WORKSPACE, COWIKI_BRANCH, COWIKI_EXECUTION_ID env vars.
 //! Write/remove tracking via WikiFsGateway (reset before dispatch, take after).
+//!
+//! ## Auth
+//!
+//! When COWIKI_MCP_AUTH_TOKEN is set, every request must include
+//! `Authorization: Bearer <token>`. The cowiki server generates a random
+//! token at startup and passes it to pi via the .mcp.json config file.
 
 use std::sync::Arc;
 
@@ -223,9 +229,21 @@ fn json_result(v: serde_json::Value) -> CallToolResult {
     .unwrap_or_else(|_| Content::text("{}".to_string()))])
 }
 
+// ── Server launcher ───────────────────────────────────────────
+
 /// Start the MCP server on the given bind address (e.g., "127.0.0.1:9380").
 /// Runs until the tokio runtime is dropped (no separate Ctrl+C handler).
-pub async fn start_mcp_server(gateway: Arc<WikiFsGateway>, bind_addr: &str) -> anyhow::Result<()> {
+///
+/// `auth_token`: optional shared secret — when set, all requests must include
+/// `Authorization: Bearer <token>`. Set via COWIKI_MCP_AUTH_TOKEN env var.
+pub async fn start_mcp_server(
+    gateway: Arc<WikiFsGateway>,
+    bind_addr: &str,
+    auth_token: Option<&str>,
+) -> anyhow::Result<()> {
+    use hyper::body::{Bytes, Incoming};
+    use hyper::service::{service_fn, Service};
+    use http_body_util::{BodyExt, Full};
     use hyper_util::{
         rt::TokioExecutor, server::conn::auto::Builder, service::TowerToHyperService,
     };
@@ -233,7 +251,10 @@ pub async fn start_mcp_server(gateway: Arc<WikiFsGateway>, bind_addr: &str) -> a
         session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
     };
 
-    tracing::info!("MCP server starting on {bind_addr}");
+    tracing::info!(
+        "MCP server starting on {bind_addr} (auth: {})",
+        if auth_token.is_some() { "required" } else { "none" }
+    );
 
     let mcp = CowikiMcp::new(gateway);
     let mcp_service: StreamableHttpService<CowikiMcp, LocalSessionManager> =
@@ -243,7 +264,7 @@ pub async fn start_mcp_server(gateway: Arc<WikiFsGateway>, bind_addr: &str) -> a
             StreamableHttpServerConfig::default(),
         );
 
-    let tower_service = TowerToHyperService::new(mcp_service);
+    let auth_token: Option<Arc<str>> = auth_token.map(|t| Arc::from(t));
     let listener = tokio::net::TcpListener::bind(bind_addr).await?;
     tracing::info!("MCP server listening on {bind_addr}");
 
@@ -254,10 +275,43 @@ pub async fn start_mcp_server(gateway: Arc<WikiFsGateway>, bind_addr: &str) -> a
                 Err(e) => { tracing::error!("accept: {e}"); continue; }
             },
         };
-        let svc = tower_service.clone();
+        let tower_svc = TowerToHyperService::new(mcp_service.clone());
+        let token = auth_token.clone();
+
+        // Wrap with auth check via hyper service_fn
+        let auth_svc = service_fn(move |req: hyper::Request<Incoming>| {
+            let svc = tower_svc.clone();
+            let token = token.clone();
+            async move {
+                // Auth check: when token is configured, require matching Bearer header
+                if let Some(ref expected) = token {
+                    let authorized = req
+                        .headers()
+                        .get(http::header::AUTHORIZATION)
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|v| v.strip_prefix("Bearer "))
+                        .map(|t| t == expected.as_ref())
+                        .unwrap_or(false);
+
+                    if !authorized {
+                        let body = Full::new(Bytes::from("MCP auth required"))
+                            .map_err(|never| match never {})
+                            .boxed();
+                        return Ok(
+                            http::Response::builder()
+                                .status(http::StatusCode::UNAUTHORIZED)
+                                .body(body)
+                                .expect("static response"),
+                        );
+                    }
+                }
+                svc.call(req).await
+            }
+        });
+
         tokio::spawn(async move {
             if let Err(e) = Builder::new(TokioExecutor::default())
-                .serve_connection(hyper_util::rt::TokioIo::new(stream), svc)
+                .serve_connection(hyper_util::rt::TokioIo::new(stream), auth_svc)
                 .await
             {
                 if !e.to_string().contains("connection") {
