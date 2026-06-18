@@ -113,6 +113,12 @@ pub async fn create_comment(
     let guard = require_membership(&state, &headers, &ws_slug).await?;
     let user = &guard.user;
 
+    // Validate the body before any write, so a rejected comment never leaves a
+    // snapshot row behind (the snapshot upsert below happens for top-level ones).
+    if input.body.trim().is_empty() {
+        return Err(AppError::BadRequest("comment body is empty".into()));
+    }
+
     let (content_hash, start_line, end_line) = match input.parent_id {
         // Reply: must target a top-level comment on the same page; no anchor.
         Some(parent_id) => {
@@ -152,10 +158,6 @@ pub async fn create_comment(
             (Some(hash), Some(s), Some(e))
         }
     };
-
-    if input.body.trim().is_empty() {
-        return Err(AppError::BadRequest("comment body is empty".into()));
-    }
 
     let comment = cowiki_db::page_comments::create(
         &state.db,
