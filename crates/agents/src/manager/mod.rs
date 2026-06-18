@@ -278,14 +278,14 @@ impl AgentManager {
             let mut map = self.concurrency.write().await;
             map.entry(task.workspace.clone())
                 .or_insert_with(|| {
-                    Arc::new(tokio::sync::Semaphore::new(self.agent_config.max_concurrent_per_workspace))
+                    Arc::new(tokio::sync::Semaphore::new(
+                        self.agent_config.max_concurrent_per_workspace,
+                    ))
                 })
                 .clone()
         };
-        let _permit = sem.acquire().await.map_err(|_| {
-            AgentError::PoolExhausted {
-                task_type: task.task_type.clone(),
-            }
+        let _permit = sem.acquire().await.map_err(|_| AgentError::PoolExhausted {
+            task_type: task.task_type.clone(),
         })?;
 
         let agent_home = self.workspace_path.join("agents").join(name);

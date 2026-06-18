@@ -126,7 +126,10 @@ impl CowikiConfig {
 
         // MCP auth token: from env var, or auto-generate + log for operator
         let mcp_auth_token = std::env::var("COWIKI_MCP_AUTH_TOKEN").ok().or_else(|| {
-            let token = format!("cw_mcp_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
+            let token = format!(
+                "cw_mcp_{}",
+                uuid::Uuid::new_v4().to_string().replace('-', "")
+            );
             tracing::info!(
                 "COWIKI_MCP_AUTH_TOKEN not set — auto-generated token: {token}\n\
                  Set this in your .env file and pass it to the MCP binary:\n\
@@ -269,8 +272,14 @@ mod tests {
         // When COWIKI_MCP_AUTH_TOKEN is not set, should auto-generate one
         std::env::remove_var("COWIKI_MCP_AUTH_TOKEN");
         let config = CowikiConfig::from_env();
-        assert!(config.mcp.auth_token.is_some(), "should auto-generate a token");
+        assert!(
+            config.mcp.auth_token.is_some(),
+            "should auto-generate a token"
+        );
         let token = config.mcp.auth_token.unwrap();
-        assert!(token.starts_with("cw_mcp_"), "token should have cw_mcp_ prefix: {token}");
+        assert!(
+            token.starts_with("cw_mcp_"),
+            "token should have cw_mcp_ prefix: {token}"
+        );
     }
 }

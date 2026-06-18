@@ -219,9 +219,7 @@ impl OpenAIEmbedder {
         // Guard against zero-length embeddings
         for (i, r) in results.iter().enumerate() {
             if r.vector.is_empty() {
-                return Err(format!(
-                    "embedder batch: empty embedding at index {i}"
-                ));
+                return Err(format!("embedder batch: empty embedding at index {i}"));
             }
         }
 

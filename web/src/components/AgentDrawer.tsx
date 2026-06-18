@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { C } from '@/lib/design';
 import type { AgentEvent, StreamStatus } from '@/hooks/useCompileStream';
 import { AgentLogView } from '@/components/AgentLogView';
@@ -54,6 +55,15 @@ export function AgentDrawer({
   countdown,
   isReconnecting,
 }: AgentDrawerProps) {
+  const [mode, setMode] = useState<'stream' | 'log'>('log');
+
+  useEffect(() => {
+    // Auto-switch to stream (chat) view when compilation starts
+    if (isCompiling) {
+      setMode('stream');
+    }
+  }, [isCompiling]);
+
   return (
     <div
       style={{

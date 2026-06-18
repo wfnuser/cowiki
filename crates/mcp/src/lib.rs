@@ -241,9 +241,9 @@ pub async fn start_mcp_server(
     bind_addr: &str,
     auth_token: Option<&str>,
 ) -> anyhow::Result<()> {
+    use http_body_util::{BodyExt, Full};
     use hyper::body::{Bytes, Incoming};
     use hyper::service::{service_fn, Service};
-    use http_body_util::{BodyExt, Full};
     use hyper_util::{
         rt::TokioExecutor, server::conn::auto::Builder, service::TowerToHyperService,
     };
@@ -253,7 +253,11 @@ pub async fn start_mcp_server(
 
     tracing::info!(
         "MCP server starting on {bind_addr} (auth: {})",
-        if auth_token.is_some() { "required" } else { "none" }
+        if auth_token.is_some() {
+            "required"
+        } else {
+            "none"
+        }
     );
 
     let mcp = CowikiMcp::new(gateway);
@@ -297,12 +301,10 @@ pub async fn start_mcp_server(
                         let body = Full::new(Bytes::from("MCP auth required"))
                             .map_err(|never| match never {})
                             .boxed();
-                        return Ok(
-                            http::Response::builder()
-                                .status(http::StatusCode::UNAUTHORIZED)
-                                .body(body)
-                                .expect("static response"),
-                        );
+                        return Ok(http::Response::builder()
+                            .status(http::StatusCode::UNAUTHORIZED)
+                            .body(body)
+                            .expect("static response"));
                     }
                 }
                 svc.call(req).await

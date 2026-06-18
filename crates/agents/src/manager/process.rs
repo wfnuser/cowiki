@@ -62,9 +62,7 @@ pub async fn stop_agent(manager: &AgentManager, name: &str) -> Result<(), AgentE
         tracing::info!(%name, pid, "sending SIGTERM to agent (by PID)");
         // Send SIGTERM via command
         let pid_str = pid.to_string();
-        let _ = tokio::process::Command::new("kill")
-            .arg(&pid_str)
-            .spawn();
+        let _ = tokio::process::Command::new("kill").arg(&pid_str).spawn();
         sleep(Duration::from_secs(SHUTDOWN_GRACE_PERIOD_SECS)).await;
         let _ = tokio::process::Command::new("kill")
             .arg("-9")

@@ -69,10 +69,7 @@ impl PiAgentHandle {
     }
 
     /// Attach a process map for stop_agent support.
-    pub fn with_process_map(
-        mut self,
-        map: Arc<RwLock<HashMap<String, AgentProcess>>>,
-    ) -> Self {
+    pub fn with_process_map(mut self, map: Arc<RwLock<HashMap<String, AgentProcess>>>) -> Self {
         self.process_map = Some(map);
         self
     }
@@ -114,7 +111,12 @@ impl PiAgentHandle {
         write_skills(&self.agent_home, task_type).await?;
 
         // MCP config — pi-mcp-adapter auto-discovers .mcp.json
-        write_mcp_config(&self.agent_home, &self.mcp_url, self.mcp_auth_token.as_deref()).await?;
+        write_mcp_config(
+            &self.agent_home,
+            &self.mcp_url,
+            self.mcp_auth_token.as_deref(),
+        )
+        .await?;
 
         Ok(())
     }

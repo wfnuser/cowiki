@@ -109,8 +109,10 @@ async fn agent_events(
         }
     });
 
-    Ok(axum::response::Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
-        .keep_alive(axum::response::sse::KeepAlive::default()))
+    Ok(
+        axum::response::Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
+            .keep_alive(axum::response::sse::KeepAlive::default()),
+    )
 }
 
 /// Check if an AgentEvent's workspace field matches the given workspace slug.
@@ -123,7 +125,9 @@ fn event_workspace_matches(event: &cowiki_agents::stream::AgentEvent, ws: &str) 
         | cowiki_agents::stream::AgentEvent::AgentStopped { workspace, .. } => workspace,
     };
     // Match on workspace slug or path suffix (e.g. "data/default/repo" ends with "/default/repo")
-    event_ws == ws || event_ws.ends_with(&format!("/{ws}/repo")) || event_ws == &format!("data/{ws}/repo")
+    event_ws == ws
+        || event_ws.ends_with(&format!("/{ws}/repo"))
+        || event_ws == &format!("data/{ws}/repo")
 }
 
 #[tokio::main]
