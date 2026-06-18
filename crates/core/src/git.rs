@@ -540,6 +540,43 @@ impl WikiRepo {
         }
     }
 
+    /// Author name + unix timestamp of the most recent commit on `branch` that
+    /// changed `file_path` — i.e. who last edited the page and when.
+    pub fn last_commit_for(
+        &self,
+        branch: &str,
+        file_path: &str,
+    ) -> Result<Option<(String, i64)>, git2::Error> {
+        let repo = self.repo()?;
+        let head = repo
+            .find_branch(branch, BranchType::Local)?
+            .get()
+            .peel_to_commit()?;
+        let mut revwalk = repo.revwalk()?;
+        revwalk.push(head.id())?;
+        revwalk.set_sorting(git2::Sort::TIME)?;
+        let path = Path::new(file_path);
+        for oid in revwalk {
+            let commit = repo.find_commit(oid?)?;
+            let here = commit.tree()?.get_path(path).map(|e| e.id()).ok();
+            let parent = commit
+                .parent(0)
+                .ok()
+                .and_then(|p| p.tree().ok())
+                .and_then(|t| t.get_path(path).map(|e| e.id()).ok());
+            let changed = match (here, parent) {
+                (Some(a), Some(b)) => a != b,
+                (Some(_), None) => true,
+                _ => false,
+            };
+            if changed {
+                let name = commit.author().name().unwrap_or("Unknown").to_string();
+                return Ok(Some((name, commit.time().seconds())));
+            }
+        }
+        Ok(None)
+    }
+
     pub fn list_files(&self, branch: &str, dir: &str) -> Result<Vec<String>, git2::Error> {
         let repo = self.repo()?;
         let branch_ref = repo.find_branch(branch, BranchType::Local)?;
