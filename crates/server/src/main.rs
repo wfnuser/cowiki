@@ -24,6 +24,14 @@ pub struct AppState {
     pub wiki_fs_gateway: Arc<WikiFsGateway>,
     /// Global AgentManager (single instance for all workspaces)
     pub agent_manager: Arc<cowiki_agents::manager::AgentManager>,
+    /// Pending OAuth CSRF nonces → minted-at, swept on insert.
+    ///
+    /// In-process only: this does NOT survive a restart and is NOT shared across
+    /// instances behind a load balancer — a login started on instance A can't
+    /// complete its callback on instance B. Fine for the current single-instance
+    /// deploy; multi-instance needs a shared store (Redis/DB) or a signed,
+    /// self-validating state token. Tracked with the account-system redesign (#12).
+    pub oauth_states: std::sync::Mutex<HashMap<String, std::time::Instant>>,
 }
 
 // ── Usage endpoint response ──
@@ -224,6 +232,7 @@ async fn main() {
         compiler,
         wiki_fs_gateway,
         agent_manager,
+        oauth_states: std::sync::Mutex::new(HashMap::new()),
     });
 
     // Background task: expire stale invitations
@@ -421,6 +430,27 @@ async fn main() {
         .route(
             "/api/workspaces/{ws_slug}/reviews/{submission_id}/comments/{comment_id}",
             delete(routes::comments::delete_comment),
+        )
+        // Document comments (inline page comments)
+        .route(
+            "/api/workspaces/{ws_slug}/page-comments",
+            get(routes::page_comments::list_comments),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/page-comments",
+            post(routes::page_comments::create_comment),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/page-comments/{comment_id}/resolve",
+            post(routes::page_comments::resolve_comment),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/page-comments/{comment_id}/unresolve",
+            post(routes::page_comments::unresolve_comment),
+        )
+        .route(
+            "/api/workspaces/{ws_slug}/page-comments/{comment_id}",
+            delete(routes::page_comments::delete_comment),
         )
         // Search
         .route(

@@ -81,6 +81,28 @@ pub fn require(guard: &WorkspaceGuard, permission: Permission) -> Result<()> {
     }
 }
 
+/// Reads may target the shared `main` or the caller's own draft branch — never
+/// another user's branch (their un-reviewed drafts are private until submitted).
+pub fn require_readable_branch(branch: &str, user_id: uuid::Uuid) -> Result<()> {
+    if branch == "main" || branch == format!("user/{user_id}") {
+        return Ok(());
+    }
+    Err(AppError::Forbidden(
+        "reads are limited to main or your own draft branch".into(),
+    ))
+}
+
+/// Mutating ops only touch the caller's own draft branch — never main, pr/* snapshots,
+/// or other users' branches (all writes flow to main exclusively through merge_pr).
+pub fn require_own_branch(branch: &str, user_id: uuid::Uuid) -> Result<()> {
+    if branch != format!("user/{user_id}") {
+        return Err(AppError::Forbidden(
+            "writes are only allowed on your own draft branch".into(),
+        ));
+    }
+    Ok(())
+}
+
 // ── Unit Tests ──────────────────────────────────────────────────────
 
 #[cfg(test)]

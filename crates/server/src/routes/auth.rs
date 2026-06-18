@@ -39,12 +39,12 @@ pub async fn register(
         return Err(AppError::BadRequest("name already taken".into()));
     }
 
-    let user =
+    let (user, raw_key) =
         cowiki_db::users::create(&state.db, &input.name, input.email.as_deref(), None).await?;
     init_user_space(&state, &user).await?;
 
     Ok(Json(AuthResponse {
-        api_key: user.api_key.clone(),
+        api_key: raw_key,
         user: UserInfo {
             id: user.id.to_string(),
             name: user.name,
@@ -74,10 +74,10 @@ pub async fn regenerate_key(
     headers: axum::http::HeaderMap,
 ) -> Result<Json<AuthResponse>> {
     let user = extract_user(&state.db, &headers).await?;
-    let updated = cowiki_db::users::regenerate_api_key(&state.db, user.id).await?;
+    let (updated, raw_key) = cowiki_db::users::regenerate_api_key(&state.db, user.id).await?;
 
     Ok(Json(AuthResponse {
-        api_key: updated.api_key.clone(),
+        api_key: raw_key,
         user: UserInfo {
             id: updated.id.to_string(),
             name: updated.name,
@@ -90,17 +90,30 @@ pub async fn regenerate_key(
 // ── GitHub OAuth ──
 
 pub async fn github_login(State(state): State<Arc<AppState>>) -> Redirect {
+    // CSRF protection (#59): a random, single-use `state` nonce that the callback
+    // must echo back. Stored in-memory with a TTL (single-instance server).
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
+    {
+        let mut states = state.oauth_states.lock().unwrap();
+        let now = std::time::Instant::now();
+        states.retain(|_, t| now.duration_since(*t).as_secs() < OAUTH_STATE_TTL_SECS);
+        states.insert(nonce.clone(), now);
+    }
     let url = format!(
-        "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&scope=read:user%20user:email",
+        "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&scope=read:user%20user:email&state={}",
         state.config.auth.github_client_id,
         urlencoding::encode(&state.config.auth.github_redirect_uri),
+        nonce,
     );
     Redirect::temporary(&url)
 }
 
+const OAUTH_STATE_TTL_SECS: u64 = 600;
+
 #[derive(Deserialize)]
 pub struct GithubCallbackParams {
     pub code: String,
+    pub state: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -127,6 +140,23 @@ pub async fn github_callback(
     State(state): State<Arc<AppState>>,
     Query(params): Query<GithubCallbackParams>,
 ) -> Result<Redirect> {
+    // Verify the CSRF nonce minted at login: present, known, fresh, single-use.
+    let nonce = params
+        .state
+        .as_deref()
+        .ok_or_else(|| AppError::Unauthorized("missing oauth state".into()))?;
+    {
+        let mut states = state.oauth_states.lock().unwrap();
+        let fresh = states
+            .remove(nonce)
+            .map(|t| t.elapsed().as_secs() < OAUTH_STATE_TTL_SECS)
+            .unwrap_or(false);
+        if !fresh {
+            return Err(AppError::Unauthorized(
+                "invalid or expired oauth state".into(),
+            ));
+        }
+    }
     let client = reqwest::Client::new();
 
     let token_resp = client
@@ -177,7 +207,7 @@ pub async fn github_callback(
         emails.and_then(|list| list.into_iter().find(|e| e.primary).map(|e| e.email))
     };
 
-    let user = if let Some(existing) =
+    let (user, raw_key) = if let Some(existing) =
         cowiki_db::users::find_by_name(&state.db, &gh_user.login).await?
     {
         // Update email if the existing user has none but GitHub provides one
@@ -190,25 +220,31 @@ pub async fn github_callback(
                 }
             }
         }
-        existing
+        // The primary key is stored hashed and can't be recovered — mint a fresh
+        // secondary key for this sign-in instead of rotating the primary (which
+        // would log out the user's other sessions/agents). Revoke the previous
+        // "GitHub sign-in" key first so repeated logins don't accumulate keys
+        // unboundedly — each sign-in supersedes the last (one active login key).
+        let _ = cowiki_db::api_keys::revoke_by_name(&state.db, existing.id, "GitHub sign-in").await;
+        let minted = cowiki_db::api_keys::create(&state.db, existing.id, "GitHub sign-in").await?;
+        (existing, minted.raw_key)
     } else {
-        let user =
+        let (user, raw_key) =
             cowiki_db::users::create(&state.db, &gh_user.login, email.as_deref(), None).await?;
         if let Err(e) = init_user_space(&state, &user).await {
             tracing::error!("failed to init user space: {:?}", e);
         }
         tracing::info!("created user {} via GitHub OAuth", user.name);
-        user
+        (user, raw_key)
     };
 
-    // TODO: SECURITY — Passing the API key as a query parameter in the redirect URL is a risk:
-    // it may be logged in server access logs, browser history, and HTTP Referer headers.
-    // This should be replaced with a short-lived auth code exchange or secure HttpOnly cookie flow.
-    // Not changing the flow now as it would break the current login integration.
+    // The credential travels in the URL *fragment* (#59): fragments never reach
+    // servers, access logs, or Referer headers — unlike the old ?api_key= query.
+    // (A full HttpOnly-cookie session flow is the account-system redesign, #12.)
     let redirect_url = format!(
-        "{}/?api_key={}&user_name={}&user_id={}",
+        "{}/#api_key={}&user_name={}&user_id={}",
         state.config.frontend_url,
-        user.api_key,
+        raw_key,
         urlencoding::encode(&user.name),
         user.id,
     );
@@ -221,8 +257,6 @@ pub async fn extract_user(
     db: &sqlx::PgPool,
     headers: &axum::http::HeaderMap,
 ) -> Result<cowiki_db::users::User> {
-    use sha2::{Digest, Sha256};
-
     let auth_header = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -232,17 +266,14 @@ pub async fn extract_user(
         .strip_prefix("Bearer ")
         .ok_or_else(|| AppError::Unauthorized("invalid Authorization format".into()))?;
 
-    // Fast path: primary key (plaintext in users.api_key)
+    // Primary key: stored as SHA-256 (find_by_api_key hashes the raw token)
     if let Some(user) = cowiki_db::users::find_by_api_key(db, api_key).await? {
         return Ok(user);
     }
 
-    // Fallback: secondary keys (SHA-256 hashed in api_keys.key_hash)
-    let key_hash: String = {
-        let mut hasher = Sha256::new();
-        hasher.update(api_key.as_bytes());
-        format!("{:x}", hasher.finalize())
-    };
+    // Fallback: secondary keys (SHA-256 hashed in api_keys.key_hash). Use the same
+    // canonical hash function as the primary key so the two paths can't drift.
+    let key_hash = cowiki_db::users::hash_api_key(api_key);
 
     if let Some((_key, user_id)) = cowiki_db::api_keys::find_by_key_hash(db, &key_hash).await? {
         // Touch last_used_at (fire-and-forget)

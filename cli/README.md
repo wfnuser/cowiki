@@ -7,11 +7,14 @@ Command-line client for [cowiki](https://github.com/wfnuser/cowiki) — a collab
 ### Dev Install (from source)
 
 ```bash
-cd cli
-npm install
-npm run build
-npm link
+npm run cli:dev-install
 cowiki --help
+```
+
+After the first dev install, rebuild the linked CLI after pulling CLI changes:
+
+```bash
+npm run cli:build
 ```
 
 ### npm Install (when published)

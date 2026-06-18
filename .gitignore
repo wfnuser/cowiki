@@ -31,3 +31,6 @@ mcp-server
 tmp
 
 sketch-*
+# local comment-system test stack
+data-comments-test/
+cowiki.conf

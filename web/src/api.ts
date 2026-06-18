@@ -19,6 +19,10 @@ export interface PageMeta {
 
 export interface PageFull extends PageMeta {
   body: string;
+  /** Last editor of the page (git history), for the byline. */
+  edited_by?: string | null;
+  /** Unix timestamp (seconds) of that last edit. */
+  edited_at?: number | null;
 }
 
 export interface Submission {
@@ -689,6 +693,97 @@ export async function editReview(workspaceSlug: string, submissionId: string, pa
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ path, content }),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => `Request failed: ${res.status}`));
+}
+
+// ── Document Comments ──
+
+export interface PageComment {
+  id: string;
+  workspace_slug: string;
+  page_slug: string;
+  user_id: string;
+  content_hash: string | null;
+  start_line: number | null;
+  end_line: number | null;
+  body: string;
+  parent_id: string | null;
+  resolved: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CommentSnapshot {
+  content_hash: string;
+  source: string;
+}
+
+export interface PageCommentsResponse {
+  comments: PageComment[];
+  snapshots: CommentSnapshot[];
+}
+
+/** All comments on a page plus the snapshots needed to re-anchor them. */
+export async function listPageComments(workspaceSlug: string, slug: string): Promise<PageCommentsResponse> {
+  const res = await fetch(
+    `${BASE}/workspaces/${workspaceSlug}/page-comments?slug=${encodeURIComponent(slug)}`,
+    { headers: h() },
+  );
+  if (!res.ok) throw new Error(await res.text().catch(() => `Request failed: ${res.status}`));
+  return res.json();
+}
+
+/**
+ * Create a comment or reply. Top-level comments pass `source` (the rendered,
+ * frontmatter-stripped markdown the anchor was made against) plus a 1-based
+ * `startLine`/`endLine`; replies pass only `parentId` + `body`.
+ */
+export async function createPageComment(
+  workspaceSlug: string,
+  input: {
+    slug: string;
+    body: string;
+    source?: string;
+    startLine?: number;
+    endLine?: number;
+    parentId?: string;
+  },
+): Promise<PageComment> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/page-comments`, {
+    method: 'POST',
+    headers: h({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      slug: input.slug,
+      body: input.body,
+      source: input.source,
+      start_line: input.startLine,
+      end_line: input.endLine,
+      parent_id: input.parentId,
+    }),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => `Request failed: ${res.status}`));
+  return res.json();
+}
+
+export async function setPageCommentResolved(
+  workspaceSlug: string,
+  commentId: string,
+  resolved: boolean,
+): Promise<PageComment> {
+  const action = resolved ? 'resolve' : 'unresolve';
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/page-comments/${commentId}/${action}`, {
+    method: 'POST',
+    headers: h(),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => `Request failed: ${res.status}`));
+  return res.json();
+}
+
+export async function deletePageComment(workspaceSlug: string, commentId: string): Promise<void> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/page-comments/${commentId}`, {
+    method: 'DELETE',
+    headers: h(),
   });
   if (!res.ok) throw new Error(await res.text().catch(() => `Request failed: ${res.status}`));
 }
