@@ -5,6 +5,7 @@ pub mod guard;
 pub mod ingest;
 pub mod keys;
 pub mod notifications;
+pub mod page_comments;
 pub mod pages;
 pub mod review;
 pub mod search;

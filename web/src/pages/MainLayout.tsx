@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Compass,
@@ -35,6 +35,7 @@ import { MembersView } from '../components/views/MembersView';
 import { InviteDialog } from '../components/InviteDialog';
 import { PageEditor } from '../components/PageEditor';
 import { TransferDialog } from '../components/TransferDialog';
+import { CommentsProvider, CommentsPanel, CommentsHeaderToggle, commentMarkdownComponents } from '../components/PageCommentsLayer';
 import { C } from '@/lib/design';
 
 type ActiveView =
@@ -65,6 +66,7 @@ export function MainLayout() {
   const [spaceSources, setSpaceSources] = useState<Record<string, SourceItem[]>>({});
   const [activeView, setActiveView] = useState<ActiveView>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
+  const articleRef = useRef<HTMLElement>(null);
   const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<NavTab>('wiki');
   const [reviewCount, setReviewCount] = useState(0);
@@ -521,6 +523,12 @@ export function MainLayout() {
     return body;
   };
 
+  // Page-view comment context: active only when reading (not editing) a page.
+  const pageView = activeView?.kind === 'page' ? activeView : null;
+  const commentsActive = !!pageView?.content && !editingPage;
+  const commentPageSlug = commentsActive && pageView ? pageView.slug : '';
+  const commentSource = commentsActive && pageView?.content ? renderBody(pageView.content.body) : '';
+
   // Execute a pending rename/delete from the tree menus.
   const handlePathOp = async () => {
     if (!pathOp || !activeWorkspace) return;
@@ -622,6 +630,13 @@ export function MainLayout() {
 
           {/* Main Content Area */}
           <main style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+            <CommentsProvider
+              workspaceSlug={activeWorkspace?.slug ?? ''}
+              pageSlug={commentPageSlug}
+              source={commentSource}
+              articleRef={articleRef}
+              currentUserId={auth?.id}
+            >
             {/* Top bar: breadcrumb + actions */}
             <div style={{
               position: 'sticky', top: 0, zIndex: 10,
@@ -718,6 +733,7 @@ export function MainLayout() {
                       {compiling ? <RefreshCw size={13} className="animate-spin" /> : <Zap size={13} color="#e2590b" />}
                       {compiling ? 'Compiling...' : 'Compile'}
                     </button>
+                    <CommentsHeaderToggle style={{ ...headerBtnStyle, marginLeft: 2 }} />
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <button style={{ ...headerBtnStyle, padding: '4px 6px' }} aria-label="More actions">
@@ -760,7 +776,7 @@ export function MainLayout() {
             />
 
             {/* Content */}
-            <div style={{ flex: 1, padding: '36px 56px 56px' }}>
+            <div style={{ flex: 1, padding: '36px 56px 56px', position: 'relative' }}>
               {/* Review detail */}
               {activeView?.kind === 'review-detail' ? (
                 <ReviewDetail
@@ -859,9 +875,18 @@ export function MainLayout() {
                     onCancel={() => setEditingPage(false)}
                   />
                 ) : (
-                  <article className="prose">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{renderBody(activeView.content.body)}</ReactMarkdown>
-                  </article>
+                  // Fill the content box edge-to-edge: the doc scrolls on the left
+                  // (left-anchored, same left edge as every other view), the comment
+                  // panel is flush to the right edge and full height with its own
+                  // scroll. Opening it shrinks the doc from the right only.
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'stretch' }}>
+                    <article ref={articleRef} className="prose" style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '36px 48px 56px 56px' }}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={commentMarkdownComponents}>
+                        {renderBody(activeView.content.body)}
+                      </ReactMarkdown>
+                    </article>
+                    <CommentsPanel />
+                  </div>
                 )
 
               /* Discover */
@@ -878,6 +903,7 @@ export function MainLayout() {
                 </div>
               )}
             </div>
+            </CommentsProvider>
           </main>
         </div>
       </TooltipProvider>
