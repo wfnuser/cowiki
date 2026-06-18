@@ -148,6 +148,10 @@ export function CommentsProvider({
   const [panelOpen, setPanelOpen] = useState(true);
   const [pending, setPending] = useState<{ start: number; end: number; x: number; y: number } | null>(null);
   const [composing, setComposing] = useState<{ start: number; end: number; quote: string } | null>(null);
+  // Mirror `composing` into a ref so the once-registered mouseup handler can read
+  // it without a stale closure (and without re-subscribing on every change).
+  const composingRef = useRef(false);
+  composingRef.current = composing != null;
 
   const enabled = !!workspaceSlug && !!pageSlug;
 
@@ -217,6 +221,9 @@ export function CommentsProvider({
   // selection → floating "Comment" toolbar
   useEffect(() => {
     const onUp = () => {
+      // A composer is open — don't let the still-present selection re-arm the
+      // floating "Comment" bubble (it would resurface after cancel/submit).
+      if (composingRef.current) return;
       const root = articleRef.current;
       if (!root) return;
       const lr = selectionLineRange(root);
@@ -232,6 +239,7 @@ export function CommentsProvider({
     if (!composing || !body.trim()) return;
     await createPageComment(workspaceSlug, { slug: pageSlug, body: body.trim(), source, startLine: composing.start, endLine: composing.end });
     setComposing(null);
+    setPending(null);
     await reload();
   };
   const submitReply = async (parentId: string, body: string) => {
@@ -245,7 +253,7 @@ export function CommentsProvider({
     anchored, outdated, resolved, openCount,
     activeId, setActive: setActiveId,
     panelOpen, setPanelOpen,
-    composing, cancelCompose: () => setComposing(null), submitNew,
+    composing, cancelCompose: () => { setComposing(null); setPending(null); }, submitNew,
     members, nameOf, currentUserId, myId: currentUserId ?? 'me', myName: currentUserId ? nameOf(currentUserId) : 'You',
     onResolve: async (id, r) => { await setPageCommentResolved(workspaceSlug, id, r); await reload(); },
     onDelete: async (id) => { await deletePageComment(workspaceSlug, id); await reload(); },
