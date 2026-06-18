@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "scripts": {
+    "cli:dev-install": "npm --prefix cli install && npm --prefix cli run build && npm --prefix cli link",
+    "cli:build": "npm --prefix cli run build"
+  }
+}

@@ -70,9 +70,7 @@ npx @cowiki/cli <command>
 **Fix:**
 ```bash
 # Option 1: Clone the repo and link locally
-cd cli
-npm install
-npm link
+npm run cli:dev-install
 
 # Verify installation
 cowiki --version
@@ -80,8 +78,8 @@ cowiki --version
 # Option 2: If npm install fails within the local directory
 cd cli
 rm -rf node_modules package-lock.json
-npm install
-npm link
+cd ..
+npm run cli:dev-install
 ```
 
 `npm link` creates a global symlink to the local build, so `cowiki` will be available system-wide. This is also the recommended approach for development.
@@ -98,11 +96,11 @@ If you're developing the CLI itself:
 
 ```bash
 # Type check
-npm run typecheck
+npm --prefix cli run typecheck
 
-# Build
-npm run build
+# Build from the repo root
+npm run cli:build
 
 # Clean install
-rm -rf node_modules && npm install
+rm -rf cli/node_modules cli/package-lock.json && npm run cli:dev-install
 ```
