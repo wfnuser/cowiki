@@ -36,7 +36,7 @@ If Node.js is not installed or < 18, tell the user to install Node.js 18+.
 Ask the user:
 
 > "cowiki CLI can be installed in two ways:
-> 1. **Dev install** (`cd cli && npm install && npm run build && npm link`) — from the repo source, for local development
+> 1. **Dev install** (`npm run cli:dev-install`) — from the repo source, for local development
 > 2. **Global** (`npm install -g @cowiki/cli`) — published package, available everywhere
 > 
 > Which do you prefer?"
@@ -45,7 +45,12 @@ Wait for the user's choice before proceeding.
 
 **Dev install (from repo source):**
 ```bash
-cd cli && npm install && npm run build && npm link
+npm run cli:dev-install
+```
+
+After the first dev install, rebuild the linked CLI after pulling CLI changes:
+```bash
+npm run cli:build
 ```
 
 **Global install (published package):**

@@ -35,7 +35,7 @@ pub async fn submit(
     // let any user rewrite another user's branch or a frozen pr/* snapshot.
     let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
     crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
-    super::pages::require_own_branch(&input.branch, guard.user.id)?;
+    super::guard::require_own_branch(&input.branch, guard.user.id)?;
     let user = guard.user.clone();
     let repo = state
         .repo_manager
@@ -240,7 +240,7 @@ pub async fn rebase(
     // branches must be unreachable from here.
     let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
     crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
-    super::pages::require_own_branch(&input.branch, guard.user.id)?;
+    super::guard::require_own_branch(&input.branch, guard.user.id)?;
     let repo = state
         .repo_manager
         .get(&ws_slug)

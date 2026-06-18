@@ -3,6 +3,7 @@ use sqlx::PgPool;
 pub mod api_keys;
 pub mod audit;
 pub mod notifications;
+pub mod page_comments;
 pub mod pages;
 pub mod review_comments;
 pub mod submissions;
@@ -81,8 +82,18 @@ pub async fn run_migrations(pool: &PgPool, embedding_dim: u32) -> sqlx::Result<(
         tracing::error!("DB error: {e}");
         e
     })?;
-    let sql14 = include_str!("migrations/012_rename_page_slugs_to_paths.sql");
+    let sql14 = include_str!("migrations/012_hash_primary_api_keys.sql");
     sqlx::raw_sql(sql14).execute(pool).await.map_err(|e| {
+        tracing::error!("DB error: {e}");
+        e
+    })?;
+    let sql15 = include_str!("migrations/013_page_comments.sql");
+    sqlx::raw_sql(sql15).execute(pool).await.map_err(|e| {
+        tracing::error!("DB error: {e}");
+        e
+    })?;
+    let sql16 = include_str!("migrations/012_rename_page_slugs_to_paths.sql");
+    sqlx::raw_sql(sql16).execute(pool).await.map_err(|e| {
         tracing::error!("DB error: {e}");
         e
     })?;
