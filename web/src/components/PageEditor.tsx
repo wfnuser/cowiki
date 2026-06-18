@@ -32,6 +32,9 @@ export function PageEditor({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        // When focus is inside the editor, CodeMirror's own Mod-s keymap
+        // already triggers the save — skip here to avoid a double save.
+        if ((e.target as HTMLElement | null)?.closest('.cm-editor')) return;
         e.preventDefault();
         void handleSave();
       } else if (e.key === 'Escape') {

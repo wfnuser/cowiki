@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
@@ -85,6 +85,34 @@ export function MarkdownCodeEditor({
 }) {
   const ref = useRef<ReactCodeMirrorRef>(null);
 
+  // Keep the latest onSubmit reachable from the keymap without making the
+  // extensions array depend on it — otherwise the new closure PageEditor
+  // creates each render would rebuild every extension on every keystroke.
+  const onSubmitRef = useRef(onSubmit);
+  onSubmitRef.current = onSubmit;
+
+  const extensions = useMemo(
+    () => [
+      markdown({ base: markdownLanguage, codeLanguages: languages }),
+      EditorView.lineWrapping,
+      keymap.of([
+        { key: 'Mod-b', preventDefault: true, run: (v) => { surround(v, '**'); return true; } },
+        { key: 'Mod-i', preventDefault: true, run: (v) => { surround(v, '_'); return true; } },
+        { key: 'Mod-s', preventDefault: true, run: () => { onSubmitRef.current?.(); return true; } },
+      ]),
+      EditorView.theme({
+        '&': { fontSize: '13.5px', backgroundColor: C.panel, color: C.ink },
+        '&.cm-focused': { outline: 'none' },
+        '.cm-scroller': { fontFamily: fonts.mono, lineHeight: '1.65', minHeight: '460px' },
+        '.cm-content': { fontFamily: fonts.mono, padding: '16px 20px', caretColor: C.accent },
+        '.cm-cursor, .cm-dropCursor': { borderLeftColor: C.accent },
+        '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': { backgroundColor: C.accentSoft },
+        '.cm-gutters': { backgroundColor: C.bg, color: C.faint, border: 'none' },
+      }),
+    ],
+    [],
+  );
+
   return (
     <div>
       {/* Formatting toolbar */}
@@ -127,24 +155,7 @@ export function MarkdownCodeEditor({
           highlightActiveLineGutter: false,
           autocompletion: false,
         }}
-        extensions={[
-          markdown({ base: markdownLanguage, codeLanguages: languages }),
-          EditorView.lineWrapping,
-          keymap.of([
-            { key: 'Mod-b', preventDefault: true, run: (v) => { surround(v, '**'); return true; } },
-            { key: 'Mod-i', preventDefault: true, run: (v) => { surround(v, '_'); return true; } },
-            { key: 'Mod-s', preventDefault: true, run: () => { onSubmit?.(); return true; } },
-          ]),
-          EditorView.theme({
-            '&': { fontSize: '13.5px', backgroundColor: C.panel, color: C.ink },
-            '&.cm-focused': { outline: 'none' },
-            '.cm-scroller': { fontFamily: fonts.mono, lineHeight: '1.65', minHeight: '460px' },
-            '.cm-content': { fontFamily: fonts.mono, padding: '16px 20px', caretColor: C.accent },
-            '.cm-cursor, .cm-dropCursor': { borderLeftColor: C.accent },
-            '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': { backgroundColor: C.accentSoft },
-            '.cm-gutters': { backgroundColor: C.bg, color: C.faint, border: 'none' },
-          }),
-        ]}
+        extensions={extensions}
       />
     </div>
   );
