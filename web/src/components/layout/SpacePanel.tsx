@@ -224,7 +224,7 @@ export function SpacePanel({
           emptyText="No pages yet"
           renderItem={(p) => (
             <PageTreeItem
-              key={p.slug}
+              key={`${p.kind}:${p.slug}`}
               page={p}
               dir="wiki"
               activePage={wikiActive ? activePage : null}
@@ -261,7 +261,7 @@ export function SpacePanel({
           emptyText="No pages yet"
           renderItem={(p) => (
             <PageTreeItem
-              key={p.slug}
+              key={`${p.kind}:${p.slug}`}
               page={p}
               dir="entities"
               activePage={wikiActive ? activePage : null}
@@ -298,7 +298,7 @@ export function SpacePanel({
           emptyText="No pages yet"
           renderItem={(p) => (
             <PageTreeItem
-              key={p.slug}
+              key={`${p.kind}:${p.slug}`}
               page={p}
               dir="concepts"
               activePage={wikiActive ? activePage : null}
@@ -346,7 +346,7 @@ export function SpacePanel({
 
 /** Filter pages by slug prefix and sort folders-first, then A→Z */
 function filterAndSortPages(pages: PageMeta[], prefix: ContentDir): PageMeta[] {
-  const dirNode = pages.find((p) => p.slug === `${prefix}/_index` && p.kind === 'folder');
+  const dirNode = pages.find((p) => p.slug === prefix && p.kind === 'folder');
   if (!dirNode || !dirNode.children) return [];
   return sortPages(dirNode.children);
 }
@@ -513,8 +513,8 @@ function PageTreeItem({
   }, [page.kind, page.children]);
 
   if (page.kind === 'folder') {
-    // folderPath strips the _index suffix and prepends the dir prefix
-    const folderPath = dir + '/' + page.slug.replace('/_index', '');
+    // page.slug is the folder's path relative to the content dir; prepend the dir prefix
+    const folderPath = dir + '/' + page.slug;
 
     return (
       <>
@@ -561,7 +561,7 @@ function PageTreeItem({
         </div>
         {open && sortedChildren.map((child) => (
           <PageTreeItem
-            key={child.slug}
+            key={`${child.kind}:${child.slug}`}
             page={child}
             dir={dir}
             activePage={activePage}

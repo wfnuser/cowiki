@@ -9,7 +9,7 @@ import type { SubmitRequest, PageMeta } from '../types.js';
 
 const KNOWN_DIRS = ['wiki', 'entities', 'concepts'];
 
-/** Flatten a page tree to a list of repo paths, skipping folders and _index */
+/** Flatten a page tree to a list of repo paths, skipping folder nodes */
 function flattenPaths(pages: PageMeta[]): string[] {
   const paths: string[] = [];
   for (const p of pages) {
