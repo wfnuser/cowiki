@@ -16,6 +16,7 @@ pub struct PageQueryParams {
 #[derive(Serialize, Clone)]
 pub struct PageListItem {
     pub slug: String,
+    pub path: String,
     pub title: String,
     pub summary: String,
     pub branch: String,
@@ -338,10 +339,10 @@ pub async fn create_folder_ws(
         .split_whitespace()
         .collect::<Vec<_>>()
         .join("-");
-    let dir = match &input.parent {
-        Some(p) => format!("{p}/{slug}"),
-        None => format!("wiki/{slug}"),
-    };
+    let parent = input.parent.as_deref().ok_or_else(|| {
+        AppError::BadRequest("parent is required (e.g. wiki, entities, entities/people)".into())
+    })?;
+    let dir = format!("{parent}/{slug}");
     let index_path = format!("{dir}/_index.md");
     let body = format!(
         "---\ntitle: \"{}\"\nsummary: \"\"\nkind: overview\n---\n\n",
@@ -466,7 +467,12 @@ fn list_pages_from_dir(
     }
 
     // Build tree recursively
-    fn build_level(items: &[RawItem], parent_dir: &str, branch: &str) -> Vec<PageListItem> {
+    fn build_level(
+        items: &[RawItem],
+        parent_dir: &str,
+        branch: &str,
+        dir: &str,
+    ) -> Vec<PageListItem> {
         let mut result: Vec<PageListItem> = Vec::new();
 
         // Find pages directly in this directory (not _index)
@@ -474,6 +480,9 @@ fn list_pages_from_dir(
             if item.dir == parent_dir && !item.is_index {
                 result.push(PageListItem {
                     slug: item.slug.clone(),
+                    // item.slug is the full relative path under dir (e.g. "people/alice"),
+                    // so dir + slug always produces the correct full path.
+                    path: format!("{}/{}", dir, item.slug),
                     title: item.title.clone(),
                     summary: item.summary.clone(),
                     branch: branch.into(),
@@ -506,9 +515,10 @@ fn list_pages_from_dir(
                     (name.to_string(), String::new())
                 });
 
-            let children = build_level(items, &subdir, branch);
+            let children = build_level(items, &subdir, branch, dir);
             result.push(PageListItem {
                 slug: format!("{subdir}/_index"),
+                path: format!("{dir}/{subdir}/_index"),
                 title,
                 summary,
                 branch: branch.into(),
@@ -526,24 +536,25 @@ fn list_pages_from_dir(
         result
     }
 
-    let tree = build_level(&items, "", branch);
+    let tree = build_level(&items, "", branch, dir);
     Ok(Json(tree))
 }
 
 // ── Path operations: rename / delete (files and folders under wiki/) ──
 
-/// Validate a repo path for destructive ops: must be inside `wiki/` (so `sources/` and
-/// other special trees are untouchable), no traversal, no empty segments, and never the
-/// `wiki` root itself.
+/// Validate a repo path for destructive ops: must be inside a known content directory
+/// (`wiki/`, `entities/`, `concepts/`), no traversal, no empty segments, and never the
+/// root itself.
 fn validate_wiki_path(p: &str) -> Result<()> {
-    let ok = p.starts_with("wiki/")
-        && p.len() > 5
+    let allowed = cowiki_core::wiki_fs::all_dirs();
+    let ok = allowed.iter().any(|d| p.starts_with(&format!("{d}/")))
         && !p.ends_with('/')
         && p.split('/')
             .all(|seg| !seg.is_empty() && seg != "." && seg != "..");
     if !ok {
         return Err(AppError::BadRequest(format!(
-            "invalid path '{p}': only paths inside wiki/ can be modified"
+            "invalid path '{p}': paths must be inside one of {:?}",
+            allowed
         )));
     }
     Ok(())
@@ -640,6 +651,7 @@ fn list_pages_all_dirs(
 
         let dir_node = PageListItem {
             slug: format!("{dir}/_index"),
+            path: format!("{dir}/_index"),
             title: dir.to_string(),
             summary: String::new(),
             branch: branch.into(),

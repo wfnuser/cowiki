@@ -11,7 +11,7 @@ use cowiki_core::models::DuplicateWarning;
 #[derive(Deserialize)]
 pub struct SubmitRequest {
     pub branch: String,
-    pub page_slugs: Vec<String>,
+    pub paths: Vec<String>,
     /// If true, skip review and merge directly to main (for Personal Space)
     #[serde(default)]
     pub skip_review: bool,
@@ -55,13 +55,13 @@ pub async fn submit(
         )));
     }
 
-    let diffs = match repo.diff_files(&input.branch, &input.page_slugs) {
+    let diffs = match repo.diff_files(&input.branch, &input.paths) {
         Ok(d) => d,
         Err(e) => {
             tracing::error!(
-                "failed to diff files for branch={} slugs={:?}: {}",
+                "failed to diff files for branch={} paths={:?}: {}",
                 &input.branch,
-                &input.page_slugs,
+                &input.paths,
                 e
             );
             return Err(AppError::Internal(e.to_string()));
@@ -70,30 +70,35 @@ pub async fn submit(
 
     // Generate embeddings for dedup
     let mut embeddings = Vec::new();
-    for slug in &input.page_slugs {
-        let path = format!("wiki/{slug}.md");
+    for p in &input.paths {
+        // Skip synthetic _index folders
+        if p.ends_with("/_index") {
+            continue;
+        }
+        let file_path = format!("{p}.md");
         let content = repo
-            .read_file(&input.branch, &path)
+            .read_file(&input.branch, &file_path)
             .map_err(|e| AppError::Internal(e.to_string()))?
-            .ok_or_else(|| AppError::BadRequest(format!("page {slug} not found")))?;
+            .ok_or_else(|| AppError::BadRequest(format!("page {p} not found")))?;
         let text = String::from_utf8_lossy(&content);
         super::pages::require_page_title(&text)?;
         if let Ok(emb) = state.compiler.embed(&text).await {
-            embeddings.push((slug.clone(), emb));
+            embeddings.push((p.clone(), emb));
         }
     }
 
     // Check for duplicates
     let mut duplicates = Vec::new();
-    for (slug, emb) in &embeddings {
+    for (path, emb) in &embeddings {
         if let Ok(similar) =
             cowiki_db::pages::find_similar(&state.db, emb, "main", 3, 0.85, Some(&ws_slug)).await
         {
             for (page, score) in similar {
-                if page.slug != *slug {
+                let submitted_slug = path.rsplit('/').next().unwrap_or(path);
+                if page.slug != submitted_slug {
                     duplicates.push(cowiki_core::models::DuplicateWarning {
-                        new_slug: slug.clone(),
-                        existing_slug: page.slug,
+                        new_path: path.clone(),
+                        existing_path: page.slug,
                         similarity: score,
                     });
                 }
@@ -170,7 +175,7 @@ pub async fn submit(
         &state.db,
         user.id,
         &summary,
-        &input.page_slugs,
+        &input.paths,
         &input.branch,
         &ws_slug,
     )

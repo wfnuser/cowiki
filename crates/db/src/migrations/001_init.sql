@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     status TEXT NOT NULL DEFAULT 'pending'
         CHECK (status IN ('pending', 'approved', 'rejected', 'changes_requested')),
     summary TEXT NOT NULL DEFAULT '',
-    page_slugs TEXT[] NOT NULL DEFAULT '{}',
+    paths TEXT[] NOT NULL DEFAULT '{}',
     source_branch TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     reviewed_by UUID REFERENCES users(id),
