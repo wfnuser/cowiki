@@ -20,7 +20,8 @@ pub struct PageListItem {
     pub title: String,
     pub summary: String,
     pub branch: String,
-    /// "page" or "folder" (folder has _index.md)
+    /// "page" or "folder" (a folder is a directory containing pages, or an
+    /// empty directory anchored by a `.gitkeep` marker)
     pub kind: String,
     /// For folders: child pages
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -146,11 +147,7 @@ fn fallback_title_from_content_or_slug(content: &str, slug: &str) -> String {
 }
 
 fn title_from_slug(slug: &str) -> String {
-    let base = slug
-        .trim_end_matches("/_index")
-        .rsplit('/')
-        .next()
-        .unwrap_or(slug);
+    let base = slug.rsplit('/').next().unwrap_or(slug);
     let title = base
         .replace(['-', '_'], " ")
         .split_whitespace()
@@ -183,7 +180,8 @@ pub struct WritePage {
     pub summary: Option<String>,
 }
 
-/// Create a folder (directory with _index.md)
+/// Create a folder. Git can't track an empty directory, so we anchor it with an
+/// empty `.gitkeep` marker; the folder is otherwise pure structure (no page).
 #[derive(Deserialize)]
 pub struct CreateFolder {
     pub name: String,
@@ -343,21 +341,17 @@ pub async fn create_folder_ws(
         AppError::BadRequest("parent is required (e.g. wiki, entities, entities/people)".into())
     })?;
     let dir = format!("{parent}/{slug}");
-    let index_path = format!("{dir}/_index.md");
-    let body = format!(
-        "---\ntitle: \"{}\"\nsummary: \"\"\nkind: overview\n---\n\n",
-        input.name
-    );
+    let gitkeep_path = format!("{dir}/.gitkeep");
     repo.write_file(
         &input.branch,
-        &index_path,
-        body.as_bytes(),
+        &gitkeep_path,
+        b"",
         &format!("create folder: {}", input.name),
         &guard.user.name,
     )
     .map_err(|e| AppError::Internal(e.to_string()))?;
     Ok(Json(
-        serde_json::json!({"ok": true, "slug": format!("{slug}/_index"), "path": dir}),
+        serde_json::json!({"ok": true, "slug": slug, "path": dir}),
     ))
 }
 
@@ -415,13 +409,16 @@ fn list_pages_from_dir(
     dir: &str,
     files: &[String],
 ) -> Result<Json<Vec<PageListItem>>> {
-    // Collect all items: pages and folder _index metadata
+    // Collect all items. A `page` item is a real `.md` file; a `marker` item is a
+    // synthetic placeholder for an otherwise-empty directory (anchored in git by a
+    // `.gitkeep`) so the folder still surfaces in the tree. Markers never render as
+    // pages — they only cause their directory to appear as a folder node.
     struct RawItem {
         slug: String,
         title: String,
         summary: String,
-        is_index: bool, // true if this is a folder's _index.md
-        dir: String,    // parent directory path (e.g. "test-folder" or "test-folder/sub")
+        is_marker: bool,
+        dir: String, // parent directory path (e.g. "test-folder" or "test-folder/sub")
     }
 
     let mut items: Vec<RawItem> = Vec::new();
@@ -444,24 +441,35 @@ fn list_pages_from_dir(
                 )));
             }
         };
-        let parts: Vec<&str> = slug.split('/').collect();
-        if parts.len() == 1 {
+        let item_dir = match slug.rsplit_once('/') {
+            Some((parent, _)) => parent.to_string(),
+            None => String::new(),
+        };
+        items.push(RawItem {
+            slug,
+            title,
+            summary,
+            is_marker: false,
+            dir: item_dir,
+        });
+    }
+
+    // Surface empty folders: directories whose only content is a `.gitkeep` marker
+    // (git can't track an empty directory). Each becomes a marker item so its
+    // directory appears as an (empty) folder node.
+    if let Ok(marker_dirs) = repo.list_marker_dirs(branch, dir) {
+        let prefix = format!("{dir}/");
+        for marker_dir in marker_dirs {
+            let rel_dir = marker_dir.strip_prefix(&prefix).unwrap_or(&marker_dir);
+            if rel_dir.is_empty() || items.iter().any(|i| i.dir == rel_dir) {
+                continue;
+            }
             items.push(RawItem {
-                slug: slug.clone(),
-                title,
-                summary,
-                is_index: false,
-                dir: String::new(),
-            });
-        } else {
-            let dir = parts[..parts.len() - 1].join("/");
-            let filename = *parts.last().unwrap();
-            items.push(RawItem {
-                slug: slug.clone(),
-                title,
-                summary,
-                is_index: filename == "_index",
-                dir,
+                slug: rel_dir.to_string(),
+                title: String::new(),
+                summary: String::new(),
+                is_marker: true,
+                dir: rel_dir.to_string(),
             });
         }
     }
@@ -475,9 +483,9 @@ fn list_pages_from_dir(
     ) -> Vec<PageListItem> {
         let mut result: Vec<PageListItem> = Vec::new();
 
-        // Find pages directly in this directory (not _index)
+        // Find pages directly in this directory (markers are not pages)
         for item in items {
-            if item.dir == parent_dir && !item.is_index {
+            if item.dir == parent_dir && !item.is_marker {
                 result.push(PageListItem {
                     slug: item.slug.clone(),
                     // item.slug is the full relative path under dir (e.g. "people/alice"),
@@ -492,7 +500,7 @@ fn list_pages_from_dir(
             }
         }
 
-        // Find subdirectories (folders that have _index or have children at this level)
+        // Find subdirectories (any directory holding pages or an empty-folder marker)
         let mut subdirs: Vec<String> = Vec::new();
         for item in items {
             if let Some(child) = immediate_child_dir(&item.dir, parent_dir) {
@@ -505,22 +513,14 @@ fn list_pages_from_dir(
         subdirs.dedup();
 
         for subdir in subdirs {
-            // Find _index for this subdir
-            let (title, summary) = items
-                .iter()
-                .find(|i| i.dir == subdir && i.is_index)
-                .map(|i| (i.title.clone(), i.summary.clone()))
-                .unwrap_or_else(|| {
-                    let name = subdir.rsplit('/').next().unwrap_or(&subdir);
-                    (name.to_string(), String::new())
-                });
-
+            // Folder display name is just the directory name.
+            let title = subdir.rsplit('/').next().unwrap_or(&subdir).to_string();
             let children = build_level(items, &subdir, branch, dir);
             result.push(PageListItem {
-                slug: format!("{subdir}/_index"),
-                path: format!("{dir}/{subdir}/_index"),
+                slug: subdir.clone(),
+                path: format!("{dir}/{subdir}"),
                 title,
-                summary,
+                summary: String::new(),
                 branch: branch.into(),
                 kind: "folder".into(),
                 children,
@@ -636,22 +636,18 @@ fn list_pages_all_dirs(
     let mut tree: Vec<PageListItem> = Vec::new();
 
     for dir in cowiki_core::wiki_fs::all_dirs() {
-        let files = match cowiki_core::wiki_fs::list_pages_recursive(repo, branch, dir) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
+        let files =
+            cowiki_core::wiki_fs::list_pages_recursive(repo, branch, dir).unwrap_or_default();
 
-        if files.is_empty() {
-            continue;
-        }
-
-        // Build the subtree for this directory using the shared helper
+        // Build the subtree for this directory using the shared helper. This also
+        // surfaces empty sub-folders (anchored by `.gitkeep`), so a section with no
+        // pages yet but with folders still renders.
         let subtree_json = list_pages_from_dir(repo, branch, dir, &files)?;
         let children = subtree_json.0;
 
         let dir_node = PageListItem {
-            slug: format!("{dir}/_index"),
-            path: format!("{dir}/_index"),
+            slug: dir.to_string(),
+            path: dir.to_string(),
             title: dir.to_string(),
             summary: String::new(),
             branch: branch.into(),

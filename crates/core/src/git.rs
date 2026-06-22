@@ -670,6 +670,64 @@ impl WikiRepo {
         Ok(())
     }
 
+    /// List directory paths under `dir` (full paths, e.g. `wiki/research`) that
+    /// contain a `.gitkeep` marker, excluding `dir` itself. Git cannot track an
+    /// empty directory, so an empty folder is anchored by a `.gitkeep`; this lets
+    /// the page tree surface those otherwise-invisible folders.
+    pub fn list_marker_dirs(&self, branch: &str, dir: &str) -> Result<Vec<String>, git2::Error> {
+        let repo = self.repo()?;
+        let branch_ref = repo.find_branch(branch, BranchType::Local)?;
+        let commit = branch_ref.get().peel_to_commit()?;
+        let tree = commit.tree()?;
+
+        let subtree = if dir.is_empty() {
+            tree
+        } else {
+            match tree.get_path(Path::new(dir)) {
+                Ok(entry) => repo.find_tree(entry.id())?,
+                Err(_) => return Ok(Vec::new()),
+            }
+        };
+
+        let mut dirs = Vec::new();
+        self.walk_marker_dirs(&repo, &subtree, dir, &mut dirs)?;
+        dirs.retain(|d| d != dir);
+        Ok(dirs)
+    }
+
+    fn walk_marker_dirs(
+        &self,
+        repo: &Repository,
+        tree: &git2::Tree,
+        prefix: &str,
+        dirs: &mut Vec<String>,
+    ) -> Result<(), git2::Error> {
+        let mut has_marker = false;
+        for entry in tree.iter() {
+            let name = match entry.name() {
+                Some(n) => n,
+                None => continue,
+            };
+            match entry.kind() {
+                Some(git2::ObjectType::Tree) => {
+                    let full_path = if prefix.is_empty() {
+                        name.to_string()
+                    } else {
+                        format!("{prefix}/{name}")
+                    };
+                    let subtree = repo.find_tree(entry.id())?;
+                    self.walk_marker_dirs(repo, &subtree, &full_path, dirs)?;
+                }
+                Some(git2::ObjectType::Blob) if name == ".gitkeep" => has_marker = true,
+                _ => {}
+            }
+        }
+        if has_marker && !prefix.is_empty() {
+            dirs.push(prefix.to_string());
+        }
+        Ok(())
+    }
+
     pub fn diff_files(&self, branch: &str, paths: &[String]) -> Result<Vec<FileDiff>, git2::Error> {
         let mut diffs = Vec::new();
         for p in paths {
@@ -1263,12 +1321,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// list_marker_dirs surfaces directories anchored only by a `.gitkeep` (empty
+    /// folders), excludes the queried dir itself, and ignores `.md`-bearing dirs.
+    #[test]
+    fn list_marker_dirs_finds_empty_folders() {
+        let (repo, dir) = temp_repo("marker-dirs");
+        repo.ensure_branch_exists("user/m").unwrap();
+        // An empty folder, anchored by a .gitkeep
+        repo.write_file("user/m", "wiki/empty/.gitkeep", b"", "e", "m")
+            .unwrap();
+        // A nested empty folder
+        repo.write_file("user/m", "wiki/parent/child/.gitkeep", b"", "e", "m")
+            .unwrap();
+        // A normal page (no marker)
+        repo.write_file("user/m", "wiki/page.md", b"# p\n", "e", "m")
+            .unwrap();
+
+        let mut dirs = repo.list_marker_dirs("user/m", "wiki").unwrap();
+        dirs.sort();
+        assert_eq!(dirs, vec!["wiki/empty", "wiki/parent/child"]);
+        // The queried dir itself (whose .gitkeep was seeded at init) is excluded.
+        assert!(!dirs.contains(&"wiki".to_string()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// delete_path on a directory removes the whole subtree.
     #[test]
     fn delete_folder_removes_subtree() {
         let (repo, dir) = temp_repo("delete-folder");
         repo.ensure_branch_exists("user/d2").unwrap();
-        repo.write_file("user/d2", "wiki/proj/_index.md", b"i\n", "e", "d")
+        repo.write_file("user/d2", "wiki/proj/.gitkeep", b"", "e", "d")
             .unwrap();
         repo.write_file("user/d2", "wiki/proj/x.md", b"x\n", "e", "d")
             .unwrap();
@@ -1276,7 +1358,7 @@ mod tests {
             .unwrap();
         repo.delete_path("user/d2", "wiki/proj", "rm folder", "d")
             .unwrap();
-        assert!(read(&repo, "user/d2", "wiki/proj/_index.md").is_none());
+        assert!(read(&repo, "user/d2", "wiki/proj/.gitkeep").is_none());
         assert!(read(&repo, "user/d2", "wiki/proj/x.md").is_none());
         assert_eq!(
             read(&repo, "user/d2", "wiki/other.md").as_deref(),

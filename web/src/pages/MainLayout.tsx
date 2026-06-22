@@ -201,8 +201,8 @@ export function MainLayout() {
 
   /** Walk the page tree and recursively merge draft pages into main pages by path.
    *  When both trees have a folder at the same path, their children are merged
-   *  recursively so that draft-only pages under existing section nodes (wiki/_index,
-   *  entities/_index, concepts/_index) are not silently dropped. */
+   *  recursively so that draft-only pages under existing section nodes (wiki,
+   *  entities, concepts) are not silently dropped. */
   function mergePageTrees(main: PageMeta[], draft: PageMeta[]): PageMeta[] {
     const merged: PageMeta[] = [...main];
     const pathToIndex = new Map(merged.map((p, i) => [p.path, i] as const));

@@ -71,10 +71,6 @@ pub async fn submit(
     // Generate embeddings for dedup
     let mut embeddings = Vec::new();
     for p in &input.paths {
-        // Skip synthetic _index folders
-        if p.ends_with("/_index") {
-            continue;
-        }
         let file_path = format!("{p}.md");
         let content = repo
             .read_file(&input.branch, &file_path)
