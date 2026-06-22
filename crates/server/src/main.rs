@@ -1,9 +1,9 @@
 use axum::routing::{delete, get, post};
 use axum::Router;
-use clap::Parser;
+use cowiki_core::ai::embedder::Embedder;
 use cowiki_core::ai::embedder::{create_embedder, EmbedderConfig};
+use cowiki_core::ai::llm::Llm;
 use cowiki_core::ai::llm::{create_llm, LlmConfig};
-use cowiki_core::compiler::Compiler;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
@@ -14,13 +14,14 @@ mod config;
 mod error;
 mod routes;
 
-use config::CliArgs;
-
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub config: config::Config,
-    pub repo_manager: cowiki_core::git::WikiRepoManager, // per-workspace repos
-    pub compiler: Compiler,
+    pub repo_manager: cowiki_core::git::WikiRepoManager,
+    pub llm: Arc<Box<dyn Llm>>,
+    pub embedder: Arc<Box<dyn Embedder>>,
+    /// Global AgentManager (single instance for all workspaces)
+    pub agent_manager: Arc<cowiki_agents::manager::AgentManager>,
     /// Pending OAuth CSRF nonces → minted-at, swept on insert.
     ///
     /// In-process only: this does NOT survive a restart and is NOT shared across
@@ -40,12 +41,16 @@ struct UsageResponse {
 }
 
 async fn get_usage(
+    headers: axum::http::HeaderMap,
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
-) -> axum::Json<UsageResponse> {
-    axum::Json(UsageResponse {
-        llm: state.compiler.llm_usage(),
-        embedder: state.compiler.embedder_usage(),
-    })
+) -> Result<axum::Json<UsageResponse>, crate::error::AppError> {
+    // Require authenticated user (any valid API key)
+    let _user = crate::routes::auth::extract_user(&state.db, &headers).await?;
+
+    Ok(axum::Json(UsageResponse {
+        llm: state.llm.usage_snapshot(),
+        embedder: state.embedder.usage_snapshot(),
+    }))
 }
 
 #[tokio::main]
@@ -53,8 +58,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
     dotenvy::dotenv().ok();
 
-    let cli_args = CliArgs::parse();
-    let config = config::Config::load(Some(cli_args));
+    let config = config::Config::load();
 
     // Database
     let db = cowiki_db::create_pool(&config.database.url)
@@ -65,9 +69,23 @@ async fn main() {
         .expect("failed to run migrations");
     tracing::info!("database connected and migrations applied");
 
-    // Git repos (one per workspace, created lazily)
+    // Git repos
     let repo_manager = cowiki_core::git::WikiRepoManager::new(&config.server.data_dir);
     tracing::info!("wiki repos dir: {}", config.server.data_dir);
+
+    // Validate pi binary availability
+    let pi_binary = std::env::var("PI_BINARY").unwrap_or_else(|_| "pi".into());
+    match which::which(&pi_binary) {
+        Ok(path) => {
+            tracing::info!("pi binary found at {}", path.display());
+        }
+        Err(_) => {
+            tracing::warn!(
+                "pi binary '{}' NOT found on PATH. Agent-based compile will fail.",
+                pi_binary
+            );
+        }
+    }
 
     let llm = create_llm(LlmConfig {
         provider: config.llm.provider.clone(),
@@ -86,23 +104,41 @@ async fn main() {
         dimension: config.embedder.dimension,
     });
 
-    // Compiler
-    let compiler = Compiler::new(llm, embedder);
-
     let port = config.server.port.to_string();
+    let data_dir = config.server.data_dir.clone();
 
-    // Clone db for background task before moving into AppState
     let expire_db = db.clone();
+
+    // Create global AgentManager (single instance for all workspaces).
+    let data_dir_path = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join(&data_dir);
+    let agent_manager = Arc::new(cowiki_agents::manager::AgentManager::new(
+        format!("http://127.0.0.1:{port}"),
+        data_dir_path,
+        cowiki_utils::LlmConfig {
+            provider: config.llm.provider.clone(),
+            model: config.llm.model.clone(),
+            api_key: config.llm.api_key.clone(),
+            api_base: config.llm.api_base.clone(),
+            temperature: config.llm.temperature,
+            max_tokens: config.llm.max_tokens,
+        },
+        config.agent.clone(),
+        config.auth.copilot_github_token.clone(),
+    ));
 
     let state = Arc::new(AppState {
         db,
         config,
         repo_manager,
-        compiler,
+        llm: Arc::new(llm),
+        embedder: Arc::new(embedder),
+        agent_manager,
         oauth_states: std::sync::Mutex::new(HashMap::new()),
     });
 
-    // Background task: expire stale invitations every hour
+    // Background task: expire stale invitations
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
@@ -116,7 +152,6 @@ async fn main() {
 
     let app = Router::new()
         .route("/api/health", get(|| async { "ok" }))
-        // Usage
         .route("/api/usage", get(get_usage))
         // Auth
         .route("/api/auth/register", post(routes::auth::register))
@@ -153,7 +188,6 @@ async fn main() {
             "/api/workspaces/{slug}/members",
             get(routes::workspace::list_members),
         )
-        // Invitations (batch invite, list, resend, revoke, accept, reject, pending)
         .route(
             "/api/workspaces/{slug}/invitations",
             get(routes::workspace::list_invitations),
@@ -178,7 +212,6 @@ async fn main() {
             "/api/invitations/{id}/reject",
             post(routes::workspace::reject_invitation),
         )
-        // Member management (Manager+)
         .route(
             "/api/workspaces/{slug}/members/remove",
             post(routes::workspace::remove_member),
@@ -187,7 +220,6 @@ async fn main() {
             "/api/workspaces/{slug}/members/role",
             post(routes::workspace::change_member_role),
         )
-        // Ownership transfer
         .route(
             "/api/workspaces/{slug}/transfer-ownership",
             post(routes::transfers::initiate_transfer),
@@ -208,12 +240,11 @@ async fn main() {
             "/api/transfers/{id}",
             delete(routes::transfers::cancel_transfer),
         )
-        // Workspace deletion (Owner only)
         .route(
             "/api/workspaces/{slug}",
             delete(routes::workspace::delete_workspace),
         )
-        // Pages (workspace-scoped — uses per-workspace repo)
+        // Pages
         .route(
             "/api/workspaces/{ws_slug}/pages",
             get(routes::pages::list_pages_ws),
@@ -226,7 +257,6 @@ async fn main() {
             "/api/workspaces/{ws_slug}/folders",
             post(routes::pages::create_folder_ws),
         )
-        // Path ops on the caller's draft branch (files & folders under wiki/ only)
         .route(
             "/api/workspaces/{ws_slug}/paths/rename",
             post(routes::pages::rename_path_ws),
@@ -258,17 +288,16 @@ async fn main() {
             "/api/workspaces/{ws_slug}/sources/{filename}",
             get(routes::sources::get_source),
         )
-        // Submit (workspace-scoped)
+        // Submit
         .route(
             "/api/workspaces/{ws_slug}/submit",
             post(routes::submit::submit),
         )
-        // Rebase / sync a branch onto main (the "sync with main" button)
         .route(
             "/api/workspaces/{ws_slug}/rebase",
             post(routes::submit::rebase),
         )
-        // Reviews (workspace-scoped)
+        // Reviews
         .route(
             "/api/workspaces/{ws_slug}/reviews",
             get(routes::review::list_reviews),
@@ -281,12 +310,10 @@ async fn main() {
             "/api/workspaces/{ws_slug}/reviews/{id}",
             post(routes::review::review_action),
         )
-        // Review-requested change: edit the submission's pr/{id} snapshot
         .route(
             "/api/workspaces/{ws_slug}/reviews/{id}/edit",
             post(routes::review::edit_review),
         )
-        // Review comments
         .route(
             "/api/workspaces/{ws_slug}/reviews/{submission_id}/comments",
             get(routes::comments::list_comments),
@@ -333,11 +360,11 @@ async fn main() {
             "/api/workspaces/{ws_slug}/search",
             get(routes::search::search),
         )
-        // API Keys — multi-key management
+        // API Keys
         .route("/api/keys", get(routes::keys::list_keys))
         .route("/api/keys", post(routes::keys::create_key))
         .route("/api/keys/{id}", delete(routes::keys::revoke_key))
-        // User search (for invite autocomplete)
+        // User search
         .route("/api/users/search", get(routes::users::search_users))
         // Notifications
         .route(

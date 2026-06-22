@@ -106,7 +106,7 @@ fn make_submission(author_key: &str, author_id: &str, slug: &str, page: &str) ->
     );
     assert_eq!(status, 200, "write page failed: {}", resp);
 
-    let submit_body = format!(r#"{{"branch":"{}","page_slugs":["{}"]}}"#, branch, page);
+    let submit_body = format!(r#"{{"branch":"{}","paths":["{}"]}}"#, branch, page);
     let (resp, status) = api_request(
         "POST",
         &format!("/workspaces/{}/submit", slug),

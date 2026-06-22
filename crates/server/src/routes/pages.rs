@@ -215,10 +215,10 @@ pub async fn list_pages_ws(
         return list_pages_all_dirs(&repo, &branch);
     }
 
-    cowiki_core::wiki_fs::validate_dir(dir).map_err(|e| AppError::BadRequest(e))?;
+    cowiki_core::wiki_fs::validate_dir(dir).map_err(AppError::BadRequest)?;
 
     let files = cowiki_core::wiki_fs::list_pages_recursive(&repo, &branch, dir)
-        .map_err(|e| AppError::Internal(e))?;
+        .map_err(AppError::Internal)?;
     list_pages_from_dir(&repo, &branch, dir, &files)
 }
 
@@ -244,9 +244,9 @@ pub async fn get_page_ws(
             "dir=all is only supported for listing. Use a specific directory to read.".into(),
         ));
     }
-    cowiki_core::wiki_fs::validate_dir(dir).map_err(|e| AppError::BadRequest(e))?;
+    cowiki_core::wiki_fs::validate_dir(dir).map_err(AppError::BadRequest)?;
     let content = cowiki_core::wiki_fs::read_page(&repo, &branch, dir, &slug)
-        .map_err(|e| AppError::Internal(e))?
+        .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound(format!("page {slug} not found in {dir}")))?;
     let body = String::from_utf8_lossy(&content).into_owned();
     let (title, summary) = parse_frontmatter(&body);
@@ -289,7 +289,7 @@ pub async fn write_page_ws(
             "dir=all is only supported for listing. Use a specific directory to write.".into(),
         ));
     }
-    cowiki_core::wiki_fs::validate_dir(dir).map_err(|e| AppError::BadRequest(e))?;
+    cowiki_core::wiki_fs::validate_dir(dir).map_err(AppError::BadRequest)?;
 
     // If title is provided, prepend YAML frontmatter to the body
     let final_body = if let Some(ref title) = input.title {
@@ -313,8 +313,17 @@ pub async fn write_page_ws(
         &guard.user.name,
     )
     .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    // Track write for active agent session (no-op if no tracking session active)
+    let page_path = format!("{}/{}.md", dir, input.slug);
+    let _ = state
+        .agent_manager
+        .session_manager
+        .track_write(&ws_slug, &page_path)
+        .await;
+
     Ok(Json(
-        serde_json::json!({"ok": true, "slug": input.slug, "path": format!("{dir}/{}", input.slug)}),
+        serde_json::json!({"ok": true, "slug": input.slug, "path": page_path}),
     ))
 }
 
@@ -624,6 +633,14 @@ pub async fn delete_path_ws(
         &guard.user.name,
     )
     .map_err(|e| AppError::BadRequest(e.to_string()))?;
+
+    // Track remove for active agent session
+    let _ = state
+        .agent_manager
+        .session_manager
+        .track_remove(&ws_slug, &input.path)
+        .await;
+
     Ok(Json(serde_json::json!({"ok": true})))
 }
 

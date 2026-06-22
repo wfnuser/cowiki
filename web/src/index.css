@@ -96,6 +96,15 @@ body {
   font-size: 1.75rem;
 }
 
+/* ── Keyframe animations ── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes agentBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.3; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }

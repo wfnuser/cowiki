@@ -18,6 +18,8 @@ pgvector = { version = "0.4", features = ["sqlx"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 async-trait = "0.1"
 similar = "2"
+cowiki-db = { path = "../db" }
+cowiki-agents = { path = "../agents" }
 
 [dev-dependencies]
 tempfile = "3"

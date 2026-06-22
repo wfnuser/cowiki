@@ -16,8 +16,8 @@ cowiki is a collaborative knowledge base where humans and AI agents co-maintain 
 │              Rust Backend (axum)         │
 │                                          │
 │  ┌──────────┐ ┌────────┐ ┌───────────┐ │
-│  │ Wiki API │ │Review  │ │ MCP Server│ │
-│  │ (CRUD)   │ │ API    │ │ (agents)  │ │
+│  │ Wiki API │ │Review  │ │Agent Infra│ │
+│  │ (CRUD)   │ │ API    │ │(spawner)  │ │
 │  └────┬─────┘ └───┬────┘ └─────┬─────┘ │
 │       │           │             │        │
 │  ┌────▼───────────▼─────────────▼──────┐ │
@@ -43,7 +43,7 @@ cowiki is a collaborative knowledge base where humans and AI agents co-maintain 
 | Database | PostgreSQL + pgvector |
 | File storage + VCS | Git (gitoxide or libgit2) |
 | LLM | OpenAI API |
-| Agent protocol | MCP Server (Rust) |
+| Agent protocol | cowiki CLI (HTTP API) |
 | Desktop (post-MVP) | Tauri 2 |
 
 ## Data Model
@@ -97,7 +97,7 @@ submission_pages (submission_id, page_slug, action, diff_summary)
 | **Submit** | Propose pages to Shared Space | `POST /api/submit` |
 | **Review** | Approve/reject/request changes | `POST /api/review/:id` |
 
-### For Agents (MCP Server)
+### For Agents (CLI)
 
 | Tool | Description |
 |------|-------------|

@@ -166,7 +166,7 @@ pub async fn search(
     // ── Semantic: best-effort (indexed pages only; tolerate embedder failure) ──
     let mut semantic: Vec<SemanticHit> = Vec::new();
     if want_semantic && q.chars().count() >= 2 {
-        if let Ok(embedding) = state.compiler.embed(&q).await {
+        if let Ok(embedding) = cowiki_core::ai::embedder::embed(&**state.embedder, &q).await {
             let drafts = cowiki_db::pages::find_similar(
                 &state.db,
                 &embedding,

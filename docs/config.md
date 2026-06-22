@@ -48,12 +48,12 @@ url = "postgres://cowiki:cowiki@localhost:5432/cowiki"
 
 Server runtime settings (shared by `cowiki-server` via `cowiki-utils` crate).
 
-> **Note**: MCP server (`cowiki-mcp`) is now a standalone crate at `cowiki-mcp-server/` with its own `.env` configuration. It no longer reads `cowiki.conf`. See `cowiki-mcp-server/.env.example`.
+> **Note**: Agent operations use the `cowiki` CLI which talks to the server's HTTP API. No separate MCP process needed.
 
 | Field | Type | Default | Env Var | Description |
 |-------|------|---------|---------|-------------|
 | `port` | integer | `3000` | `COWIKI_PORT` | HTTP server port (cowiki-server) |
-| `data_dir` | string | `"./data"` | `COWIKI_DATA_DIR` | Data directory for git repo and wiki files |
+| `data_dir` | string | `"./data"` | `COWIKI_DATA_DIR` | Workspace data root (organized by space slug: `data/{workspace}/repo/`) |
 
 Example:
 ```toml
@@ -62,11 +62,31 @@ port = 3000
 data_dir = "./data"
 ```
 
+#### Data Directory Structure
+
+```
+$COWIKI_DATA_DIR/
+  personal-xx/                   ← Personal workspace
+    repo/                        ← Git repo (bare)
+      wiki/                      ← Wiki pages
+      sources/                   ← Extracted source folders
+      agents/                    ← Agent instances (state only)
+        compiler/
+      entities/
+      concepts/
+  general-xx/                    ← Team workspace
+    repo/
+      wiki/
+      sources/
+      agents/
+        compiler/
+        reviewer/
+```
+
 ```bash
 # Start REST API on port 3000
 cowiki-server &
-# Start MCP server on port 8080 (configured via cowiki-mcp-server/.env)
-cd cowiki-mcp-server && cargo run &
+# Start cowiki server on port 3000 (agent uses cowiki CLI for wiki ops)
 ```
 
 ---
@@ -149,10 +169,9 @@ dimension = 1024
 
 ---
 
-### `[mcp-server]`
+### `[mcp]` (已移除)
 
-> **已移除**: MCP server 配置已迁移至 `cowiki-mcp-server/.env`（独立于 `cowiki.conf`）。
-> 参考 `cowiki-mcp-server/.env.example` 了解 `COWIKI_MCP_PORT` 和 `COWIKI_BASE_URL` 的配置方式。
+> **已移除**: MCP server 已完全删除。Agent 使用 `cowiki` CLI 操作 wiki。
 
 ---
 

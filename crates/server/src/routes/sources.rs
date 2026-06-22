@@ -40,7 +40,7 @@ pub struct SourceContent {
 fn load_compile_state(
     repo: &cowiki_core::git::WikiRepo,
     branch: &str,
-) -> super::compile::CompileState {
+) -> cowiki_core::compile::CompileState {
     repo.read_file(branch, ".cowiki/state.json")
         .ok()
         .flatten()

@@ -18,10 +18,10 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   listWorkspaces, listPages, getPage, createWorkspace, writePage, createFolder,
-  compile, submit, renameWorkspace,
+  submit, renameWorkspace,
   deleteWorkspace,
   listPublicWorkspaces, joinWorkspace,
-  listSources, getSource, listReviews, syncBranch, renamePath, deletePath,
+  listSources, getSource, listReviews, syncBranch, renamePath, deletePath, compileAsync,
   type Workspace, type PageMeta, type PageFull, type SourceItem, type SourceContent,
 } from '../api';
 import { AddSourceDialog } from '@/components/AddSourceDialog';
@@ -85,7 +85,6 @@ export function MainLayout() {
   const [newSlug, setNewSlug] = useState('');
   const [creating, setCreating] = useState(false);
   const [showIngest, setShowIngest] = useState(false);
-  const [compiling, setCompiling] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showRename, setShowRename] = useState<Workspace | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -401,23 +400,28 @@ export function MainLayout() {
     }
   };
 
-  // Compile
+  // Compile — fire-and-forget, reload after completion
+  const [isCompiling, setIsCompiling] = useState(false);
+
   const handleCompile = async () => {
-    if (!activeWorkspace) return;
-    const ws = activeWorkspace;
-    setCompiling(true);
+    if (!activeWorkspace || isCompiling) return;
     setMessage(null);
+    const sources = spaceSources[activeWorkspace.id];
+    if (!sources || sources.length === 0) {
+      setMessage({ text: 'No sources to compile. Add a source first.', type: 'error' });
+      return;
+    }
+    setIsCompiling(true);
     try {
-      const res = await compile(userBranch, ws.slug);
-      const count = res.pages?.length || 0;
-      const skipped = res.skipped || 0;
-      setMessage({ text: `Compiled ${count} page(s)${skipped > 0 ? `, ${skipped} skipped` : ''}`, type: 'success' });
-      loadSpacePages(ws);
-      loadSpaceSources(ws);
-    } catch {
-      setMessage({ text: 'Compilation failed', type: 'error' });
+      await compileAsync(userBranch, activeWorkspace.slug);
+      loadSpacePages(activeWorkspace);
+      loadSpaceSources(activeWorkspace);
+      setMessage({ text: 'Compile completed', type: 'success' });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Unknown error';
+      setMessage({ text: `Compile failed: ${msg}`, type: 'error' });
     } finally {
-      setCompiling(false);
+      setIsCompiling(false);
     }
   };
 
@@ -786,11 +790,11 @@ export function MainLayout() {
                     </button>
                     <button
                       onClick={handleCompile}
-                      disabled={compiling}
-                      style={{ ...headerBtnStyle, opacity: compiling ? 0.4 : 1 }}
+                      style={headerBtnStyle}
+                      disabled={isCompiling}
                     >
-                      {compiling ? <RefreshCw size={13} className="animate-spin" /> : <Zap size={13} color="#e2590b" />}
-                      {compiling ? 'Compiling...' : 'Compile'}
+                      {isCompiling ? <RefreshCw size={13} className="animate-spin" /> : <Zap size={13} color="#e2590b" />}
+                      {isCompiling ? 'Compiling...' : 'Compile'}
                     </button>
                     <CommentsHeaderToggle style={{ ...headerBtnStyle, marginLeft: 2 }} />
                     <DropdownMenu>
@@ -965,6 +969,7 @@ export function MainLayout() {
             </div>
             </CommentsProvider>
           </main>
+
         </div>
       </TooltipProvider>
 

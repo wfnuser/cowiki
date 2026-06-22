@@ -1,0 +1,22 @@
+[package]
+name = "cowiki-agents"
+version = "0.1.0"
+edition = "2021"
+description = "Agent lifecycle manager, AgentHandle, AgentPool, and tool gateway for cowiki"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tokio = { version = "1", features = ["sync", "process", "time", "io-util", "fs", "rt", "macros"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+thiserror = "2"
+async-trait = "0.1"
+futures = "0.3"
+async-stream = "0.3"
+uuid = { version = "1", features = ["v4"] }
+toml = "0.8"
+cowiki-utils = { path = "../utils" }
+agent-client-protocol = "0.15"
+tokio-util = { version = "0.7", features = ["compat"] }

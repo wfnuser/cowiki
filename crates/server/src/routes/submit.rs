@@ -82,7 +82,7 @@ pub async fn submit(
             .ok_or_else(|| AppError::BadRequest(format!("page {p} not found")))?;
         let text = String::from_utf8_lossy(&content);
         super::pages::require_page_title(&text)?;
-        if let Ok(emb) = state.compiler.embed(&text).await {
+        if let Ok(emb) = cowiki_core::ai::embedder::embed(&**state.embedder, &text).await {
             embeddings.push((p.clone(), emb));
         }
     }
@@ -191,13 +191,17 @@ pub async fn submit(
         let content = summary.clone();
         tokio::spawn(async move {
             match state
-                .compiler
-                .generate_summary(&format!("Submission changes:\n{content}"))
+                .llm
+                .chat(
+                    "Generate a concise one-line summary of the following changes.",
+                    &format!("Submission changes:\n{content}"),
+                )
                 .await
             {
-                Ok(s) => {
+                Ok(resp) => {
                     if let Err(e) =
-                        cowiki_db::submissions::update_summary(&state.db, sub_id, &s).await
+                        cowiki_db::submissions::update_summary(&state.db, sub_id, &resp.content)
+                            .await
                     {
                         tracing::warn!("failed to store async summary for {sub_id}: {e}");
                     }

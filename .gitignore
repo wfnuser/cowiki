@@ -25,7 +25,12 @@ mcp-server
 .claude/CLAUDE.md
 .claude/settings.local.json
 
+.superpowers
 .omc
+.od-skills
+tmp
+
+sketch-*
 # local comment-system test stack
 data-comments-test/
 cowiki.conf

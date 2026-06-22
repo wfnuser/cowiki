@@ -40,10 +40,15 @@ pub trait Embedder: Send + Sync {
 }
 
 /// Factory: create an Embedder instance from configuration.
-/// Dispatches to the correct provider implementation based on `config.provider`.
 pub fn create_embedder(config: EmbedderConfig) -> Box<dyn Embedder> {
     match config.provider.as_str() {
         "openai" => Box::new(openai::OpenAIEmbedder::new(config)),
         other => panic!("unsupported embedder provider: {other}"),
     }
+}
+
+/// Convenience: embed a single text, returning the vector directly.
+pub async fn embed(embedder: &dyn Embedder, text: &str) -> Result<Vec<f32>, String> {
+    let result = embedder.embed(text, false).await?;
+    Ok(result.vector)
 }
