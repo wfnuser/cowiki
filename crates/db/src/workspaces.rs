@@ -783,6 +783,9 @@ mod tests {
         let _ = sqlx::raw_sql(include_str!("migrations/011_pages_workspace_scope.sql"))
             .execute(&pool)
             .await;
+        let _ = sqlx::raw_sql(include_str!("migrations/012_hash_primary_api_keys.sql"))
+            .execute(&pool)
+            .await;
         Some(pool)
     }
 

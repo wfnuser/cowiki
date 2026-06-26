@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Compass,
@@ -29,18 +29,21 @@ import { SettingsDialog } from '../components/SettingsDialog';
 import { getStoredAuth, clearAuth } from '../auth';
 import { SpaceRail } from '../components/layout/SpaceRail';
 import { SpacePanel, type NavTab } from '../components/layout/SpacePanel';
+type ContentDir = 'wiki' | 'entities' | 'concepts';
 import { ReviewList } from '../components/review/ReviewList';
 import { ReviewDetail } from '../components/review/ReviewDetail';
 import { MembersView } from '../components/views/MembersView';
 import { InviteDialog } from '../components/InviteDialog';
 import { PageEditor } from '../components/PageEditor';
+import { PageByline } from '../components/PageByline';
 import { TransferDialog } from '../components/TransferDialog';
 import { NotificationsPage } from '../components/notifications/NotificationsPage';
 import { notificationUnreadCount } from '../api';
+import { CommentsProvider, CommentsPanel, CommentsHeaderToggle, commentMarkdownComponents } from '../components/PageCommentsLayer';
 import { C } from '@/lib/design';
 
 type ActiveView =
-  | { kind: 'page'; slug: string; content: PageFull | null }
+  | { kind: 'page'; slug: string; path?: string; content: PageFull | null }
   | { kind: 'source'; filename: string; content: SourceContent | null }
   | { kind: 'review-list'; workspaceSlug: string }
   | { kind: 'review-detail'; workspaceSlug: string; submissionId: string }
@@ -74,6 +77,7 @@ export function MainLayout() {
   useEffect(() => {
     notificationUnreadCount().then(setNotifUnread).catch(() => {});
   }, []);
+  const articleRef = useRef<HTMLElement>(null);
   const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<NavTab>('wiki');
   const [reviewCount, setReviewCount] = useState(0);
@@ -84,6 +88,8 @@ export function MainLayout() {
   const [showNewFolder, setShowNewFolder] = useState<Workspace | null>(null);
   const [newPageFolder, setNewPageFolder] = useState<string | null>(null);
   const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
+  const [newPageDir, setNewPageDir] = useState<ContentDir>('wiki');
+  const [newFolderDir, setNewFolderDir] = useState<ContentDir>('wiki');
   const [newName, setNewName] = useState('');
   const [newSlug, setNewSlug] = useState('');
   const [creating, setCreating] = useState(false);
@@ -144,21 +150,35 @@ export function MainLayout() {
           await loadSpaceSources(targetWs);
         }
         const branch = targetWs.visibility === 'private' ? userBranch : 'main';
+        // Find the page in the tree to get its path
+        const findPath = (items: PageMeta[], targetSlug: string): string | undefined => {
+          for (const p of items) {
+            if (p.kind !== 'folder' && p.slug === targetSlug) return p.path;
+            if (p.children) {
+              const found = findPath(p.children, targetSlug);
+              if (found) return found;
+            }
+          }
+          return undefined;
+        };
+        const pagePath = findPath(spacePages[targetWs.id] || [], pageSlug);
+        const dir = pagePath?.split('/')[0] || 'wiki';
         try {
-          const page = await getPage(pageSlug, branch, targetWs.slug);
-          setActiveView({ kind: 'page', slug: pageSlug, content: page });
+          const page = await getPage(pageSlug, branch, targetWs.slug, dir);
+          setActiveView({ kind: 'page', slug: pageSlug, path: pagePath, content: page });
         } catch {
           // Page not found, just show home
         }
       }
     } else if (personal) {
-      const personalPages = await listPages(userBranch, personal.slug);
+      const personalPages = await listPages(userBranch, personal.slug, 'all');
       const firstPage = personalPages.find((p) => p.kind === 'page');
       if (firstPage) {
-        setActiveView({ kind: 'page', slug: firstPage.slug, content: null });
+        setActiveView({ kind: 'page', slug: firstPage.slug, path: firstPage.path, content: null });
         navigate(`/${personal.slug}/${firstPage.slug}`, { replace: true });
+        const firstDir = firstPage.path?.split('/')[0] || 'wiki';
         try {
-          const page = await getPage(firstPage.slug, userBranch, personal.slug);
+          const page = await getPage(firstPage.slug, userBranch, personal.slug, firstDir);
           setActiveView(prev => prev?.kind === 'page' ? { ...prev, content: page } : prev);
         } catch {
           // Page not found
@@ -188,21 +208,42 @@ export function MainLayout() {
     return ws.visibility === 'private' && ws.role === 'owner';
   }
 
+  /** Walk the page tree and recursively merge draft pages into main pages by path.
+   *  When both trees have a folder at the same path, their children are merged
+   *  recursively so that draft-only pages under existing section nodes (wiki,
+   *  entities, concepts) are not silently dropped. */
+  function mergePageTrees(main: PageMeta[], draft: PageMeta[]): PageMeta[] {
+    const merged: PageMeta[] = [...main];
+    const pathToIndex = new Map(merged.map((p, i) => [p.path, i] as const));
+    for (const dp of draft) {
+      const idx = pathToIndex.get(dp.path);
+      if (idx === undefined) {
+        // Draft-only node — add to merged
+        pathToIndex.set(dp.path, merged.length);
+        merged.push(dp);
+      } else if (merged[idx].kind === 'folder' && dp.kind === 'folder') {
+        // Both are folders — recursively merge their children
+        merged[idx] = {
+          ...merged[idx],
+          children: mergePageTrees(merged[idx].children || [], dp.children || []),
+        };
+      }
+      // else: main has a page at this path — main wins, skip draft
+    }
+    return merged;
+  }
+
   // Load pages for a space
   const loadSpacePages = async (ws: Workspace) => {
     if (ws.visibility === 'private') {
-      const pages = await listPages(userBranch, ws.slug);
+      const pages = await listPages(userBranch, ws.slug, 'all');
       setSpacePages((prev) => ({ ...prev, [ws.id]: pages }));
     } else {
       const [mainPages, draftPages] = await Promise.all([
-        listPages('main', ws.slug),
-        listPages(userBranch, ws.slug).catch(() => [] as PageMeta[]),
+        listPages('main', ws.slug, 'all'),
+        listPages(userBranch, ws.slug, 'all').catch(() => [] as PageMeta[]),
       ]);
-      const mainSlugs = new Set(mainPages.map((p) => p.slug));
-      const merged = [
-        ...mainPages,
-        ...draftPages.filter((p) => !mainSlugs.has(p.slug)),
-      ];
+      const merged = mergePageTrees(mainPages, draftPages);
       setSpacePages((prev) => ({ ...prev, [ws.id]: merged }));
     }
   };
@@ -266,26 +307,27 @@ export function MainLayout() {
     const pages = spacePages[ws.id] || [];
     const first = pages.find((p) => p.kind === 'page');
     if (first) {
-      selectPage(ws, first.slug);
+      selectPage(ws, first.slug, first.path);
     } else {
       setActiveView(null);
     }
   };
 
   // Select a page
-  const selectPage = async (ws: Workspace, slug: string) => {
+  const selectPage = async (ws: Workspace, slug: string, path?: string) => {
     setActiveWorkspace(ws);
     setActiveTab('wiki');
     setEditingPage(false);
-    setActiveView({ kind: 'page', slug, content: null });
+    setActiveView({ kind: 'page', slug, path, content: null });
     navigate(`/${ws.slug}/${slug}`, { replace: true });
 
+    const dir = path?.split('/')[0] || 'wiki';
     const setContent = (content: PageFull | null) =>
       setActiveView(prev => prev?.kind === 'page' ? { ...prev, content } : prev);
 
     if (ws.visibility === 'private') {
       try {
-        const page = await getPage(slug, userBranch, ws.slug);
+        const page = await getPage(slug, userBranch, ws.slug, dir);
         setContent(page);
       } catch {
         setContent(null);
@@ -293,11 +335,11 @@ export function MainLayout() {
       }
     } else {
       try {
-        const page = await getPage(slug, userBranch, ws.slug);
+        const page = await getPage(slug, userBranch, ws.slug, dir);
         setContent(page);
       } catch {
         try {
-          const page = await getPage(slug, 'main', ws.slug);
+          const page = await getPage(slug, 'main', ws.slug, dir);
           setContent(page);
         } catch {
           setContent(null);
@@ -329,18 +371,22 @@ export function MainLayout() {
     if (!newName.trim() || !showNewPage) return;
     const ws = showNewPage;
     const baseSlug = newName.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim();
-    const slug = newPageFolder
-      ? `${newPageFolder.replace('wiki/', '')}/${baseSlug}`
-      : baseSlug;
+    // Strip dir prefix from folder path if creating inside a folder
+    const folderRelative = newPageFolder
+      ? newPageFolder.slice(newPageDir.length + 1) // e.g. "wiki/some/path" → "some/path"
+      : null;
+    const slug = folderRelative ? `${folderRelative}/${baseSlug}` : baseSlug;
     const body = `---\ntitle: "${newName.trim()}"\nsummary: ""\nkind: concept\n---\n\n`;
     try {
-      await writePage(slug, body, userBranch, ws.slug);
+      await writePage(slug, body, userBranch, ws.slug, newPageDir);
       const title = newName.trim();
       setShowNewPage(null);
       setNewName('');
       setNewPageFolder(null);
+      setNewPageDir('wiki');
       await loadSpacePages(ws);
-      setActiveView({ kind: 'page', slug, content: { slug, title, summary: '', body, branch: userBranch, kind: 'page', children: [] } });
+      const newPath = `${newPageDir}/${slug}`;
+      setActiveView({ kind: 'page', slug, path: newPath, content: { slug, path: newPath, title, summary: '', body, branch: userBranch, kind: 'page', children: [] } });
       navigate(`/${ws.slug}/${slug}`, { replace: true });
     } catch {
       setMessage({ text: 'Failed to create page', type: 'error' });
@@ -353,10 +399,11 @@ export function MainLayout() {
     if (!newName.trim() || !showNewFolder) return;
     const ws = showNewFolder;
     try {
-      await createFolder(newName.trim(), userBranch, newFolderParent || undefined, ws.slug);
+      await createFolder(newName.trim(), userBranch, newFolderParent || newFolderDir, ws.slug);
       setShowNewFolder(null);
       setNewName('');
       setNewFolderParent(null);
+      setNewFolderDir('wiki');
       await loadSpacePages(ws);
     } catch {
       setMessage({ text: 'Failed to create folder', type: 'error' });
@@ -395,9 +442,21 @@ export function MainLayout() {
         setMessage({ text: 'No pages to submit', type: 'error' });
         return;
       }
-      const slugs = pages.map((p) => p.slug);
+      // Flatten page tree to paths, skipping folders
+      const flatten = (items: PageMeta[]): string[] => {
+        const result: string[] = [];
+        for (const p of items) {
+          if (p.kind === 'folder' && p.children && p.children.length > 0) {
+            result.push(...flatten(p.children));
+          } else if (p.kind !== 'folder') {
+            result.push(p.path);
+          }
+        }
+        return result;
+      };
+      const paths = flatten(pages);
       const personal = isPersonalSpace(ws);
-      await submit(userBranch, slugs, personal, ws.slug);
+      await submit(userBranch, paths, personal, ws.slug);
       setMessage({ text: personal ? 'Committed.' : 'Submitted for review.', type: 'success' });
     } catch {
       setMessage({ text: 'Submit failed', type: 'error' });
@@ -440,7 +499,7 @@ export function MainLayout() {
         const pages = spacePages[activeWorkspace.id] || [];
         const first = pages.find((p) => p.kind === 'page');
         if (first) {
-          selectPage(activeWorkspace, first.slug);
+          selectPage(activeWorkspace, first.slug, first.path);
         } else {
           setActiveView(null);
         }
@@ -530,6 +589,12 @@ export function MainLayout() {
     return body;
   };
 
+  // Page-view comment context: active only when reading (not editing) a page.
+  const pageView = activeView?.kind === 'page' ? activeView : null;
+  const commentsActive = !!pageView?.content && !editingPage;
+  const commentPageSlug = commentsActive && pageView ? pageView.slug : '';
+  const commentSource = commentsActive && pageView?.content ? renderBody(pageView.content.body) : '';
+
   // Execute a pending rename/delete from the tree menus.
   const handlePathOp = async () => {
     if (!pathOp || !activeWorkspace) return;
@@ -554,7 +619,8 @@ export function MainLayout() {
       setPathOp(null);
       // If the open page lived under the changed path, drop the stale view.
       if (activeView?.kind === 'page') {
-        const viewPath = `wiki/${activeView.slug}.md`;
+        const dir = activeView.path?.split('/')[0] || 'wiki';
+        const viewPath = `${dir}/${activeView.slug}.md`;
         if (viewPath === pathOp.path || viewPath.startsWith(pathOp.path + '/')) {
           setActiveView(null);
           navigate(`/`, { replace: true });
@@ -571,11 +637,12 @@ export function MainLayout() {
     if (!activeWorkspace || activeView?.kind !== 'page') return;
     const ws = activeWorkspace;
     const slug = activeView.slug;
-    await writePage(slug, body, userBranch, ws.slug);
+    const dir = activeView.path?.split('/')[0] || 'wiki';
+    await writePage(slug, body, userBranch, ws.slug, dir);
     setEditingPage(false);
     setMessage({ text: 'Saved to your draft.', type: 'success' });
     try {
-      const page = await getPage(slug, userBranch, ws.slug);
+      const page = await getPage(slug, userBranch, ws.slug, dir);
       setActiveView((prev) => (prev?.kind === 'page' ? { ...prev, content: page } : prev));
     } catch { /* keep the stale view; tree reload below still runs */ }
     loadSpacePages(ws);
@@ -618,12 +685,12 @@ export function MainLayout() {
             reviewCount={reviewCount}
             isPersonal={personal}
             isOwner={isOwner}
-            onSelectPage={(slug) => activeWorkspace && selectPage(activeWorkspace, slug)}
+            onSelectPage={(slug, path) => activeWorkspace && selectPage(activeWorkspace, slug, path)}
             onSelectSource={(filename) => activeWorkspace && selectSource(activeWorkspace, filename)}
-            onNewPage={() => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(null); } }}
-            onNewFolder={() => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(null); } }}
-            onAddPageInFolder={(folderPath) => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(folderPath); } }}
-            onAddFolderInFolder={(parentPath) => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(parentPath); } }}
+            onNewPage={(dir?: ContentDir) => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(null); setNewPageDir(dir || 'wiki'); } }}
+            onNewFolder={(dir?: ContentDir) => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(null); setNewFolderDir(dir || 'wiki'); } }}
+            onAddPageInFolder={(folderPath, dir) => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(folderPath); setNewPageDir(dir); } }}
+            onAddFolderInFolder={(parentPath, dir) => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(parentPath); setNewFolderDir(dir); } }}
             onRenamePath={(path, isFolder, title) => setPathOp({ kind: 'rename', path, isFolder, title, value: title })}
             onDeletePath={(path, isFolder, title) => setPathOp({ kind: 'delete', path, isFolder, title })}
             onShowIngest={() => setShowIngest(true)}
@@ -633,6 +700,13 @@ export function MainLayout() {
 
           {/* Main Content Area */}
           <main style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+            <CommentsProvider
+              workspaceSlug={activeWorkspace?.slug ?? ''}
+              pageSlug={commentPageSlug}
+              source={commentSource}
+              articleRef={articleRef}
+              currentUserId={auth?.id}
+            >
             {/* Top bar: breadcrumb + actions */}
             <div style={{
               position: 'sticky', top: 0, zIndex: 10,
@@ -732,6 +806,7 @@ export function MainLayout() {
                       {compiling ? <RefreshCw size={13} className="animate-spin" /> : <Zap size={13} color="#e2590b" />}
                       {compiling ? 'Compiling...' : 'Compile'}
                     </button>
+                    <CommentsHeaderToggle style={{ ...headerBtnStyle, marginLeft: 2 }} />
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <button style={{ ...headerBtnStyle, padding: '4px 6px' }} aria-label="More actions">
@@ -774,7 +849,7 @@ export function MainLayout() {
             />
 
             {/* Content */}
-            <div style={{ flex: 1, padding: '36px 56px 56px' }}>
+            <div style={{ flex: 1, padding: '36px 56px 56px', position: 'relative' }}>
               {/* Notifications (cross-space inbox) */}
               {activeView?.kind === 'notifications' ? (
                 <NotificationsPage onUnreadChange={setNotifUnread} />
@@ -877,9 +952,19 @@ export function MainLayout() {
                     onCancel={() => setEditingPage(false)}
                   />
                 ) : (
-                  <article className="prose">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{renderBody(activeView.content.body)}</ReactMarkdown>
-                  </article>
+                  // Fill the content box edge-to-edge: the doc scrolls on the left
+                  // (left-anchored, same left edge as every other view), the comment
+                  // panel is flush to the right edge and full height with its own
+                  // scroll. Opening it shrinks the doc from the right only.
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'stretch' }}>
+                    <article ref={articleRef} className="prose" style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '36px 48px 56px 56px' }}>
+                      <PageByline name={activeView.content.edited_by} editedAt={activeView.content.edited_at} />
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={commentMarkdownComponents}>
+                        {renderBody(activeView.content.body)}
+                      </ReactMarkdown>
+                    </article>
+                    <CommentsPanel />
+                  </div>
                 )
 
               /* Discover */
@@ -896,6 +981,7 @@ export function MainLayout() {
                 </div>
               )}
             </div>
+            </CommentsProvider>
           </main>
         </div>
       </TooltipProvider>

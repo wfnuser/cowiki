@@ -360,12 +360,12 @@ export function ReviewDetail({
               Labels
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {submission.page_slugs.map((slug) => (
-                <span key={slug} style={{
+              {submission.paths.map((p) => (
+                <span key={p} style={{
                   fontSize: 11.5, padding: '2px 8px', borderRadius: 999,
                   background: C.rail, color: C.ink2,
                 }}>
-                  {slug}
+                  {p}
                 </span>
               ))}
             </div>

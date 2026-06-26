@@ -10,6 +10,7 @@ function h(extra: Record<string, string> = {}): Record<string, string> {
 
 export interface PageMeta {
   slug: string;
+  path: string;
   title: string;
   summary: string;
   branch: string;
@@ -19,6 +20,10 @@ export interface PageMeta {
 
 export interface PageFull extends PageMeta {
   body: string;
+  /** Last editor of the page (git history), for the byline. */
+  edited_by?: string | null;
+  /** Unix timestamp (seconds) of that last edit. */
+  edited_at?: number | null;
 }
 
 export interface Submission {
@@ -26,7 +31,7 @@ export interface Submission {
   user_id: string;
   status: string;
   summary: string;
-  page_slugs: string[];
+  paths: string[];
   source_branch: string;
   created_at: string;
   reviewed_by: string | null;
@@ -297,8 +302,8 @@ export async function listMembers(workspaceSlug: string): Promise<MemberInfo[]> 
 
 // ── Pages ──
 
-export async function listPages(branch = 'main', workspaceSlug: string): Promise<PageMeta[]> {
-  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages?branch=${branch}`, { headers: h() });
+export async function listPages(branch = 'main', workspaceSlug: string, dir = 'all'): Promise<PageMeta[]> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages?branch=${encodeURIComponent(branch)}&dir=${encodeURIComponent(dir)}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Request failed: ${res.status}`);
@@ -306,8 +311,8 @@ export async function listPages(branch = 'main', workspaceSlug: string): Promise
   return res.json();
 }
 
-export async function getPage(slug: string, branch = 'main', workspaceSlug: string): Promise<PageFull> {
-  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages/${slug}?branch=${branch}`, { headers: h() });
+export async function getPage(slug: string, branch = 'main', workspaceSlug: string, dir = 'wiki'): Promise<PageFull> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages/${encodeURIComponent(slug)}?branch=${encodeURIComponent(branch)}&dir=${encodeURIComponent(dir)}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Request failed: ${res.status}`);
@@ -315,11 +320,11 @@ export async function getPage(slug: string, branch = 'main', workspaceSlug: stri
   return res.json();
 }
 
-export async function writePage(slug: string, body: string, branch: string, workspaceSlug: string): Promise<void> {
+export async function writePage(slug: string, body: string, branch: string, workspaceSlug: string, dir = 'wiki'): Promise<void> {
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ slug, body, branch }),
+    body: JSON.stringify({ slug, body, branch, dir }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -357,11 +362,11 @@ export async function compile(branch: string, workspaceSlug: string) {
 
 // ── Submit & Review ──
 
-export async function submit(branch: string, pageSlugs: string[], skipReview: boolean, workspaceSlug: string) {
+export async function submit(branch: string, paths: string[], skipReview: boolean, workspaceSlug: string) {
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/submit`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ branch, page_slugs: pageSlugs, skip_review: skipReview }),
+    body: JSON.stringify({ branch, paths, skip_review: skipReview }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -683,6 +688,97 @@ export async function editReview(workspaceSlug: string, submissionId: string, pa
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ path, content }),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => `Request failed: ${res.status}`));
+}
+
+// ── Document Comments ──
+
+export interface PageComment {
+  id: string;
+  workspace_slug: string;
+  page_slug: string;
+  user_id: string;
+  content_hash: string | null;
+  start_line: number | null;
+  end_line: number | null;
+  body: string;
+  parent_id: string | null;
+  resolved: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CommentSnapshot {
+  content_hash: string;
+  source: string;
+}
+
+export interface PageCommentsResponse {
+  comments: PageComment[];
+  snapshots: CommentSnapshot[];
+}
+
+/** All comments on a page plus the snapshots needed to re-anchor them. */
+export async function listPageComments(workspaceSlug: string, slug: string): Promise<PageCommentsResponse> {
+  const res = await fetch(
+    `${BASE}/workspaces/${workspaceSlug}/page-comments?slug=${encodeURIComponent(slug)}`,
+    { headers: h() },
+  );
+  if (!res.ok) throw new Error(await res.text().catch(() => `Request failed: ${res.status}`));
+  return res.json();
+}
+
+/**
+ * Create a comment or reply. Top-level comments pass `source` (the rendered,
+ * frontmatter-stripped markdown the anchor was made against) plus a 1-based
+ * `startLine`/`endLine`; replies pass only `parentId` + `body`.
+ */
+export async function createPageComment(
+  workspaceSlug: string,
+  input: {
+    slug: string;
+    body: string;
+    source?: string;
+    startLine?: number;
+    endLine?: number;
+    parentId?: string;
+  },
+): Promise<PageComment> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/page-comments`, {
+    method: 'POST',
+    headers: h({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      slug: input.slug,
+      body: input.body,
+      source: input.source,
+      start_line: input.startLine,
+      end_line: input.endLine,
+      parent_id: input.parentId,
+    }),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => `Request failed: ${res.status}`));
+  return res.json();
+}
+
+export async function setPageCommentResolved(
+  workspaceSlug: string,
+  commentId: string,
+  resolved: boolean,
+): Promise<PageComment> {
+  const action = resolved ? 'resolve' : 'unresolve';
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/page-comments/${commentId}/${action}`, {
+    method: 'POST',
+    headers: h(),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => `Request failed: ${res.status}`));
+  return res.json();
+}
+
+export async function deletePageComment(workspaceSlug: string, commentId: string): Promise<void> {
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/page-comments/${commentId}`, {
+    method: 'DELETE',
+    headers: h(),
   });
   if (!res.ok) throw new Error(await res.text().catch(() => `Request failed: ${res.status}`));
 }

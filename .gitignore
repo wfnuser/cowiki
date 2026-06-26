@@ -26,3 +26,6 @@ mcp-server
 .claude/settings.local.json
 
 .omc
+# local comment-system test stack
+data-comments-test/
+cowiki.conf

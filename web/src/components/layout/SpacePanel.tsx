@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
   ChevronRight, FileText, Folder, Upload, Wand2,
   MoreHorizontal, Plus, FolderPlus, Settings, BookOpen, GitPullRequest, Users, Activity,
@@ -13,6 +13,9 @@ import { C } from '@/lib/design';
 
 export type NavTab = 'wiki' | 'reviews' | 'members' | 'activity';
 
+/** Supported content directory prefixes */
+type ContentDir = 'wiki' | 'entities' | 'concepts';
+
 interface SpacePanelProps {
   workspace: Workspace | null;
   activeTab: NavTab;
@@ -24,13 +27,13 @@ interface SpacePanelProps {
   reviewCount: number;
   isPersonal: boolean;
   isOwner: boolean;
-  onSelectPage: (slug: string) => void;
+  onSelectPage: (slug: string, path?: string) => void;
   onSelectSource: (filename: string) => void;
-  onNewPage: () => void;
-  onNewFolder: () => void;
-  onAddPageInFolder: (folderPath: string) => void;
-  onAddFolderInFolder: (parentPath: string) => void;
-  /** path is the repo path: wiki/<slug>.md for pages, wiki/<dir> for folders */
+  onNewPage: (dir?: ContentDir) => void;
+  onNewFolder: (dir?: ContentDir) => void;
+  onAddPageInFolder: (folderPath: string, dir: ContentDir) => void;
+  onAddFolderInFolder: (parentPath: string, dir: ContentDir) => void;
+  /** path is the repo path: <dir>/<slug>.md for pages, <dir>/<dir> for folders */
   onRenamePath: (path: string, isFolder: boolean, title: string) => void;
   onDeletePath: (path: string, isFolder: boolean, title: string) => void;
   onShowIngest: () => void;
@@ -88,6 +91,8 @@ export function SpacePanel({
     { tab: 'members', icon: <Users size={16} />, label: 'Members & roles', hide: isPersonal },
     { tab: 'activity', icon: <Activity size={16} />, label: 'Activity' },
   ];
+
+  const wikiActive = activeTab === 'wiki';
 
   return (
     <aside style={panelStyle}>
@@ -181,59 +186,147 @@ export function SpacePanel({
           </span>
         </button>
 
-        {/* Wiki Space header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 10px', margin: '12px 0 8px' }}>
-          <span style={{ fontSize: 11.5, fontWeight: 600, color: C.faint, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-            Wiki Space
-          </span>
+        {/* Section 1: Sources */}
+        <ContentSection
+          title="Sources"
+          items={sources}
+          emptyText="No sources yet"
+          renderItem={(s) => (
+            <SourceEntry
+              key={s.filename}
+              source={s}
+              active={activeSource === s.filename}
+              onSelect={() => onSelectSource(s.filename)}
+              onSelectPage={wikiActive ? onSelectPage : undefined}
+            />
+          )}
+          menuItems={
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: C.faint, display: 'flex' }}
+                  onClick={(e) => e.stopPropagation()}>
+                  <MoreHorizontal size={13} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-36">
+                <DropdownMenuItem onClick={onShowIngest}><Upload size={14} className="mr-2" /> Add Source</DropdownMenuItem>
+                <DropdownMenuItem onClick={onCompile}><Wand2 size={14} className="mr-2" /> Compile</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          }
+        />
+
+        {/* Section 2: Wiki */}
+        <ContentSection
+          title="Wiki"
+          defaultExpanded
+          items={filterAndSortPages(pages, 'wiki')}
+          emptyText="No pages yet"
+          renderItem={(p) => (
+            <PageTreeItem
+              key={`${p.kind}:${p.slug}`}
+              page={p}
+              dir="wiki"
+              activePage={wikiActive ? activePage : null}
+              depth={0}
+              onSelectPage={onSelectPage}
+              onAddPageInFolder={(fp) => onAddPageInFolder(fp, 'wiki')}
+              onAddFolderInFolder={(pp) => onAddFolderInFolder(pp, 'wiki')}
+              onRenamePath={onRenamePath}
+              onDeletePath={onDeletePath}
+            />
+          )}
+          menuItems={
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button style={{
                   background: 'none', border: 'none', cursor: 'pointer', padding: 2, borderRadius: 4,
                   color: C.faint, display: 'flex',
-                }}>
+                }} onClick={(e) => e.stopPropagation()}>
                   <Plus size={14} />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-40">
-                <DropdownMenuItem onClick={onNewPage}><FileText size={14} className="mr-2" /> New Page</DropdownMenuItem>
-                <DropdownMenuItem onClick={onNewFolder}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onNewPage('wiki')}><FileText size={14} className="mr-2" /> New Page</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onNewFolder('wiki')}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          </div>
+          }
+        />
 
-          <>
-              {/* Sources section */}
-              <SourcesSection
-                sources={sources}
-                activeSource={activeTab === 'wiki' ? activeSource : null}
-                onSelectSource={onSelectSource}
-                onSelectPage={onSelectPage}
-                onShowIngest={onShowIngest}
-                onCompile={onCompile}
-              />
+        {/* Section 3: Entities */}
+        <ContentSection
+          title="Entities"
+          items={filterAndSortPages(pages, 'entities')}
+          emptyText="No pages yet"
+          renderItem={(p) => (
+            <PageTreeItem
+              key={`${p.kind}:${p.slug}`}
+              page={p}
+              dir="entities"
+              activePage={wikiActive ? activePage : null}
+              depth={0}
+              onSelectPage={onSelectPage}
+              onAddPageInFolder={(fp) => onAddPageInFolder(fp, 'entities')}
+              onAddFolderInFolder={(pp) => onAddFolderInFolder(pp, 'entities')}
+              onRenamePath={onRenamePath}
+              onDeletePath={onDeletePath}
+            />
+          )}
+          menuItems={
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: 2, borderRadius: 4,
+                  color: C.faint, display: 'flex',
+                }} onClick={(e) => e.stopPropagation()}>
+                  <Plus size={14} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                <DropdownMenuItem onClick={() => onNewPage('entities')}><FileText size={14} className="mr-2" /> New Page</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onNewFolder('entities')}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          }
+        />
 
-              {/* Page tree */}
-              {pages.length === 0 ? (
-                <div style={{ padding: '8px 8px', fontSize: 12, color: C.faint, fontStyle: 'italic' }}>
-                  No pages yet
-                </div>
-              ) : (
-                pages.map((p) => (
-                  <PageTreeItem
-                    key={p.slug}
-                    page={p}
-                    activePage={activeTab === 'wiki' ? activePage : null}
-                    depth={0}
-                    onSelectPage={onSelectPage}
-                    onAddPageInFolder={onAddPageInFolder}
-                    onAddFolderInFolder={onAddFolderInFolder}
-                    onRenamePath={onRenamePath}
-                    onDeletePath={onDeletePath}
-                  />
-                ))
-              )}
-            </>
+        {/* Section 4: Concepts */}
+        <ContentSection
+          title="Concepts"
+          items={filterAndSortPages(pages, 'concepts')}
+          emptyText="No pages yet"
+          renderItem={(p) => (
+            <PageTreeItem
+              key={`${p.kind}:${p.slug}`}
+              page={p}
+              dir="concepts"
+              activePage={wikiActive ? activePage : null}
+              depth={0}
+              onSelectPage={onSelectPage}
+              onAddPageInFolder={(fp) => onAddPageInFolder(fp, 'concepts')}
+              onAddFolderInFolder={(pp) => onAddFolderInFolder(pp, 'concepts')}
+              onRenamePath={onRenamePath}
+              onDeletePath={onDeletePath}
+            />
+          )}
+          menuItems={
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: 2, borderRadius: 4,
+                  color: C.faint, display: 'flex',
+                }} onClick={(e) => e.stopPropagation()}>
+                  <Plus size={14} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                <DropdownMenuItem onClick={() => onNewPage('concepts')}><FileText size={14} className="mr-2" /> New Page</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onNewFolder('concepts')}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          }
+        />
       </div>
 
       <SearchModal
@@ -249,95 +342,87 @@ export function SpacePanel({
   );
 }
 
-/* ── Sources section ── */
-function SourcesSection({
-  sources,
-  activeSource,
-  onSelectSource,
-  onSelectPage,
-  onShowIngest,
-  onCompile,
-}: {
-  sources: SourceItem[];
-  activeSource: string | null;
-  onSelectSource: (filename: string) => void;
-  onSelectPage: (slug: string) => void;
-  onShowIngest: () => void;
-  onCompile: () => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
+/* ── Helpers ── */
+
+/** Filter pages by slug prefix and sort folders-first, then A→Z */
+function filterAndSortPages(pages: PageMeta[], prefix: ContentDir): PageMeta[] {
+  const dirNode = pages.find((p) => p.slug === prefix && p.kind === 'folder');
+  if (!dirNode || !dirNode.children) return [];
+  return sortPages(dirNode.children);
+}
+
+/** Sort pages: folders first, then A→Z within each group */
+function sortPages(pages: PageMeta[]): PageMeta[] {
+  return [...pages].sort((a, b) => {
+    const aFolder = a.kind === 'folder' ? 0 : 1;
+    const bFolder = b.kind === 'folder' ? 0 : 1;
+    if (aFolder !== bFolder) return aFolder - bFolder;
+    const aName = (a.title || a.slug).toLowerCase();
+    const bName = (b.title || b.slug).toLowerCase();
+    return aName.localeCompare(bName);
+  });
+}
+
+/* ── Section header component ── */
+
+interface SectionHeaderProps {
+  title: string;
+  expanded: boolean;
+  onToggle: () => void;
+  menuItems?: React.ReactNode;
+}
+
+function SectionHeader({ title, expanded, onToggle, menuItems }: SectionHeaderProps) {
+  return (
+    <div
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
+        borderRadius: 6, cursor: 'pointer', userSelect: 'none',
+        fontSize: 14, color: C.ink2,
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = C.rail; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+    >
+      <span onClick={onToggle} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+        <ChevronRight size={12} style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
+        <Folder size={14} />
+        <span>{title}</span>
+      </span>
+      {menuItems}
+    </div>
+  );
+}
+
+/* ── Unified collapsible section ── */
+
+interface ContentSectionProps<T> {
+  title: string;
+  defaultExpanded?: boolean;
+  items: T[];
+  emptyText: string;
+  renderItem: (item: T) => React.ReactNode;
+  menuItems?: React.ReactNode;
+}
+
+function ContentSection<T>({
+  title, defaultExpanded = false, items, emptyText, renderItem, menuItems,
+}: ContentSectionProps<T>) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
 
   return (
     <>
-      <div
-        style={{
-          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
-          borderRadius: 6, cursor: 'pointer', userSelect: 'none',
-          fontSize: 14, color: C.ink2,
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = C.rail; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-      >
-        <span onClick={() => setExpanded(!expanded)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
-          <ChevronRight size={12} style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
-          <Folder size={14} />
-          <span>Sources</span>
-        </span>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: C.faint, display: 'flex' }}
-              onClick={(e) => e.stopPropagation()}>
-              <MoreHorizontal size={13} />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-36">
-            <DropdownMenuItem onClick={onShowIngest}><Upload size={14} className="mr-2" /> Add Source</DropdownMenuItem>
-            <DropdownMenuItem onClick={onCompile}><Wand2 size={14} className="mr-2" /> Compile</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+      <SectionHeader
+        title={title}
+        expanded={expanded}
+        onToggle={() => setExpanded(!expanded)}
+        menuItems={menuItems}
+      />
       {expanded && (
         <div style={{ paddingLeft: 16 }}>
-          {sources.length === 0 ? (
-            <div style={{ padding: '4px 8px', fontSize: 12, color: C.faint, fontStyle: 'italic' }}>No sources yet</div>
+          {items.length === 0 ? (
+            <div style={{ padding: '4px 8px', fontSize: 12, color: C.faint, fontStyle: 'italic' }}>{emptyText}</div>
           ) : (
-            sources.map((s) => (
-              <div key={s.filename}>
-                <button
-                  onClick={() => onSelectSource(s.filename)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-                    padding: '6px 10px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                    background: activeSource === s.filename ? 'rgba(0,0,0,0.05)' : 'transparent',
-                    color: activeSource === s.filename ? C.ink : C.ink2,
-                    fontSize: 14, fontWeight: activeSource === s.filename ? 550 : 400,
-                    textAlign: 'left',
-                  }}
-                  onMouseEnter={(e) => { if (activeSource !== s.filename) e.currentTarget.style.background = C.rail; }}
-                  onMouseLeave={(e) => { if (activeSource !== s.filename) e.currentTarget.style.background = 'transparent'; }}
-                >
-                  {s.compiled ? <CheckCircle2 size={14} color={C.green} /> : <Clock size={14} color={C.amber} />}
-                  <FileCode size={14} />
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.filename}</span>
-                </button>
-                {s.compiled && s.compiled_pages.length > 0 && (
-                  <div style={{ paddingLeft: 24, display: 'flex', flexWrap: 'wrap', gap: 2, paddingBottom: 2 }}>
-                    {s.compiled_pages.map((slug) => (
-                      <button
-                        key={slug}
-                        onClick={(e) => { e.stopPropagation(); onSelectPage(slug); }}
-                        style={{
-                          background: 'none', border: 'none', cursor: 'pointer',
-                          fontSize: 10, color: C.faint, padding: 0,
-                        }}
-                      >
-                        {slug}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))
+            items.map(renderItem)
           )}
         </div>
       )}
@@ -345,9 +430,59 @@ function SourcesSection({
   );
 }
 
+/* ── Source entry (custom view showing compilation status) ── */
+
+function SourceEntry({
+  source, active, onSelect, onSelectPage,
+}: {
+  source: SourceItem;
+  active: boolean;
+  onSelect: () => void;
+  onSelectPage?: (slug: string, path?: string) => void;
+}) {
+  return (
+    <div>
+      <button
+        onClick={onSelect}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+          padding: '6px 10px', borderRadius: 6, border: 'none', cursor: 'pointer',
+          background: active ? 'rgba(0,0,0,0.05)' : 'transparent',
+          color: active ? C.ink : C.ink2,
+          fontSize: 14, fontWeight: active ? 550 : 400,
+          textAlign: 'left',
+        }}
+        onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = C.rail; }}
+        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+      >
+        {source.compiled ? <CheckCircle2 size={14} color={C.green} /> : <Clock size={14} color={C.amber} />}
+        <FileCode size={14} />
+        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{source.filename}</span>
+      </button>
+      {source.compiled && source.compiled_pages.length > 0 && onSelectPage && (
+        <div style={{ paddingLeft: 24, display: 'flex', flexWrap: 'wrap', gap: 2, paddingBottom: 2 }}>
+          {source.compiled_pages.map((slug) => (
+            <button
+              key={slug}
+              onClick={(e) => { e.stopPropagation(); onSelectPage(slug); }}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                fontSize: 10, color: C.faint, padding: 0,
+              }}
+            >
+              {slug}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Page tree item ── */
 function PageTreeItem({
   page,
+  dir,
   activePage,
   depth,
   onSelectPage,
@@ -357,9 +492,10 @@ function PageTreeItem({
   onDeletePath,
 }: {
   page: PageMeta;
+  dir: ContentDir;
   activePage: string | null;
   depth: number;
-  onSelectPage: (slug: string) => void;
+  onSelectPage: (slug: string, path?: string) => void;
   onAddPageInFolder: (folderPath: string) => void;
   onAddFolderInFolder: (parentPath: string) => void;
   onRenamePath: (path: string, isFolder: boolean, title: string) => void;
@@ -370,8 +506,16 @@ function PageTreeItem({
   const isActive = activePage === page.slug;
   const title = page.title || page.slug;
 
+  // Hook must be at top level — not inside a conditional
+  const sortedChildren = useMemo(() => {
+    if (page.kind !== 'folder' || !page.children || page.children.length === 0) return [];
+    return sortPages(page.children);
+  }, [page.kind, page.children]);
+
   if (page.kind === 'folder') {
-    const folderPath = 'wiki/' + page.slug.replace('/_index', '');
+    // page.slug is the folder's path relative to the content dir; prepend the dir prefix
+    const folderPath = dir + '/' + page.slug;
+
     return (
       <>
         <div
@@ -415,10 +559,11 @@ function PageTreeItem({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        {open && page.children?.map((child) => (
+        {open && sortedChildren.map((child) => (
           <PageTreeItem
-            key={child.slug}
+            key={`${child.kind}:${child.slug}`}
             page={child}
+            dir={dir}
             activePage={activePage}
             depth={depth + 1}
             onSelectPage={onSelectPage}
@@ -432,7 +577,7 @@ function PageTreeItem({
     );
   }
 
-  const pagePath = `wiki/${page.slug}.md`;
+  const pagePath = `${dir}/${page.slug}.md`;
   return (
     <div
       style={{
@@ -455,7 +600,7 @@ function PageTreeItem({
         if (btn) btn.style.opacity = '0';
       }}
     >
-      <span onClick={() => onSelectPage(page.slug)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+      <span onClick={() => onSelectPage(page.slug, page.path)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
         <FileText size={14} style={{ flexShrink: 0 }} />
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
       </span>

@@ -16,10 +16,12 @@ pub struct PageQueryParams {
 #[derive(Serialize, Clone)]
 pub struct PageListItem {
     pub slug: String,
+    pub path: String,
     pub title: String,
     pub summary: String,
     pub branch: String,
-    /// "page" or "folder" (folder has _index.md)
+    /// "page" or "folder" (a folder is a directory containing pages, or an
+    /// empty directory anchored by a `.gitkeep` marker)
     pub kind: String,
     /// For folders: child pages
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -33,6 +35,10 @@ pub struct PageResponse {
     pub summary: String,
     pub body: String,
     pub branch: String,
+    /// Last editor of this page on `branch` (from git history), for the byline.
+    pub edited_by: Option<String>,
+    /// Unix timestamp of that last edit.
+    pub edited_at: Option<i64>,
 }
 
 pub(crate) fn parse_frontmatter(content: &str) -> (Option<String>, String) {
@@ -141,11 +147,7 @@ fn fallback_title_from_content_or_slug(content: &str, slug: &str) -> String {
 }
 
 fn title_from_slug(slug: &str) -> String {
-    let base = slug
-        .trim_end_matches("/_index")
-        .rsplit('/')
-        .next()
-        .unwrap_or(slug);
+    let base = slug.rsplit('/').next().unwrap_or(slug);
     let title = base
         .replace(['-', '_'], " ")
         .split_whitespace()
@@ -178,7 +180,8 @@ pub struct WritePage {
     pub summary: Option<String>,
 }
 
-/// Create a folder (directory with _index.md)
+/// Create a folder. Git can't track an empty directory, so we anchor it with an
+/// empty `.gitkeep` marker; the folder is otherwise pure structure (no page).
 #[derive(Deserialize)]
 pub struct CreateFolder {
     pub name: String,
@@ -191,13 +194,17 @@ pub struct CreateFolder {
 pub async fn list_pages_ws(
     State(state): State<Arc<AppState>>,
     Path(ws_slug): Path<String>,
+    headers: axum::http::HeaderMap,
     Query(params): Query<PageQueryParams>,
 ) -> Result<Json<Vec<PageListItem>>> {
+    let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
+    crate::routes::guard::require(&guard, crate::routes::guard::Permission::ViewContent)?;
     let repo = state
         .repo_manager
         .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     let branch = params.branch.unwrap_or_else(|| "main".into());
+    crate::routes::guard::require_readable_branch(&branch, guard.user.id)?;
     ensure_user_branch_if_needed(&repo, &branch)?;
 
     let dir = params.dir.as_deref().unwrap_or("wiki");
@@ -216,14 +223,18 @@ pub async fn list_pages_ws(
 pub async fn get_page_ws(
     State(state): State<Arc<AppState>>,
     Path((ws_slug, raw_slug)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
     Query(params): Query<PageQueryParams>,
 ) -> Result<Json<PageResponse>> {
+    let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
+    crate::routes::guard::require(&guard, crate::routes::guard::Permission::ViewContent)?;
     let slug = raw_slug.strip_prefix('/').unwrap_or(&raw_slug).to_string();
     let repo = state
         .repo_manager
         .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     let branch = params.branch.unwrap_or_else(|| "main".into());
+    crate::routes::guard::require_readable_branch(&branch, guard.user.id)?;
     ensure_user_branch_if_needed(&repo, &branch)?;
     let dir = params.dir.as_deref().unwrap_or("wiki");
     if dir == "all" {
@@ -238,12 +249,19 @@ pub async fn get_page_ws(
     let body = String::from_utf8_lossy(&content).into_owned();
     let (title, summary) = parse_frontmatter(&body);
     let title = title.unwrap_or_else(|| fallback_title_from_content_or_slug(&body, &slug));
+    // Best-effort: who last edited this page and when (for the byline).
+    let edited = repo
+        .last_commit_for(&branch, &format!("{dir}/{slug}.md"))
+        .ok()
+        .flatten();
     Ok(Json(PageResponse {
         slug,
         title,
         summary,
         body,
         branch,
+        edited_by: edited.as_ref().map(|(name, _)| name.clone()),
+        edited_at: edited.map(|(_, ts)| ts),
     }))
 }
 
@@ -257,7 +275,7 @@ pub async fn write_page_ws(
     // own draft branch; main changes exclusively via merge_pr.
     let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
     crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
-    require_own_branch(&input.branch, guard.user.id)?;
+    crate::routes::guard::require_own_branch(&input.branch, guard.user.id)?;
     let repo = state
         .repo_manager
         .get(&ws_slug)
@@ -306,7 +324,7 @@ pub async fn create_folder_ws(
 ) -> Result<Json<serde_json::Value>> {
     let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
     crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
-    require_own_branch(&input.branch, guard.user.id)?;
+    crate::routes::guard::require_own_branch(&input.branch, guard.user.id)?;
     let repo = state
         .repo_manager
         .get(&ws_slug)
@@ -319,25 +337,21 @@ pub async fn create_folder_ws(
         .split_whitespace()
         .collect::<Vec<_>>()
         .join("-");
-    let dir = match &input.parent {
-        Some(p) => format!("{p}/{slug}"),
-        None => format!("wiki/{slug}"),
-    };
-    let index_path = format!("{dir}/_index.md");
-    let body = format!(
-        "---\ntitle: \"{}\"\nsummary: \"\"\nkind: overview\n---\n\n",
-        input.name
-    );
+    let parent = input.parent.as_deref().ok_or_else(|| {
+        AppError::BadRequest("parent is required (e.g. wiki, entities, entities/people)".into())
+    })?;
+    let dir = format!("{parent}/{slug}");
+    let gitkeep_path = format!("{dir}/.gitkeep");
     repo.write_file(
         &input.branch,
-        &index_path,
-        body.as_bytes(),
+        &gitkeep_path,
+        b"",
         &format!("create folder: {}", input.name),
         &guard.user.name,
     )
     .map_err(|e| AppError::Internal(e.to_string()))?;
     Ok(Json(
-        serde_json::json!({"ok": true, "slug": format!("{slug}/_index"), "path": dir}),
+        serde_json::json!({"ok": true, "slug": slug, "path": dir}),
     ))
 }
 
@@ -395,13 +409,16 @@ fn list_pages_from_dir(
     dir: &str,
     files: &[String],
 ) -> Result<Json<Vec<PageListItem>>> {
-    // Collect all items: pages and folder _index metadata
+    // Collect all items. A `page` item is a real `.md` file; a `marker` item is a
+    // synthetic placeholder for an otherwise-empty directory (anchored in git by a
+    // `.gitkeep`) so the folder still surfaces in the tree. Markers never render as
+    // pages — they only cause their directory to appear as a folder node.
     struct RawItem {
         slug: String,
         title: String,
         summary: String,
-        is_index: bool, // true if this is a folder's _index.md
-        dir: String,    // parent directory path (e.g. "test-folder" or "test-folder/sub")
+        is_marker: bool,
+        dir: String, // parent directory path (e.g. "test-folder" or "test-folder/sub")
     }
 
     let mut items: Vec<RawItem> = Vec::new();
@@ -424,37 +441,56 @@ fn list_pages_from_dir(
                 )));
             }
         };
-        let parts: Vec<&str> = slug.split('/').collect();
-        if parts.len() == 1 {
+        let item_dir = match slug.rsplit_once('/') {
+            Some((parent, _)) => parent.to_string(),
+            None => String::new(),
+        };
+        items.push(RawItem {
+            slug,
+            title,
+            summary,
+            is_marker: false,
+            dir: item_dir,
+        });
+    }
+
+    // Surface empty folders: directories whose only content is a `.gitkeep` marker
+    // (git can't track an empty directory). Each becomes a marker item so its
+    // directory appears as an (empty) folder node.
+    if let Ok(marker_dirs) = repo.list_marker_dirs(branch, dir) {
+        let prefix = format!("{dir}/");
+        for marker_dir in marker_dirs {
+            let rel_dir = marker_dir.strip_prefix(&prefix).unwrap_or(&marker_dir);
+            if rel_dir.is_empty() || items.iter().any(|i| i.dir == rel_dir) {
+                continue;
+            }
             items.push(RawItem {
-                slug: slug.clone(),
-                title,
-                summary,
-                is_index: false,
-                dir: String::new(),
-            });
-        } else {
-            let dir = parts[..parts.len() - 1].join("/");
-            let filename = *parts.last().unwrap();
-            items.push(RawItem {
-                slug: slug.clone(),
-                title,
-                summary,
-                is_index: filename == "_index",
-                dir,
+                slug: rel_dir.to_string(),
+                title: String::new(),
+                summary: String::new(),
+                is_marker: true,
+                dir: rel_dir.to_string(),
             });
         }
     }
 
     // Build tree recursively
-    fn build_level(items: &[RawItem], parent_dir: &str, branch: &str) -> Vec<PageListItem> {
+    fn build_level(
+        items: &[RawItem],
+        parent_dir: &str,
+        branch: &str,
+        dir: &str,
+    ) -> Vec<PageListItem> {
         let mut result: Vec<PageListItem> = Vec::new();
 
-        // Find pages directly in this directory (not _index)
+        // Find pages directly in this directory (markers are not pages)
         for item in items {
-            if item.dir == parent_dir && !item.is_index {
+            if item.dir == parent_dir && !item.is_marker {
                 result.push(PageListItem {
                     slug: item.slug.clone(),
+                    // item.slug is the full relative path under dir (e.g. "people/alice"),
+                    // so dir + slug always produces the correct full path.
+                    path: format!("{}/{}", dir, item.slug),
                     title: item.title.clone(),
                     summary: item.summary.clone(),
                     branch: branch.into(),
@@ -464,7 +500,7 @@ fn list_pages_from_dir(
             }
         }
 
-        // Find subdirectories (folders that have _index or have children at this level)
+        // Find subdirectories (any directory holding pages or an empty-folder marker)
         let mut subdirs: Vec<String> = Vec::new();
         for item in items {
             if let Some(child) = immediate_child_dir(&item.dir, parent_dir) {
@@ -477,21 +513,14 @@ fn list_pages_from_dir(
         subdirs.dedup();
 
         for subdir in subdirs {
-            // Find _index for this subdir
-            let (title, summary) = items
-                .iter()
-                .find(|i| i.dir == subdir && i.is_index)
-                .map(|i| (i.title.clone(), i.summary.clone()))
-                .unwrap_or_else(|| {
-                    let name = subdir.rsplit('/').next().unwrap_or(&subdir);
-                    (name.to_string(), String::new())
-                });
-
-            let children = build_level(items, &subdir, branch);
+            // Folder display name is just the directory name.
+            let title = subdir.rsplit('/').next().unwrap_or(&subdir).to_string();
+            let children = build_level(items, &subdir, branch, dir);
             result.push(PageListItem {
-                slug: format!("{subdir}/_index"),
+                slug: subdir.clone(),
+                path: format!("{dir}/{subdir}"),
                 title,
-                summary,
+                summary: String::new(),
                 branch: branch.into(),
                 kind: "folder".into(),
                 children,
@@ -507,36 +536,26 @@ fn list_pages_from_dir(
         result
     }
 
-    let tree = build_level(&items, "", branch);
+    let tree = build_level(&items, "", branch, dir);
     Ok(Json(tree))
 }
 
 // ── Path operations: rename / delete (files and folders under wiki/) ──
 
-/// Validate a repo path for destructive ops: must be inside `wiki/` (so `sources/` and
-/// other special trees are untouchable), no traversal, no empty segments, and never the
-/// `wiki` root itself.
+/// Validate a repo path for destructive ops: must be inside a known content directory
+/// (`wiki/`, `entities/`, `concepts/`), no traversal, no empty segments, and never the
+/// root itself.
 fn validate_wiki_path(p: &str) -> Result<()> {
-    let ok = p.starts_with("wiki/")
-        && p.len() > 5
+    let allowed = cowiki_core::wiki_fs::all_dirs();
+    let ok = allowed.iter().any(|d| p.starts_with(&format!("{d}/")))
         && !p.ends_with('/')
         && p.split('/')
             .all(|seg| !seg.is_empty() && seg != "." && seg != "..");
     if !ok {
         return Err(AppError::BadRequest(format!(
-            "invalid path '{p}': only paths inside wiki/ can be modified"
+            "invalid path '{p}': paths must be inside one of {:?}",
+            allowed
         )));
-    }
-    Ok(())
-}
-
-/// Mutating ops only touch the caller's own draft branch — never main, pr/* snapshots,
-/// or other users' branches (all writes flow to main exclusively through merge_pr).
-pub(crate) fn require_own_branch(branch: &str, user_id: uuid::Uuid) -> Result<()> {
-    if branch != format!("user/{user_id}") {
-        return Err(AppError::Forbidden(
-            "writes are only allowed on your own draft branch".into(),
-        ));
     }
     Ok(())
 }
@@ -556,7 +575,7 @@ pub async fn rename_path_ws(
 ) -> Result<Json<serde_json::Value>> {
     let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
     crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
-    require_own_branch(&input.branch, guard.user.id)?;
+    crate::routes::guard::require_own_branch(&input.branch, guard.user.id)?;
     validate_wiki_path(&input.from)?;
     validate_wiki_path(&input.to)?;
 
@@ -590,7 +609,7 @@ pub async fn delete_path_ws(
 ) -> Result<Json<serde_json::Value>> {
     let guard = crate::routes::guard::require_membership(&state, &headers, &ws_slug).await?;
     crate::routes::guard::require(&guard, crate::routes::guard::Permission::EditContent)?;
-    require_own_branch(&input.branch, guard.user.id)?;
+    crate::routes::guard::require_own_branch(&input.branch, guard.user.id)?;
     validate_wiki_path(&input.path)?;
 
     let repo = state
@@ -617,21 +636,18 @@ fn list_pages_all_dirs(
     let mut tree: Vec<PageListItem> = Vec::new();
 
     for dir in cowiki_core::wiki_fs::all_dirs() {
-        let files = match cowiki_core::wiki_fs::list_pages_recursive(repo, branch, dir) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
+        let files =
+            cowiki_core::wiki_fs::list_pages_recursive(repo, branch, dir).unwrap_or_default();
 
-        if files.is_empty() {
-            continue;
-        }
-
-        // Build the subtree for this directory using the shared helper
+        // Build the subtree for this directory using the shared helper. This also
+        // surfaces empty sub-folders (anchored by `.gitkeep`), so a section with no
+        // pages yet but with folders still renders.
         let subtree_json = list_pages_from_dir(repo, branch, dir, &files)?;
         let children = subtree_json.0;
 
         let dir_node = PageListItem {
-            slug: format!("{dir}/_index"),
+            slug: dir.to_string(),
+            path: dir.to_string(),
             title: dir.to_string(),
             summary: String::new(),
             branch: branch.into(),

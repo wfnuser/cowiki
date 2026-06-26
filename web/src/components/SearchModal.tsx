@@ -52,7 +52,7 @@ export function SearchModal({
   workspaceName: string;
   open: boolean;
   onClose: () => void;
-  onSelectPage: (slug: string) => void;
+  onSelectPage: (slug: string, path?: string) => void;
 }) {
   const [q, setQ] = useState('');
   const [kw, setKw] = useState<SearchResponse['keyword'] | null>(null);

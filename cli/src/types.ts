@@ -21,9 +21,12 @@ export interface UserInfo {
 
 export interface PageMeta {
   slug: string;
+  path: string;
   title: string;
   summary: string;
   branch: string;
+  kind?: string;
+  children?: PageMeta[];
 }
 
 export interface PageFull {
@@ -120,7 +123,7 @@ export interface SearchResponse {
 
 export interface SubmitRequest {
   branch: string;
-  page_slugs: string[];
+  paths: string[];
 }
 
 export interface SubmitResponse {
@@ -130,8 +133,8 @@ export interface SubmitResponse {
 }
 
 export interface DuplicateWarning {
-  new_slug: string;
-  existing_slug: string;
+  new_path: string;
+  existing_path: string;
   similarity: number;
 }
 
@@ -142,7 +145,7 @@ export interface Submission {
   user_id: string;
   status: string;
   summary: string;
-  page_slugs: string[];
+  paths: string[];
   source_branch: string;
   created_at: string;
   reviewed_by?: string;

@@ -112,12 +112,12 @@ export function ReviewList({
                 {/* Main content */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 550, color: C.ink, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {s.summary || s.page_slugs.join(', ') || 'Submission'}
+                    {s.summary || s.paths.join(', ') || 'Submission'}
                   </div>
                   <div style={{ fontSize: 12.5, color: C.muted, display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span>{author}</span>
                     <span>·</span>
-                    <span>{s.page_slugs.length} file{s.page_slugs.length === 1 ? '' : 's'}</span>
+                    <span>{s.paths.length} file{s.paths.length === 1 ? '' : 's'}</span>
                     <span>·</span>
                     <span>{timeAgo(s.created_at)}</span>
                   </div>

@@ -540,6 +540,43 @@ impl WikiRepo {
         }
     }
 
+    /// Author name + unix timestamp of the most recent commit on `branch` that
+    /// changed `file_path` — i.e. who last edited the page and when.
+    pub fn last_commit_for(
+        &self,
+        branch: &str,
+        file_path: &str,
+    ) -> Result<Option<(String, i64)>, git2::Error> {
+        let repo = self.repo()?;
+        let head = repo
+            .find_branch(branch, BranchType::Local)?
+            .get()
+            .peel_to_commit()?;
+        let mut revwalk = repo.revwalk()?;
+        revwalk.push(head.id())?;
+        revwalk.set_sorting(git2::Sort::TIME)?;
+        let path = Path::new(file_path);
+        for oid in revwalk {
+            let commit = repo.find_commit(oid?)?;
+            let here = commit.tree()?.get_path(path).map(|e| e.id()).ok();
+            let parent = commit
+                .parent(0)
+                .ok()
+                .and_then(|p| p.tree().ok())
+                .and_then(|t| t.get_path(path).map(|e| e.id()).ok());
+            let changed = match (here, parent) {
+                (Some(a), Some(b)) => a != b,
+                (Some(_), None) => true,
+                _ => false,
+            };
+            if changed {
+                let name = commit.author().name().unwrap_or("Unknown").to_string();
+                return Ok(Some((name, commit.time().seconds())));
+            }
+        }
+        Ok(None)
+    }
+
     pub fn list_files(&self, branch: &str, dir: &str) -> Result<Vec<String>, git2::Error> {
         let repo = self.repo()?;
         let branch_ref = repo.find_branch(branch, BranchType::Local)?;
@@ -633,12 +670,70 @@ impl WikiRepo {
         Ok(())
     }
 
-    pub fn diff_files(&self, branch: &str, slugs: &[String]) -> Result<Vec<FileDiff>, git2::Error> {
+    /// List directory paths under `dir` (full paths, e.g. `wiki/research`) that
+    /// contain a `.gitkeep` marker, excluding `dir` itself. Git cannot track an
+    /// empty directory, so an empty folder is anchored by a `.gitkeep`; this lets
+    /// the page tree surface those otherwise-invisible folders.
+    pub fn list_marker_dirs(&self, branch: &str, dir: &str) -> Result<Vec<String>, git2::Error> {
+        let repo = self.repo()?;
+        let branch_ref = repo.find_branch(branch, BranchType::Local)?;
+        let commit = branch_ref.get().peel_to_commit()?;
+        let tree = commit.tree()?;
+
+        let subtree = if dir.is_empty() {
+            tree
+        } else {
+            match tree.get_path(Path::new(dir)) {
+                Ok(entry) => repo.find_tree(entry.id())?,
+                Err(_) => return Ok(Vec::new()),
+            }
+        };
+
+        let mut dirs = Vec::new();
+        self.walk_marker_dirs(&repo, &subtree, dir, &mut dirs)?;
+        dirs.retain(|d| d != dir);
+        Ok(dirs)
+    }
+
+    fn walk_marker_dirs(
+        &self,
+        repo: &Repository,
+        tree: &git2::Tree,
+        prefix: &str,
+        dirs: &mut Vec<String>,
+    ) -> Result<(), git2::Error> {
+        let mut has_marker = false;
+        for entry in tree.iter() {
+            let name = match entry.name() {
+                Some(n) => n,
+                None => continue,
+            };
+            match entry.kind() {
+                Some(git2::ObjectType::Tree) => {
+                    let full_path = if prefix.is_empty() {
+                        name.to_string()
+                    } else {
+                        format!("{prefix}/{name}")
+                    };
+                    let subtree = repo.find_tree(entry.id())?;
+                    self.walk_marker_dirs(repo, &subtree, &full_path, dirs)?;
+                }
+                Some(git2::ObjectType::Blob) if name == ".gitkeep" => has_marker = true,
+                _ => {}
+            }
+        }
+        if has_marker && !prefix.is_empty() {
+            dirs.push(prefix.to_string());
+        }
+        Ok(())
+    }
+
+    pub fn diff_files(&self, branch: &str, paths: &[String]) -> Result<Vec<FileDiff>, git2::Error> {
         let mut diffs = Vec::new();
-        for slug in slugs {
-            let path = format!("wiki/{slug}.md");
-            let main_content = self.read_file("main", &path)?;
-            let branch_content = self.read_file(branch, &path)?;
+        for p in paths {
+            let file_path = format!("{p}.md");
+            let main_content = self.read_file("main", &file_path)?;
+            let branch_content = self.read_file(branch, &file_path)?;
             let old_str = main_content
                 .as_ref()
                 .map(|b| String::from_utf8_lossy(b).into_owned());
@@ -650,7 +745,7 @@ impl WikiRepo {
                 new_str.as_deref().unwrap_or(""),
             );
             diffs.push(FileDiff {
-                path,
+                path: file_path,
                 old_content: old_str,
                 new_content: new_str,
                 hunks,
@@ -1226,12 +1321,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// list_marker_dirs surfaces directories anchored only by a `.gitkeep` (empty
+    /// folders), excludes the queried dir itself, and ignores `.md`-bearing dirs.
+    #[test]
+    fn list_marker_dirs_finds_empty_folders() {
+        let (repo, dir) = temp_repo("marker-dirs");
+        repo.ensure_branch_exists("user/m").unwrap();
+        // An empty folder, anchored by a .gitkeep
+        repo.write_file("user/m", "wiki/empty/.gitkeep", b"", "e", "m")
+            .unwrap();
+        // A nested empty folder
+        repo.write_file("user/m", "wiki/parent/child/.gitkeep", b"", "e", "m")
+            .unwrap();
+        // A normal page (no marker)
+        repo.write_file("user/m", "wiki/page.md", b"# p\n", "e", "m")
+            .unwrap();
+
+        let mut dirs = repo.list_marker_dirs("user/m", "wiki").unwrap();
+        dirs.sort();
+        assert_eq!(dirs, vec!["wiki/empty", "wiki/parent/child"]);
+        // The queried dir itself (whose .gitkeep was seeded at init) is excluded.
+        assert!(!dirs.contains(&"wiki".to_string()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// delete_path on a directory removes the whole subtree.
     #[test]
     fn delete_folder_removes_subtree() {
         let (repo, dir) = temp_repo("delete-folder");
         repo.ensure_branch_exists("user/d2").unwrap();
-        repo.write_file("user/d2", "wiki/proj/_index.md", b"i\n", "e", "d")
+        repo.write_file("user/d2", "wiki/proj/.gitkeep", b"", "e", "d")
             .unwrap();
         repo.write_file("user/d2", "wiki/proj/x.md", b"x\n", "e", "d")
             .unwrap();
@@ -1239,7 +1358,7 @@ mod tests {
             .unwrap();
         repo.delete_path("user/d2", "wiki/proj", "rm folder", "d")
             .unwrap();
-        assert!(read(&repo, "user/d2", "wiki/proj/_index.md").is_none());
+        assert!(read(&repo, "user/d2", "wiki/proj/.gitkeep").is_none());
         assert!(read(&repo, "user/d2", "wiki/proj/x.md").is_none());
         assert_eq!(
             read(&repo, "user/d2", "wiki/other.md").as_deref(),
@@ -1290,6 +1409,118 @@ mod tests {
         assert!(repo
             .rename_path("user/r", "wiki/new.md", "wiki/exists.md", "mv", "r")
             .is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// diff_files accepts full repo paths (no hardcoded wiki/ prefix), so pages
+    /// from entities/ and concepts/ are diffed against the correct files.
+    #[test]
+    fn diff_files_uses_full_repo_paths() {
+        let (repo, dir) = temp_repo("diff-paths");
+        repo.ensure_branch_exists("user/a").unwrap();
+
+        // Write pages in different content directories
+        repo.write_file("user/a", "wiki/home.md", b"wiki page\n", "edit", "a")
+            .unwrap();
+        repo.write_file(
+            "user/a",
+            "entities/people/alice.md",
+            b"alice entity\n",
+            "edit",
+            "a",
+        )
+        .unwrap();
+        repo.write_file(
+            "user/a",
+            "concepts/patterns/error-handling.md",
+            b"error handling concept\n",
+            "edit",
+            "a",
+        )
+        .unwrap();
+
+        // diff_files with full repo paths (no .md extension per design)
+        let paths: Vec<String> = vec![
+            "wiki/home".into(),
+            "entities/people/alice".into(),
+            "concepts/patterns/error-handling".into(),
+        ];
+        let diffs = repo.diff_files("user/a", &paths).unwrap();
+        assert_eq!(diffs.len(), 3);
+
+        // Each path in the diff should carry the full .md file path
+        let diff_paths: Vec<&str> = diffs.iter().map(|d| d.path.as_str()).collect();
+        assert!(diff_paths.contains(&"wiki/home.md"));
+        assert!(diff_paths.contains(&"entities/people/alice.md"));
+        assert!(diff_paths.contains(&"concepts/patterns/error-handling.md"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// list_pages with dir=entities only returns pages under entities/,
+    /// not wiki/ or concepts/.
+    #[test]
+    fn list_pages_scoped_to_directory() {
+        let (repo, dir) = temp_repo("list-scoped");
+        repo.ensure_branch_exists("user/b").unwrap();
+
+        repo.write_file("user/b", "wiki/home.md", b"wiki\n", "e", "b")
+            .unwrap();
+        repo.write_file("user/b", "entities/alice.md", b"alice\n", "e", "b")
+            .unwrap();
+        repo.write_file("user/b", "entities/people/bob.md", b"bob\n", "e", "b")
+            .unwrap();
+
+        // list_pages_recursive under entities/
+        let entities_files =
+            crate::wiki_fs::list_pages_recursive(&repo, "user/b", "entities").unwrap();
+        assert_eq!(entities_files.len(), 2);
+        assert!(entities_files.iter().any(|f| f == "entities/alice.md"));
+        assert!(entities_files.iter().any(|f| f == "entities/people/bob.md"));
+
+        // list_pages_recursive under wiki/
+        let wiki_files = crate::wiki_fs::list_pages_recursive(&repo, "user/b", "wiki").unwrap();
+        assert_eq!(wiki_files.len(), 1);
+        assert!(wiki_files.iter().any(|f| f == "wiki/home.md"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// write_file + read_file work with multi-directory paths — no hardcoded
+    /// assumptions about the content root.
+    #[test]
+    fn read_write_multi_directory() {
+        let (repo, dir) = temp_repo("multi-dir-rw");
+        repo.ensure_branch_exists("user/c").unwrap();
+
+        let test_cases = vec![
+            ("wiki/team-home.md", "team home content"),
+            ("entities/people/alice.md", "alice content"),
+            (
+                "concepts/patterns/error-handling.md",
+                "error handling content",
+            ),
+            ("wiki/research/ai-safety.md", "nested wiki page"),
+            ("entities/orgs/acme.md", "org entity"),
+        ];
+
+        for (file_path, content) in &test_cases {
+            repo.write_file("user/c", file_path, content.as_bytes(), "add", "c")
+                .unwrap();
+        }
+
+        for (file_path, expected) in &test_cases {
+            let got = repo
+                .read_file("user/c", file_path)
+                .unwrap()
+                .map(|b| String::from_utf8_lossy(&b).into_owned());
+            assert_eq!(
+                got.as_deref(),
+                Some(*expected),
+                "read_file({file_path}) should match written content"
+            );
+        }
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
