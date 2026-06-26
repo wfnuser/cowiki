@@ -19,6 +19,24 @@ pub struct AuthResponse {
     pub api_key: String,
 }
 
+/// A user's `name` doubles as their unique handle: it's how GitHub sign-in keys
+/// them (`gh_user.login`) and how `@mentions` resolve them. Locally-registered
+/// users must therefore be handle-shaped too — no spaces, GitHub-login charset —
+/// so a `@name` token always parses back to exactly one user.
+fn validate_handle(name: &str) -> Result<()> {
+    let ok = (1..=39).contains(&name.len())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if ok {
+        Ok(())
+    } else {
+        Err(AppError::BadRequest(
+            "name must be 1–39 characters, letters/digits/'-'/'_' only".into(),
+        ))
+    }
+}
+
 #[derive(Serialize)]
 pub struct UserInfo {
     pub id: String,
@@ -32,6 +50,7 @@ pub async fn register(
     State(state): State<Arc<AppState>>,
     Json(input): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>> {
+    validate_handle(&input.name)?;
     if cowiki_db::users::find_by_name(&state.db, &input.name)
         .await?
         .is_some()
@@ -365,4 +384,23 @@ async fn init_user_space(state: &crate::AppState, user: &cowiki_db::users::User)
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_handle;
+
+    #[test]
+    fn accepts_github_login_shaped_names() {
+        for ok in ["wfnuser", "Dead-pool_mine", "a", "x9", &"a".repeat(39)] {
+            assert!(validate_handle(ok).is_ok(), "should accept {ok:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_spaces_empty_and_overlong() {
+        for bad in ["John Doe", "", "  ", "name!", "емоджи", &"a".repeat(40)] {
+            assert!(validate_handle(bad).is_err(), "should reject {bad:?}");
+        }
+    }
 }
