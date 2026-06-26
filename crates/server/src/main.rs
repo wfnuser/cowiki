@@ -356,6 +356,10 @@ async fn main() {
             "/api/notifications/{id}/read",
             post(routes::notifications::mark_read),
         )
+        .route(
+            "/api/notifications/{id}/unread",
+            post(routes::notifications::mark_unread),
+        )
         .layer(
             TraceLayer::new_for_http()
                 .on_request(DefaultOnRequest::new().level(Level::INFO))

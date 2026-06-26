@@ -13,6 +13,12 @@ pub struct Notification {
     pub link: Option<String>,
     pub read: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Workspace name/slug joined in read queries (None for cross-space
+    /// notifications with no workspace, or on write paths that don't JOIN).
+    #[sqlx(default)]
+    pub workspace_name: Option<String>,
+    #[sqlx(default)]
+    pub workspace_slug: Option<String>,
 }
 
 pub async fn create(
@@ -47,8 +53,14 @@ pub async fn list_for_user(
     user_id: Uuid,
     limit: i64,
 ) -> sqlx::Result<Vec<Notification>> {
+    // LEFT JOIN so cross-space notifications (workspace_id NULL) still come back,
+    // with workspace_name/slug for display and the per-space filter on the page.
     sqlx::query_as::<_, Notification>(
-        "SELECT * FROM notifications WHERE user_id = $1 ORDER BY read ASC, created_at DESC LIMIT $2",
+        "SELECT n.*, w.name AS workspace_name, w.slug AS workspace_slug \
+         FROM notifications n \
+         LEFT JOIN workspaces w ON w.id = n.workspace_id \
+         WHERE n.user_id = $1 \
+         ORDER BY n.read ASC, n.created_at DESC LIMIT $2",
     )
     .bind(user_id)
     .bind(limit)
@@ -81,6 +93,23 @@ pub async fn mark_read(pool: &PgPool, notification_id: Uuid, user_id: Uuid) -> s
         .await
         .map_err(|e| {
             tracing::error!("DB mark read failed: {e}");
+            e
+        })?;
+    Ok(rows.rows_affected() > 0)
+}
+
+pub async fn mark_unread(
+    pool: &PgPool,
+    notification_id: Uuid,
+    user_id: Uuid,
+) -> sqlx::Result<bool> {
+    let rows = sqlx::query("UPDATE notifications SET read = FALSE WHERE id = $1 AND user_id = $2")
+        .bind(notification_id)
+        .bind(user_id)
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("DB mark unread failed: {e}");
             e
         })?;
     Ok(rows.rows_affected() > 0)

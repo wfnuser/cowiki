@@ -37,6 +37,8 @@ import { InviteDialog } from '../components/InviteDialog';
 import { PageEditor } from '../components/PageEditor';
 import { PageByline } from '../components/PageByline';
 import { TransferDialog } from '../components/TransferDialog';
+import { NotificationsPage } from '../components/notifications/NotificationsPage';
+import { notificationUnreadCount } from '../api';
 import { CommentsProvider, CommentsPanel, CommentsHeaderToggle, commentMarkdownComponents } from '../components/PageCommentsLayer';
 import { C } from '@/lib/design';
 
@@ -47,6 +49,7 @@ type ActiveView =
   | { kind: 'review-detail'; workspaceSlug: string; submissionId: string }
   | { kind: 'members'; workspaceSlug: string }
   | { kind: 'activity'; workspaceSlug: string }
+  | { kind: 'notifications' }
   | null;
 
 export function MainLayout() {
@@ -68,6 +71,12 @@ export function MainLayout() {
   const [spaceSources, setSpaceSources] = useState<Record<string, SourceItem[]>>({});
   const [activeView, setActiveView] = useState<ActiveView>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
+  const [notifUnread, setNotifUnread] = useState(0);
+
+  // Cross-space unread badge for the rail; refreshed when opening the inbox.
+  useEffect(() => {
+    notificationUnreadCount().then(setNotifUnread).catch(() => {});
+  }, []);
   const articleRef = useRef<HTMLElement>(null);
   const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<NavTab>('wiki');
@@ -660,6 +669,8 @@ export function MainLayout() {
             onSettings={() => setSettingsOpen(true)}
             onDiscover={() => { setActiveView(null); navigate('/discover'); }}
             onLogout={handleLogout}
+            notifUnread={notifUnread}
+            onShowNotifications={() => setActiveView({ kind: 'notifications' })}
           />
 
           {/* Secondary Panel */}
@@ -747,6 +758,9 @@ export function MainLayout() {
                     <span style={{ color: C.faint }}>/</span>
                     <span style={{ color: C.ink }}>Activity</span>
                   </>
+                )}
+                {activeView?.kind === 'notifications' && (
+                  <span style={{ color: C.ink }}>Notifications</span>
                 )}
               </div>
 
@@ -836,8 +850,12 @@ export function MainLayout() {
 
             {/* Content */}
             <div style={{ flex: 1, padding: '36px 56px 56px', position: 'relative' }}>
-              {/* Review detail */}
-              {activeView?.kind === 'review-detail' ? (
+              {/* Notifications (cross-space inbox) */}
+              {activeView?.kind === 'notifications' ? (
+                <NotificationsPage onUnreadChange={setNotifUnread} />
+
+              /* Review detail */
+              ) : activeView?.kind === 'review-detail' ? (
                 <ReviewDetail
                   workspaceSlug={activeView.workspaceSlug}
                   submissionId={activeView.submissionId}
