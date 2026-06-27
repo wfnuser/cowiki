@@ -50,13 +50,12 @@ pub async fn compile_ws(
         .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     super::pages::ensure_user_branch_if_needed(&repo, &input.branch)?;
-    do_compile(&state, &repo, &ws_slug, &input.branch).await
+    do_compile(&state, &repo, &input.branch).await
 }
 
 async fn do_compile(
     state: &AppState,
     repo: &cowiki_core::git::WikiRepo,
-    ws_slug: &str,
     branch: &str,
 ) -> Result<Json<CompileResponse>> {
     // 1. Load compile state
@@ -111,8 +110,6 @@ async fn do_compile(
         .await
         .map_err(AppError::Internal)?;
 
-    let default_user = cowiki_db::users::get_default(&state.db).await?;
-
     // 5. Write pages
     let mut result_pages = Vec::new();
     for page in &compiled {
@@ -137,38 +134,6 @@ async fn do_compile(
             branch,
         )
         .map_err(|e| AppError::Internal(e.to_string()))?;
-
-        let hash = format!("{:x}", Sha256::digest(full_content.as_bytes()));
-        match state
-            .compiler
-            .embed(&format!("{}\n{}", page.title, page.summary))
-            .await
-        {
-            Ok(emb) => {
-                if let Err(e) = cowiki_db::pages::upsert(
-                    &state.db,
-                    &page.slug,
-                    &page.title,
-                    &page.summary,
-                    branch,
-                    &hash,
-                    Some(&emb),
-                    default_user.id,
-                    ws_slug,
-                )
-                .await
-                {
-                    tracing::warn!(
-                        "failed to index compiled page '{}' for search: {e}",
-                        page.slug
-                    );
-                }
-            }
-            Err(e) => tracing::warn!(
-                "failed to embed compiled page '{}' (not indexed for search): {e}",
-                page.slug
-            ),
-        }
 
         // Record source→page mapping from the compiler's output
         for source in &page.sources {

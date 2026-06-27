@@ -68,8 +68,7 @@ pub async fn submit(
         }
     };
 
-    // Generate embeddings for dedup
-    let mut embeddings = Vec::new();
+    // Validate that every submitted page has a title before snapshotting.
     for p in &input.paths {
         let file_path = format!("{p}.md");
         let content = repo
@@ -78,29 +77,12 @@ pub async fn submit(
             .ok_or_else(|| AppError::BadRequest(format!("page {p} not found")))?;
         let text = String::from_utf8_lossy(&content);
         super::pages::require_page_title(&text)?;
-        if let Ok(emb) = state.compiler.embed(&text).await {
-            embeddings.push((p.clone(), emb));
-        }
     }
 
-    // Check for duplicates
-    let mut duplicates = Vec::new();
-    for (path, emb) in &embeddings {
-        if let Ok(similar) =
-            cowiki_db::pages::find_similar(&state.db, emb, "main", 3, 0.85, Some(&ws_slug)).await
-        {
-            for (page, score) in similar {
-                let submitted_slug = path.rsplit('/').next().unwrap_or(path);
-                if page.slug != submitted_slug {
-                    duplicates.push(cowiki_core::models::DuplicateWarning {
-                        new_path: path.clone(),
-                        existing_path: page.slug,
-                        similarity: score,
-                    });
-                }
-            }
-        }
-    }
+    // Dedup-on-submit was backed by the `pages` embedding index, which has been
+    // removed (it never functioned: embeddings were only written by compile, and
+    // merge wrote NULL). Always return an empty warning list.
+    let duplicates: Vec<DuplicateWarning> = Vec::new();
 
     // Submit returns immediately with a diff-based summary; the AI one-liner is generated
     // in the background after the submission is created (see below), so a slow or

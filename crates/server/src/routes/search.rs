@@ -1,7 +1,6 @@
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::error::{AppError, Result};
@@ -102,7 +101,6 @@ pub async fn search(
     let q_lower = q.to_lowercase();
     let mode = params.mode.as_deref().unwrap_or("all");
     let want_keyword = mode != "semantic";
-    let want_semantic = mode != "keyword";
 
     let repo = state
         .repo_manager
@@ -163,54 +161,11 @@ pub async fn search(
     keyword.sort_by(|a, b| b.title_match.cmp(&a.title_match));
     keyword.truncate(limit);
 
-    // ── Semantic: best-effort (indexed pages only; tolerate embedder failure) ──
-    let mut semantic: Vec<SemanticHit> = Vec::new();
-    if want_semantic && q.chars().count() >= 2 {
-        if let Ok(embedding) = state.compiler.embed(&q).await {
-            let drafts = cowiki_db::pages::find_similar(
-                &state.db,
-                &embedding,
-                &user_branch,
-                limit as i64,
-                0.3,
-                Some(&ws_slug),
-            )
-            .await
-            .unwrap_or_default();
-            let merged = cowiki_db::pages::find_similar(
-                &state.db,
-                &embedding,
-                "main",
-                limit as i64,
-                0.3,
-                Some(&ws_slug),
-            )
-            .await
-            .unwrap_or_default();
-
-            // Overlay semantics: a draft of a page shadows its merged version.
-            let mut seen: HashSet<String> = HashSet::new();
-            for (page, score, source) in drafts
-                .into_iter()
-                .map(|(p, s)| (p, s, "draft"))
-                .chain(merged.into_iter().map(|(p, s)| (p, s, "main")))
-            {
-                if seen.insert(page.slug.clone()) {
-                    semantic.push(SemanticHit {
-                        slug: page.slug,
-                        title: page.title,
-                        summary: page.summary,
-                        similarity: score,
-                        source: source.into(),
-                    });
-                }
-            }
-            semantic.sort_by(|a, b| b.similarity.total_cmp(&a.similarity));
-            semantic.truncate(limit);
-        } else {
-            tracing::warn!("semantic search degraded: embedder unavailable");
-        }
-    }
+    // Semantic search was backed by the `pages` embedding index, which has been
+    // removed (it never functioned: embeddings were only written by compile and
+    // were NULL after merge). Keyword search above reads git directly and is
+    // unaffected; `semantic` stays empty until/if a real index is reintroduced.
+    let semantic: Vec<SemanticHit> = Vec::new();
 
     Ok(Json(SearchResponse { keyword, semantic }))
 }
