@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "desktop:dev": "tauri dev",
+    "desktop:build": "tauri build"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",
@@ -22,6 +25,7 @@
     "@radix-ui/react-select": "^2.3.0",
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-tabs": "^1.1.13",
+    "@tauri-apps/api": "^2.11.1",
     "@tailwindcss/vite": "^4.3.0",
     "@uiw/react-codemirror": "^4.25.10",
     "class-variance-authority": "^0.7.1",
@@ -47,6 +51,7 @@
     "@types/node": "^24.12.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@tauri-apps/cli": "^2.11.4",
     "@vitejs/plugin-react": "^6.0.1",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",

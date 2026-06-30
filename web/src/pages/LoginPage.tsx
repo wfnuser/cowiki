@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getStoredAuth } from '../auth';
+import { apiBase } from '../runtime';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -24,7 +25,7 @@ export function LoginPage() {
         </p>
 
         <a
-          href={`${import.meta.env.VITE_API_BASE || ''}/api/auth/github`}
+          href={`${apiBase()}/auth/github`}
           className="inline-flex items-center gap-2.5 bg-[var(--color-text)] text-[var(--color-bg)] px-6 py-3 text-sm font-medium hover:opacity-90 transition-opacity"
           style={{ borderRadius: 'var(--radius)' }}
         >
