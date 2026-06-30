@@ -1,7 +1,6 @@
 use axum::extract::{Path, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 use crate::error::{AppError, Result};
@@ -110,15 +109,6 @@ pub async fn review_action(
                 .get(&ws_slug)
                 .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
 
-            let pr_ref = format!("pr/{}", submission.id);
-            // Pages changed by this submission (for search indexing after the merge).
-            let changed: Vec<String> = repo
-                .diff_ref_against_main(&pr_ref)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|d| d.path)
-                .collect();
-
             // Merge is authored by the original submitter, not the reviewer.
             let author = cowiki_db::users::find_by_id(&state.db, submission.user_id)
                 .await
@@ -153,35 +143,6 @@ pub async fn review_action(
                         "main has moved and this snapshot now conflicts ({}); submission closed — sync your branch and submit again",
                         paths.join(", ")
                     )));
-                }
-            }
-
-            // Index changed pages from main (best-effort; search can catch up separately).
-            for path in &changed {
-                let slug = path
-                    .strip_prefix("wiki/")
-                    .and_then(|s| s.strip_suffix(".md"))
-                    .unwrap_or(path);
-                if let Ok(Some(content)) = repo.read_file("main", path) {
-                    let text = String::from_utf8_lossy(&content);
-                    if let Ok((title, summary)) = super::pages::require_page_title(&text) {
-                        let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
-                        if let Err(e) = cowiki_db::pages::upsert(
-                            &state.db,
-                            slug,
-                            &title,
-                            &summary,
-                            "main",
-                            &hash,
-                            None,
-                            guard.user.id,
-                            &ws_slug,
-                        )
-                        .await
-                        {
-                            tracing::warn!("failed to index merged page '{slug}': {e}");
-                        }
-                    }
                 }
             }
 

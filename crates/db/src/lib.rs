@@ -4,7 +4,6 @@ pub mod api_keys;
 pub mod audit;
 pub mod notifications;
 pub mod page_comments;
-pub mod pages;
 pub mod review_comments;
 pub mod submissions;
 pub mod transfers;
