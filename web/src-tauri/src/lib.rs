@@ -76,8 +76,7 @@ fn run_loopback_oauth(auth_base_url: String) -> Result<DesktopOAuthCredential, S
 }
 
 fn build_desktop_login_url(auth_base_url: &str, callback_url: &str) -> Result<String, String> {
-    let mut url =
-        url::Url::parse(auth_base_url).map_err(|e| format!("invalid auth URL: {e}"))?;
+    let mut url = url::Url::parse(auth_base_url).map_err(|e| format!("invalid auth URL: {e}"))?;
     url.query_pairs_mut()
         .append_pair("client", "desktop")
         .append_pair("callback", callback_url);
