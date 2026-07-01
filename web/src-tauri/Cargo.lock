@@ -376,9 +376,11 @@ dependencies = [
 name = "cowiki-desktop"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "tauri",
  "tauri-build",
  "time",
+ "url",
 ]
 
 [[package]]

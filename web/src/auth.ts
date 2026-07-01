@@ -1,10 +1,13 @@
+import { isDesktopClient } from './runtime';
+
 const API_KEY_STORAGE = 'cowiki_api_key';
 const USER_STORAGE = 'cowiki_user';
 
 export interface AuthUser {
   id: string;
   name: string;
-  api_key: string;
+  api_key: string | null;
+  mode: 'remote' | 'local';
 }
 
 export function getStoredAuth(): AuthUser | null {
@@ -12,10 +15,21 @@ export function getStoredAuth(): AuthUser | null {
   const user = localStorage.getItem(USER_STORAGE);
   if (!key || !user) return null;
   try {
-    return { ...JSON.parse(user), api_key: key };
+    return { ...JSON.parse(user), api_key: key, mode: 'remote' };
   } catch {
     return null;
   }
+}
+
+export function getCurrentAuth(): AuthUser | null {
+  const remote = getStoredAuth();
+  if (remote) return remote;
+  if (!isDesktopClient()) return null;
+  return { id: 'local', name: 'Local User', api_key: null, mode: 'local' };
+}
+
+export function isRemoteAuth(auth: AuthUser | null): boolean {
+  return auth?.mode === 'remote' && !!auth.api_key;
 }
 
 export function storeAuth(apiKey: string, userName: string, userId: string) {
@@ -29,7 +43,7 @@ export function clearAuth() {
 }
 
 export function getApiKey(): string | null {
-  return localStorage.getItem(API_KEY_STORAGE);
+  return getStoredAuth()?.api_key ?? null;
 }
 
 /** Add auth header to fetch requests */
