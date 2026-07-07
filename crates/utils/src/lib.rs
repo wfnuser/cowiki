@@ -40,6 +40,7 @@ pub struct TomlDatabase {
 pub struct TomlServer {
     pub port: Option<u16>,
     pub data_dir: Option<String>,
+    pub local_mode: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -93,7 +94,33 @@ pub struct DatabaseConfig {
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub port: u16,
-    pub data_dir: String,
+    /// Wiki data directory as configured; `None` when not set anywhere.
+    /// Consumers resolve the default (`resolve_data_dir`) so local mode can
+    /// pick `~/cowiki` while hosted deploys keep `./data`.
+    pub data_dir: Option<String>,
+    /// Single-user local mode (no login). `None` = not configured; the server
+    /// defaults it to "on" when GitHub OAuth is not configured.
+    pub local_mode: Option<bool>,
+}
+
+/// Expand a leading `~/` to the user's home directory.
+pub fn expand_tilde(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = home_dir() {
+            return home.join(rest).to_string_lossy().into_owned();
+        }
+    }
+    path.to_string()
+}
+
+/// Resolve the wiki data directory: explicit config wins (with `~` expansion);
+/// otherwise `~/cowiki` in local mode, `./data` for hosted deploys.
+pub fn resolve_data_dir(configured: Option<&str>, local_mode: bool) -> String {
+    match configured {
+        Some(dir) if !dir.is_empty() => expand_tilde(dir),
+        _ if local_mode => expand_tilde("~/cowiki"),
+        _ => "./data".into(),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -229,11 +256,13 @@ impl CowikiConfig {
             },
             server: ServerConfig {
                 port: toml.server.as_ref().and_then(|s| s.port).unwrap_or(3000),
-                data_dir: toml
-                    .server
-                    .as_ref()
-                    .and_then(|s| s.data_dir.clone())
-                    .unwrap_or_else(|| "./data".into()),
+                data_dir: std::env::var("COWIKI_DATA_DIR")
+                    .ok()
+                    .or_else(|| toml.server.as_ref().and_then(|s| s.data_dir.clone())),
+                local_mode: std::env::var("COWIKI_LOCAL_MODE")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .or_else(|| toml.server.as_ref().and_then(|s| s.local_mode)),
             },
             llm: LlmConfig {
                 provider: toml
@@ -325,7 +354,10 @@ impl CowikiConfig {
             },
             server: ServerConfig {
                 port: server_port,
-                data_dir: std::env::var("COWIKI_DATA_DIR").unwrap_or_else(|_| "./data".into()),
+                data_dir: std::env::var("COWIKI_DATA_DIR").ok(),
+                local_mode: std::env::var("COWIKI_LOCAL_MODE")
+                    .ok()
+                    .and_then(|s| s.parse().ok()),
             },
             llm: LlmConfig {
                 provider: std::env::var("COWIKI_LLM_PROVIDER").unwrap_or_else(|_| "openai".into()),
@@ -448,7 +480,7 @@ dimension = 768
         let config = CowikiConfig::from_file(&path);
         assert_eq!(config.database.url, "postgres://test:test@localhost/testdb");
         assert_eq!(config.server.port, 4200);
-        assert_eq!(config.server.data_dir, "/tmp/cowiki-test");
+        assert_eq!(config.server.data_dir.as_deref(), Some("/tmp/cowiki-test"));
         assert_eq!(config.llm.provider, "test-provider");
         assert_eq!(config.llm.model, "test-model");
         assert_eq!(config.llm.api_key, "sk-test");

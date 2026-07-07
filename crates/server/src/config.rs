@@ -7,11 +7,23 @@ pub use cowiki_utils::CliArgs;
 #[derive(Debug, Clone)]
 pub struct Config {
     pub database: cowiki_utils::DatabaseConfig,
-    pub server: cowiki_utils::ServerConfig,
+    pub server: ServerSettings,
     pub llm: cowiki_utils::LlmConfig,
     pub embedder: cowiki_utils::EmbedderConfig,
     pub auth: AuthConfig,
     pub frontend_url: String,
+}
+
+/// Server settings with local-mode defaults resolved.
+#[derive(Debug, Clone)]
+pub struct ServerSettings {
+    pub port: u16,
+    /// Wiki data directory: explicit config wins, else `~/cowiki` in local
+    /// mode, `./data` for hosted deploys.
+    pub data_dir: String,
+    /// Single-user local mode: `/api/auth/local` signs you in without OAuth.
+    /// Defaults to on when GitHub OAuth is not configured.
+    pub local_mode: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -33,9 +45,22 @@ impl Config {
                 .unwrap_or_else(|_| "http://localhost:3000/api/auth/github/callback".into()),
         };
 
+        // Local mode: explicit config wins; otherwise on iff GitHub OAuth is
+        // absent — hosted deploys (which set GITHUB_CLIENT_ID) are unaffected.
+        let local_mode = shared
+            .server
+            .local_mode
+            .unwrap_or_else(|| auth.github_client_id.is_empty());
+
+        let server = ServerSettings {
+            port: shared.server.port,
+            data_dir: cowiki_utils::resolve_data_dir(shared.server.data_dir.as_deref(), local_mode),
+            local_mode,
+        };
+
         Config {
             database: shared.database,
-            server: shared.server,
+            server,
             llm: shared.llm,
             embedder: shared.embedder,
             auth,

@@ -87,6 +87,41 @@ pub async fn regenerate_key(
     }))
 }
 
+// ── Local mode ──
+
+/// Sign in as the machine's local user — no OAuth, no password. Only enabled
+/// in local mode (single-user install); hosted deploys 404 here. Reuses one
+/// account (named after $USER) and mints a fresh "Local session" key per
+/// fresh browser login, so existing sessions keep working.
+pub async fn local_login(State(state): State<Arc<AppState>>) -> Result<Json<AuthResponse>> {
+    if !state.config.server.local_mode {
+        return Err(AppError::NotFound("local login is disabled".into()));
+    }
+
+    let name = std::env::var("USER").unwrap_or_else(|_| "local".into());
+
+    let (user, raw_key) =
+        if let Some(existing) = cowiki_db::users::find_by_name(&state.db, &name).await? {
+            let minted = cowiki_db::api_keys::create(&state.db, existing.id, "Local session").await?;
+            (existing, minted.raw_key)
+        } else {
+            let (user, raw_key) = cowiki_db::users::create(&state.db, &name, None, None).await?;
+            init_user_space(&state, &user).await?;
+            tracing::info!("created local user {}", user.name);
+            (user, raw_key)
+        };
+
+    Ok(Json(AuthResponse {
+        api_key: raw_key,
+        user: UserInfo {
+            id: user.id.to_string(),
+            name: user.name,
+            email: user.email,
+            avatar_url: None,
+        },
+    }))
+}
+
 // ── GitHub OAuth ──
 
 pub async fn github_login(State(state): State<Arc<AppState>>) -> Redirect {

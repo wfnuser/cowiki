@@ -11,8 +11,13 @@ embedding_dimension = 1536
 [server]
 # Server port
 port = 3000
-# Data directory (git repo, wiki files)
-data_dir = "./data"
+# Single-user local mode: sign in automatically as the machine user, no OAuth.
+# Defaults to true when GitHub OAuth (GITHUB_CLIENT_ID) is not configured,
+# false when it is. Uncomment to force either way.
+# local_mode = true
+# Data directory (git repos, wiki files). Supports "~". Defaults to ~/cowiki
+# in local mode, ./data otherwise.
+# data_dir = "~/cowiki"
 
 [llm]
 # LLM (Language Model) provider: currently only "openai" is supported

@@ -38,3 +38,22 @@ export function authHeaders(): Record<string, string> {
   if (!key) return {};
   return { Authorization: `Bearer ${key}` };
 }
+
+/**
+ * Local-mode sign-in: single-user installs expose /api/auth/local, which
+ * returns credentials for the machine's local user without OAuth. Returns
+ * true when local mode is active and auth was stored; false on hosted
+ * deploys (endpoint disabled) or network failure.
+ */
+export async function tryLocalLogin(): Promise<boolean> {
+  try {
+    const res = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/auth/local`, { method: 'POST' });
+    if (!res.ok) return false;
+    const data = await res.json();
+    if (!data?.api_key || !data?.user?.id) return false;
+    storeAuth(data.api_key, data.user.name, data.user.id);
+    return true;
+  } catch {
+    return false;
+  }
+}

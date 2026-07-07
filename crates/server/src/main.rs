@@ -125,6 +125,7 @@ async fn main() {
             "/api/auth/regenerate-key",
             post(routes::auth::regenerate_key),
         )
+        .route("/api/auth/local", post(routes::auth::local_login))
         .route("/api/auth/github", get(routes::auth::github_login))
         .route(
             "/api/auth/github/callback",
