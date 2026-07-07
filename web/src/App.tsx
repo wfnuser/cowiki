@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { MainLayout } from './pages/MainLayout';
 import { LoginPage } from './pages/LoginPage';
-import { getStoredAuth, storeAuth } from './auth';
+import { getCurrentAuth, storeAuth } from './auth';
 
 /** OAuth hands the credential over in the URL *fragment* (never sent to servers,
  *  logs, or Referer). Parse #api_key=...&user_name=...&user_id=..., store, then
@@ -24,7 +24,7 @@ function consumeOAuthFragment(): boolean {
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   // No hash read here — the OAuth fragment is consumed once at startup (below),
   // so a stored session is the single source of truth on every render.
-  if (!getStoredAuth()) return <Navigate to="/login" replace />;
+  if (!getCurrentAuth()) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
 

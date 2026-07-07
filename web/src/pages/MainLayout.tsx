@@ -26,7 +26,7 @@ import {
 } from '../api';
 import { AddSourceDialog } from '@/components/AddSourceDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
-import { getStoredAuth, clearAuth } from '../auth';
+import { getCurrentAuth, clearAuth, isRemoteAuth } from '../auth';
 import { SpaceRail } from '../components/layout/SpaceRail';
 import { SpacePanel, type NavTab } from '../components/layout/SpacePanel';
 type ContentDir = 'wiki' | 'entities' | 'concepts';
@@ -53,14 +53,14 @@ type ActiveView =
   | null;
 
 export function MainLayout() {
-  const [auth, setAuth] = useState(() => getStoredAuth());
+  const [auth, setAuth] = useState(() => getCurrentAuth());
   const navigate = useNavigate();
   const location = useLocation();
 
   // Re-check auth on mount (handles OAuth redirect timing)
   useEffect(() => {
     if (!auth) {
-      const stored = getStoredAuth();
+      const stored = getCurrentAuth();
       if (stored) setAuth(stored);
     }
   }, []);
@@ -75,8 +75,8 @@ export function MainLayout() {
 
   // Cross-space unread badge for the rail; refreshed when opening the inbox.
   useEffect(() => {
-    notificationUnreadCount().then(setNotifUnread).catch(() => {});
-  }, []);
+    if (isRemoteAuth(auth)) notificationUnreadCount().then(setNotifUnread).catch(() => {});
+  }, [auth?.mode, auth?.id]);
   const articleRef = useRef<HTMLElement>(null);
   const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<NavTab>('wiki');
@@ -124,6 +124,12 @@ export function MainLayout() {
   // Load workspaces + restore state from URL
   const loadWorkspaces = useCallback(async () => {
     if (!auth) return;
+    if (!isRemoteAuth(auth)) {
+      setWorkspaces([]);
+      setActiveWorkspace(null);
+      setActiveView(null);
+      return;
+    }
     const ws = await listWorkspaces();
     setWorkspaces(ws);
 
@@ -352,6 +358,10 @@ export function MainLayout() {
   // Create workspace
   const handleCreateWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isRemoteAuth(auth)) {
+      navigate('/login');
+      return;
+    }
     if (!newName.trim() || !newSlug.trim()) return;
     setCreating(true);
     try {
@@ -571,6 +581,7 @@ export function MainLayout() {
 
   const handleLogout = () => {
     clearAuth();
+    setAuth(getCurrentAuth());
     navigate('/login');
   };
 
@@ -665,7 +676,10 @@ export function MainLayout() {
             activeWorkspaceId={activeWorkspace?.id ?? null}
             userName={auth?.name || 'User'}
             onSelectWorkspace={handleSelectWorkspace}
-            onCreateWorkspace={() => { setShowCreate(true); setNewName(''); setNewSlug(''); }}
+            onCreateWorkspace={() => {
+              if (!isRemoteAuth(auth)) { navigate('/login'); return; }
+              setShowCreate(true); setNewName(''); setNewSlug('');
+            }}
             onSettings={() => setSettingsOpen(true)}
             onDiscover={() => { setActiveView(null); navigate('/discover'); }}
             onLogout={handleLogout}

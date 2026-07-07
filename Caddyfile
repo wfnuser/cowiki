@@ -1,3 +1,0 @@
-{$DOMAIN:localhost} {
-	reverse_proxy backend:3000
-}

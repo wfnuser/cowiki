@@ -1,6 +1,7 @@
 import { authHeaders } from './auth';
+import { apiBase } from './runtime';
 
-const BASE = `${import.meta.env.VITE_API_BASE || ''}/api`;
+const BASE = apiBase();
 
 function h(extra: Record<string, string> = {}): Record<string, string> {
   return { ...authHeaders(), ...extra };
