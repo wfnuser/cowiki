@@ -565,20 +565,29 @@ export function MainLayout() {
     }
   };
 
-  // Save an in-page edit to the user's draft branch, then refresh the page + tree.
+  // Autosave an in-page edit to the user's draft branch (the backend amends a
+  // single working commit, so frequent saves are fine). Refresh the tree so
+  // frontmatter title changes show up while editing.
   const handleSavePage = async (body: string) => {
     if (!activeWorkspace || activeView?.kind !== 'page') return;
     const ws = activeWorkspace;
-    const slug = activeView.slug;
-    await writePage(slug, body, userBranch, ws.slug);
-    setEditingPage(false);
-    setMessage({ text: 'Saved to your draft.', type: 'success' });
-    try {
-      const page = await getPage(slug, userBranch, ws.slug);
-      setActiveView((prev) => (prev?.kind === 'page' ? { ...prev, content: page } : prev));
-    } catch { /* keep the stale view; tree reload below still runs */ }
+    await writePage(activeView.slug, body, userBranch, ws.slug);
     loadSpacePages(ws);
   };
+
+  // Leave edit mode; pull the saved page back so the read view is fresh.
+  const handleDoneEditing = async () => {
+    setEditingPage(false);
+    if (!activeWorkspace || activeView?.kind !== 'page') return;
+    try {
+      const page = await getPage(activeView.slug, userBranch, activeWorkspace.slug);
+      setActiveView((prev) => (prev?.kind === 'page' ? { ...prev, content: page } : prev));
+    } catch { /* keep the stale view */ }
+  };
+
+  // Flat slug list for the editor's [[wikilink]] autocompletion.
+  const collectSlugs = (pages: PageMeta[]): string[] =>
+    pages.flatMap((p) => (p.kind === 'folder' ? collectSlugs(p.children) : [p.slug]));
 
   const personal = activeWorkspace ? isPersonalSpace(activeWorkspace) : false;
   const isOwner = activeWorkspace?.role === 'owner';
@@ -870,9 +879,10 @@ export function MainLayout() {
                   <PageEditor
                     key={activeView.slug}
                     initialBody={activeView.content.body}
-                    stripFrontmatter={renderBody}
                     onSave={handleSavePage}
-                    onCancel={() => setEditingPage(false)}
+                    onDone={() => { void handleDoneEditing(); }}
+                    onWikilink={(target) => activeWorkspace && selectPage(activeWorkspace, target)}
+                    getPageSlugs={() => (activeWorkspace ? collectSlugs(spacePages[activeWorkspace.id] || []) : [])}
                   />
                 ) : (
                   // Fill the content box edge-to-edge: the doc scrolls on the left
