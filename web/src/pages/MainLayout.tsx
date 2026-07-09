@@ -26,7 +26,7 @@ import {
 } from '../api';
 import { AddSourceDialog } from '@/components/AddSourceDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
-import { getCurrentAuth, clearAuth, isRemoteAuth } from '../auth';
+import { getCurrentAuth, clearAuth, isRemoteAuth, hasAuth } from '../auth';
 import { SpaceRail } from '../components/layout/SpaceRail';
 import { SpacePanel, type NavTab } from '../components/layout/SpacePanel';
 type ContentDir = 'wiki' | 'entities' | 'concepts';
@@ -124,7 +124,9 @@ export function MainLayout() {
   // Load workspaces + restore state from URL
   const loadWorkspaces = useCallback(async () => {
     if (!auth) return;
-    if (!isRemoteAuth(auth)) {
+    // Local sessions are full accounts on the local backend — only a
+    // credential-less placeholder (backend unreachable) shows the empty state.
+    if (!hasAuth(auth)) {
       setWorkspaces([]);
       setActiveWorkspace(null);
       setActiveView(null);
@@ -358,7 +360,7 @@ export function MainLayout() {
   // Create workspace
   const handleCreateWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isRemoteAuth(auth)) {
+    if (!hasAuth(auth)) {
       navigate('/login');
       return;
     }
@@ -643,21 +645,31 @@ export function MainLayout() {
     }
   };
 
-  // Save an in-page edit to the user's draft branch, then refresh the page + tree.
+  // Autosave an in-page edit to the user's draft branch (the backend amends a
+  // single working commit, so frequent saves are fine). Refresh the tree so
+  // frontmatter title changes show up while editing.
   const handleSavePage = async (body: string) => {
     if (!activeWorkspace || activeView?.kind !== 'page') return;
     const ws = activeWorkspace;
-    const slug = activeView.slug;
     const dir = activeView.path?.split('/')[0] || 'wiki';
-    await writePage(slug, body, userBranch, ws.slug, dir);
-    setEditingPage(false);
-    setMessage({ text: 'Saved to your draft.', type: 'success' });
-    try {
-      const page = await getPage(slug, userBranch, ws.slug, dir);
-      setActiveView((prev) => (prev?.kind === 'page' ? { ...prev, content: page } : prev));
-    } catch { /* keep the stale view; tree reload below still runs */ }
+    await writePage(activeView.slug, body, userBranch, ws.slug, dir);
     loadSpacePages(ws);
   };
+
+  // Leave edit mode; pull the saved page back so the read view is fresh.
+  const handleDoneEditing = async () => {
+    setEditingPage(false);
+    if (!activeWorkspace || activeView?.kind !== 'page') return;
+    const dir = activeView.path?.split('/')[0] || 'wiki';
+    try {
+      const page = await getPage(activeView.slug, userBranch, activeWorkspace.slug, dir);
+      setActiveView((prev) => (prev?.kind === 'page' ? { ...prev, content: page } : prev));
+    } catch { /* keep the stale view */ }
+  };
+
+  // Flat slug list for the editor's [[wikilink]] autocompletion.
+  const collectSlugs = (pages: PageMeta[]): string[] =>
+    pages.flatMap((p) => (p.kind === 'folder' ? collectSlugs(p.children) : [p.slug]));
 
   const personal = activeWorkspace ? isPersonalSpace(activeWorkspace) : false;
   const isOwner = activeWorkspace?.role === 'owner';
@@ -677,7 +689,7 @@ export function MainLayout() {
             userName={auth?.name || 'User'}
             onSelectWorkspace={handleSelectWorkspace}
             onCreateWorkspace={() => {
-              if (!isRemoteAuth(auth)) { navigate('/login'); return; }
+              if (!hasAuth(auth)) { navigate('/login'); return; }
               setShowCreate(true); setNewName(''); setNewSlug('');
             }}
             onSettings={() => setSettingsOpen(true)}
@@ -685,6 +697,7 @@ export function MainLayout() {
             onLogout={handleLogout}
             notifUnread={notifUnread}
             onShowNotifications={() => setActiveView({ kind: 'notifications' })}
+            showBell={isRemoteAuth(auth)}
           />
 
           {/* Secondary Panel */}
@@ -961,9 +974,10 @@ export function MainLayout() {
                   <PageEditor
                     key={activeView.slug}
                     initialBody={activeView.content.body}
-                    stripFrontmatter={renderBody}
                     onSave={handleSavePage}
-                    onCancel={() => setEditingPage(false)}
+                    onDone={() => { void handleDoneEditing(); }}
+                    onWikilink={(target) => activeWorkspace && selectPage(activeWorkspace, target)}
+                    getPageSlugs={() => (activeWorkspace ? collectSlugs(spacePages[activeWorkspace.id] || []) : [])}
                   />
                 ) : (
                   // Fill the content box edge-to-edge: the doc scrolls on the left

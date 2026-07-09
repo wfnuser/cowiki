@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { MainLayout } from './pages/MainLayout';
 import { LoginPage } from './pages/LoginPage';
-import { getCurrentAuth, storeAuth } from './auth';
+import { getCurrentAuth, getStoredAuth, storeAuth, tryLocalLogin } from './auth';
 
 /** OAuth hands the credential over in the URL *fragment* (never sent to servers,
  *  logs, or Referer). Parse #api_key=...&user_name=...&user_id=..., store, then
@@ -34,8 +34,15 @@ export default function App() {
   // "no auth yet, fragment still present" state.
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    consumeOAuthFragment();
-    setReady(true);
+    const bootstrap = async () => {
+      consumeOAuthFragment();
+      // Local-first: without a stored session, try the backend's local-mode
+      // sign-in (single-user installs / the desktop app's local server).
+      // Hosted deploys disable the endpoint and fall through to login.
+      if (!getStoredAuth()) await tryLocalLogin();
+      setReady(true);
+    };
+    void bootstrap();
   }, []);
 
   if (!ready) return null;
