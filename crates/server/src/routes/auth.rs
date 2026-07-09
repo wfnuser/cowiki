@@ -100,16 +100,17 @@ pub async fn local_login(State(state): State<Arc<AppState>>) -> Result<Json<Auth
 
     let name = std::env::var("USER").unwrap_or_else(|_| "local".into());
 
-    let (user, raw_key) =
-        if let Some(existing) = cowiki_db::users::find_by_name(&state.db, &name).await? {
-            let minted = cowiki_db::api_keys::create(&state.db, existing.id, "Local session").await?;
-            (existing, minted.raw_key)
-        } else {
-            let (user, raw_key) = cowiki_db::users::create(&state.db, &name, None, None).await?;
-            init_user_space(&state, &user).await?;
-            tracing::info!("created local user {}", user.name);
-            (user, raw_key)
-        };
+    let (user, raw_key) = if let Some(existing) =
+        cowiki_db::users::find_by_name(&state.db, &name).await?
+    {
+        let minted = cowiki_db::api_keys::create(&state.db, existing.id, "Local session").await?;
+        (existing, minted.raw_key)
+    } else {
+        let (user, raw_key) = cowiki_db::users::create(&state.db, &name, None, None).await?;
+        init_user_space(&state, &user).await?;
+        tracing::info!("created local user {}", user.name);
+        (user, raw_key)
+    };
 
     Ok(Json(AuthResponse {
         api_key: raw_key,
