@@ -23,6 +23,8 @@ interface SpaceRailProps {
   onLogout: () => void;
   notifUnread: number;
   onShowNotifications: () => void;
+  /** Hosted sessions only — local mode has no one to notify you about. */
+  showBell: boolean;
 }
 
 export function SpaceRail({
@@ -36,6 +38,7 @@ export function SpaceRail({
   onLogout,
   notifUnread,
   onShowNotifications,
+  showBell,
 }: SpaceRailProps) {
   const personalSpaces = workspaces.filter((w) => w.visibility === 'private' && w.role === 'owner');
   const teamSpaces = workspaces.filter((w) => !(w.visibility === 'private' && w.role === 'owner'));
@@ -119,7 +122,7 @@ export function SpaceRail({
       <div style={{ flex: 1 }} />
 
       {/* Notification bell */}
-      <NotificationBell unread={notifUnread} onOpen={onShowNotifications} />
+      {showBell && <NotificationBell unread={notifUnread} onOpen={onShowNotifications} />}
 
       {/* User avatar + menu */}
       <DropdownMenu>
