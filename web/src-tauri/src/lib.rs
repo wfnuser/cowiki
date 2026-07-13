@@ -17,9 +17,89 @@ async fn start_desktop_oauth(auth_base_url: String) -> Result<DesktopOAuthCreden
         .map_err(|e| format!("desktop oauth task failed: {e}"))?
 }
 
+/// Default port for the embedded backend; falls back to an OS-assigned one.
+const LOCAL_API_PORT: u16 = 3000;
+
+/// Local-first startup: reuse an already-running backend on :3000 when one is
+/// healthy (dev convenience — `cargo run` your own server and the app uses
+/// it); otherwise run the whole backend in-process on a loopback listener
+/// with the SQLite metadata store. Returns the API origin the webview should
+/// call.
+async fn start_backend() -> Result<String, String> {
+    if external_backend_is_healthy(LOCAL_API_PORT) {
+        return Ok(format!("http://127.0.0.1:{LOCAL_API_PORT}"));
+    }
+
+    let listener = match tokio::net::TcpListener::bind(("127.0.0.1", LOCAL_API_PORT)).await {
+        Ok(l) => l,
+        // Port taken by something that isn't a healthy cowiki server — let the
+        // OS pick; the origin is injected into the page so nothing hardcodes it.
+        Err(_) => tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .map_err(|e| format!("failed to bind local api listener: {e}"))?,
+    };
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("failed to read local api port: {e}"))?
+        .port();
+
+    let config = cowiki_server::Config::local(None);
+    let state = cowiki_server::build_state(config)
+        .await
+        .map_err(|e| format!("failed to start local backend: {e:#}"))?;
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = cowiki_server::serve_on(listener, state).await {
+            eprintln!("embedded cowiki backend exited: {e:#}");
+        }
+    });
+
+    Ok(format!("http://127.0.0.1:{port}"))
+}
+
+/// Minimal `GET /api/health` probe over std TCP (no HTTP client dependency).
+fn external_backend_is_healthy(port: u16) -> bool {
+    let Ok(mut stream) = std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        Duration::from_millis(300),
+    ) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    if stream
+        .write_all(b"GET /api/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut buf = String::new();
+    let _ = stream.read_to_string(&mut buf);
+    buf.starts_with("HTTP/1.1 200") && buf.ends_with("ok")
+}
+
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![start_desktop_oauth])
+        .setup(|app| {
+            let origin = tauri::async_runtime::block_on(start_backend())
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+
+            // The page reads this before anything else (runtime.ts) — it wins
+            // over the hardcoded localhost default, so an OS-assigned port
+            // still works.
+            tauri::WebviewWindowBuilder::new(
+                app,
+                "main",
+                tauri::WebviewUrl::default(),
+            )
+            .title("CoWiki")
+            .inner_size(1280.0, 860.0)
+            .min_inner_size(980.0, 680.0)
+            .initialization_script(format!(
+                "window.__COWIKI_API_ORIGIN__ = '{origin}';"
+            ))
+            .build()?;
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running cowiki desktop client");
 }

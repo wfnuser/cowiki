@@ -19,3 +19,11 @@ serde = { version = "1", features = ["derive"] }
 tauri = { version = "2", features = [] }
 time = "=0.3.44"
 url = "2"
+# The whole cowiki backend, embedded in-process for local-first mode.
+# Pin to a branch until the local-first stack lands on main.
+cowiki-server = { git = "https://github.com/wfnuser/cowiki-backend", branch = "feat/server-lib" }
+tokio = { version = "1", features = ["net"] }
+
+# Local backend development: uncomment to build against a checkout.
+# [patch."https://github.com/wfnuser/cowiki-backend"]
+# cowiki-server = { path = "../../../../cowiki-backend/crates/server" }

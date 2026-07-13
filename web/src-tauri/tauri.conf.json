@@ -10,15 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "title": "CoWiki",
-        "width": 1280,
-        "height": 860,
-        "minWidth": 980,
-        "minHeight": 680
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }
