@@ -316,7 +316,20 @@ fn validate_index(path: &str, content: &str) -> Vec<ValidationIssue> {
 
 fn validate_log(path: &str, content: &str) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
-    if !content.lines().any(|line| line.starts_with("# ")) {
+    let body = if content.starts_with("---") {
+        issues.push(issue(
+            path,
+            "log-frontmatter",
+            "log.md must not contain frontmatter",
+        ));
+        split_frontmatter(content)
+            .ok()
+            .map(|(_, body)| body)
+            .unwrap_or(content)
+    } else {
+        content
+    };
+    if !body.lines().any(|line| line.starts_with("# ")) {
         issues.push(issue(
             path,
             "log-heading",
@@ -324,7 +337,7 @@ fn validate_log(path: &str, content: &str) -> Vec<ValidationIssue> {
         ));
     }
 
-    let lines = content.lines().collect::<Vec<_>>();
+    let lines = body.lines().collect::<Vec<_>>();
     let mut dates = Vec::new();
     for (position, line) in lines.iter().enumerate() {
         let Some(raw_date) = line.strip_prefix("## ") else {

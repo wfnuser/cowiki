@@ -35,6 +35,12 @@ fn reserved_files_follow_the_full_v01_structure() {
 
     let issues = validate_document(
         "log.md",
+        b"---\ntype: Log\n---\n\n# Directory Update Log\n\n## 2026-07-14\n* Updated.\n",
+    );
+    assert!(issues.iter().any(|issue| issue.rule == "log-frontmatter"));
+
+    let issues = validate_document(
+        "log.md",
         b"# Directory Update Log\n\n## 14 July 2026\nNo list.\n",
     );
     assert!(issues.iter().any(|issue| issue.rule == "log-date"));
