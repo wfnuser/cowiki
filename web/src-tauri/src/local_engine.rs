@@ -519,14 +519,34 @@ impl LocalEngine {
     pub fn rebuild_all_search_indexes(&self) -> Result<(), String> {
         for space in self.list_spaces()? {
             if space.local_path.is_dir() {
-                let repo =
-                    Repository::open(&space.local_path).map_err(|error| error.to_string())?;
-                prepare_okf_repository(&repo, &space.local_path)?;
+                match Repository::open(&space.local_path) {
+                    Ok(repo) => {
+                        if let Err(error) = prepare_okf_repository(&repo, &space.local_path) {
+                            eprintln!(
+                                "CoWiki skipped startup migration for Space '{}': {error}",
+                                space.slug
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "CoWiki could not open the Git repository for Space '{}': {error}",
+                            space.slug
+                        );
+                    }
+                }
                 let mut db = self
                     .db
                     .lock()
                     .map_err(|_| "local database lock poisoned".to_string())?;
-                knowledge_index::rebuild_space(&mut db, &space.id, &space.local_path)?;
+                if let Err(error) =
+                    knowledge_index::rebuild_space(&mut db, &space.id, &space.local_path)
+                {
+                    eprintln!(
+                        "CoWiki skipped startup indexing for Space '{}': {error}",
+                        space.slug
+                    );
+                }
             }
         }
         Ok(())
@@ -1492,6 +1512,84 @@ mod tests {
         let engine = LocalEngine::open(temp.path()).unwrap();
 
         assert!(engine.list_spaces().unwrap().is_empty());
+    }
+
+    #[test]
+    fn startup_isolates_a_registered_dirty_legacy_space_without_mutating_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join("metadata");
+        let folder = temp.path().join("legacy");
+        std::fs::create_dir_all(&folder).unwrap();
+        let engine = LocalEngine::open(&metadata).unwrap();
+        let space = engine.add_space("Legacy", "legacy", &folder).unwrap();
+        std::fs::write(
+            folder.join("dirty.md"),
+            "# Dirty legacy page\n\nSearchable startup evidence.\n",
+        )
+        .unwrap();
+        let healthy_folder = temp.path().join("healthy");
+        std::fs::create_dir_all(&healthy_folder).unwrap();
+        let healthy = engine
+            .add_space("Healthy", "healthy", &healthy_folder)
+            .unwrap();
+        engine
+            .write_page(
+                &healthy.slug,
+                "wiki",
+                "ready",
+                "---\ntype: Note\n---\n\nHealthy startup evidence.\n",
+            )
+            .unwrap();
+        drop(engine);
+
+        let repo = git2::Repository::open(&folder).unwrap();
+        let head_before = repo.head().unwrap().target().unwrap();
+        let bytes_before = std::fs::read(folder.join("dirty.md")).unwrap();
+        let statuses_before = repo
+            .statuses(None)
+            .unwrap()
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .path()
+                    .map(|path| (path.to_string(), entry.status().bits()))
+            })
+            .collect::<Vec<_>>();
+        drop(repo);
+
+        let reopened =
+            LocalEngine::open(&metadata).expect("one dirty Space must not abort startup");
+        let spaces = reopened.list_spaces().unwrap();
+        assert_eq!(spaces.len(), 2);
+        assert!(spaces.contains(&space));
+        assert!(spaces.contains(&healthy));
+        let hits = reopened
+            .search_pages(&space.slug, "startup evidence", 10)
+            .unwrap();
+        assert!(hits.iter().any(|hit| hit.path == "dirty.md"));
+        assert!(reopened
+            .search_pages(&healthy.slug, "healthy startup", 10)
+            .unwrap()
+            .iter()
+            .any(|hit| hit.path == "ready.md"));
+
+        let repo = git2::Repository::open(&folder).unwrap();
+        assert_eq!(repo.head().unwrap().target().unwrap(), head_before);
+        assert_eq!(
+            std::fs::read(folder.join("dirty.md")).unwrap(),
+            bytes_before
+        );
+        let statuses_after = repo
+            .statuses(None)
+            .unwrap()
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .path()
+                    .map(|path| (path.to_string(), entry.status().bits()))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(statuses_after, statuses_before);
     }
 
     #[test]
