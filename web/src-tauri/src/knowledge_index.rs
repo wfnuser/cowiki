@@ -1,0 +1,417 @@
+//! Rebuildable local knowledge index.
+//!
+//! Markdown files remain the source of truth. Every row in these tables is
+//! derived data and may be dropped and rebuilt without losing user content.
+
+use rusqlite::{params, Connection};
+use serde::Serialize;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SearchHit {
+    pub slug: String,
+    pub path: String,
+    pub title: String,
+    pub snippet: String,
+    pub title_match: bool,
+}
+
+pub fn initialize(connection: &Connection) -> Result<(), String> {
+    connection
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS indexed_pages (
+                id INTEGER PRIMARY KEY,
+                space_id TEXT NOT NULL,
+                path TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL,
+                modified_ns INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(space_id, path)
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS indexed_pages_fts USING fts5(
+                title,
+                body,
+                content='indexed_pages',
+                content_rowid='id',
+                tokenize='unicode61 remove_diacritics 2'
+            );
+            CREATE TRIGGER IF NOT EXISTS indexed_pages_insert AFTER INSERT ON indexed_pages BEGIN
+                INSERT INTO indexed_pages_fts(rowid, title, body)
+                VALUES (new.id, new.title, new.body);
+            END;
+            CREATE TRIGGER IF NOT EXISTS indexed_pages_delete AFTER DELETE ON indexed_pages BEGIN
+                INSERT INTO indexed_pages_fts(indexed_pages_fts, rowid, title, body)
+                VALUES ('delete', old.id, old.title, old.body);
+            END;
+            CREATE TRIGGER IF NOT EXISTS indexed_pages_update AFTER UPDATE ON indexed_pages BEGIN
+                INSERT INTO indexed_pages_fts(indexed_pages_fts, rowid, title, body)
+                VALUES ('delete', old.id, old.title, old.body);
+                INSERT INTO indexed_pages_fts(rowid, title, body)
+                VALUES (new.id, new.title, new.body);
+            END;
+            CREATE TABLE IF NOT EXISTS page_links (
+                space_id TEXT NOT NULL,
+                source_path TEXT NOT NULL,
+                target TEXT NOT NULL,
+                UNIQUE(space_id, source_path, target)
+            );
+            CREATE INDEX IF NOT EXISTS page_links_target
+                ON page_links(space_id, target);",
+        )
+        .map_err(|error| format!("cannot initialize local search index: {error}"))
+}
+
+pub fn rebuild_space(
+    connection: &mut Connection,
+    space_id: &str,
+    root: &Path,
+) -> Result<(), String> {
+    if !root.is_dir() {
+        return Ok(());
+    }
+    let transaction = connection.transaction().map_err(|e| e.to_string())?;
+    transaction
+        .execute("DELETE FROM page_links WHERE space_id = ?1", [space_id])
+        .map_err(|e| e.to_string())?;
+    transaction
+        .execute("DELETE FROM indexed_pages WHERE space_id = ?1", [space_id])
+        .map_err(|e| e.to_string())?;
+
+    for entry in walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_entry(|entry| entry.path() == root || !is_hidden(entry.path(), root))
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if entry.file_type().is_file() && is_markdown(path) {
+            index_file_in(&transaction, space_id, root, path)?;
+        }
+    }
+    transaction.commit().map_err(|e| e.to_string())
+}
+
+pub fn index_file(
+    connection: &mut Connection,
+    space_id: &str,
+    root: &Path,
+    path: &Path,
+) -> Result<(), String> {
+    if !path.is_file() || !is_markdown(path) || is_hidden(path, root) {
+        return Ok(());
+    }
+    let transaction = connection.transaction().map_err(|e| e.to_string())?;
+    index_file_in(&transaction, space_id, root, path)?;
+    transaction.commit().map_err(|e| e.to_string())
+}
+
+/// Reconcile the derived index with files on disk without re-reading pages
+/// whose modification timestamp has not changed. This is used before search
+/// so edits made directly by Codex, Claude Code, or another editor appear in
+/// retrieval without making SQLite authoritative.
+pub fn refresh_space(
+    connection: &mut Connection,
+    space_id: &str,
+    root: &Path,
+) -> Result<(), String> {
+    if !root.is_dir() {
+        return Ok(());
+    }
+    let transaction = connection.transaction().map_err(|e| e.to_string())?;
+    let existing = {
+        let mut statement = transaction
+            .prepare("SELECT path, modified_ns FROM indexed_pages WHERE space_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let rows = statement
+            .query_map([space_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<HashMap<_, _>, _>>()
+            .map_err(|e| e.to_string())?
+    };
+    let mut seen = HashSet::new();
+    for entry in walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_entry(|entry| entry.path() == root || !is_hidden(entry.path(), root))
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if !entry.file_type().is_file() || !is_markdown(path) {
+            continue;
+        }
+        let relative = relative_path(root, path)?;
+        let modified_ns = file_modified_ns(path);
+        seen.insert(relative.clone());
+        if existing.get(&relative).copied() != Some(modified_ns) {
+            index_file_in(&transaction, space_id, root, path)?;
+        }
+    }
+    for deleted in existing.keys().filter(|path| !seen.contains(*path)) {
+        transaction
+            .execute(
+                "DELETE FROM page_links WHERE space_id = ?1 AND source_path = ?2",
+                params![space_id, deleted],
+            )
+            .map_err(|e| e.to_string())?;
+        transaction
+            .execute(
+                "DELETE FROM indexed_pages WHERE space_id = ?1 AND path = ?2",
+                params![space_id, deleted],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    transaction.commit().map_err(|e| e.to_string())
+}
+
+fn index_file_in(
+    connection: &Connection,
+    space_id: &str,
+    root: &Path,
+    path: &Path,
+) -> Result<(), String> {
+    let relative = relative_path(root, path)?;
+    let body = match std::fs::read_to_string(path) {
+        Ok(body) => body,
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+            connection
+                .execute(
+                    "DELETE FROM page_links WHERE space_id = ?1 AND source_path = ?2",
+                    params![space_id, relative],
+                )
+                .map_err(|e| e.to_string())?;
+            connection
+                .execute(
+                    "DELETE FROM indexed_pages WHERE space_id = ?1 AND path = ?2",
+                    params![space_id, relative],
+                )
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let title = crate::local_engine::markdown_title(&body).unwrap_or_else(|| {
+        path.file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    });
+    let modified_ns = file_modified_ns(path);
+
+    connection
+        .execute(
+            "INSERT INTO indexed_pages (space_id, path, title, body, modified_ns)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(space_id, path) DO UPDATE SET
+               title = excluded.title,
+               body = excluded.body,
+               modified_ns = excluded.modified_ns",
+            params![space_id, relative, title, body, modified_ns],
+        )
+        .map_err(|e| e.to_string())?;
+    connection
+        .execute(
+            "DELETE FROM page_links WHERE space_id = ?1 AND source_path = ?2",
+            params![space_id, relative],
+        )
+        .map_err(|e| e.to_string())?;
+    for target in extract_wikilinks(&body) {
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO page_links (space_id, source_path, target)
+                 VALUES (?1, ?2, ?3)",
+                params![space_id, relative, target],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+pub fn search(
+    connection: &Connection,
+    space_id: &str,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<SearchHit>, String> {
+    let fts_query = fts_query(query);
+    if fts_query.is_empty() || limit == 0 {
+        return Ok(Vec::new());
+    }
+    let title_needle = format!("%{}%", query.trim().to_lowercase());
+    let mut statement = connection
+        .prepare(
+            "SELECT page.path,
+                    page.title,
+                    snippet(indexed_pages_fts, 1, '', '', ' … ', 24),
+                    lower(page.title) LIKE ?3 AS title_match
+             FROM indexed_pages_fts
+             JOIN indexed_pages AS page ON page.id = indexed_pages_fts.rowid
+             WHERE indexed_pages_fts MATCH ?1 AND page.space_id = ?2
+             ORDER BY title_match DESC, bm25(indexed_pages_fts, 8.0, 1.0) ASC, page.path ASC
+             LIMIT ?4",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map(
+            params![fts_query, space_id, title_needle, limit.min(100) as i64],
+            |row| {
+                let path: String = row.get(0)?;
+                Ok(SearchHit {
+                    slug: slug_for_path(&path),
+                    path,
+                    title: row.get(1)?,
+                    snippet: row.get::<_, String>(2)?.replace('\n', " "),
+                    title_match: row.get(3)?,
+                })
+            },
+        )
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+pub fn backlinks(
+    connection: &Connection,
+    space_id: &str,
+    target_path: &str,
+) -> Result<Vec<SearchHit>, String> {
+    let target = normalize_link_target(target_path);
+    let mut statement = connection
+        .prepare(
+            "SELECT page.path, page.title, page.body
+             FROM page_links AS link
+             JOIN indexed_pages AS page
+               ON page.space_id = link.space_id AND page.path = link.source_path
+             WHERE link.space_id = ?1 AND link.target = ?2
+             ORDER BY page.title COLLATE NOCASE, page.path",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map(params![space_id, target], |row| {
+            let path: String = row.get(0)?;
+            let body: String = row.get(2)?;
+            Ok(SearchHit {
+                slug: slug_for_path(&path),
+                path,
+                title: row.get(1)?,
+                snippet: first_content_line(&body),
+                title_match: false,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+pub fn page_count(connection: &Connection, space_id: &str) -> Result<usize, String> {
+    connection
+        .query_row(
+            "SELECT COUNT(*) FROM indexed_pages WHERE space_id = ?1",
+            [space_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count.max(0) as usize)
+        .map_err(|e| e.to_string())
+}
+
+fn is_markdown(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+}
+
+fn file_modified_ns(path: &Path) -> i64 {
+    path.metadata()
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos().min(i64::MAX as u128) as i64)
+        .unwrap_or(0)
+}
+
+fn is_hidden(path: &Path, root: &Path) -> bool {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .components()
+        .any(|component| component.as_os_str().to_string_lossy().starts_with('.'))
+}
+
+fn relative_path(root: &Path, path: &Path) -> Result<String, String> {
+    path.strip_prefix(root)
+        .map(normalize_path)
+        .map_err(|_| "indexed page is outside its Space".to_string())
+}
+
+fn normalize_path(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn slug_for_path(path: &str) -> String {
+    let without_extension = path.strip_suffix(".md").unwrap_or(path);
+    for section in ["wiki/", "entities/", "concepts/"] {
+        if let Some(slug) = without_extension.strip_prefix(section) {
+            return slug.to_string();
+        }
+    }
+    without_extension.to_string()
+}
+
+fn fts_query(query: &str) -> String {
+    query
+        .split_whitespace()
+        .map(|word| word.trim_matches('"').replace('"', "\"\""))
+        .filter(|word| !word.is_empty())
+        .map(|word| format!("\"{word}\""))
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+fn extract_wikilinks(body: &str) -> Vec<String> {
+    let mut links = Vec::new();
+    let mut rest = body;
+    while let Some(start) = rest.find("[[") {
+        rest = &rest[start + 2..];
+        let Some(end) = rest.find("]]") else { break };
+        let raw = &rest[..end];
+        let target = raw
+            .split('|')
+            .next()
+            .unwrap_or_default()
+            .split('#')
+            .next()
+            .unwrap_or_default();
+        let normalized = normalize_link_target(target);
+        if !normalized.is_empty() && !links.contains(&normalized) {
+            links.push(normalized);
+        }
+        rest = &rest[end + 2..];
+    }
+    links
+}
+
+fn normalize_link_target(target: &str) -> String {
+    let cleaned = target
+        .trim()
+        .trim_start_matches("./")
+        .trim_start_matches('/')
+        .strip_suffix(".md")
+        .unwrap_or_else(|| {
+            target
+                .trim()
+                .trim_start_matches("./")
+                .trim_start_matches('/')
+        });
+    cleaned.to_lowercase()
+}
+
+fn first_content_line(body: &str) -> String {
+    body.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && *line != "---" && !line.starts_with("title:"))
+        .unwrap_or_default()
+        .trim_start_matches('#')
+        .trim()
+        .to_string()
+}

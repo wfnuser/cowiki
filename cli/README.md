@@ -4,16 +4,50 @@ Command-line client for [cowiki](https://github.com/wfnuser/cowiki) — a collab
 
 ## Quick Start
 
+### Dev Install (from source)
+
 ```bash
-cargo build --release
-./target/release/cowiki --help
-
-# edit env with your API key and server URL
-cp .env.example .env
-
-# check configuration
-cargo run --release help 
+npm run cli:dev-install
+cowiki --help
 ```
+
+After the first dev install, rebuild the linked CLI after pulling CLI changes:
+
+```bash
+npm run cli:build
+```
+
+### npm Install (when published)
+
+```bash
+npm install -g @cowiki/cli
+cowiki --help
+```
+
+### Setup
+
+```bash
+# Interactive setup wizard
+cowiki setup
+
+# Or non-interactive
+cowiki setup --api-key cw_xxx --server https://cowiki.example.com
+```
+
+Configuration is stored in `~/.cowiki-cli/config`. Alternatively, use env vars:
+
+- `COWIKI_BASE_URL` — server base URL
+- `COWIKI_API_KEY` — API key for authentication
+
+### Testing
+
+```bash
+npm test
+```
+
+## For Agents
+
+Read and install cowiki-cli skill for me: [file://cli/skill.md](https://github.com/wfnuser/cowiki/blob/8a2c4d7586e7ab2a1560c5d32cd38d48949247ae/cli/skills/cowiki-cli/SKILL.md), and setup cowiki.
 
 ## Commands
 
@@ -21,10 +55,10 @@ cargo run --release help
 |---------|-------------|
 | `cowiki ingest` | Add a source (URL, text, or file) |
 | `cowiki compile` | Compile sources into wiki pages with LLM |
-| `cowiki write` | Create or edit a page |
+| `cowiki write` | Create or edit a page (use `--dir entities|concepts` for multi-dir wiki) |
 | `cowiki search` | Semantic search across the wiki |
-| `cowiki read` | Read a page (with pager) |
-| `cowiki list` | List pages on a branch |
+| `cowiki read` | Read a page with pager (use `--dir entities|concepts` for multi-dir wiki) |
+| `cowiki list` | List pages on a branch (use `--dir entities|concepts|all` for multi-dir wiki) |
 | `cowiki workspaces` | List available workspaces |
 | `cowiki submit` | Submit pages for review |
 | `cowiki review` | Review submissions (approve/reject) |
@@ -86,6 +120,31 @@ cowiki workspaces
 ```
 
 Your personal workspace slug matches your user ID. Team workspace slugs are the URL-friendly names shown in the web UI sidebar (e.g., `engineering-wiki`).
+
+### Multi-Directory Wiki
+
+cowiki supports three content directories beyond the default `wiki/`:
+
+| Directory | Purpose | Example |
+|-----------|---------|---------|
+| `wiki/` | General knowledge pages (default) | `cowiki write architecture --body "..."` |
+| `entities/` | Extracted entities (people, projects, events) | `cowiki write alice --dir entities --body "..."` |
+| `concepts/` | Patterns, decisions, conventions | `cowiki write error-handling --dir concepts --body "..."` |
+
+```bash
+# Write to different directories
+cowiki write my-project -w mywiki --dir entities --body "# My Project"
+cowiki write error-pattern -w mywiki --dir concepts --body "# Error Pattern"
+
+# List specific directories
+cowiki list -w mywiki --dir entities          # entities only
+cowiki list -w mywiki --dir concepts          # concepts only
+cowiki list -w mywiki --dir all               # all directories merged
+
+# Read from specific directories
+cowiki read my-project -w mywiki --dir entities
+cowiki read error-pattern -w mywiki --dir concepts
+```
 
 ## Usage Examples
 
@@ -156,21 +215,22 @@ cowiki search "topic" --json | jq '.[].slug'
 
 ## Configuration
 
-Credentials and defaults are stored in `~/.config/cowiki/config.toml`:
+Credentials and defaults are stored in `~/.cowiki-cli/config`:
 
-```toml
-server_url = "http://localhost:3000"
-api_key = "your-api-key"
-default_branch = "main"
+```env
+COWIKI_BASE_URL=https://api.cowiki.app   # or http://localhost:3000 for local dev
+COWIKI_API_KEY=your-api-key
 ```
+
+Set up interactively with `cowiki setup`, or create the file manually.
 
 Override with environment variables:
 
 | Variable | Field |
 |----------|-------|
-| `COWIKI_SERVER` | `server_url` |
-| `COWIKI_API_KEY` | `api_key` |
-| `COWIKI_BRANCH` | `default_branch` |
+| `COWIKI_SERVER` | (deprecated, use `COWIKI_BASE_URL`) |
+| `COWIKI_BASE_URL` | Server base URL |
+| `COWIKI_API_KEY` | API key |
 
 ## Shell Completions
 
@@ -185,48 +245,24 @@ source <(cowiki completions zsh)
 cowiki completions fish | source
 ```
 
-## Build from Source
-
-```bash
-cd cli
-cargo build --release
-```
-
-The CLI is a standalone crate — it's excluded from the root workspace.
-Build it independently; `cargo build` at the repo root won't include it.
-
 ## Architecture
 
 - **Pure HTTP client** — zero dependency on `cowiki_core` or `cowiki_db`
 - **Workspace-aware** — `--workspace`/`-w` routes to per-workspace API endpoints
-- **Stateless except auth** — only `~/.config/cowiki/config.toml` persisted
-- **Async** — `tokio` runtime, `reqwest` HTTP client
+- **Stateless except auth** — only `~/.cowiki-cli/config` persisted
+- **TypeScript** — Node.js runtime, native `fetch` for HTTP
 - **Dual output** — human-friendly tables by default, `--json` for scripting
 
 ## Testing
 
-### Fast unit tests (no server needed)
-
 ```bash
-cargo test
+npm test
 ```
 
-These test argument parsing, help text, and flag acceptance. 14 tests, < 20s.
-
-### API integration tests (requires running server)
-
-```bash
-# Start the server first
-cd .. && cargo run -p cowiki-server
-
-# Then run API tests
-cd cli && cargo test -- --ignored
-```
-
-API tests cover: personal vs shared workspace routing, ingest, read/write roundtrip, and branch resolution. Marked `#[ignore]` by default.
+Unit tests cover argument parsing, URL construction, config loading, output formatting, and error handling. No server needed.
 
 ## Future Plans
 
 - [ ] Terminal UI (TUI) for interactive browsing and editing
-- [ ] Workspace-scoped search, submit, and review endpoints
 - [ ] `workspace create` / `workspace invite` management commands
+- [ ] npm package publication (`@cowiki/cli`)

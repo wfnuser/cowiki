@@ -1,0 +1,16 @@
+target/
+node_modules/
+web/dist/
+data/
+.env
+.env.*
+!.env.example
+cowiki.conf
+.git/
+.vscode/
+.github/
+cli/
+cowiki-mcp-server/
+docs/
+scripts/
+*.md
