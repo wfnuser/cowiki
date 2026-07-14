@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { EditorView, keymap, drawSelection } from '@codemirror/view';
 import { EditorState, Prec } from '@codemirror/state';
 import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands';
@@ -14,7 +14,7 @@ import { editorTheme, editorHighlighting } from './theme';
 export interface LivePreviewEditorProps {
   initialDoc: string;
   /** Fired on every document change with the full new text. */
-  onDocChanged: (doc: string) => void;
+  onDocChanged: (doc: string, source: 'human' | 'external') => void;
   /** Cmd/Ctrl+S — the host flushes its pending save. */
   onRequestSave?: () => void;
   onWikilink?: (target: string) => void;
@@ -24,12 +24,17 @@ export interface LivePreviewEditorProps {
   style?: React.CSSProperties;
 }
 
+export interface LivePreviewEditorHandle {
+  /** Replace the open document synchronously after host-side revision checks. */
+  replaceDocument: (doc: string) => void;
+}
+
 /**
  * Obsidian-style live-preview markdown editor: markdown source with
  * formatting rendered in place; syntax marks reveal themselves around
  * the cursor.
  */
-export function LivePreviewEditor({
+export const LivePreviewEditor = forwardRef<LivePreviewEditorHandle, LivePreviewEditorProps>(function LivePreviewEditor({
   initialDoc,
   onDocChanged,
   onRequestSave,
@@ -37,9 +42,10 @@ export function LivePreviewEditor({
   getPageSlugs,
   className,
   style,
-}: LivePreviewEditorProps) {
+}, ref) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const applyingExternalDoc = useRef(false);
 
   // Keep callbacks fresh without recreating the editor.
   const callbacks = useRef({ onDocChanged, onRequestSave, onWikilink, getPageSlugs });
@@ -102,7 +108,12 @@ export function LivePreviewEditor({
           ])),
           keymap.of([...markdownKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
           EditorView.updateListener.of((update) => {
-            if (update.docChanged) callbacks.current.onDocChanged(update.state.doc.toString());
+            if (update.docChanged) {
+              callbacks.current.onDocChanged(
+                update.state.doc.toString(),
+                applyingExternalDoc.current ? 'external' : 'human',
+              );
+            }
           }),
         ],
       }),
@@ -118,7 +129,26 @@ export function LivePreviewEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useImperativeHandle(ref, () => ({
+    // This dispatch is synchronous. A human key event cannot land between the
+    // host's revision check and CodeMirror receiving the accepted agent edit.
+    replaceDocument: (doc: string) => {
+      const view = viewRef.current;
+      if (!view || doc === view.state.doc.toString()) return;
+
+      applyingExternalDoc.current = true;
+      try {
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: doc },
+          selection: { anchor: Math.min(view.state.selection.main.head, doc.length) },
+        });
+      } finally {
+        applyingExternalDoc.current = false;
+      }
+    },
+  }), []);
+
   return <div ref={hostRef} className={className} style={{ height: '100%', ...style }} />;
-}
+});
 
 export default LivePreviewEditor;

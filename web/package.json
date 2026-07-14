@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "test": "npm run test:auth-flow && npm run test:versioned-document",
     "test:auth-flow": "node --experimental-strip-types --test tests/auth-flow.test.ts",
+    "test:versioned-document": "node --experimental-strip-types --test tests/versioned-document.test.ts",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build"

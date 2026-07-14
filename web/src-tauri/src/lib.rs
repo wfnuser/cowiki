@@ -17,27 +17,22 @@ async fn start_desktop_oauth(auth_base_url: String) -> Result<DesktopOAuthCreden
         .map_err(|e| format!("desktop oauth task failed: {e}"))?
 }
 
-/// Default port for the embedded backend; falls back to an OS-assigned one.
-const LOCAL_API_PORT: u16 = 3000;
+/// Bind a private desktop listener. The OS-assigned port prevents the desktop
+/// client from accidentally attaching to a cloud/dev backend already running
+/// on a well-known port. Loopback keeps the unauthenticated local-mode surface
+/// unreachable from other machines.
+async fn bind_private_local_listener() -> Result<tokio::net::TcpListener, std::io::Error> {
+    tokio::net::TcpListener::bind(("127.0.0.1", 0)).await
+}
 
-/// Local-first startup: reuse an already-running backend on :3000 when one is
-/// healthy (dev convenience — `cargo run` your own server and the app uses
-/// it); otherwise run the whole backend in-process on a loopback listener
-/// with the SQLite metadata store. Returns the API origin the webview should
-/// call.
+/// Start the desktop-owned local runtime with its SQLite metadata store.
+/// It is deliberately isolated from `cowiki-backend`: cloud services may run
+/// on the same machine without becoming the desktop app's local data source.
+/// Returns the private API origin injected into the webview.
 async fn start_backend() -> Result<String, String> {
-    if external_backend_is_healthy(LOCAL_API_PORT) {
-        return Ok(format!("http://127.0.0.1:{LOCAL_API_PORT}"));
-    }
-
-    let listener = match tokio::net::TcpListener::bind(("127.0.0.1", LOCAL_API_PORT)).await {
-        Ok(l) => l,
-        // Port taken by something that isn't a healthy cowiki server — let the
-        // OS pick; the origin is injected into the page so nothing hardcodes it.
-        Err(_) => tokio::net::TcpListener::bind(("127.0.0.1", 0))
-            .await
-            .map_err(|e| format!("failed to bind local api listener: {e}"))?,
-    };
+    let listener = bind_private_local_listener()
+        .await
+        .map_err(|e| format!("failed to bind private local api listener: {e}"))?;
     let port = listener
         .local_addr()
         .map_err(|e| format!("failed to read local api port: {e}"))?
@@ -56,26 +51,6 @@ async fn start_backend() -> Result<String, String> {
     Ok(format!("http://127.0.0.1:{port}"))
 }
 
-/// Minimal `GET /api/health` probe over std TCP (no HTTP client dependency).
-fn external_backend_is_healthy(port: u16) -> bool {
-    let Ok(mut stream) = std::net::TcpStream::connect_timeout(
-        &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
-        Duration::from_millis(300),
-    ) else {
-        return false;
-    };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
-    if stream
-        .write_all(b"GET /api/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-        .is_err()
-    {
-        return false;
-    }
-    let mut buf = String::new();
-    let _ = stream.read_to_string(&mut buf);
-    buf.starts_with("HTTP/1.1 200") && buf.ends_with("ok")
-}
-
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![start_desktop_oauth])
@@ -86,7 +61,7 @@ pub fn run() {
             // The page reads this before anything else (runtime.ts) — it wins
             // over the hardcoded localhost default, so an OS-assigned port
             // still works.
-            tauri::WebviewWindowBuilder::new(
+            let window = tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
                 tauri::WebviewUrl::default(),
@@ -98,6 +73,11 @@ pub fn run() {
                 "window.__COWIKI_API_ORIGIN__ = '{origin}';"
             ))
             .build()?;
+            // A programmatically-created macOS window is not activated by the
+            // empty `app.windows` config. Make first launch visible instead of
+            // leaving a healthy webview behind the desktop.
+            window.show()?;
+            window.set_focus()?;
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -213,7 +193,18 @@ fn open_system_browser(url: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_desktop_login_url, parse_callback_request_line};
+    use super::{
+        bind_private_local_listener, build_desktop_login_url, parse_callback_request_line,
+    };
+
+    #[tokio::test]
+    async fn private_local_listener_is_loopback_and_os_assigned() {
+        let listener = bind_private_local_listener().await.unwrap();
+        let address = listener.local_addr().unwrap();
+
+        assert!(address.ip().is_loopback());
+        assert_ne!(address.port(), 0);
+    }
 
     #[test]
     fn builds_desktop_login_url_with_loopback_callback() {

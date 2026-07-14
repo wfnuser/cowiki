@@ -6,8 +6,6 @@ declare global {
   }
 }
 
-const LOCAL_API_ORIGIN = 'http://localhost:3000';
-
 export function isDesktopClient(): boolean {
   return typeof window !== 'undefined' && window.__TAURI_INTERNALS__ != null;
 }
@@ -27,7 +25,10 @@ export function apiOrigin(): string {
     if (saved) return saved.replace(/\/$/, '');
   }
 
-  return isDesktopClient() ? LOCAL_API_ORIGIN : '';
+  // The desktop shell always injects its private local origin. Never guess a
+  // well-known port here: doing so could silently attach local UI to a cloud
+  // or development backend running on the same machine.
+  return '';
 }
 
 export function apiBase(): string {

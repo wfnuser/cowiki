@@ -1,23 +1,39 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from 'react';
 import { Check, CircleDashed, CloudUpload, X } from 'lucide-react';
 import { C, fonts } from '@/lib/design';
-import { LivePreviewEditor } from './editor/LivePreviewEditor';
+import {
+  LivePreviewEditor,
+  type LivePreviewEditorHandle,
+} from './editor/LivePreviewEditor';
+import {
+  VersionedDocument,
+  type DocumentReplacement,
+  type DocumentSnapshot,
+} from '@/lib/versioned-document';
 
 type SaveStatus = 'saved' | 'dirty' | 'saving' | 'error';
 
 /**
  * Obsidian-style live-preview editor for a page body (frontmatter included,
- * shown as a dimmed block). Autosaves with a short debounce — the backend
- * amends a single working commit per draft branch, so frequent saves are
- * cheap. Esc or Done exits after flushing any pending save.
+ * shown as a dimmed block). Human and agent edits share this document; every
+ * accepted edit advances its revision so an agent can never apply stale text
+ * over newer typing. Esc or Done exits after flushing any pending save.
  */
-export function PageEditor({
-  initialBody,
-  onSave,
-  onDone,
-  onWikilink,
-  getPageSlugs,
-}: {
+export interface PageEditorHandle {
+  /** Current text and revision read by an in-app agent before proposing an edit. */
+  readDocument: () => DocumentSnapshot;
+  /** Applies only when expectedRevision still matches; stale edits throw internally. */
+  applyAgentEdit: (edit: Omit<DocumentReplacement, 'writer'>) => DocumentSnapshot;
+}
+
+export const PageEditor = forwardRef<PageEditorHandle, {
   initialBody: string;
   /** Persist the body; called on the autosave debounce, not on every keystroke. */
   onSave: (body: string) => Promise<void>;
@@ -25,12 +41,20 @@ export function PageEditor({
   onDone: () => void;
   onWikilink?: (target: string) => void;
   getPageSlugs?: () => string[];
-}) {
+}>(function PageEditor({
+  initialBody,
+  onSave,
+  onDone,
+  onWikilink,
+  getPageSlugs,
+}, ref) {
   const [status, setStatus] = useState<SaveStatus>('saved');
   const [error, setError] = useState<string | null>(null);
 
   const latestBody = useRef(initialBody);
   const savedBody = useRef(initialBody);
+  const document = useRef(new VersionedDocument(initialBody));
+  const liveEditor = useRef<LivePreviewEditorHandle>(null);
   const saving = useRef(false);
   const timer = useRef<number | null>(null);
 
@@ -55,7 +79,7 @@ export function PageEditor({
     }
   }, [onSave]);
 
-  const handleDocChanged = useCallback((doc: string) => {
+  const scheduleSave = useCallback((doc: string) => {
     latestBody.current = doc;
     if (timer.current !== null) window.clearTimeout(timer.current);
     if (doc === savedBody.current) {
@@ -65,6 +89,31 @@ export function PageEditor({
     setStatus('dirty');
     timer.current = window.setTimeout(() => { void flush(); }, 900);
   }, [flush]);
+
+  const handleDocChanged = useCallback((doc: string, source: 'human' | 'external') => {
+    if (source === 'human') {
+      const current = document.current.snapshot();
+      document.current.replace({
+        content: doc,
+        expectedRevision: current.revision,
+        writer: 'human',
+      });
+    }
+    scheduleSave(doc);
+  }, [scheduleSave]);
+
+  useImperativeHandle(ref, () => ({
+    readDocument: () => document.current.snapshot(),
+    applyAgentEdit: (edit) => {
+      const editor = liveEditor.current;
+      if (!editor) throw new Error('shared editor is not ready');
+      const accepted = document.current.replace({ ...edit, writer: 'agent' });
+      // Synchronous hand-off closes the check→apply race: user input cannot
+      // arrive after validation but before the accepted text reaches CodeMirror.
+      editor.replaceDocument(accepted.content);
+      return accepted;
+    },
+  }), []);
 
   const handleDone = useCallback(async () => {
     await flush();
@@ -108,6 +157,7 @@ export function PageEditor({
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
       <LivePreviewEditor
+        ref={liveEditor}
         initialDoc={initialBody}
         onDocChanged={handleDocChanged}
         onRequestSave={() => { void flush(); }}
@@ -145,6 +195,6 @@ export function PageEditor({
       </div>
     </div>
   );
-}
+});
 
 export default PageEditor;
