@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import type { CSSProperties } from 'react';
 import { Check, X } from 'lucide-react';
 import { C, fonts } from '@/lib/design';
 import {
@@ -17,12 +18,13 @@ import {
   type DocumentReplacement,
   type DocumentSnapshot,
 } from '@/lib/versioned-document';
+import { restoreSystemFrontmatter, splitSystemFrontmatter } from '@/lib/page-frontmatter';
 
 type SaveFeedback = { type: 'saved' | 'error'; text: string } | null;
 
 /**
- * Obsidian-style live-preview editor for a page body (frontmatter included,
- * shown as a dimmed block). Human and agent edits share this document; every
+ * Obsidian-style live-preview editor for a page body. CoWiki-owned frontmatter
+ * is hidden and restored on save. Human and agent edits share this document; every
  * accepted edit advances its revision so an agent can never apply stale text
  * over newer typing. Autosave stays quiet; Esc exits after flushing any pending save.
  */
@@ -31,12 +33,22 @@ export interface PageEditorHandle {
   readDocument: () => DocumentSnapshot;
   /** Applies only when expectedRevision still matches; stale edits throw internally. */
   applyAgentEdit: (edit: Omit<DocumentReplacement, 'writer'>) => DocumentSnapshot;
+  /** Reload an on-disk edit when clean; preserve both versions when human text is dirty. */
+  applyExternalFile: (fullBody: string) => 'applied' | 'conflict';
+  /** Handle an Agent deleting or renaming the open file without losing human text. */
+  applyExternalDeletion: () => 'applied' | 'conflict';
 }
+
+type ExternalConflict =
+  | { kind: 'changed'; fullBody: string }
+  | { kind: 'deleted' };
 
 export const PageEditor = forwardRef<PageEditorHandle, {
   initialBody: string;
   /** Persist the body; called on the autosave debounce, not on every keystroke. */
-  onSave: (body: string) => Promise<void>;
+  onSave: (body: string, expectedExternalBody?: string | null) => Promise<void>;
+  onExternalReload?: (fullBody: string) => void;
+  onExternalDeleted?: () => void;
   /** Exit edit mode (pending changes are flushed first). */
   onDone: () => void;
   onWikilink?: (target: string) => void;
@@ -44,15 +56,19 @@ export const PageEditor = forwardRef<PageEditorHandle, {
 }>(function PageEditor({
   initialBody,
   onSave,
+  onExternalReload,
+  onExternalDeleted,
   onDone,
   onWikilink,
   getPageSlugs,
 }, ref) {
   const [feedback, setFeedback] = useState<SaveFeedback>(null);
+  const [externalConflict, setExternalConflict] = useState<ExternalConflict | null>(null);
+  const initialPage = useRef(splitSystemFrontmatter(initialBody));
 
-  const latestBody = useRef(initialBody);
-  const savedBody = useRef(initialBody);
-  const document = useRef(new VersionedDocument(initialBody));
+  const latestBody = useRef(initialPage.current.body);
+  const savedBody = useRef(initialPage.current.body);
+  const document = useRef(new VersionedDocument(initialPage.current.body));
   const liveEditor = useRef<LivePreviewEditorHandle>(null);
   const saving = useRef(false);
   const timer = useRef<number | null>(null);
@@ -67,7 +83,7 @@ export const PageEditor = forwardRef<PageEditorHandle, {
     try {
       while (latestBody.current !== savedBody.current) {
         const body = latestBody.current;
-        await onSave(body);
+        await onSave(restoreSystemFrontmatter(initialPage.current.systemFrontmatter, body));
         savedBody.current = body;
       }
       if (feedbackTimer.current !== null) window.clearTimeout(feedbackTimer.current);
@@ -117,7 +133,36 @@ export const PageEditor = forwardRef<PageEditorHandle, {
       editor.replaceDocument(accepted.content);
       return accepted;
     },
-  }), []);
+    applyExternalFile: (fullBody) => {
+      const next = splitSystemFrontmatter(fullBody);
+      if (latestBody.current !== savedBody.current) {
+        setExternalConflict({ kind: 'changed', fullBody });
+        return 'conflict';
+      }
+      const editor = liveEditor.current;
+      if (!editor) return 'conflict';
+      initialPage.current = next;
+      latestBody.current = next.body;
+      savedBody.current = next.body;
+      const current = document.current.snapshot();
+      document.current.replace({
+        content: next.body,
+        expectedRevision: current.revision,
+        writer: 'agent',
+      });
+      editor.replaceDocument(next.body);
+      setExternalConflict(null);
+      return 'applied';
+    },
+    applyExternalDeletion: () => {
+      if (latestBody.current !== savedBody.current) {
+        setExternalConflict({ kind: 'deleted' });
+        return 'conflict';
+      }
+      onExternalDeleted?.();
+      return 'applied';
+    },
+  }), [onExternalDeleted]);
 
   const handleDone = useCallback(async () => {
     await flush();
@@ -129,6 +174,46 @@ export const PageEditor = forwardRef<PageEditorHandle, {
     await flush();
     onWikilink?.(target);
   }, [flush, onWikilink]);
+
+  const reloadExternal = useCallback(() => {
+    if (!externalConflict) return;
+    if (externalConflict.kind === 'deleted') {
+      setExternalConflict(null);
+      setFeedback(null);
+      onExternalDeleted?.();
+      return;
+    }
+    const next = splitSystemFrontmatter(externalConflict.fullBody);
+    initialPage.current = next;
+    latestBody.current = next.body;
+    savedBody.current = next.body;
+    const current = document.current.snapshot();
+    document.current.replace({ content: next.body, expectedRevision: current.revision, writer: 'agent' });
+    liveEditor.current?.replaceDocument(next.body);
+    setExternalConflict(null);
+    setFeedback(null);
+    onExternalReload?.(externalConflict.fullBody);
+  }, [externalConflict, onExternalDeleted, onExternalReload]);
+
+  const keepHumanVersion = useCallback(async () => {
+    if (!externalConflict) return;
+    const external = externalConflict.kind === 'changed'
+      ? splitSystemFrontmatter(externalConflict.fullBody)
+      : initialPage.current;
+    const merged = restoreSystemFrontmatter(external.systemFrontmatter, latestBody.current);
+    try {
+      await onSave(
+        merged,
+        externalConflict.kind === 'changed' ? externalConflict.fullBody : null,
+      );
+      initialPage.current = external;
+      savedBody.current = latestBody.current;
+      setExternalConflict(null);
+      setFeedback({ type: 'saved', text: 'Kept your version' });
+    } catch (cause) {
+      setFeedback({ type: 'error', text: cause instanceof Error ? cause.message : 'The file changed again' });
+    }
+  }, [externalConflict, onSave]);
 
   // Esc exits (unless CodeMirror already consumed it, e.g. closing autocomplete).
   useEffect(() => {
@@ -158,7 +243,7 @@ export const PageEditor = forwardRef<PageEditorHandle, {
     <div style={{ position: 'absolute', inset: 0 }}>
       <LivePreviewEditor
         ref={liveEditor}
-        initialDoc={initialBody}
+        initialDoc={initialPage.current.body}
         onDocChanged={handleDocChanged}
         onRequestSave={() => { void flush(true); }}
         onWikilink={handleWikilink}
@@ -182,8 +267,28 @@ export const PageEditor = forwardRef<PageEditorHandle, {
           {feedback.text}
         </span>
       </div>}
+
+      {externalConflict && <div style={{
+        position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 12,
+        display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 9,
+        background: C.panel, border: `1px solid ${C.redSoft}`, boxShadow: '0 4px 16px rgba(29,28,26,0.12)',
+        font: `500 12px ${fonts.sans}`, color: C.ink2,
+      }}>
+        <span>{externalConflict.kind === 'deleted'
+          ? 'The file was deleted or renamed in the Agent terminal.'
+          : 'The file changed in the Agent terminal.'}</span>
+        <button type="button" onClick={reloadExternal} style={conflictButtonStyle}>
+          {externalConflict.kind === 'deleted' ? 'Accept deletion' : 'Reload Agent version'}
+        </button>
+        <button type="button" onClick={() => { void keepHumanVersion(); }} style={{ ...conflictButtonStyle, background: C.ink, color: '#fff' }}>Keep my version</button>
+      </div>}
     </div>
   );
 });
+
+const conflictButtonStyle: CSSProperties = {
+  border: `1px solid ${C.line}`, borderRadius: 6, background: C.panel, color: C.ink2,
+  padding: '4px 8px', font: `600 11px ${fonts.sans}`, cursor: 'pointer', whiteSpace: 'nowrap',
+};
 
 export default PageEditor;

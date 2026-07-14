@@ -25,9 +25,10 @@ export function apiOrigin(): string {
     if (saved) return saved.replace(/\/$/, '');
   }
 
-  // The desktop shell always injects its private local origin. Never guess a
-  // well-known port here: doing so could silently attach local UI to a cloud
-  // or development backend running on the same machine.
+  // Desktop content operations use Tauri directly. HTTP is reserved for
+  // explicit Cloud capabilities such as sign-in, publishing, and shared
+  // Spaces, so the hosted origin is safe as the final fallback.
+  if (isDesktopClient()) return 'https://api.cowiki.app';
   return '';
 }
 

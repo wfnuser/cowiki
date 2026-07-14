@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Mail, ArrowRightLeft, GitPullRequest, CheckCircle2, Users, Sparkles, Bell,
+  Mail, ArrowRightLeft, GitPullRequest, CheckCircle2, Users, Bell,
   Check, Circle, CheckCheck, Inbox,
 } from 'lucide-react';
 import {
@@ -28,8 +28,6 @@ function kindMeta(kind: string): { icon: typeof Bell; color: string; label: stri
       return { icon: CheckCircle2, color: C.green, label: 'Review decision' };
     case 'member_joined':
       return { icon: Users, color: '#3f6c8c', label: 'Member joined' };
-    case 'compile_done':
-      return { icon: Sparkles, color: C.accent, label: 'Compile done' };
     default:
       return { icon: Bell, color: C.muted, label: kind };
   }

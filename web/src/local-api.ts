@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   PageFull,
   PageMeta,
+  FileDiff,
   SearchResponse,
   SourceContent,
   SourceItem,
@@ -12,8 +13,8 @@ export function listSpaces(): Promise<Workspace[]> {
   return invoke('local_list_spaces');
 }
 
-export function addSpace(name: string, slug: string, localPath: string): Promise<Workspace> {
-  return invoke('local_add_space', { name, slug, localPath });
+export function addSpace(name: string, slug: string, localPath: string, createDirectory = false): Promise<Workspace> {
+  return invoke('local_add_space', { name, slug, localPath, createDirectory });
 }
 
 export function listPages(spaceSlug: string, dir = 'all'): Promise<PageMeta[]> {
@@ -24,8 +25,15 @@ export function getPage(spaceSlug: string, dir: string, pageSlug: string): Promi
   return invoke('local_get_page', { spaceSlug, dir, pageSlug });
 }
 
-export function writePage(spaceSlug: string, dir: string, pageSlug: string, content: string): Promise<void> {
-  return invoke('local_write_page', { spaceSlug, dir, pageSlug, content });
+export function writePage(
+  spaceSlug: string,
+  dir: string,
+  pageSlug: string,
+  content: string,
+  expectedContent?: string,
+  createOnly = false,
+): Promise<void> {
+  return invoke('local_write_page', { spaceSlug, dir, pageSlug, content, expectedContent, createOnly });
 }
 
 export function createFolder(spaceSlug: string, name: string, parent?: string): Promise<unknown> {
@@ -51,6 +59,14 @@ export function ingest(
 
 export function submit(spaceSlug: string, paths: string[]): Promise<unknown> {
   return invoke('local_submit', { spaceSlug, paths });
+}
+
+export function workingDiff(spaceSlug: string): Promise<FileDiff[]> {
+  return invoke('local_working_diff', { spaceSlug });
+}
+
+export function keepWorkingDiff(spaceSlug: string, expected: FileDiff[]): Promise<unknown> {
+  return invoke('local_keep_working_diff', { spaceSlug, expected });
 }
 
 export function search(spaceSlug: string, query: string, limit: number): Promise<SearchResponse> {
