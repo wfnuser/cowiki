@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Check, CircleDashed, CloudUpload, X } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 import { C, fonts } from '@/lib/design';
 import {
   LivePreviewEditor,
@@ -18,13 +18,13 @@ import {
   type DocumentSnapshot,
 } from '@/lib/versioned-document';
 
-type SaveStatus = 'saved' | 'dirty' | 'saving' | 'error';
+type SaveFeedback = { type: 'saved' | 'error'; text: string } | null;
 
 /**
  * Obsidian-style live-preview editor for a page body (frontmatter included,
  * shown as a dimmed block). Human and agent edits share this document; every
  * accepted edit advances its revision so an agent can never apply stale text
- * over newer typing. Esc or Done exits after flushing any pending save.
+ * over newer typing. Autosave stays quiet; Esc exits after flushing any pending save.
  */
 export interface PageEditorHandle {
   /** Current text and revision read by an in-app agent before proposing an edit. */
@@ -48,8 +48,7 @@ export const PageEditor = forwardRef<PageEditorHandle, {
   onWikilink,
   getPageSlugs,
 }, ref) {
-  const [status, setStatus] = useState<SaveStatus>('saved');
-  const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<SaveFeedback>(null);
 
   const latestBody = useRef(initialBody);
   const savedBody = useRef(initialBody);
@@ -57,24 +56,31 @@ export const PageEditor = forwardRef<PageEditorHandle, {
   const liveEditor = useRef<LivePreviewEditorHandle>(null);
   const saving = useRef(false);
   const timer = useRef<number | null>(null);
+  const feedbackTimer = useRef<number | null>(null);
+  const manualSaveRequested = useRef(false);
 
-  const flush = useCallback(async () => {
+  const flush = useCallback(async (showConfirmation = false) => {
+    if (showConfirmation) manualSaveRequested.current = true;
     if (timer.current !== null) { window.clearTimeout(timer.current); timer.current = null; }
     if (saving.current) return;
     saving.current = true;
     try {
       while (latestBody.current !== savedBody.current) {
         const body = latestBody.current;
-        setStatus('saving');
         await onSave(body);
         savedBody.current = body;
       }
-      setStatus('saved');
-      setError(null);
+      if (feedbackTimer.current !== null) window.clearTimeout(feedbackTimer.current);
+      if (manualSaveRequested.current) {
+        setFeedback({ type: 'saved', text: 'Saved locally' });
+        feedbackTimer.current = window.setTimeout(() => setFeedback(null), 1600);
+      } else {
+        setFeedback(null);
+      }
     } catch (e) {
-      setStatus('error');
-      setError(e instanceof Error ? e.message : 'Failed to save');
+      setFeedback({ type: 'error', text: e instanceof Error ? e.message : 'Failed to save' });
     } finally {
+      manualSaveRequested.current = false;
       saving.current = false;
     }
   }, [onSave]);
@@ -83,10 +89,8 @@ export const PageEditor = forwardRef<PageEditorHandle, {
     latestBody.current = doc;
     if (timer.current !== null) window.clearTimeout(timer.current);
     if (doc === savedBody.current) {
-      setStatus('saved');
       return;
     }
-    setStatus('dirty');
     timer.current = window.setTimeout(() => { void flush(); }, 900);
   }, [flush]);
 
@@ -145,14 +149,10 @@ export const PageEditor = forwardRef<PageEditorHandle, {
   }, []);
 
   // Flush on unmount so navigating away never drops edits.
-  useEffect(() => () => { void flush(); }, [flush]);
-
-  const statusUi = {
-    saved: { icon: <Check size={12} />, text: 'Saved', color: C.muted },
-    dirty: { icon: <CircleDashed size={12} />, text: 'Editing…', color: C.faint },
-    saving: { icon: <CloudUpload size={12} />, text: 'Saving…', color: C.muted },
-    error: { icon: <X size={12} />, text: error || 'Save failed', color: C.red },
-  }[status];
+  useEffect(() => () => {
+    if (feedbackTimer.current !== null) window.clearTimeout(feedbackTimer.current);
+    void flush();
+  }, [flush]);
 
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
@@ -160,39 +160,28 @@ export const PageEditor = forwardRef<PageEditorHandle, {
         ref={liveEditor}
         initialDoc={initialBody}
         onDocChanged={handleDocChanged}
-        onRequestSave={() => { void flush(); }}
+        onRequestSave={() => { void flush(true); }}
         onWikilink={handleWikilink}
         getPageSlugs={getPageSlugs}
       />
 
-      {/* Floating status + Done */}
-      <div style={{
-        position: 'absolute', top: 10, right: 16, zIndex: 10,
-        display: 'flex', alignItems: 'center', gap: 10,
-        padding: '5px 6px 5px 12px', borderRadius: 999,
-        background: C.panel, border: `1px solid ${C.line}`,
-        boxShadow: '0 1px 2px rgba(29, 28, 26, 0.06)',
+      {feedback && <div style={{
+        position: 'absolute', top: 12, right: 18, zIndex: 10,
+        padding: '7px 11px', borderRadius: 8,
+        background: C.panel, border: `1px solid ${feedback.type === 'error' ? C.redSoft : C.line}`,
+        boxShadow: '0 2px 10px rgba(29, 28, 26, 0.08)',
       }}>
         <span
-          title="Autosaves as you type · ⌘S to save now · Esc to finish"
           style={{
             display: 'flex', alignItems: 'center', gap: 5,
-            fontSize: 12, color: statusUi.color, fontFamily: fonts.sans,
+            fontSize: 12, color: feedback.type === 'error' ? C.red : C.muted, fontFamily: fonts.sans,
             maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}
         >
-          {statusUi.icon} {statusUi.text}
+          {feedback.type === 'error' ? <X size={12} /> : <Check size={12} />}
+          {feedback.text}
         </span>
-        <button
-          onClick={() => { void handleDone(); }}
-          style={{
-            padding: '4px 14px', borderRadius: 999, fontSize: 12.5, fontWeight: 600,
-            color: '#fff', background: C.accent, border: 'none', cursor: 'pointer',
-          }}
-        >
-          Done
-        </button>
-      </div>
+      </div>}
     </div>
   );
 });

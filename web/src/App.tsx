@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { MainLayout } from './pages/MainLayout';
 import { LoginPage } from './pages/LoginPage';
 import { authHeaders, clearAuth, getCurrentAuth, getStoredAuth, storeAuth, tryLocalLogin } from './auth';
-import { apiBase } from './runtime';
+import { apiBase, isDesktopClient } from './runtime';
 
 /** OAuth hands the credential over in the URL *fragment* (never sent to servers,
  *  logs, or Referer). Parse #api_key=...&user_name=...&user_id=..., store, then
@@ -37,6 +37,12 @@ export default function App() {
   useEffect(() => {
     const bootstrap = async () => {
       consumeOAuthFragment();
+      // Desktop local mode talks straight to the Tauri local engine. It has no
+      // account and must never wait for, or redirect through, a sign-in flow.
+      if (isDesktopClient()) {
+        setReady(true);
+        return;
+      }
       // Local-first: without a stored session, try the backend's local-mode
       // sign-in (single-user installs / the desktop app's local server).
       // Hosted deploys disable the endpoint and fall through to login.

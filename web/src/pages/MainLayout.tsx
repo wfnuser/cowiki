@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Compass,
   Upload, Zap, ArrowUpRight, MoreHorizontal, RefreshCw,
-  CheckCircle2, Clock, Pencil,
+  CheckCircle2, Clock, Pencil, FolderOpen, PanelLeftOpen,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -41,6 +41,13 @@ import { NotificationsPage } from '../components/notifications/NotificationsPage
 import { notificationUnreadCount } from '../api';
 import { CommentsProvider, CommentsPanel, CommentsHeaderToggle, commentMarkdownComponents } from '../components/PageCommentsLayer';
 import { C } from '@/lib/design';
+import { isDesktopClient } from '@/runtime';
+import { chooseLocalSpaceDirectory, localSpaceIdentityFromPath } from '@/local-space';
+import {
+  clampSidebarWidth,
+  loadSidebarLayout,
+  saveSidebarLayout,
+} from '@/lib/sidebar-layout';
 
 type ActiveView =
   | { kind: 'page'; slug: string; path?: string; content: PageFull | null }
@@ -54,19 +61,13 @@ type ActiveView =
 
 export function MainLayout() {
   const [auth, setAuth] = useState(() => getCurrentAuth());
+  const desktop = isDesktopClient();
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Re-check auth on mount (handles OAuth redirect timing)
-  useEffect(() => {
-    if (!auth) {
-      const stored = getCurrentAuth();
-      if (stored) setAuth(stored);
-    }
-  }, []);
-
   // Data
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
   const [spacePages, setSpacePages] = useState<Record<string, PageMeta[]>>({});
   const [spaceSources, setSpaceSources] = useState<Record<string, SourceItem[]>>({});
   const [activeView, setActiveView] = useState<ActiveView>(null);
@@ -76,11 +77,51 @@ export function MainLayout() {
   // Cross-space unread badge for the rail; refreshed when opening the inbox.
   useEffect(() => {
     if (isRemoteAuth(auth)) notificationUnreadCount().then(setNotifUnread).catch(() => {});
-  }, [auth?.mode, auth?.id]);
+  }, [auth]);
   const articleRef = useRef<HTMLElement>(null);
   const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<NavTab>('wiki');
   const [reviewCount, setReviewCount] = useState(0);
+  const [sidebarLayout, setSidebarLayout] = useState(() => loadSidebarLayout(window.localStorage));
+  const [resizingSidebar, setResizingSidebar] = useState(false);
+  const sidebarResizeStart = useRef({ pointerX: 0, width: sidebarLayout.width });
+
+  useEffect(() => {
+    try {
+      saveSidebarLayout(window.localStorage, sidebarLayout);
+    } catch {
+      // A disabled storage API should not prevent the local workspace from opening.
+    }
+  }, [sidebarLayout]);
+
+  useEffect(() => {
+    if (!resizingSidebar) return;
+
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const onPointerMove = (event: PointerEvent) => {
+      const delta = event.clientX - sidebarResizeStart.current.pointerX;
+      setSidebarLayout((current) => ({
+        ...current,
+        width: clampSidebarWidth(sidebarResizeStart.current.width + delta),
+      }));
+    };
+    const stopResize = () => setResizingSidebar(false);
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', stopResize, { once: true });
+    window.addEventListener('pointercancel', stopResize, { once: true });
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }, [resizingSidebar]);
 
   // Modals
   const [showCreate, setShowCreate] = useState(false);
@@ -126,14 +167,16 @@ export function MainLayout() {
     if (!auth) return;
     // Local sessions are full accounts on the local backend — only a
     // credential-less placeholder (backend unreachable) shows the empty state.
-    if (!hasAuth(auth)) {
+    if (!desktop && !hasAuth(auth)) {
       setWorkspaces([]);
       setActiveWorkspace(null);
       setActiveView(null);
+      setWorkspacesLoaded(true);
       return;
     }
     const ws = await listWorkspaces();
     setWorkspaces(ws);
+    setWorkspacesLoaded(true);
 
     // Auto-expand personal space and load its pages
     const personal = ws.find((w) => w.visibility === 'private' && w.role === 'owner');
@@ -193,16 +236,19 @@ export function MainLayout() {
         }
       }
     }
-  }, [auth?.id]);
+  }, [auth?.id, desktop]);
 
   useEffect(() => {
-    if (auth) loadWorkspaces();
-  }, [auth?.id, loadWorkspaces]);
+    if (!auth) return;
+    const task = window.setTimeout(() => { void loadWorkspaces(); }, 0);
+    return () => window.clearTimeout(task);
+  }, [auth, loadWorkspaces]);
 
   // Load review count when workspace changes
   useEffect(() => {
     if (!activeWorkspace || isPersonalSpace(activeWorkspace)) {
-      setReviewCount(0);
+      const task = window.setTimeout(() => setReviewCount(0), 0);
+      return () => window.clearTimeout(task);
       return;
     }
     let cancelled = false;
@@ -210,7 +256,7 @@ export function MainLayout() {
       .then((s) => !cancelled && setReviewCount(s.filter((r) => r.status === 'pending').length))
       .catch(() => !cancelled && setReviewCount(0));
     return () => { cancelled = true; };
-  }, [activeWorkspace?.slug, reviewRefreshKey]);
+  }, [activeWorkspace, reviewRefreshKey]);
 
   function isPersonalSpace(ws: Workspace): boolean {
     return ws.visibility === 'private' && ws.role === 'owner';
@@ -358,6 +404,36 @@ export function MainLayout() {
   };
 
   // Create workspace
+  const handleCreateLocalSpace = useCallback(async () => {
+    setCreating(true);
+    try {
+      const localPath = await chooseLocalSpaceDirectory();
+      if (!localPath) return;
+      const { name, slug } = localSpaceIdentityFromPath(localPath);
+      await createWorkspace(name, slug, 'private', localPath);
+      await loadWorkspaces();
+    } catch (error) {
+      setMessage({
+        text: error instanceof Error ? error.message : 'Could not open this folder',
+        type: 'error',
+      });
+    } finally {
+      setCreating(false);
+    }
+  }, [loadWorkspaces]);
+
+  useEffect(() => {
+    if (!desktop || !workspacesLoaded || workspaces.length > 0) return;
+    const openOnShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'o') {
+        event.preventDefault();
+        if (!creating) void handleCreateLocalSpace();
+      }
+    };
+    window.addEventListener('keydown', openOnShortcut);
+    return () => window.removeEventListener('keydown', openOnShortcut);
+  }, [creating, desktop, handleCreateLocalSpace, workspaces.length, workspacesLoaded]);
+
   const handleCreateWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hasAuth(auth)) {
@@ -678,6 +754,16 @@ export function MainLayout() {
   const currentActivePage = activeView?.kind === 'page' ? activeView.slug : null;
   const currentActiveSource = activeView?.kind === 'source' ? activeView.filename : null;
 
+  if (desktop && workspacesLoaded && workspaces.length === 0) {
+    return (
+      <LocalSpaceEmptyState
+        creating={creating}
+        error={message?.type === 'error' ? message.text : null}
+        onOpenFolder={() => { void handleCreateLocalSpace(); }}
+      />
+    );
+  }
+
   return (
     <>
       <TooltipProvider>
@@ -689,6 +775,7 @@ export function MainLayout() {
             userName={auth?.name || 'User'}
             onSelectWorkspace={handleSelectWorkspace}
             onCreateWorkspace={() => {
+              if (desktop) { void handleCreateLocalSpace(); return; }
               if (!hasAuth(auth)) { navigate('/login'); return; }
               setShowCreate(true); setNewName(''); setNewSlug('');
             }}
@@ -698,32 +785,69 @@ export function MainLayout() {
             notifUnread={notifUnread}
             onShowNotifications={() => setActiveView({ kind: 'notifications' })}
             showBell={isRemoteAuth(auth)}
+            showCloudActions={isRemoteAuth(auth)}
           />
 
           {/* Secondary Panel */}
-          <SpacePanel
-            workspace={activeWorkspace}
-            activeTab={activeTab}
-            onTabChange={handleTabChange}
-            pages={activeWorkspace ? (spacePages[activeWorkspace.id] || []) : []}
-            sources={activeWorkspace ? (spaceSources[activeWorkspace.id] || []) : []}
-            activePage={currentActivePage}
-            activeSource={currentActiveSource}
-            reviewCount={reviewCount}
-            isPersonal={personal}
-            isOwner={isOwner}
-            onSelectPage={(slug, path) => activeWorkspace && selectPage(activeWorkspace, slug, path)}
-            onSelectSource={(filename) => activeWorkspace && selectSource(activeWorkspace, filename)}
-            onNewPage={(dir?: ContentDir) => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(null); setNewPageDir(dir || 'wiki'); } }}
-            onNewFolder={(dir?: ContentDir) => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(null); setNewFolderDir(dir || 'wiki'); } }}
-            onAddPageInFolder={(folderPath, dir) => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(folderPath); setNewPageDir(dir); } }}
-            onAddFolderInFolder={(parentPath, dir) => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(parentPath); setNewFolderDir(dir); } }}
-            onRenamePath={(path, isFolder, title) => setPathOp({ kind: 'rename', path, isFolder, title, value: title })}
-            onDeletePath={(path, isFolder, title) => setPathOp({ kind: 'delete', path, isFolder, title })}
-            onShowIngest={() => setShowIngest(true)}
-            onCompile={handleCompile}
-            onSettings={() => setSettingsOpen(true)}
-          />
+          {!sidebarLayout.collapsed && (
+            <div style={{
+              width: sidebarLayout.width, minWidth: sidebarLayout.width, height: '100vh',
+              position: 'relative', flexShrink: 0,
+            }}>
+              <SpacePanel
+                workspace={activeWorkspace}
+                activeTab={activeTab}
+                onTabChange={handleTabChange}
+                pages={activeWorkspace ? (spacePages[activeWorkspace.id] || []) : []}
+                sources={activeWorkspace ? (spaceSources[activeWorkspace.id] || []) : []}
+                activePage={currentActivePage}
+                activeSource={currentActiveSource}
+                reviewCount={reviewCount}
+                isPersonal={personal}
+                isOwner={isOwner}
+                onSelectPage={(slug, path) => activeWorkspace && selectPage(activeWorkspace, slug, path)}
+                onSelectSource={(filename) => activeWorkspace && selectSource(activeWorkspace, filename)}
+                onNewPage={(dir?: ContentDir) => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(null); setNewPageDir(dir || 'wiki'); } }}
+                onNewFolder={(dir?: ContentDir) => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(null); setNewFolderDir(dir || 'wiki'); } }}
+                onAddPageInFolder={(folderPath, dir) => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(folderPath); setNewPageDir(dir); } }}
+                onAddFolderInFolder={(parentPath, dir) => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(parentPath); setNewFolderDir(dir); } }}
+                onRenamePath={(path, isFolder, title) => setPathOp({ kind: 'rename', path, isFolder, title, value: title })}
+                onDeletePath={(path, isFolder, title) => setPathOp({ kind: 'delete', path, isFolder, title })}
+                onShowIngest={() => setShowIngest(true)}
+                onCompile={handleCompile}
+                onSettings={() => setSettingsOpen(true)}
+                onCollapse={() => setSidebarLayout((current) => ({ ...current, collapsed: true }))}
+              />
+              <div
+                role="separator"
+                aria-label="Resize sidebar"
+                aria-orientation="vertical"
+                aria-valuemin={220}
+                aria-valuemax={480}
+                aria-valuenow={sidebarLayout.width}
+                tabIndex={0}
+                onPointerDown={(event) => {
+                  sidebarResizeStart.current = { pointerX: event.clientX, width: sidebarLayout.width };
+                  setResizingSidebar(true);
+                }}
+                onKeyDown={(event) => {
+                  const step = event.shiftKey ? 40 : 12;
+                  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                    event.preventDefault();
+                    const direction = event.key === 'ArrowLeft' ? -1 : 1;
+                    setSidebarLayout((current) => ({ ...current, width: clampSidebarWidth(current.width + direction * step) }));
+                  }
+                }}
+                style={{
+                  position: 'absolute', top: 0, right: -3, zIndex: 30,
+                  width: 6, height: '100%', cursor: 'col-resize', touchAction: 'none',
+                  background: resizingSidebar ? C.accent : 'transparent', opacity: resizingSidebar ? 0.32 : 1,
+                }}
+                onMouseEnter={(event) => { if (!resizingSidebar) event.currentTarget.style.background = C.line; }}
+                onMouseLeave={(event) => { if (!resizingSidebar) event.currentTarget.style.background = 'transparent'; }}
+              />
+            </div>
+          )}
 
           {/* Main Content Area */}
           <main style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
@@ -743,6 +867,24 @@ export function MainLayout() {
             }}>
               {/* Left: breadcrumb */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: C.muted, minWidth: 0, overflow: 'hidden' }}>
+                {sidebarLayout.collapsed && (
+                  <button
+                    type="button"
+                    aria-label="Expand sidebar"
+                    title="Expand sidebar"
+                    onClick={() => setSidebarLayout((current) => ({ ...current, collapsed: false }))}
+                    style={{
+                      width: 28, height: 28, padding: 0, marginRight: 4,
+                      border: 'none', borderRadius: 7, background: 'transparent',
+                      color: C.faint, cursor: 'pointer', flexShrink: 0,
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                    onMouseEnter={(event) => { event.currentTarget.style.background = C.rail; event.currentTarget.style.color = C.ink2; }}
+                    onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = C.faint; }}
+                  >
+                    <PanelLeftOpen size={16} />
+                  </button>
+                )}
                 {activeWorkspace && (
                   <span style={{ color: C.ink2 }}>{activeWorkspace.name}</span>
                 )}
@@ -1168,6 +1310,66 @@ export function MainLayout() {
       {/* Settings dialog */}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </>
+  );
+}
+
+function LocalSpaceEmptyState({
+  creating,
+  error,
+  onOpenFolder,
+}: {
+  creating: boolean;
+  error: string | null;
+  onOpenFolder: () => void;
+}) {
+  return (
+    <main style={{
+      minHeight: '100vh', display: 'grid', placeItems: 'center',
+      background: C.bg, color: C.ink, fontFamily: 'var(--font-sans)',
+    }}>
+      <section style={{ width: 'min(560px, calc(100vw - 48px))', textAlign: 'center', marginTop: -32 }}>
+        <div style={{
+          width: 68, height: 68, margin: '0 auto 28px', borderRadius: 20,
+          display: 'grid', placeItems: 'center', color: C.accent,
+          background: C.accentSoft, border: '1px solid rgba(226, 89, 11, 0.2)',
+        }}>
+          <FolderOpen size={31} strokeWidth={1.8} />
+        </div>
+        <h1 style={{
+          margin: '0 0 18px', fontFamily: 'var(--font-serif)', fontSize: 40,
+          lineHeight: 1.1, letterSpacing: '-0.025em', fontWeight: 700,
+        }}>
+          Open a folder
+        </h1>
+        <p style={{ margin: '0 auto 34px', maxWidth: 490, color: C.ink2, fontSize: 17, lineHeight: 1.65 }}>
+          Choose a local repo, docs folder, or notes folder.<br />
+          CoWiki keeps everything in plain Markdown files.
+        </p>
+        <button
+          type="button"
+          onClick={onOpenFolder}
+          disabled={creating}
+          style={{
+            minWidth: 220, height: 58, padding: '0 24px', border: 'none', borderRadius: 14,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 18,
+            background: C.accent, color: '#fff', fontSize: 17, fontWeight: 700,
+            cursor: creating ? 'default' : 'pointer', opacity: creating ? 0.7 : 1,
+            boxShadow: '0 8px 22px rgba(226, 89, 11, 0.2)',
+          }}
+        >
+          {creating ? 'Opening…' : 'Open folder'}
+          {!creating && (
+            <kbd style={{
+              padding: '2px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.2)',
+              font: '600 13px var(--font-sans)',
+            }}>
+              ⌘O
+            </kbd>
+          )}
+        </button>
+        {error && <p role="alert" style={{ color: C.red, fontSize: 13, marginTop: 18 }}>{error}</p>}
+      </section>
+    </main>
   );
 }
 

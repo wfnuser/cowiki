@@ -3,6 +3,7 @@ import {
   ChevronRight, FileText, Folder, Upload, Wand2,
   MoreHorizontal, Plus, FolderPlus, Settings, BookOpen, GitPullRequest, Users, Activity,
   CheckCircle2, Clock, FileCode, Pencil, Trash2, Search,
+  PanelLeftClose,
 } from 'lucide-react';
 import type { Workspace, PageMeta, SourceItem } from '../../api';
 import { SearchModal } from '../SearchModal';
@@ -39,6 +40,7 @@ interface SpacePanelProps {
   onShowIngest: () => void;
   onCompile: () => void;
   onSettings?: () => void;
+  onCollapse: () => void;
 }
 
 export function SpacePanel({
@@ -63,6 +65,7 @@ export function SpacePanel({
   onShowIngest,
   onCompile,
   onSettings,
+  onCollapse,
 }: SpacePanelProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const hasWorkspace = !!workspace;
@@ -80,7 +83,10 @@ export function SpacePanel({
   if (!workspace) {
     return (
       <aside style={panelStyle}>
-        <div style={{ padding: 16, color: C.muted, fontSize: 13 }}>Select a space</div>
+        <div style={{ padding: '12px 10px 12px 16px', color: C.muted, fontSize: 13, display: 'flex', alignItems: 'center' }}>
+          <span style={{ flex: 1 }}>Select a space</span>
+          <CollapseButton onClick={onCollapse} />
+        </div>
       </aside>
     );
   }
@@ -112,6 +118,7 @@ export function SpacePanel({
         <span style={{ fontSize: 15.5, fontWeight: 650, color: C.ink, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {workspace.name}
         </span>
+        <CollapseButton onClick={onCollapse} />
       </div>
 
       {/* Nav items */}
@@ -625,11 +632,31 @@ function PageTreeItem({
 }
 
 const panelStyle: React.CSSProperties = {
-  width: 236, minWidth: 236, height: '100vh',
+  width: '100%', minWidth: 0, height: '100vh',
   background: C.sidebar, borderRight: `1px solid ${C.line}`,
   display: 'flex', flexDirection: 'column',
   position: 'sticky', top: 0, zIndex: 15,
   overflowY: 'auto',
 };
+
+function CollapseButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Collapse sidebar"
+      title="Collapse sidebar"
+      style={{
+        width: 28, height: 28, padding: 0, border: 'none', borderRadius: 7,
+        background: 'transparent', color: C.faint, cursor: 'pointer', flexShrink: 0,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      }}
+      onMouseEnter={(event) => { event.currentTarget.style.background = C.rail; event.currentTarget.style.color = C.ink2; }}
+      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = C.faint; }}
+    >
+      <PanelLeftClose size={16} />
+    </button>
+  );
+}
 
 export default SpacePanel;

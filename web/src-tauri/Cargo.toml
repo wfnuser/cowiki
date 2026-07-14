@@ -16,14 +16,16 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tauri = { version = "2", features = [] }
 time = "=0.3.44"
 url = "2"
-# The whole cowiki backend, embedded in-process for local-first mode.
-# Pin to a branch until the local-first stack lands on main.
-cowiki-server = { git = "https://github.com/wfnuser/cowiki-backend", branch = "feat/server-lib" }
-tokio = { version = "1", features = ["net"] }
+git2 = "0.20"
+rfd = "0.15"
+rusqlite = { version = "0.32", features = ["bundled"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+walkdir = "2"
 
-# Local backend development: uncomment to build against a checkout.
-# [patch."https://github.com/wfnuser/cowiki-backend"]
-# cowiki-server = { path = "../../../../cowiki-backend/crates/server" }
+[dev-dependencies]
+tempfile = "3"

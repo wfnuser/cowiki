@@ -25,6 +25,8 @@ interface SpaceRailProps {
   onShowNotifications: () => void;
   /** Hosted sessions only — local mode has no one to notify you about. */
   showBell: boolean;
+  /** Discover and sign-out only make sense after connecting a cloud account. */
+  showCloudActions: boolean;
 }
 
 export function SpaceRail({
@@ -39,6 +41,7 @@ export function SpaceRail({
   notifUnread,
   onShowNotifications,
   showBell,
+  showCloudActions,
 }: SpaceRailProps) {
   const personalSpaces = workspaces.filter((w) => w.visibility === 'private' && w.role === 'owner');
   const teamSpaces = workspaces.filter((w) => !(w.visibility === 'private' && w.role === 'owner'));
@@ -48,20 +51,17 @@ export function SpaceRail({
       width: 64, minWidth: 64, height: '100vh',
       background: C.rail, borderRight: `1px solid ${C.line}`,
       display: 'flex', flexDirection: 'column', alignItems: 'center',
-      padding: '0 0 12px', gap: 0, position: 'sticky', top: 0,
+      // macOS traffic lights live in the overlay titlebar. Reserve their row
+      // so they never collide with the CoWiki logo or Space buttons.
+      padding: '30px 0 12px', boxSizing: 'border-box', gap: 0, position: 'sticky', top: 0,
       zIndex: 20,
     }}>
       {/* Logo — matches panel header height (52px) */}
       <div style={{
-        width: 64, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: 64, height: 46, display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: 'default', flexShrink: 0,
       }}>
-        <span style={{
-          fontFamily: '"Source Serif 4 Variable", Georgia, serif',
-          fontWeight: 700, fontSize: 22, color: C.ink, letterSpacing: '-0.02em',
-        }}>
-          C<span style={{ color: C.accent }}>.</span>
-        </span>
+        <img src="/cowiki-logo.svg" alt="CoWiki" width={30} height={30} />
       </div>
 
       {/* Separator */}
@@ -144,13 +144,17 @@ export function SpaceRail({
           <DropdownMenuItem onClick={onSettings}>
             <Settings size={14} className="mr-2" /> Settings
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={onDiscover}>
-            <Compass size={14} className="mr-2" /> Discover
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={onLogout}>
-            <LogOut size={14} className="mr-2" /> Sign out
-          </DropdownMenuItem>
+          {showCloudActions && (
+            <>
+              <DropdownMenuItem onClick={onDiscover}>
+                <Compass size={14} className="mr-2" /> Discover
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={onLogout}>
+                <LogOut size={14} className="mr-2" /> Sign out
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </aside>
