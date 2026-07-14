@@ -239,13 +239,7 @@ fn normalize_parent(parent: &str) -> Result<String> {
 }
 
 fn document_path_for_slug(slug: &str) -> Result<String> {
-    if slug == "index" {
-        return Ok("index.md".into());
-    }
-    if let Some(folder) = slug.strip_suffix("/index") {
-        return cowiki_core::okf::folder_index_path(folder).map_err(AppError::BadRequest);
-    }
-    cowiki_core::okf::concept_path(slug).map_err(AppError::BadRequest)
+    cowiki_core::okf::document_path(slug).map_err(AppError::BadRequest)
 }
 
 fn normalize_api_slug(slug: &str) -> String {

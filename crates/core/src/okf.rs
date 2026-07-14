@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path};
 
 pub const OKF_VERSION: &str = "0.1";
@@ -83,6 +85,23 @@ pub fn concept_path(slug: &str) -> Result<String, String> {
     Ok(format!("{without_suffix}.md"))
 }
 
+/// Resolve an API document ID to either a concept or an editable OKF index.
+/// Update logs remain outside the page review workflow.
+pub fn document_path(slug: &str) -> Result<String, String> {
+    let normalized = normalize_relative_path(slug)?;
+    let without_suffix = normalized.strip_suffix(".md").unwrap_or(&normalized);
+    if without_suffix == "index" {
+        return Ok("index.md".into());
+    }
+    if let Some(folder) = without_suffix
+        .strip_suffix("/index")
+        .or_else(|| without_suffix.strip_suffix("/_index"))
+    {
+        return folder_index_path(folder);
+    }
+    concept_path(without_suffix)
+}
+
 pub fn folder_index_path(folder: &str) -> Result<String, String> {
     let folder = normalize_relative_path(folder)?;
     Ok(format!("{folder}/index.md"))
@@ -98,7 +117,7 @@ pub fn source_path(filename: &str) -> Result<String, String> {
     {
         return Err("source filename must be a plain filename".into());
     }
-    Ok(format!("{RAW_SOURCES_DIR}/{filename}"))
+    Ok(source_storage_path(filename))
 }
 
 /// Maps the pre-OKF CoWiki layout into a conforming bundle without deleting
@@ -111,9 +130,23 @@ pub fn migrate_legacy_path(path: &str) -> String {
         return relative.replace("/_index.md", "/index.md");
     }
     if let Some(relative) = path.strip_prefix("sources/") {
-        return format!("{RAW_SOURCES_DIR}/{relative}");
+        return source_storage_path(relative);
     }
     path.to_string()
+}
+
+fn source_storage_path(filename: &str) -> String {
+    let is_reserved = matches!(
+        Path::new(filename)
+            .file_name()
+            .and_then(|name| name.to_str()),
+        Some("index.md" | "log.md")
+    );
+    if filename.ends_with(".md") && !is_reserved {
+        return format!("{RAW_SOURCES_DIR}/{filename}");
+    }
+    let digest = format!("{:x}", Sha256::digest(filename.as_bytes()));
+    format!("{RAW_SOURCES_DIR}/_encoded/{digest}.md")
 }
 
 pub fn root_index() -> String {
@@ -146,27 +179,186 @@ pub fn source_body(document: &str) -> Result<String, String> {
 }
 
 pub fn normalize_index_document(path: &str, content: &str) -> Result<String, String> {
-    let (_, body) = split_frontmatter(content)?;
+    let (frontmatter, body) = split_frontmatter(content)?;
+    let mut root_mapping = Mapping::new();
+    let mut frontmatter_description = None;
+    let frontmatter_title = if let Some(raw) = frontmatter {
+        let mapping = serde_yaml::from_str::<Mapping>(raw)
+            .map_err(|error| format!("invalid YAML frontmatter: {error}"))?;
+        let title = mapping
+            .get(Value::String("title".into()))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        frontmatter_description = mapping
+            .get(Value::String("description".into()))
+            .or_else(|| mapping.get(Value::String("summary".into())))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        if path == "index.md" {
+            root_mapping = mapping;
+        }
+        title
+    } else {
+        None
+    };
     let body = body.trim_start_matches(['\r', '\n']);
-    let fallback_title = Path::new(path)
-        .parent()
-        .and_then(Path::file_name)
-        .and_then(|name| name.to_str())
-        .unwrap_or("Knowledge");
-    let normalized_body = if body.lines().any(|line| line.starts_with("# ")) {
+    let fallback_title = frontmatter_title.unwrap_or_else(|| {
+        Path::new(path)
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            .map(humanize_path_segment)
+            .unwrap_or_else(|| "Knowledge".into())
+    });
+    let mut normalized_body = if body.lines().any(|line| line.starts_with("# ")) {
         body.to_string()
     } else if body.trim().is_empty() {
-        folder_index(fallback_title)
+        folder_index(&fallback_title)
     } else {
         format!("# {fallback_title}\n\n{body}")
     };
+    if path != "index.md" {
+        if let Some(description) = frontmatter_description {
+            if !normalized_body.contains(&description) {
+                normalized_body = format!("{}\n\n{description}\n", normalized_body.trim_end());
+            }
+        }
+    }
     if path == "index.md" {
-        Ok(format!(
-            "---\nokf_version: \"{OKF_VERSION}\"\n---\n\n{normalized_body}"
-        ))
+        root_mapping.insert(
+            Value::String("okf_version".into()),
+            Value::String(OKF_VERSION.into()),
+        );
+        let yaml = serde_yaml::to_string(&root_mapping)
+            .map_err(|error| format!("could not serialize root index frontmatter: {error}"))?;
+        Ok(format!("---\n{yaml}---\n\n{normalized_body}"))
     } else {
         Ok(normalized_body)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexEntry {
+    pub title: String,
+    pub target: String,
+    pub description: Option<String>,
+}
+
+/// Replace CoWiki's generated listing while preserving the human-authored
+/// heading and prose around it.
+pub fn update_index_entries(
+    path: &str,
+    content: &str,
+    entries: &[IndexEntry],
+) -> Result<String, String> {
+    const START: &str = "<!-- cowiki:generated-index:start -->";
+    const END: &str = "<!-- cowiki:generated-index:end -->";
+
+    let normalized = normalize_index_document(path, content)?;
+    let (frontmatter, body) = split_frontmatter(&normalized)?;
+    let mut listing = String::from(START);
+    for entry in entries {
+        listing.push_str("\n* [");
+        listing.push_str(&escape_markdown_link_label(&entry.title));
+        listing.push_str("](<");
+        listing.push_str(&escape_markdown_link_target(&entry.target));
+        listing.push_str(">)");
+        if let Some(description) = entry
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            listing.push_str(" - ");
+            listing.push_str(&escape_generated_text(description));
+        }
+    }
+    listing.push('\n');
+    listing.push_str(END);
+
+    let body = if let Some(start) = body.find(START) {
+        let after_start = &body[start..];
+        let end_offset = after_start
+            .find(END)
+            .ok_or_else(|| "generated index block has no closing marker".to_string())?;
+        let end = start + end_offset + END.len();
+        format!("{}{}{}", &body[..start], listing, &body[end..])
+    } else {
+        format!("{}\n\n{}\n", body.trim_end(), listing)
+    };
+
+    if let Some(raw) = frontmatter {
+        Ok(format!("---\n{raw}---\n\n{}", body.trim_start()))
+    } else {
+        Ok(body.trim_start().to_string())
+    }
+}
+
+fn escape_markdown_link_label(value: &str) -> String {
+    escape_generated_text(value)
+        .replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+}
+
+fn escape_generated_text(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace(['\r', '\n'], " ")
+}
+
+fn escape_markdown_link_target(value: &str) -> String {
+    value
+        .replace('%', "%25")
+        .replace('<', "%3C")
+        .replace('>', "%3E")
+        .replace('?', "%3F")
+        .replace('#', "%23")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
+}
+
+pub fn display_metadata(content: &str) -> (Option<String>, Option<String>) {
+    let Ok((Some(raw), _)) = split_frontmatter(content) else {
+        return (None, None);
+    };
+    let Ok(mapping) = serde_yaml::from_str::<Mapping>(raw) else {
+        return (None, None);
+    };
+    let value = |key: &str| {
+        mapping
+            .get(Value::String(key.into()))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    (
+        value("title"),
+        value("description").or_else(|| value("summary")),
+    )
+}
+
+pub fn index_title(path: &str, content: &str) -> String {
+    let body = split_frontmatter(content)
+        .map(|(_, body)| body)
+        .unwrap_or(content);
+    body.lines()
+        .find_map(|line| line.strip_prefix("# ").map(str::trim))
+        .filter(|title| !title.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            Path::new(path)
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|name| name.to_str())
+                .map(humanize_path_segment)
+                .unwrap_or_else(|| "Knowledge".into())
+        })
 }
 
 pub fn replacement_log(legacy_path: &str) -> String {
@@ -222,8 +414,9 @@ pub fn validate_document(path: &str, bytes: &[u8]) -> Vec<ValidationIssue> {
 }
 
 pub fn validate_bundle(files: impl IntoIterator<Item = BundleFile>) -> BundleValidation {
+    let files = files.into_iter().collect::<Vec<_>>();
     let mut result = BundleValidation::default();
-    for file in files {
+    for file in &files {
         match DocumentKind::from_path(&file.path) {
             DocumentKind::Concept => result.concepts += 1,
             DocumentKind::Index => result.indexes += 1,
@@ -234,7 +427,155 @@ pub fn validate_bundle(files: impl IntoIterator<Item = BundleFile>) -> BundleVal
             .issues
             .extend(validate_document(&file.path, &file.content));
     }
+    result.issues.extend(validate_index_coverage(&files));
     result
+}
+
+fn validate_index_coverage(files: &[BundleFile]) -> Vec<ValidationIssue> {
+    let by_path = files
+        .iter()
+        .map(|file| (file.path.as_str(), file.content.as_slice()))
+        .collect::<BTreeMap<_, _>>();
+    let mut issues = Vec::new();
+    for file in files {
+        if DocumentKind::from_path(&file.path) != DocumentKind::Index {
+            continue;
+        }
+        let Some(content) = std::str::from_utf8(&file.content).ok() else {
+            continue;
+        };
+        let directory = Path::new(&file.path)
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        let prefix = if directory.is_empty() {
+            String::new()
+        } else {
+            format!("{directory}/")
+        };
+        let mut expected = BTreeSet::new();
+        for path in by_path.keys() {
+            let Some(relative) = path.strip_prefix(&prefix) else {
+                continue;
+            };
+            if relative == "index.md" || relative.starts_with('.') {
+                continue;
+            }
+            if DocumentKind::from_path(path) == DocumentKind::Other {
+                continue;
+            }
+            if let Some((child, _)) = relative.split_once('/') {
+                if !child.starts_with('.') {
+                    expected.insert(format!("{child}/"));
+                }
+            } else if DocumentKind::from_path(path) == DocumentKind::Concept {
+                expected.insert(relative.to_string());
+            }
+        }
+        let link_targets = markdown_link_targets(content);
+        for target in expected {
+            let absolute = if directory.is_empty() {
+                format!("/{target}")
+            } else {
+                format!("/{directory}/{target}")
+            };
+            let covered = link_targets.iter().any(|candidate| {
+                let candidate = candidate
+                    .split(['#', '?'])
+                    .next()
+                    .unwrap_or(candidate.as_str());
+                let candidate = percent_decode_target(candidate);
+                candidate == target || candidate == format!("./{target}") || candidate == absolute
+            });
+            if !covered {
+                issues.push(issue(
+                    &file.path,
+                    "index-entry",
+                    &format!("Index is missing a progressive-disclosure entry for '{target}'"),
+                ));
+            }
+        }
+    }
+    issues
+}
+
+fn percent_decode_target(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut position = 0;
+    while position < bytes.len() {
+        if bytes[position] == b'%' && position + 2 < bytes.len() {
+            let high = hex_value(bytes[position + 1]);
+            let low = hex_value(bytes[position + 2]);
+            if let (Some(high), Some(low)) = (high, low) {
+                decoded.push(high * 16 + low);
+                position += 3;
+                continue;
+            }
+        }
+        decoded.push(bytes[position]);
+        position += 1;
+    }
+    String::from_utf8(decoded).unwrap_or_else(|_| value.to_string())
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn markdown_link_targets(content: &str) -> Vec<String> {
+    let mut targets = Vec::new();
+    let mut remaining = content;
+    while let Some(start) = remaining.find("](") {
+        let after = &remaining[start + 2..];
+        let (target, consumed) = if let Some(angle) = after.trim_start().strip_prefix('<') {
+            let Some(end_angle) = angle.find('>') else {
+                break;
+            };
+            let after_angle = &angle[end_angle + 1..];
+            let Some(end_paren) = after_angle.find(')') else {
+                break;
+            };
+            (
+                Some(&angle[..end_angle]),
+                after.len() - after_angle.len() + end_paren + 1,
+            )
+        } else {
+            let Some(end) = after.find(')') else {
+                break;
+            };
+            (after[..end].split_whitespace().next(), end + 1)
+        };
+        if let Some(target) = target.filter(|target| !target.is_empty()) {
+            targets.push(target.to_string());
+        }
+        remaining = &after[consumed..];
+    }
+    for line in content.lines() {
+        let line = line.trim_start();
+        let Some((_, destination)) = line.split_once("]:") else {
+            continue;
+        };
+        if !line.starts_with('[') {
+            continue;
+        }
+        let destination = destination.trim();
+        let target = if let Some(destination) = destination.strip_prefix('<') {
+            destination.split_once('>').map(|(target, _)| target)
+        } else {
+            destination.split_whitespace().next()
+        };
+        if let Some(target) = target.filter(|target| !target.is_empty()) {
+            targets.push(target.to_string());
+        }
+    }
+    targets
 }
 
 fn validate_concept(path: &str, content: &str) -> Vec<ValidationIssue> {
@@ -356,14 +697,13 @@ fn validate_log(path: &str, content: &str) -> Vec<ValidationIssue> {
             .position(|candidate| candidate.starts_with("## "))
             .map(|offset| position + 1 + offset)
             .unwrap_or(lines.len());
-        if !lines[position + 1..next_heading]
-            .iter()
-            .any(|entry| entry.starts_with("* "))
-        {
+        if !lines[position + 1..next_heading].iter().any(|entry| {
+            entry.starts_with("* ") || entry.starts_with("- ") || entry.starts_with("+ ")
+        }) {
             issues.push(issue(
                 path,
                 "log-entry",
-                "Each log date group requires at least one '* ' list entry",
+                "Each log date group requires at least one Markdown list entry",
             ));
         }
     }
@@ -382,6 +722,15 @@ fn validate_log(path: &str, content: &str) -> Vec<ValidationIssue> {
         ));
     }
     issues
+}
+
+fn humanize_path_segment(segment: &str) -> String {
+    let words = segment.replace(['-', '_'], " ");
+    let mut chars = words.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => "Knowledge".into(),
+    }
 }
 
 fn split_frontmatter(content: &str) -> Result<(Option<&str>, &str), String> {

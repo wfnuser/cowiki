@@ -1,8 +1,9 @@
 use cowiki_core::okf::{
-    concept_path, folder_index_path, migrate_legacy_path, normalize_concept_document, source_body,
-    source_document, source_path, validate_bundle, validate_document, BundleFile, DocumentKind,
-    OKF_VERSION,
+    concept_path, folder_index_path, migrate_legacy_path, normalize_concept_document, root_index,
+    source_body, source_document, source_path, update_index_entries, validate_bundle,
+    validate_document, BundleFile, DocumentKind, IndexEntry, OKF_VERSION,
 };
+use std::path::Path;
 
 #[test]
 fn canonical_paths_follow_okf_bundle_rules() {
@@ -15,6 +16,25 @@ fn canonical_paths_follow_okf_bundle_rules() {
         "architecture/index.md"
     );
     assert_eq!(source_path("notes.md").unwrap(), ".cowiki/sources/notes.md");
+    let encoded_source = source_path("interview.txt").unwrap();
+    assert!(encoded_source.starts_with(".cowiki/sources/_encoded/"));
+    assert!(encoded_source.ends_with(".md"));
+    assert_ne!(source_path("foo").unwrap(), source_path("foo.md").unwrap());
+    for reserved in ["index.md", "log.md"] {
+        let path = source_path(reserved).unwrap();
+        assert_eq!(DocumentKind::from_path(&path), DocumentKind::Concept);
+        assert!(path.starts_with(".cowiki/sources/_encoded/"));
+    }
+    let long_name = format!("{}.txt", "界".repeat(80));
+    let long_path = source_path(&long_name).unwrap();
+    assert!(
+        Path::new(&long_path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .len()
+            <= 255
+    );
     assert!(concept_path("index").is_err());
     assert!(concept_path("../secret").is_err());
 }
@@ -44,6 +64,18 @@ fn reserved_files_follow_the_full_v01_structure() {
         b"# Directory Update Log\n\n## 14 July 2026\nNo list.\n",
     );
     assert!(issues.iter().any(|issue| issue.rule == "log-date"));
+    assert!(issues.iter().any(|issue| issue.rule == "log-entry"));
+
+    let issues = validate_document(
+        "log.md",
+        b"# Directory Update Log\n\n## 2026-07-14\n- A standard Markdown bullet is valid.\n",
+    );
+    assert!(issues.is_empty(), "{issues:?}");
+
+    let issues = validate_document(
+        "log.md",
+        b"# Directory Update Log\n\n## 2026-07-14\n  - Nested is not a flat list entry.\n",
+    );
     assert!(issues.iter().any(|issue| issue.rule == "log-entry"));
 }
 
@@ -79,6 +111,102 @@ fn bundle_validation_checks_every_markdown_document_including_hidden_directories
         .issues
         .iter()
         .any(|issue| issue.rule == "link-target"));
+}
+
+#[test]
+fn bundle_validation_rejects_a_stale_present_index() {
+    let result = validate_bundle(vec![
+        BundleFile::new(
+            "index.md",
+            b"# Knowledge\n\nProse mentions architecture.md, but [a backup](architecture.md.bak) is not the concept.\n",
+        ),
+        BundleFile::new(
+            "architecture.md",
+            b"---\ntype: Note\ntitle: Architecture\n---\n",
+        ),
+        BundleFile::new("assets/logo.svg", b"<svg />"),
+    ]);
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| issue.rule == "index-entry" && issue.path == "index.md"));
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| issue.message.contains("assets/")));
+}
+
+#[test]
+fn index_coverage_accepts_standard_markdown_link_variants() {
+    let result = validate_bundle(vec![
+        BundleFile::new(
+            "index.md",
+            b"# Knowledge\n\n* [Architecture](architecture.md \"Design notes\")\n",
+        ),
+        BundleFile::new("architecture.md", b"---\ntype: Note\n---\n"),
+    ]);
+    assert!(result.is_conformant(), "{:?}", result.issues);
+}
+
+#[test]
+fn generated_indexes_escape_titles_and_support_markdown_sensitive_paths() {
+    let root = update_index_entries(
+        "index.md",
+        &root_index(),
+        &[IndexEntry {
+            title: "My ]\nDocs".into(),
+            target: "my docs/".into(),
+            description: None,
+        }],
+    )
+    .unwrap();
+    let nested = update_index_entries(
+        "my docs/index.md",
+        "# My Docs\n",
+        &[IndexEntry {
+            title: "A [special] page".into(),
+            target: "foo(bar)>?#.md".into(),
+            description: None,
+        }],
+    )
+    .unwrap();
+
+    assert!(root.contains("[My \\] Docs](<my docs/>)"));
+    assert!(nested.contains("[A \\[special\\] page](<foo(bar)%3E%3F%23.md>)"));
+    let result = validate_bundle(vec![
+        BundleFile::new("index.md", root.as_bytes()),
+        BundleFile::new("my docs/index.md", nested.as_bytes()),
+        BundleFile::new(
+            "my docs/foo(bar)>?#.md",
+            b"---\ntype: Note\ntitle: Special\n---\n",
+        ),
+    ]);
+    assert!(result.is_conformant(), "{:?}", result.issues);
+}
+
+#[test]
+fn generated_index_refresh_is_idempotent_when_metadata_contains_its_end_marker() {
+    let marker = "<!-- cowiki:generated-index:end -->";
+    let entries = vec![IndexEntry {
+        title: format!("Marker {marker}"),
+        target: "page.md".into(),
+        description: Some(format!("Description {marker}")),
+    }];
+    let once = update_index_entries("index.md", &root_index(), &entries).unwrap();
+    let twice = update_index_entries("index.md", &once, &entries).unwrap();
+
+    assert_eq!(once, twice);
+    assert_eq!(
+        twice
+            .matches("<!-- cowiki:generated-index:start -->")
+            .count(),
+        1
+    );
+    assert_eq!(twice.matches(marker).count(), 1);
+
+    let human_prose = format!("{once}\nHuman explanation mentioning {marker}\n");
+    let refreshed = update_index_entries("index.md", &human_prose, &entries).unwrap();
+    assert!(refreshed.contains(&format!("Human explanation mentioning {marker}")));
 }
 
 #[test]

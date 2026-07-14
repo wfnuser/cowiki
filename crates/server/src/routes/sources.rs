@@ -121,10 +121,10 @@ pub async fn list_sources(
 
     let branch = &params.branch;
     let compile_state = load_compile_state(&repo, branch);
-    // Use non-recursive list to match get_source's filename validation
-    // The OKF bundle stays clean: raw compiler inputs live in hidden CoWiki metadata.
+    // Non-Markdown original names are collision-free encoded below this directory,
+    // while their original filename remains in the Source concept frontmatter.
     let source_files = repo
-        .list_files(branch, cowiki_core::okf::RAW_SOURCES_DIR)
+        .list_files_recursive(branch, cowiki_core::okf::RAW_SOURCES_DIR)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // Pre-load all wiki files once to avoid O(n*m) per-source scans
@@ -132,10 +132,18 @@ pub async fn list_sources(
 
     let mut items = Vec::new();
     for file in &source_files {
-        let filename = file
+        let stored_filename = file
             .strip_prefix(&format!("{}/", cowiki_core::okf::RAW_SOURCES_DIR))
             .unwrap_or(file)
             .to_string();
+        let filename = repo
+            .read_file(branch, file)
+            .ok()
+            .flatten()
+            .and_then(|content| {
+                cowiki_core::okf::display_metadata(&String::from_utf8_lossy(&content)).0
+            })
+            .unwrap_or_else(|| stored_filename.trim_end_matches(".md").to_string());
         let compiled = compile_state.contains_key(&filename);
         let compiled_pages = if compiled {
             find_referencing_pages_batched(&wiki_contents, &filename)

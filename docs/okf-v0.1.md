@@ -28,7 +28,7 @@ tags: [engineering]
 ---
 ```
 
-CoWiki preserves unknown producer fields. `title`, `description`, `resource`, `tags`, and `timestamp` follow the standard but remain optional. Links between concepts are ordinary Markdown links. CoWiki's `.cowiki/` namespace is an additive producer convention: every Markdown source stored there still obeys the complete concept contract, while non-Markdown state is outside OKF's document rules.
+CoWiki preserves unknown producer fields. `title`, `description`, `resource`, `tags`, and `timestamp` follow the standard but remain optional. Links between concepts are ordinary Markdown links. CoWiki's `.cowiki/` namespace is an additive producer convention: every source is stored as a Markdown concept there. Existing `.md` names remain readable; other filenames use a collision-free encoded `.md` path while retaining the original name in frontmatter. Non-Markdown state is outside OKF's document rules.
 
 ## Normative conformance matrix
 
@@ -44,8 +44,8 @@ This implementation follows every normative section of Google's `0.1 — Draft`;
 | §4.1 Recommended | `title`, `description`, `resource`, `tags`, `timestamp` | Accepted without becoming required; new pages use `title`/`description` |
 | §4.2 Body | Standard Markdown; conventional sections are optional | Body is round-tripped without a Cowiki-only syntax requirement |
 | §5 Cross-linking | Absolute bundle-relative and relative Markdown links | CoWiki authors standard Markdown links; broken links are never a conformance error |
-| §6 Index | Optional at any directory; progressive-disclosure H1 sections; only root may have frontmatter | `index-heading` and `index-frontmatter` rules; root declares `okf_version: "0.1"` |
-| §7 Log | Optional; no frontmatter; H1 title; ISO `YYYY-MM-DD` groups, newest first, flat list entries | `log-frontmatter`, `log-heading`, `log-date`, `log-order`, `log-entry` rules |
+| §6 Index | Optional at any directory; progressive-disclosure H1 sections; only root may have frontmatter | CoWiki preserves human prose and maintains a generated listing block after writes and migrations; bundle validation detects stale present indexes |
+| §7 Log | Optional; no frontmatter; H1 title; ISO `YYYY-MM-DD` groups, newest first, flat list entries | `log-frontmatter`, `log-heading`, `log-date`, `log-order`, `log-entry` rules; standard `*`, `-`, and `+` bullets are accepted |
 | §8 Citations | Optional numbered citations under `# Citations` | Preserved as standard Markdown; not falsely promoted from SHOULD to MUST |
 | §9 Conformance tolerance | Do not reject missing optional fields, unknown types/keys, broken links, or missing indexes | Tests explicitly cover producer extensions and broken links |
 | §11 Versioning | Optional root declaration; consumers must attempt best-effort future consumption | Writes `0.1`; an unknown declared version is not used as a reason to reject readable content |
@@ -62,7 +62,9 @@ Opening a pre-OKF repository creates an explicit Git migration commit on every l
 | `wiki/team/_index.md` | `team/index.md` |
 | `sources/input.md` | `.cowiki/sources/input.md` |
 
-Migration adds `type: Note` where required and mirrors legacy `summary` into the standard `description` field. Raw legacy sources become valid `type: Source` concepts. Unknown fields such as `page_id` are preserved. Malformed legacy frontmatter is preserved as body text under a new valid frontmatter block, so opening a Space never discards content. A malformed legacy `log.md` is retained byte-for-byte as `.cowiki/legacy/<path>.txt` and replaced by a conforming migration log.
+Migration adds `type: Note` only where required and mirrors legacy `summary` into the standard `description` field. Already-conforming concepts remain byte-for-byte unchanged. Raw legacy sources become valid `type: Source` concepts. Unknown fields such as `page_id` are preserved. Frontmatter-only legacy folder indexes retain their title as the new H1. Malformed legacy frontmatter is preserved as body text under a new valid frontmatter block. If a legacy and canonical path collide, the canonical file wins and the other blob is archived under `.cowiki/legacy/collisions/`; a malformed legacy `log.md` is likewise retained byte-for-byte under `.cowiki/legacy/`.
+
+Migration is applied automatically only to a clean checked-out branch. After its migration commit, CoWiki checks out the new tree and synchronizes the Git index so the filesystem, index, and branch ref agree. If local uncommitted changes exist, opening stops before changing refs and asks the caller to preserve or commit those changes first.
 
 The implementation is pinned to OKF `0.1 — Draft`, official repository commit `d44368c15e38e7c92481c5992e4f9b5b421a801d` (inspected 2026-07-14).
 

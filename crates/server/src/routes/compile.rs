@@ -64,7 +64,7 @@ async fn do_compile(
 
     // 2. List sources
     let source_files = repo
-        .list_files(branch, cowiki_core::okf::RAW_SOURCES_DIR)
+        .list_files_recursive(branch, cowiki_core::okf::RAW_SOURCES_DIR)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     if source_files.is_empty() {
@@ -84,9 +84,18 @@ async fn do_compile(
             .map_err(|e| AppError::Internal(e.to_string()))?
         {
             let document = String::from_utf8_lossy(&content).into_owned();
+            let original_name = cowiki_core::okf::display_metadata(&document)
+                .0
+                .unwrap_or_else(|| {
+                    file.rsplit('/')
+                        .next()
+                        .unwrap_or(file)
+                        .trim_end_matches(".md")
+                        .to_string()
+                });
             let text = cowiki_core::okf::source_body(&document).unwrap_or(document);
             let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
-            let name = file.rsplit('/').next().unwrap_or(file).to_string();
+            let name = original_name;
 
             if compile_state.sources.get(&name) == Some(&hash) {
                 skipped += 1;
