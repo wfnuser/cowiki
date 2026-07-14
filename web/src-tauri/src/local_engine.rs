@@ -147,30 +147,58 @@ impl LocalEngine {
         }
         let mut imported = 0;
         for entry in std::fs::read_dir(cowiki_home).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
-            let repo = entry.path().join("repo");
-            if !repo.join(".git").exists() {
-                continue;
-            }
-            let repo = repo.canonicalize().map_err(|e| e.to_string())?;
-            let slug = entry.file_name().to_string_lossy().to_string();
-            let git = Repository::open(&repo).map_err(|error| error.to_string())?;
-            prepare_okf_repository(&git, &repo)?;
-            if self.space_by_path(&repo)?.is_some() {
-                continue;
-            }
-            let name = if slug.starts_with("personal-") {
-                "My Space".to_string()
-            } else if slug.starts_with("general-") {
-                "General".to_string()
-            } else {
-                slug.replace(['-', '_'], " ")
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    eprintln!("CoWiki skipped an unreadable legacy Space entry: {error}");
+                    continue;
+                }
             };
-            let space = self.insert_space(&name, &slug, &repo)?;
-            self.rebuild_search_index(&space.slug)?;
-            imported += 1;
+            let legacy_path = entry.path();
+            match self.import_legacy_space(&legacy_path) {
+                Ok(true) => imported += 1,
+                Ok(false) => {}
+                Err(error) => eprintln!(
+                    "CoWiki skipped legacy Space '{}': {error}",
+                    legacy_path.display()
+                ),
+            }
         }
         Ok(imported)
+    }
+
+    fn import_legacy_space(&self, legacy_path: &Path) -> Result<bool, String> {
+        let repo = legacy_path.join("repo");
+        if !repo.join(".git").exists() {
+            return Ok(false);
+        }
+        let repo = repo.canonicalize().map_err(|e| e.to_string())?;
+        if self.space_by_path(&repo)?.is_some() {
+            return Ok(false);
+        }
+
+        let slug = legacy_path
+            .file_name()
+            .ok_or_else(|| "legacy Space directory has no name".to_string())?
+            .to_string_lossy()
+            .to_string();
+        let git = Repository::open(&repo).map_err(|error| error.to_string())?;
+        prepare_okf_repository(&git, &repo)?;
+        let name = if slug.starts_with("personal-") {
+            "My Space".to_string()
+        } else if slug.starts_with("general-") {
+            "General".to_string()
+        } else {
+            slug.replace(['-', '_'], " ")
+        };
+        let space = self.insert_space(&name, &slug, &repo)?;
+        if let Err(error) = self.rebuild_search_index(&space.slug) {
+            eprintln!(
+                "CoWiki imported legacy Space '{}' without its search index: {error}",
+                space.slug
+            );
+        }
+        Ok(true)
     }
 
     pub fn add_space(&self, name: &str, slug: &str, folder: &Path) -> Result<Space, String> {
@@ -1668,6 +1696,89 @@ mod tests {
         assert_eq!(spaces.len(), 1);
         assert_eq!(spaces[0].name, "My Space");
         assert_eq!(spaces[0].local_path, repo.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn legacy_discovery_skips_a_dirty_repo_and_imports_a_healthy_repo_without_mutation() {
+        fn commit_legacy_page(folder: &std::path::Path, content: &str) -> git2::Repository {
+            std::fs::create_dir_all(folder).unwrap();
+            std::fs::write(folder.join("legacy.md"), content).unwrap();
+            let repo = git2::Repository::init(folder).unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(std::path::Path::new("legacy.md")).unwrap();
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let signature = git2::Signature::now("legacy", "legacy@example.com").unwrap();
+            repo.commit(Some("HEAD"), &signature, &signature, "legacy", &tree, &[])
+                .unwrap();
+            drop(tree);
+            repo
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let legacy = temp.path().join("cowiki");
+        let dirty_folder = legacy.join("dirty-device").join("repo");
+        let dirty_repo = commit_legacy_page(&dirty_folder, "# Committed\n");
+        std::fs::write(dirty_folder.join("legacy.md"), "# Unsaved local draft\n").unwrap();
+        let dirty_head_before = dirty_repo.head().unwrap().target().unwrap();
+        let dirty_bytes_before = std::fs::read(dirty_folder.join("legacy.md")).unwrap();
+        let dirty_index_before = std::fs::read(dirty_repo.path().join("index")).unwrap();
+        let dirty_status_before = dirty_repo
+            .statuses(None)
+            .unwrap()
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .path()
+                    .map(|path| (path.to_string(), entry.status().bits()))
+            })
+            .collect::<Vec<_>>();
+        drop(dirty_repo);
+
+        let healthy_folder = legacy.join("healthy-device").join("repo");
+        drop(commit_legacy_page(
+            &healthy_folder,
+            "# Healthy legacy page\n\nImport evidence.\n",
+        ));
+
+        assert_eq!(engine.import_legacy_spaces(&legacy).unwrap(), 1);
+        let spaces = engine.list_spaces().unwrap();
+        assert_eq!(spaces.len(), 1);
+        assert_eq!(spaces[0].slug, "healthy-device");
+        assert_eq!(spaces[0].local_path, healthy_folder.canonicalize().unwrap());
+        assert!(engine
+            .search_pages("healthy-device", "import evidence", 10)
+            .unwrap()
+            .iter()
+            .any(|hit| hit.path == "legacy.md"));
+
+        let dirty_repo = git2::Repository::open(&dirty_folder).unwrap();
+        assert_eq!(
+            dirty_repo.head().unwrap().target().unwrap(),
+            dirty_head_before
+        );
+        assert_eq!(
+            std::fs::read(dirty_folder.join("legacy.md")).unwrap(),
+            dirty_bytes_before
+        );
+        assert_eq!(
+            std::fs::read(dirty_repo.path().join("index")).unwrap(),
+            dirty_index_before
+        );
+        let dirty_status_after = dirty_repo
+            .statuses(None)
+            .unwrap()
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .path()
+                    .map(|path| (path.to_string(), entry.status().bits()))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(dirty_status_after, dirty_status_before);
+        assert!(!dirty_folder.join("index.md").exists());
     }
 
     #[test]
