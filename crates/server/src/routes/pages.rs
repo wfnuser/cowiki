@@ -1,6 +1,8 @@
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::path::Path as FsPath;
 use std::sync::Arc;
 
 use crate::error::{AppError, Result};
@@ -17,9 +19,8 @@ pub struct PageListItem {
     pub title: String,
     pub summary: String,
     pub branch: String,
-    /// "page" or "folder" (folder has _index.md)
+    /// `page` for an OKF concept, or `folder` for a directory represented by index.md.
     pub kind: String,
-    /// For folders: child pages
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<PageListItem>,
 }
@@ -33,149 +34,6 @@ pub struct PageResponse {
     pub branch: String,
 }
 
-/// List pages as a tree by reading from Git recursively
-pub async fn list_pages(
-    State(state): State<Arc<AppState>>,
-    Query(params): Query<ListParams>,
-) -> Result<Json<Vec<PageListItem>>> {
-    let branch = params.branch.unwrap_or_else(|| "main".into());
-
-    let files = state
-        .wiki_repo
-        .list_files_recursive(&branch, "wiki")
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-
-    // Build tree from flat file list
-    let mut root_items: Vec<PageListItem> = Vec::new();
-    let mut folders: std::collections::HashMap<String, Vec<PageListItem>> = std::collections::HashMap::new();
-    let mut folder_index: std::collections::HashMap<String, (String, String)> = std::collections::HashMap::new(); // dir → (title, summary)
-
-    for file_path in &files {
-        let rel = file_path.strip_prefix("wiki/").unwrap_or(file_path);
-        let slug = rel.strip_suffix(".md").unwrap_or(rel).to_string();
-
-        let (title, summary) = match state.wiki_repo.read_file(&branch, file_path) {
-            Ok(Some(content)) => {
-                let text = String::from_utf8_lossy(&content);
-                parse_frontmatter(&text)
-            }
-            _ => ("Untitled".into(), String::new()),
-        };
-
-        let parts: Vec<&str> = slug.split('/').collect();
-
-        if parts.len() == 1 {
-            // Top-level page
-            root_items.push(PageListItem {
-                slug,
-                title,
-                summary,
-                branch: branch.clone(),
-                kind: "page".into(),
-                children: Vec::new(),
-            });
-        } else {
-            // Nested: e.g. "infra/docker" or "infra/_index"
-            let dir = parts[..parts.len() - 1].join("/");
-            let filename = *parts.last().unwrap();
-
-            if filename == "_index" {
-                // This is the folder's own content
-                folder_index.insert(dir, (title, summary));
-            } else {
-                let item = PageListItem {
-                    slug,
-                    title,
-                    summary,
-                    branch: branch.clone(),
-                    kind: "page".into(),
-                    children: Vec::new(),
-                };
-                folders.entry(dir).or_default().push(item);
-            }
-        }
-    }
-
-    // Build folder items and merge children
-    let mut folder_names: Vec<String> = folders.keys().chain(folder_index.keys()).cloned().collect();
-    folder_names.sort();
-    folder_names.dedup();
-
-    for dir in folder_names {
-        let (title, summary) = folder_index.remove(&dir).unwrap_or_else(|| {
-            // No _index.md, use directory name as title
-            let name = dir.rsplit('/').next().unwrap_or(&dir);
-            (name.to_string(), String::new())
-        });
-        let children = folders.remove(&dir).unwrap_or_default();
-
-        root_items.push(PageListItem {
-            slug: format!("{dir}/_index"),
-            title,
-            summary,
-            branch: branch.clone(),
-            kind: "folder".into(),
-            children,
-        });
-    }
-
-    // Sort: folders first, then pages alphabetically
-    root_items.sort_by(|a, b| {
-        let a_folder = a.kind == "folder";
-        let b_folder = b.kind == "folder";
-        b_folder.cmp(&a_folder).then(a.title.cmp(&b.title))
-    });
-
-    Ok(Json(root_items))
-}
-
-pub async fn get_page(
-    State(state): State<Arc<AppState>>,
-    Path(raw_slug): Path<String>,
-    Query(params): Query<ListParams>,
-) -> Result<Json<PageResponse>> {
-    let slug = raw_slug.strip_prefix('/').unwrap_or(&raw_slug).to_string();
-    let branch = params.branch.unwrap_or_else(|| "main".into());
-    let path = format!("wiki/{slug}.md");
-    let content = state
-        .wiki_repo
-        .read_file(&branch, &path)
-        .map_err(|e| AppError::Internal(e.to_string()))?
-        .ok_or_else(|| AppError::NotFound(format!("page {slug} not found")))?;
-    let body = String::from_utf8_lossy(&content).into_owned();
-    let (title, summary) = parse_frontmatter(&body);
-
-    Ok(Json(PageResponse {
-        slug,
-        title,
-        summary,
-        body,
-        branch,
-    }))
-}
-
-fn parse_frontmatter(content: &str) -> (String, String) {
-    if !content.starts_with("---") {
-        return ("Untitled".into(), String::new());
-    }
-    let parts: Vec<&str> = content.splitn(3, "---").collect();
-    if parts.len() < 3 {
-        return ("Untitled".into(), String::new());
-    }
-    let fm = parts[1];
-    let title = fm
-        .lines()
-        .find(|l| l.trim().starts_with("title:"))
-        .map(|l| l.trim().trim_start_matches("title:").trim().trim_matches('"').to_string())
-        .unwrap_or_else(|| "Untitled".into());
-    let summary = fm
-        .lines()
-        .find(|l| l.trim().starts_with("summary:"))
-        .map(|l| l.trim().trim_start_matches("summary:").trim().trim_matches('"').to_string())
-        .unwrap_or_default();
-    (title, summary)
-}
-
 #[derive(Deserialize)]
 pub struct WritePage {
     pub slug: String,
@@ -183,76 +41,58 @@ pub struct WritePage {
     pub branch: String,
 }
 
+#[derive(Deserialize)]
+pub struct CreateFolder {
+    pub name: String,
+    /// Bundle-relative parent directory. A legacy `wiki/` prefix is accepted during migration.
+    pub parent: Option<String>,
+    pub branch: String,
+}
+
+pub async fn list_pages(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<ListParams>,
+) -> Result<Json<Vec<PageListItem>>> {
+    let branch = params.branch.unwrap_or_else(|| "main".into());
+    ensure_user_branch_if_needed(&state.wiki_repo, &branch)?;
+    list_pages_from_repo(&state.wiki_repo, &branch)
+}
+
+pub async fn get_page(
+    State(state): State<Arc<AppState>>,
+    Path(raw_slug): Path<String>,
+    Query(params): Query<ListParams>,
+) -> Result<Json<PageResponse>> {
+    let branch = params.branch.unwrap_or_else(|| "main".into());
+    ensure_user_branch_if_needed(&state.wiki_repo, &branch)?;
+    get_page_from_repo(&state.wiki_repo, raw_slug, branch)
+}
+
 pub async fn write_page(
     State(state): State<Arc<AppState>>,
     Json(input): Json<WritePage>,
 ) -> Result<Json<serde_json::Value>> {
-    let path = format!("wiki/{}.md", input.slug);
-    state
-        .wiki_repo
-        .write_file(
-            &input.branch,
-            &path,
-            input.body.as_bytes(),
-            &format!("edit: {}", input.slug),
-            &input.branch,
-        )
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-    Ok(Json(serde_json::json!({"ok": true, "slug": input.slug})))
-}
-
-/// Create a folder (directory with _index.md)
-#[derive(Deserialize)]
-pub struct CreateFolder {
-    pub name: String,
-    pub parent: Option<String>, // parent directory path, e.g. "wiki/infra"
-    pub branch: String,
+    ensure_user_branch_if_needed(&state.wiki_repo, &input.branch)?;
+    write_page_to_repo(&state.wiki_repo, input)
 }
 
 pub async fn create_folder(
     State(state): State<Arc<AppState>>,
     Json(input): Json<CreateFolder>,
 ) -> Result<Json<serde_json::Value>> {
-    let slug = input.name.to_lowercase()
-        .replace(|c: char| !c.is_alphanumeric() && c != ' ', "")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join("-");
-
-    let dir = match &input.parent {
-        Some(p) => format!("{p}/{slug}"),
-        None => format!("wiki/{slug}"),
-    };
-
-    let index_path = format!("{dir}/_index.md");
-    let body = format!(
-        "---\ntitle: \"{}\"\nsummary: \"\"\nkind: overview\n---\n\n",
-        input.name
-    );
-
-    state
-        .wiki_repo
-        .write_file(
-            &input.branch,
-            &index_path,
-            body.as_bytes(),
-            &format!("create folder: {}", input.name),
-            &input.branch,
-        )
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-
-    Ok(Json(serde_json::json!({"ok": true, "slug": format!("{slug}/_index"), "path": dir})))
+    ensure_user_branch_if_needed(&state.wiki_repo, &input.branch)?;
+    create_folder_in_repo(&state.wiki_repo, input)
 }
-
-// ── Workspace-scoped routes (use per-workspace repos) ──
 
 pub async fn list_pages_ws(
     State(state): State<Arc<AppState>>,
     Path(ws_slug): Path<String>,
     Query(params): Query<ListParams>,
 ) -> Result<Json<Vec<PageListItem>>> {
-    let repo = state.repo_manager.get(&ws_slug)
-        .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
+        .map_err(|error| AppError::Internal(format!("repo error: {error}")))?;
     let branch = params.branch.unwrap_or_else(|| "main".into());
     ensure_user_branch_if_needed(&repo, &branch)?;
     list_pages_from_repo(&repo, &branch)
@@ -263,18 +103,13 @@ pub async fn get_page_ws(
     Path((ws_slug, raw_slug)): Path<(String, String)>,
     Query(params): Query<ListParams>,
 ) -> Result<Json<PageResponse>> {
-    let slug = raw_slug.strip_prefix('/').unwrap_or(&raw_slug).to_string();
-    let repo = state.repo_manager.get(&ws_slug)
-        .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
+        .map_err(|error| AppError::Internal(format!("repo error: {error}")))?;
     let branch = params.branch.unwrap_or_else(|| "main".into());
     ensure_user_branch_if_needed(&repo, &branch)?;
-    let path = format!("wiki/{slug}.md");
-    let content = repo.read_file(&branch, &path)
-        .map_err(|e| AppError::Internal(e.to_string()))?
-        .ok_or_else(|| AppError::NotFound(format!("page {slug} not found")))?;
-    let body = String::from_utf8_lossy(&content).into_owned();
-    let (title, summary) = parse_frontmatter(&body);
-    Ok(Json(PageResponse { slug, title, summary, body, branch }))
+    get_page_from_repo(&repo, raw_slug, branch)
 }
 
 pub async fn write_page_ws(
@@ -282,13 +117,12 @@ pub async fn write_page_ws(
     Path(ws_slug): Path<String>,
     Json(input): Json<WritePage>,
 ) -> Result<Json<serde_json::Value>> {
-    let repo = state.repo_manager.get(&ws_slug)
-        .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
+        .map_err(|error| AppError::Internal(format!("repo error: {error}")))?;
     ensure_user_branch_if_needed(&repo, &input.branch)?;
-    let path = format!("wiki/{}.md", input.slug);
-    repo.write_file(&input.branch, &path, input.body.as_bytes(), &format!("edit: {}", input.slug), &input.branch)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-    Ok(Json(serde_json::json!({"ok": true, "slug": input.slug})))
+    write_page_to_repo(&repo, input)
 }
 
 pub async fn create_folder_ws(
@@ -296,136 +130,361 @@ pub async fn create_folder_ws(
     Path(ws_slug): Path<String>,
     Json(input): Json<CreateFolder>,
 ) -> Result<Json<serde_json::Value>> {
-    let repo = state.repo_manager.get(&ws_slug)
-        .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
+        .map_err(|error| AppError::Internal(format!("repo error: {error}")))?;
     ensure_user_branch_if_needed(&repo, &input.branch)?;
-    let slug = input.name.to_lowercase()
-        .replace(|c: char| !c.is_alphanumeric() && c != ' ', "")
-        .split_whitespace().collect::<Vec<_>>().join("-");
-    let dir = match &input.parent {
-        Some(p) => format!("{p}/{slug}"),
-        None => format!("wiki/{slug}"),
-    };
-    let index_path = format!("{dir}/_index.md");
-    let body = format!("---\ntitle: \"{}\"\nsummary: \"\"\nkind: overview\n---\n\n", input.name);
-    repo.write_file(&input.branch, &index_path, body.as_bytes(), &format!("create folder: {}", input.name), &input.branch)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-    Ok(Json(serde_json::json!({"ok": true, "slug": format!("{slug}/_index"), "path": dir})))
+    create_folder_in_repo(&repo, input)
 }
 
-/// Ensure user branch exists lazily (for workspace repos and legacy routes)
-pub(crate) fn ensure_user_branch_if_needed(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Result<()> {
+fn get_page_from_repo(
+    repo: &cowiki_core::git::WikiRepo,
+    raw_slug: String,
+    branch: String,
+) -> Result<Json<PageResponse>> {
+    let slug = normalize_api_slug(raw_slug.trim_start_matches('/'));
+    let path = document_path_for_slug(&slug)?;
+    let content = repo
+        .read_file(&branch, &path)
+        .map_err(|error| AppError::Internal(error.to_string()))?
+        .ok_or_else(|| AppError::NotFound(format!("page {slug} not found")))?;
+    let body = String::from_utf8_lossy(&content).into_owned();
+    let (title, summary) = parse_metadata(&path, &body);
+    Ok(Json(PageResponse {
+        slug,
+        title,
+        summary,
+        body,
+        branch,
+    }))
+}
+
+fn write_page_to_repo(
+    repo: &cowiki_core::git::WikiRepo,
+    input: WritePage,
+) -> Result<Json<serde_json::Value>> {
+    let slug = normalize_api_slug(&input.slug);
+    let path = document_path_for_slug(&slug)?;
+    let fallback_title = path
+        .rsplit('/')
+        .next()
+        .unwrap_or("Untitled")
+        .trim_end_matches(".md");
+    let normalized = match cowiki_core::okf::DocumentKind::from_path(&path) {
+        cowiki_core::okf::DocumentKind::Concept => {
+            cowiki_core::okf::normalize_concept_document(&input.body, fallback_title)
+        }
+        cowiki_core::okf::DocumentKind::Index => {
+            cowiki_core::okf::normalize_index_document(&path, &input.body)
+        }
+        _ => Err("only OKF Markdown documents can be edited as pages".into()),
+    }
+    .map_err(AppError::BadRequest)?;
+    repo.write_file(
+        &input.branch,
+        &path,
+        normalized.as_bytes(),
+        &format!("edit: {slug}"),
+        &input.branch,
+    )
+    .map_err(|error| AppError::Internal(error.to_string()))?;
+    Ok(Json(serde_json::json!({"ok": true, "slug": slug})))
+}
+
+fn create_folder_in_repo(
+    repo: &cowiki_core::git::WikiRepo,
+    input: CreateFolder,
+) -> Result<Json<serde_json::Value>> {
+    let folder_slug = slugify(&input.name);
+    if folder_slug.is_empty() {
+        return Err(AppError::BadRequest(
+            "folder name must contain letters or numbers".into(),
+        ));
+    }
+    let parent = input.parent.as_deref().map(normalize_parent).transpose()?;
+    let dir = match parent.filter(|parent| !parent.is_empty()) {
+        Some(parent) => format!("{parent}/{folder_slug}"),
+        None => folder_slug.clone(),
+    };
+    let index_path = cowiki_core::okf::folder_index_path(&dir).map_err(AppError::BadRequest)?;
+    let body = cowiki_core::okf::folder_index(&input.name);
+    repo.write_file(
+        &input.branch,
+        &index_path,
+        body.as_bytes(),
+        &format!("create folder: {}", input.name),
+        &input.branch,
+    )
+    .map_err(|error| AppError::Internal(error.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "slug": format!("{dir}/index"),
+        "path": dir,
+    })))
+}
+
+fn normalize_parent(parent: &str) -> Result<String> {
+    let parent = parent
+        .trim_matches('/')
+        .strip_prefix("wiki/")
+        .unwrap_or(parent.trim_matches('/'))
+        .trim_end_matches("/index")
+        .trim_end_matches("/_index");
+    if parent.is_empty() {
+        return Ok(String::new());
+    }
+    let probe = cowiki_core::okf::folder_index_path(parent).map_err(AppError::BadRequest)?;
+    Ok(probe.trim_end_matches("/index.md").to_string())
+}
+
+fn document_path_for_slug(slug: &str) -> Result<String> {
+    if slug == "index" {
+        return Ok("index.md".into());
+    }
+    if let Some(folder) = slug.strip_suffix("/index") {
+        return cowiki_core::okf::folder_index_path(folder).map_err(AppError::BadRequest);
+    }
+    cowiki_core::okf::concept_path(slug).map_err(AppError::BadRequest)
+}
+
+fn normalize_api_slug(slug: &str) -> String {
+    slug.strip_suffix("/_index")
+        .map(|folder| format!("{folder}/index"))
+        .unwrap_or_else(|| slug.to_string())
+}
+
+fn list_pages_from_repo(
+    repo: &cowiki_core::git::WikiRepo,
+    branch: &str,
+) -> Result<Json<Vec<PageListItem>>> {
+    let files = repo
+        .list_files_recursive(branch, "")
+        .map_err(|error| AppError::Internal(error.to_string()))?;
+    let mut concepts: HashMap<String, (String, String)> = HashMap::new();
+    let mut indexes: HashMap<String, (String, String)> = HashMap::new();
+    let mut directories = HashSet::new();
+
+    for path in files {
+        match cowiki_core::okf::DocumentKind::from_path(&path) {
+            cowiki_core::okf::DocumentKind::Concept => {
+                let slug = path.trim_end_matches(".md").to_string();
+                let content = repo
+                    .read_file(branch, &path)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                concepts.insert(
+                    slug.clone(),
+                    parse_metadata(&path, &String::from_utf8_lossy(&content)),
+                );
+                add_parent_directories(&slug, &mut directories);
+            }
+            cowiki_core::okf::DocumentKind::Index if path != "index.md" => {
+                let dir = path.trim_end_matches("/index.md").to_string();
+                let content = repo
+                    .read_file(branch, &path)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                indexes.insert(
+                    dir.clone(),
+                    parse_metadata(&path, &String::from_utf8_lossy(&content)),
+                );
+                add_parent_directories(&dir, &mut directories);
+                directories.insert(dir);
+            }
+            _ => {}
+        }
+    }
+
+    fn build_level(
+        parent: &str,
+        branch: &str,
+        concepts: &HashMap<String, (String, String)>,
+        indexes: &HashMap<String, (String, String)>,
+        directories: &HashSet<String>,
+    ) -> Vec<PageListItem> {
+        let mut result = Vec::new();
+        for (slug, (title, summary)) in concepts {
+            let concept_parent = slug
+                .rsplit_once('/')
+                .map(|(parent, _)| parent)
+                .unwrap_or("");
+            if concept_parent == parent {
+                result.push(PageListItem {
+                    slug: slug.clone(),
+                    title: title.clone(),
+                    summary: summary.clone(),
+                    branch: branch.into(),
+                    kind: "page".into(),
+                    children: Vec::new(),
+                });
+            }
+        }
+        for dir in directories {
+            let dir_parent = dir.rsplit_once('/').map(|(parent, _)| parent).unwrap_or("");
+            if dir_parent != parent {
+                continue;
+            }
+            let fallback = dir.rsplit('/').next().unwrap_or(dir);
+            let (title, summary) = indexes
+                .get(dir)
+                .cloned()
+                .unwrap_or_else(|| (humanize(fallback), String::new()));
+            result.push(PageListItem {
+                slug: format!("{dir}/index"),
+                title,
+                summary,
+                branch: branch.into(),
+                kind: "folder".into(),
+                children: build_level(dir, branch, concepts, indexes, directories),
+            });
+        }
+        result.sort_by(|a, b| {
+            (b.kind == "folder")
+                .cmp(&(a.kind == "folder"))
+                .then_with(|| a.title.cmp(&b.title))
+        });
+        result
+    }
+
+    Ok(Json(build_level(
+        "",
+        branch,
+        &concepts,
+        &indexes,
+        &directories,
+    )))
+}
+
+fn add_parent_directories(path: &str, directories: &mut HashSet<String>) {
+    let parts = path.split('/').collect::<Vec<_>>();
+    for depth in 1..parts.len() {
+        directories.insert(parts[..depth].join("/"));
+    }
+}
+
+fn parse_metadata(path: &str, content: &str) -> (String, String) {
+    if cowiki_core::okf::DocumentKind::from_path(path) == cowiki_core::okf::DocumentKind::Index {
+        let heading = content
+            .lines()
+            .find_map(|line| line.strip_prefix("# "))
+            .map(str::trim)
+            .filter(|heading| !heading.is_empty());
+        let fallback = FsPath::new(path)
+            .parent()
+            .and_then(FsPath::file_name)
+            .and_then(|name| name.to_str())
+            .unwrap_or("Knowledge");
+        return (
+            heading
+                .map(str::to_string)
+                .unwrap_or_else(|| humanize(fallback)),
+            String::new(),
+        );
+    }
+    let frontmatter = content
+        .strip_prefix("---\n")
+        .and_then(|rest| rest.split_once("\n---"))
+        .map(|(frontmatter, _)| frontmatter)
+        .unwrap_or("");
+    let title = yaml_scalar(frontmatter, "title").unwrap_or_else(|| {
+        humanize(
+            FsPath::new(path)
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("Untitled"),
+        )
+    });
+    let summary = yaml_scalar(frontmatter, "description")
+        .or_else(|| yaml_scalar(frontmatter, "summary"))
+        .unwrap_or_default();
+    (title, summary)
+}
+
+fn yaml_scalar(frontmatter: &str, key: &str) -> Option<String> {
+    frontmatter.lines().find_map(|line| {
+        let value = line.trim().strip_prefix(&format!("{key}:"))?.trim();
+        Some(value.trim_matches(['\'', '"']).to_string())
+    })
+}
+
+fn humanize(value: &str) -> String {
+    value
+        .replace(['-', '_'], " ")
+        .split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            chars
+                .next()
+                .map(|first| first.to_uppercase().collect::<String>() + chars.as_str())
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn slugify(value: &str) -> String {
+    value
+        .to_lowercase()
+        .replace(
+            |character: char| !character.is_alphanumeric() && character != ' ',
+            "",
+        )
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+/// Ensure user branch exists lazily (for workspace repos and legacy routes).
+pub(crate) fn ensure_user_branch_if_needed(
+    repo: &cowiki_core::git::WikiRepo,
+    branch: &str,
+) -> Result<()> {
     if let Some(user_id) = branch.strip_prefix("user/") {
-        repo.ensure_user_branch(user_id)
-            .map_err(|e| AppError::Internal(format!("failed to ensure user branch '{branch}': {e}")))?;
+        repo.ensure_user_branch(user_id).map_err(|error| {
+            AppError::Internal(format!("failed to ensure user branch '{branch}': {error}"))
+        })?;
     }
     Ok(())
 }
 
-/// Internal: list pages from a specific repo instance
-fn list_pages_from_repo(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Result<Json<Vec<PageListItem>>> {
-    let files = repo.list_files_recursive(branch, "wiki")
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+#[cfg(test)]
+mod okf_tests {
+    use super::*;
 
-    // Collect all items: pages and folder _index metadata
-    struct RawItem {
-        slug: String,
-        title: String,
-        summary: String,
-        is_index: bool, // true if this is a folder's _index.md
-        dir: String,    // parent directory path (e.g. "test-folder" or "test-folder/sub")
+    #[test]
+    fn lists_root_concepts_and_okf_folder_indexes() {
+        let data = tempfile::tempdir().unwrap();
+        let repo = cowiki_core::git::WikiRepo::open_or_init(data.path().to_str().unwrap()).unwrap();
+        repo.write_file(
+            "main",
+            "welcome.md",
+            b"---\ntype: Note\ntitle: Welcome\ndescription: Start here.\n---\n",
+            "add welcome",
+            "test",
+        )
+        .unwrap();
+        repo.write_file("main", "teams/index.md", b"# Teams\n", "add folder", "test")
+            .unwrap();
+        repo.write_file(
+            "main",
+            "teams/customer.md",
+            b"---\ntype: Entity\ntitle: Customer\n---\n",
+            "add customer",
+            "test",
+        )
+        .unwrap();
+
+        let Json(items) = list_pages_from_repo(&repo, "main").unwrap();
+        assert_eq!(items.len(), 2);
+        let folder = items.iter().find(|item| item.kind == "folder").unwrap();
+        assert_eq!(folder.slug, "teams/index");
+        assert_eq!(folder.title, "Teams");
+        assert_eq!(folder.children[0].slug, "teams/customer");
+        let page = items.iter().find(|item| item.kind == "page").unwrap();
+        assert_eq!(page.slug, "welcome");
+        assert_eq!(page.summary, "Start here.");
     }
-
-    let mut items: Vec<RawItem> = Vec::new();
-
-    for file_path in &files {
-        let rel = file_path.strip_prefix("wiki/").unwrap_or(file_path);
-        let slug = rel.strip_suffix(".md").unwrap_or(rel).to_string();
-        let (title, summary) = match repo.read_file(branch, file_path) {
-            Ok(Some(content)) => parse_frontmatter(&String::from_utf8_lossy(&content)),
-            _ => ("Untitled".into(), String::new()),
-        };
-        let parts: Vec<&str> = slug.split('/').collect();
-        if parts.len() == 1 {
-            items.push(RawItem { slug: slug.clone(), title, summary, is_index: false, dir: String::new() });
-        } else {
-            let dir = parts[..parts.len() - 1].join("/");
-            let filename = *parts.last().unwrap();
-            items.push(RawItem { slug: slug.clone(), title, summary, is_index: filename == "_index", dir });
-        }
-    }
-
-    // Build tree recursively
-    fn build_level(items: &[RawItem], parent_dir: &str, branch: &str) -> Vec<PageListItem> {
-        let mut result: Vec<PageListItem> = Vec::new();
-
-        // Find pages directly in this directory (not _index)
-        for item in items {
-            if item.dir == parent_dir && !item.is_index {
-                result.push(PageListItem {
-                    slug: item.slug.clone(), title: item.title.clone(), summary: item.summary.clone(),
-                    branch: branch.into(), kind: "page".into(), children: Vec::new(),
-                });
-            }
-        }
-
-        // Find subdirectories (folders that have _index or have children at this level)
-        let mut subdirs: Vec<String> = Vec::new();
-        for item in items {
-            if !item.dir.is_empty() {
-                // Check if this item's immediate parent is our current directory
-                let expected_parent = if parent_dir.is_empty() {
-                    // Top level: subdirs are single-segment dirs
-                    if !item.dir.contains('/') {
-                        item.dir.clone()
-                    } else {
-                        item.dir.split('/').next().unwrap_or("").to_string()
-                    }
-                } else {
-                    // Nested: subdirs start with parent_dir + "/"
-                    if item.dir.starts_with(&format!("{parent_dir}/")) || item.dir == parent_dir {
-                        let rest = item.dir.strip_prefix(&format!("{parent_dir}/")).unwrap_or("");
-                        if rest.is_empty() {
-                            continue; // same dir
-                        }
-                        let next_segment = rest.split('/').next().unwrap_or("");
-                        format!("{parent_dir}/{next_segment}")
-                    } else if parent_dir.is_empty() && !item.dir.contains('/') {
-                        item.dir.clone()
-                    } else {
-                        continue;
-                    }
-                };
-                if !expected_parent.is_empty() && !subdirs.contains(&expected_parent) {
-                    subdirs.push(expected_parent);
-                }
-            }
-        }
-        subdirs.sort();
-        subdirs.dedup();
-
-        for subdir in subdirs {
-            // Find _index for this subdir
-            let (title, summary) = items.iter()
-                .find(|i| i.dir == subdir && i.is_index)
-                .map(|i| (i.title.clone(), i.summary.clone()))
-                .unwrap_or_else(|| {
-                    let name = subdir.rsplit('/').next().unwrap_or(&subdir);
-                    (name.to_string(), String::new())
-                });
-
-            let children = build_level(items, &subdir, branch);
-            result.push(PageListItem {
-                slug: format!("{subdir}/_index"), title, summary,
-                branch: branch.into(), kind: "folder".into(), children,
-            });
-        }
-
-        // Sort: folders first, then alphabetically
-        result.sort_by(|a, b| (b.kind == "folder").cmp(&(a.kind == "folder")).then(a.title.cmp(&b.title)));
-        result
-    }
-
-    let tree = build_level(&items, "", branch);
-    Ok(Json(tree))
 }

@@ -24,6 +24,7 @@ CoWiki makes LLM Wiki multiplayer:
 - **Review like a PR** — Reviewers see an LLM-generated summary, full diff, and duplicate warnings. Approve or reject with one click.
 - **Agents welcome** — AI agents connect via MCP, contribute knowledge alongside humans, and follow the same review process.
 - **Git under the hood** — Every change is version-controlled. Full history, rollback, blame — but you never touch Git directly.
+- **Open Knowledge Format** — Every Space is a portable [OKF v0.1 bundle](docs/okf-v0.1.md): plain Markdown, YAML frontmatter, standard links, and no prescribed taxonomy.
 
 ## How It Works
 
@@ -128,7 +129,7 @@ Git tracks every change under the hood. Full history, per-page diffs, and the ab
 - [ ] MCP Server — agents connect directly
 - [ ] Multi-user auth and API keys
 - [ ] Markdown editor (Milkdown) in the browser
-- [ ] Wikilink auto-resolution
+- [ ] OKF cross-link validation and graph navigation
 - [ ] Incremental compilation (skip unchanged sources)
 - [ ] Knowledge graph visualization
 - [ ] Desktop app (Tauri)

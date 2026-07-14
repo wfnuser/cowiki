@@ -13,11 +13,7 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    pub fn new(
-        llm: Box<dyn Llm>,
-        vlm: Option<Box<dyn Vlm>>,
-        embedder: Box<dyn Embedder>,
-    ) -> Self {
+    pub fn new(llm: Box<dyn Llm>, vlm: Option<Box<dyn Vlm>>, embedder: Box<dyn Embedder>) -> Self {
         Self { llm, vlm, embedder }
     }
 
@@ -34,8 +30,9 @@ For each concept, output a markdown document with YAML frontmatter:
 
 ```
 ---
+type: Note
 title: "Concept Title"
-summary: "One-line summary"
+description: "One-line summary"
 sources:
   - source-filename.md
 ---
@@ -124,8 +121,9 @@ fn parse_compiled_page(raw: &str) -> Page {
                         .trim_matches('"')
                         .to_string();
                     in_sources = false;
-                } else if trimmed.starts_with("summary:") {
+                } else if trimmed.starts_with("description:") || trimmed.starts_with("summary:") {
                     summary = trimmed
+                        .trim_start_matches("description:")
                         .trim_start_matches("summary:")
                         .trim()
                         .trim_matches('"')

@@ -56,7 +56,7 @@ fn find_referencing_pages(
     branch: &str,
     source_filename: &str,
 ) -> Vec<String> {
-    let wiki_files = repo.list_files_recursive(branch, "wiki").unwrap_or_default();
+    let wiki_files = repo.list_files_recursive(branch, "").unwrap_or_default();
     let mut pages = Vec::new();
     for file in &wiki_files {
         if let Ok(Some(content)) = repo.read_file(branch, file) {
@@ -64,12 +64,7 @@ fn find_referencing_pages(
             if text.contains(&format!("  - {source_filename}"))
                 || text.contains(&format!("- {source_filename}"))
             {
-                let slug = file
-                    .strip_prefix("wiki/")
-                    .unwrap_or(file)
-                    .strip_suffix(".md")
-                    .unwrap_or(file)
-                    .to_string();
+                let slug = file.strip_suffix(".md").unwrap_or(file).to_string();
                 pages.push(slug);
             }
         }
@@ -88,8 +83,6 @@ fn find_referencing_pages_batched(
             || text.contains(&format!("- {source_filename}"))
         {
             let slug = file_path
-                .strip_prefix("wiki/")
-                .unwrap_or(file_path)
                 .strip_suffix(".md")
                 .unwrap_or(file_path)
                 .to_string();
@@ -100,9 +93,13 @@ fn find_referencing_pages_batched(
 }
 
 fn load_all_wiki(repo: &cowiki_core::git::WikiRepo, branch: &str) -> Vec<(String, String)> {
-    let wiki_files = repo.list_files_recursive(branch, "wiki").unwrap_or_default();
+    let wiki_files = repo.list_files_recursive(branch, "").unwrap_or_default();
     wiki_files
         .iter()
+        .filter(|file| {
+            cowiki_core::okf::DocumentKind::from_path(file)
+                == cowiki_core::okf::DocumentKind::Concept
+        })
         .filter_map(|file| {
             repo.read_file(branch, file)
                 .ok()
@@ -125,9 +122,9 @@ pub async fn list_sources(
     let branch = &params.branch;
     let compile_state = load_compile_state(&repo, branch);
     // Use non-recursive list to match get_source's filename validation
-    // (compiler only considers top-level sources/*.md)
+    // The OKF bundle stays clean: raw compiler inputs live in hidden CoWiki metadata.
     let source_files = repo
-        .list_files(branch, "sources")
+        .list_files(branch, cowiki_core::okf::RAW_SOURCES_DIR)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // Pre-load all wiki files once to avoid O(n*m) per-source scans
@@ -136,7 +133,7 @@ pub async fn list_sources(
     let mut items = Vec::new();
     for file in &source_files {
         let filename = file
-            .strip_prefix("sources/")
+            .strip_prefix(&format!("{}/", cowiki_core::okf::RAW_SOURCES_DIR))
             .unwrap_or(file)
             .to_string();
         let compiled = compile_state.contains_key(&filename);
@@ -145,7 +142,11 @@ pub async fn list_sources(
         } else {
             Vec::new()
         };
-        items.push(SourceItem { filename, compiled, compiled_pages });
+        items.push(SourceItem {
+            filename,
+            compiled,
+            compiled_pages,
+        });
     }
     Ok(Json(items))
 }
@@ -177,13 +178,14 @@ pub async fn get_source(
         repo.ensure_branch_exists(branch)
             .map_err(|e| AppError::Internal(format!("failed to create branch {}: {e}", branch)))?;
     }
-    let file_path = format!("sources/{filename}");
+    let file_path = cowiki_core::okf::source_path(&filename).map_err(AppError::BadRequest)?;
     let content_bytes = repo
         .read_file(branch, &file_path)
         .map_err(|e| AppError::Internal(e.to_string()))?
         .ok_or_else(|| AppError::NotFound(format!("source file not found: {filename}")))?;
 
-    let content = String::from_utf8_lossy(&content_bytes).into_owned();
+    let document = String::from_utf8_lossy(&content_bytes).into_owned();
+    let content = cowiki_core::okf::source_body(&document).unwrap_or(document);
     let compile_state = load_compile_state(&repo, branch);
     let compiled = compile_state.contains_key(&filename);
     let compiled_pages = if compiled {
@@ -192,5 +194,10 @@ pub async fn get_source(
         Vec::new()
     };
 
-    Ok(Json(SourceContent { filename, content, compiled, compiled_pages }))
+    Ok(Json(SourceContent {
+        filename,
+        content,
+        compiled,
+        compiled_pages,
+    }))
 }

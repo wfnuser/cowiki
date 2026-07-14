@@ -36,13 +36,18 @@ pub async fn ingest_ws(
     Path(ws_slug): Path<String>,
     Json(input): Json<IngestRequest>,
 ) -> Result<Json<IngestResponse>> {
-    let repo = state.repo_manager.get(&ws_slug)
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     super::pages::ensure_user_branch_if_needed(&repo, &input.branch)?;
     do_ingest(&repo, input).await
 }
 
-async fn do_ingest(repo: &cowiki_core::git::WikiRepo, input: IngestRequest) -> Result<Json<IngestResponse>> {
+async fn do_ingest(
+    repo: &cowiki_core::git::WikiRepo,
+    input: IngestRequest,
+) -> Result<Json<IngestResponse>> {
     let content = match input.source_type.as_str() {
         "url" => fetch_url(&input.content).await?,
         "text" | "file" => input.content.clone(),
@@ -68,17 +73,27 @@ async fn do_ingest(repo: &cowiki_core::git::WikiRepo, input: IngestRequest) -> R
 
     // Ensure user branch exists before writing (needed for first ingest on a workspace)
     if input.branch != "main" {
-        repo.ensure_branch_exists(&input.branch)
-            .map_err(|e| AppError::Internal(format!("failed to create branch {}: {e}", input.branch)))?;
+        repo.ensure_branch_exists(&input.branch).map_err(|e| {
+            AppError::Internal(format!("failed to create branch {}: {e}", input.branch))
+        })?;
     }
 
-    let path = format!("sources/{filename}");
+    let path = cowiki_core::okf::source_path(&filename).map_err(AppError::BadRequest)?;
+    let source_document =
+        cowiki_core::okf::source_document(&filename, &content).map_err(AppError::BadRequest)?;
     repo.write_file(
-        &input.branch, &path, content.as_bytes(),
-        &format!("ingest: {filename}"), &input.branch,
-    ).map_err(|e| AppError::Internal(e.to_string()))?;
+        &input.branch,
+        &path,
+        source_document.as_bytes(),
+        &format!("ingest: {filename}"),
+        &input.branch,
+    )
+    .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    Ok(Json(IngestResponse { filename, content_hash: hash }))
+    Ok(Json(IngestResponse {
+        filename,
+        content_hash: hash,
+    }))
 }
 
 async fn fetch_url(url: &str) -> Result<String> {

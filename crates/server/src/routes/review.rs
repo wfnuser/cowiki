@@ -57,8 +57,8 @@ pub async fn review_action(
             let file_paths: Vec<String> = submission
                 .page_slugs
                 .iter()
-                .map(|s| format!("wiki/{s}.md"))
-                .collect();
+                .map(|slug| cowiki_core::okf::concept_path(slug).map_err(AppError::BadRequest))
+                .collect::<Result<Vec<_>>>()?;
 
             state
                 .wiki_repo
@@ -72,7 +72,7 @@ pub async fn review_action(
 
             // Update page records to main branch
             for slug in &submission.page_slugs {
-                let path = format!("wiki/{slug}.md");
+                let path = cowiki_core::okf::concept_path(slug).map_err(AppError::BadRequest)?;
                 if let Some(content) = state
                     .wiki_repo
                     .read_file("main", &path)

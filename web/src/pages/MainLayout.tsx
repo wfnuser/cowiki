@@ -299,9 +299,9 @@ export function MainLayout() {
     const baseSlug = newName.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim();
     // If creating inside a folder, prefix the slug
     const slug = newPageFolder
-      ? `${newPageFolder.replace('wiki/', '')}/${baseSlug}`
+      ? `${newPageFolder}/${baseSlug}`
       : baseSlug;
-    const body = `---\ntitle: "${newName.trim()}"\nsummary: ""\nkind: concept\n---\n\n`;
+    const body = `---\ntype: Note\ntitle: "${newName.trim()}"\ndescription: ""\n---\n\n`;
     try {
       await writePage(slug, body, userBranch, ws.slug);
       const title = newName.trim();
@@ -1295,7 +1295,7 @@ function PageItem({ page, isActive, onSelect, onSelectChild, onAddPage, onAddFol
   const paddingLeft = depth * 16; // 16px per level
 
   if (page.kind === 'folder') {
-    const folderPath = 'wiki/' + page.slug.replace('/_index', '');
+    const folderPath = page.slug.replace(/\/index$/, '');
     return (
       <>
         <SidebarMenuItem className="group/folder relative" style={{ paddingLeft }}>

@@ -46,7 +46,9 @@ pub async fn compile_ws(
     Path(ws_slug): Path<String>,
     Json(input): Json<CompileRequest>,
 ) -> Result<Json<CompileResponse>> {
-    let repo = state.repo_manager.get(&ws_slug)
+    let repo = state
+        .repo_manager
+        .get(&ws_slug)
         .map_err(|e| AppError::Internal(format!("repo error: {e}")))?;
     super::pages::ensure_user_branch_if_needed(&repo, &input.branch)?;
     do_compile(&state, &repo, &input.branch).await
@@ -62,11 +64,14 @@ async fn do_compile(
 
     // 2. List sources
     let source_files = repo
-        .list_files(branch, "sources")
+        .list_files(branch, cowiki_core::okf::RAW_SOURCES_DIR)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     if source_files.is_empty() {
-        return Ok(Json(CompileResponse { pages: vec![], skipped: 0 }));
+        return Ok(Json(CompileResponse {
+            pages: vec![],
+            skipped: 0,
+        }));
     }
 
     // 3. Read sources, check which changed
@@ -78,7 +83,8 @@ async fn do_compile(
             .read_file(branch, file)
             .map_err(|e| AppError::Internal(e.to_string()))?
         {
-            let text = String::from_utf8_lossy(&content).into_owned();
+            let document = String::from_utf8_lossy(&content).into_owned();
+            let text = cowiki_core::okf::source_body(&document).unwrap_or(document);
             let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
             let name = file.rsplit('/').next().unwrap_or(file).to_string();
 
@@ -93,11 +99,18 @@ async fn do_compile(
     }
 
     if new_sources.is_empty() {
-        return Ok(Json(CompileResponse { pages: vec![], skipped }));
+        return Ok(Json(CompileResponse {
+            pages: vec![],
+            skipped,
+        }));
     }
 
     // 4. Compile via LLM
-    let compiled = state.compiler.compile(&new_sources).await.map_err(AppError::Internal)?;
+    let compiled = state
+        .compiler
+        .compile(&new_sources)
+        .await
+        .map_err(AppError::Internal)?;
 
     let default_user = cowiki_db::users::get_default(&state.db).await?;
 
@@ -105,40 +118,80 @@ async fn do_compile(
     let mut result_pages = Vec::new();
     for page in &compiled {
         let full_content = format!(
-            "---\ntitle: \"{}\"\nsummary: \"{}\"\nkind: concept\nsources:\n{}\n---\n\n{}",
-            page.title, page.summary,
-            page.sources.iter().map(|s| format!("  - {s}")).collect::<Vec<_>>().join("\n"),
+            "---\ntype: Note\ntitle: \"{}\"\ndescription: \"{}\"\nsources:\n{}\n---\n\n{}",
+            page.title,
+            page.summary,
+            page.sources
+                .iter()
+                .map(|s| format!("  - {s}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
             page.body,
         );
 
-        let path = format!("wiki/{}.md", page.slug);
-        repo.write_file(branch, &path, full_content.as_bytes(), &format!("compile: {}", page.title), branch)
-            .map_err(|e| AppError::Internal(e.to_string()))?;
+        let path = cowiki_core::okf::concept_path(&page.slug).map_err(AppError::BadRequest)?;
+        repo.write_file(
+            branch,
+            &path,
+            full_content.as_bytes(),
+            &format!("compile: {}", page.title),
+            branch,
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
 
         let hash = format!("{:x}", Sha256::digest(full_content.as_bytes()));
-        if let Ok(emb) = state.compiler.embed(&format!("{}\n{}", page.title, page.summary)).await {
-            cowiki_db::pages::upsert(&state.db, &page.slug, &page.title, &page.summary, branch, &hash, Some(&emb), default_user.id)
-                .await.ok();
+        if let Ok(emb) = state
+            .compiler
+            .embed(&format!("{}\n{}", page.title, page.summary))
+            .await
+        {
+            cowiki_db::pages::upsert(
+                &state.db,
+                &page.slug,
+                &page.title,
+                &page.summary,
+                branch,
+                &hash,
+                Some(&emb),
+                default_user.id,
+            )
+            .await
+            .ok();
         }
 
-        result_pages.push(CompiledPage { slug: page.slug.clone(), title: page.title.clone(), summary: page.summary.clone() });
+        result_pages.push(CompiledPage {
+            slug: page.slug.clone(),
+            title: page.title.clone(),
+            summary: page.summary.clone(),
+        });
     }
 
     // 6. Save state
     save_state(repo, branch, &compile_state);
 
-    Ok(Json(CompileResponse { pages: result_pages, skipped }))
+    Ok(Json(CompileResponse {
+        pages: result_pages,
+        skipped,
+    }))
 }
 
 fn load_state(repo: &cowiki_core::git::WikiRepo, branch: &str) -> CompileState {
     repo.read_file(branch, ".cowiki/state.json")
-        .ok().flatten()
+        .ok()
+        .flatten()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
 }
 
 fn save_state(repo: &cowiki_core::git::WikiRepo, branch: &str, compile_state: &CompileState) {
     if let Ok(json) = serde_json::to_string_pretty(compile_state) {
-        repo.write_file(branch, ".cowiki/state.json", json.as_bytes(), "update compile state", "cowiki").ok();
+        repo.write_file(
+            branch,
+            ".cowiki/state.json",
+            json.as_bytes(),
+            "update compile state",
+            "cowiki",
+        )
+        .ok();
     }
 }

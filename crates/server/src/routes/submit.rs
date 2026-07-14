@@ -50,7 +50,7 @@ pub async fn submit(
     // Generate embeddings for dedup
     let mut embeddings = Vec::new();
     for slug in &input.page_slugs {
-        let path = format!("wiki/{slug}.md");
+        let path = cowiki_core::okf::concept_path(slug).map_err(AppError::BadRequest)?;
         if let Some(content) = state
             .wiki_repo
             .read_file(&input.branch, &path)
@@ -129,8 +129,8 @@ pub async fn submit(
         let file_paths: Vec<String> = input
             .page_slugs
             .iter()
-            .map(|s| format!("wiki/{s}.md"))
-            .collect();
+            .map(|slug| cowiki_core::okf::concept_path(slug).map_err(AppError::BadRequest))
+            .collect::<Result<Vec<_>>>()?;
         state
             .wiki_repo
             .merge_to_main(
