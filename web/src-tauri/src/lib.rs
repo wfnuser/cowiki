@@ -1,6 +1,7 @@
 mod knowledge_index;
 mod local_engine;
 mod mcp;
+mod okf;
 mod terminal;
 
 use local_engine::{

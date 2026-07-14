@@ -3,6 +3,8 @@
 //! Markdown files remain the source of truth. Every row in these tables is
 //! derived data and may be dropped and rebuilt without losing user content.
 
+use percent_encoding::percent_decode_str;
+use pulldown_cmark::{Event, Options, Parser, Tag};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -80,7 +82,7 @@ pub fn rebuild_space(
 
     for entry in walkdir::WalkDir::new(root)
         .into_iter()
-        .filter_entry(|entry| entry.path() == root || !is_hidden(entry.path(), root))
+        .filter_entry(|entry| should_walk(entry.path(), root))
         .filter_map(Result::ok)
     {
         let path = entry.path();
@@ -88,20 +90,6 @@ pub fn rebuild_space(
             index_file_in(&transaction, space_id, root, path)?;
         }
     }
-    transaction.commit().map_err(|e| e.to_string())
-}
-
-pub fn index_file(
-    connection: &mut Connection,
-    space_id: &str,
-    root: &Path,
-    path: &Path,
-) -> Result<(), String> {
-    if !path.is_file() || !is_markdown(path) || is_hidden(path, root) {
-        return Ok(());
-    }
-    let transaction = connection.transaction().map_err(|e| e.to_string())?;
-    index_file_in(&transaction, space_id, root, path)?;
     transaction.commit().map_err(|e| e.to_string())
 }
 
@@ -133,7 +121,7 @@ pub fn refresh_space(
     let mut seen = HashSet::new();
     for entry in walkdir::WalkDir::new(root)
         .into_iter()
-        .filter_entry(|entry| entry.path() == root || !is_hidden(entry.path(), root))
+        .filter_entry(|entry| should_walk(entry.path(), root))
         .filter_map(Result::ok)
     {
         let path = entry.path();
@@ -215,7 +203,7 @@ fn index_file_in(
             params![space_id, relative],
         )
         .map_err(|e| e.to_string())?;
-    for target in extract_wikilinks(&body) {
+    for target in extract_links(&body, &relative) {
         connection
             .execute(
                 "INSERT OR IGNORE INTO page_links (space_id, source_path, target)
@@ -266,8 +254,16 @@ pub fn search(
             },
         )
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+    let mut results = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    results.retain(|hit| {
+        hit.path != "index.md"
+            && hit.path != "log.md"
+            && !hit.path.ends_with("/index.md")
+            && !hit.path.ends_with("/log.md")
+    });
+    Ok(results)
 }
 
 pub fn backlinks(
@@ -299,8 +295,16 @@ pub fn backlinks(
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+    let mut results = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    results.retain(|hit| {
+        hit.path != "index.md"
+            && hit.path != "log.md"
+            && !hit.path.ends_with("/index.md")
+            && !hit.path.ends_with("/log.md")
+    });
+    Ok(results)
 }
 
 pub fn page_count(connection: &Connection, space_id: &str) -> Result<usize, String> {
@@ -328,11 +332,21 @@ fn file_modified_ns(path: &Path) -> i64 {
         .unwrap_or(0)
 }
 
-fn is_hidden(path: &Path, root: &Path) -> bool {
-    path.strip_prefix(root)
-        .unwrap_or(path)
+fn should_walk(path: &Path, root: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    if relative.as_os_str().is_empty() {
+        return true;
+    }
+    let parts = relative
         .components()
-        .any(|component| component.as_os_str().to_string_lossy().starts_with('.'))
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>();
+    if parts.first().is_some_and(|part| part == ".cowiki") {
+        return parts.len() == 1 || parts.get(1).is_some_and(|part| part == "sources");
+    }
+    parts.iter().all(|part| !part.starts_with('.'))
 }
 
 fn relative_path(root: &Path, path: &Path) -> Result<String, String> {
@@ -349,13 +363,7 @@ fn normalize_path(path: &Path) -> String {
 }
 
 fn slug_for_path(path: &str) -> String {
-    let without_extension = path.strip_suffix(".md").unwrap_or(path);
-    for section in ["wiki/", "entities/", "concepts/"] {
-        if let Some(slug) = without_extension.strip_prefix(section) {
-            return slug.to_string();
-        }
-    }
-    without_extension.to_string()
+    path.strip_suffix(".md").unwrap_or(path).to_string()
 }
 
 fn fts_query(query: &str) -> String {
@@ -368,7 +376,7 @@ fn fts_query(query: &str) -> String {
         .join(" AND ")
 }
 
-fn extract_wikilinks(body: &str) -> Vec<String> {
+fn extract_links(body: &str, source_path: &str) -> Vec<String> {
     let mut links = Vec::new();
     let mut rest = body;
     while let Some(start) = rest.find("[[") {
@@ -388,7 +396,53 @@ fn extract_wikilinks(body: &str) -> Vec<String> {
         }
         rest = &rest[end + 2..];
     }
+    for event in Parser::new_ext(body, Options::all()) {
+        if let Event::Start(Tag::Link { dest_url, .. }) = event {
+            if let Some(target) = resolve_markdown_target(source_path, dest_url.as_ref()) {
+                if !links.contains(&target) {
+                    links.push(target);
+                }
+            }
+        }
+    }
     links
+}
+
+fn resolve_markdown_target(source_path: &str, target: &str) -> Option<String> {
+    let target = target.split(['#', '?']).next()?.trim();
+    let target = percent_decode_str(target).decode_utf8().ok()?;
+    let target = target.as_ref();
+    if target.is_empty()
+        || target.starts_with('#')
+        || target.contains("://")
+        || target.starts_with("mailto:")
+    {
+        return None;
+    }
+    let joined = if target.starts_with('/') {
+        target.trim_start_matches('/').to_string()
+    } else {
+        let parent = source_path
+            .rsplit_once('/')
+            .map(|(parent, _)| parent)
+            .unwrap_or("");
+        if parent.is_empty() {
+            target.to_string()
+        } else {
+            format!("{parent}/{target}")
+        }
+    };
+    let mut components = Vec::new();
+    for component in joined.split('/') {
+        match component {
+            "" | "." => {}
+            ".." => {
+                components.pop()?;
+            }
+            component => components.push(component),
+        }
+    }
+    Some(normalize_link_target(&components.join("/")))
 }
 
 fn normalize_link_target(target: &str) -> String {
@@ -403,7 +457,7 @@ fn normalize_link_target(target: &str) -> String {
                 .trim_start_matches("./")
                 .trim_start_matches('/')
         });
-    cleaned.to_lowercase()
+    cleaned.to_string()
 }
 
 fn first_content_line(body: &str) -> String {

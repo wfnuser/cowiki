@@ -21,19 +21,19 @@ export function listPages(spaceSlug: string, dir = 'all'): Promise<PageMeta[]> {
   return invoke('local_list_pages', { spaceSlug, dir });
 }
 
-export function getPage(spaceSlug: string, dir: string, pageSlug: string): Promise<PageFull> {
-  return invoke('local_get_page', { spaceSlug, dir, pageSlug });
+export function getPage(spaceSlug: string, dir: string, conceptId: string): Promise<PageFull> {
+  return invoke('local_get_page', { spaceSlug, dir, pageSlug: conceptId });
 }
 
 export function writePage(
   spaceSlug: string,
   dir: string,
-  pageSlug: string,
+  conceptId: string,
   content: string,
   expectedContent?: string,
   createOnly = false,
 ): Promise<void> {
-  return invoke('local_write_page', { spaceSlug, dir, pageSlug, content, expectedContent, createOnly });
+  return invoke('local_write_page', { spaceSlug, dir, pageSlug: conceptId, content, expectedContent, createOnly });
 }
 
 export function createFolder(spaceSlug: string, name: string, parent?: string): Promise<unknown> {

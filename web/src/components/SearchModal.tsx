@@ -4,6 +4,7 @@ import { FileText, Search, Sparkles, CornerDownLeft, X } from 'lucide-react';
 import { searchWorkspace, type SearchResponse } from '../api';
 import { C, fonts } from '@/lib/design';
 import { isDesktopClient } from '@/runtime';
+import { conceptIdFromPath, conceptPath, isSearchableConceptPath } from '@/lib/okf-pages';
 
 /** Highlight occurrences of `q` inside `text` (case-insensitive). */
 function Highlight({ text, q }: { text: string; q: string }) {
@@ -131,13 +132,19 @@ export function SearchModal({
 
   // Flattened rows for keyboard navigation (semantic deduped against keyword).
   const rows: Row[] = useMemo(() => {
-    const out: Row[] = (kw ?? []).map((h) => ({
-      kind: 'keyword', slug: h.slug, path: h.path, title: h.title, snippet: h.snippet, titleMatch: h.title_match,
-    }));
-    const seen = new Set((kw ?? []).map((h) => h.slug));
+    const keywordHits = (kw ?? []).filter((hit) =>
+      isSearchableConceptPath(conceptPath(hit.slug)));
+    const out: Row[] = keywordHits.map((h) => {
+      const slug = conceptIdFromPath(h.slug);
+      return {
+        kind: 'keyword', slug, path: conceptPath(slug), title: h.title, snippet: h.snippet, titleMatch: h.title_match,
+      };
+    });
+    const seen = new Set(out.map((hit) => hit.slug));
     for (const h of sem ?? []) {
-      if (!seen.has(h.slug)) {
-        out.push({ kind: 'semantic', slug: h.slug, title: h.title, summary: h.summary, source: h.source });
+      const slug = conceptIdFromPath(h.slug);
+      if (!seen.has(slug)) {
+        out.push({ kind: 'semantic', slug, title: h.title, summary: h.summary, source: h.source });
       }
     }
     return out;

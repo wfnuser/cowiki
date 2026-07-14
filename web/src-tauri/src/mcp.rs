@@ -134,11 +134,15 @@ fn get_space_context(engine: &LocalEngine, space_slug: &str) -> Result<Value, St
     Ok(json!({
         "space": space,
         "root": root,
+        "okfVersion": crate::okf::OKF_VERSION,
+        "rootIndex": "index.md",
         "indexedPageCount": page_count,
         "markdownIsSourceOfTruth": true,
         "guidance": [
             "Search before answering questions about this Space.",
+            "Start from index.md and follow progressive-disclosure links when exploring.",
             "Read the relevant pages and cite their relative file paths.",
+            "Use standard Markdown links as the portable relationship graph; wikilinks are an extension.",
             "The index is derived; Markdown files are the source of truth."
         ]
     }))
@@ -202,7 +206,7 @@ fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "list_backlinks",
-            "description": "List pages whose wikilinks point to the requested Markdown page.",
+            "description": "List pages whose standard Markdown links or wikilinks point to the requested OKF document path.",
             "inputSchema": {
                 "type": "object",
                 "properties": {"path": {"type": "string", "minLength": 1}},
@@ -316,10 +320,11 @@ mod tests {
                 "params":{"name":"get_page","arguments":{"path":"sync.md"}}
             }),
         );
-        assert_eq!(
-            page["result"]["structuredContent"]["body"],
-            "# Sync\n\nReplication notes."
-        );
+        let body = page["result"]["structuredContent"]["body"]
+            .as_str()
+            .unwrap();
+        assert!(body.contains("type: Note"));
+        assert!(body.contains("# Sync\n\nReplication notes."));
 
         let backlinks = super::handle_request(
             &engine,
@@ -343,6 +348,51 @@ mod tests {
             }),
         );
         assert_eq!(write["result"]["isError"], true);
+    }
+
+    #[test]
+    fn mcp_uses_okf_repo_paths_and_can_read_reserved_docs_and_sources() {
+        let (temp, engine, slug) = setup();
+        let root = temp.path().join("space");
+        std::fs::create_dir_all(root.join("research")).unwrap();
+        std::fs::create_dir_all(root.join(".cowiki/sources")).unwrap();
+        std::fs::write(
+            root.join("research/note.md"),
+            "# Nested Evidence\n\nCapybara.",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".cowiki/sources/interview.md"),
+            "---\ntype: Source\ntitle: Interview\n---\n\nSource evidence about wombats.",
+        )
+        .unwrap();
+        engine.rebuild_search_index(&slug).unwrap();
+
+        let search = super::handle_request(
+            &engine,
+            &slug,
+            json!({
+                "jsonrpc":"2.0","id":8,"method":"tools/call",
+                "params":{"name":"search_pages","arguments":{"query":"wombats"}}
+            }),
+        );
+        assert_eq!(
+            search["result"]["structuredContent"]["results"][0]["path"],
+            ".cowiki/sources/interview.md"
+        );
+
+        for path in ["index.md", ".cowiki/sources/interview.md"] {
+            let page = super::handle_request(
+                &engine,
+                &slug,
+                json!({
+                    "jsonrpc":"2.0","id":9,"method":"tools/call",
+                    "params":{"name":"get_page","arguments":{"path":path}}
+                }),
+            );
+            assert_eq!(page["result"]["isError"], false, "{page}");
+            assert_eq!(page["result"]["structuredContent"]["path"], path);
+        }
     }
 
     #[test]
