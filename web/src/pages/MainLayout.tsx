@@ -2,12 +2,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Compass,
-  Upload, Zap, ArrowUpRight, MoreHorizontal, RefreshCw,
-  CheckCircle2, Clock, Pencil,
+  Upload,
+  Pencil, FolderOpen, PanelLeft, Bot, HardDrive, FolderInput, Cloud, UserPlus, ChevronLeft,
 } from 'lucide-react';
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -18,29 +15,45 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   listWorkspaces, listPages, getPage, createWorkspace, writePage, createFolder,
-  compile, submit, renameWorkspace,
+  renameWorkspace,
   deleteWorkspace,
   listPublicWorkspaces, joinWorkspace,
-  listSources, getSource, listReviews, syncBranch, renamePath, deletePath,
+  listSources, getSource, listReviews, renamePath, deletePath,
   type Workspace, type PageMeta, type PageFull, type SourceItem, type SourceContent,
 } from '../api';
 import { AddSourceDialog } from '@/components/AddSourceDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
-import { getCurrentAuth, clearAuth, isRemoteAuth } from '../auth';
+import { getCurrentAuth, clearAuth, isRemoteAuth, hasAuth } from '../auth';
 import { SpaceRail } from '../components/layout/SpaceRail';
 import { SpacePanel, type NavTab } from '../components/layout/SpacePanel';
-type ContentDir = 'wiki' | 'entities' | 'concepts';
+type CreateSpaceMode = 'choose' | 'local' | 'import';
 import { ReviewList } from '../components/review/ReviewList';
 import { ReviewDetail } from '../components/review/ReviewDetail';
 import { MembersView } from '../components/views/MembersView';
 import { InviteDialog } from '../components/InviteDialog';
-import { PageEditor } from '../components/PageEditor';
+import { PageEditor, type PageEditorHandle } from '../components/PageEditor';
 import { PageByline } from '../components/PageByline';
 import { TransferDialog } from '../components/TransferDialog';
 import { NotificationsPage } from '../components/notifications/NotificationsPage';
 import { notificationUnreadCount } from '../api';
 import { CommentsProvider, CommentsPanel, CommentsHeaderToggle, commentMarkdownComponents } from '../components/PageCommentsLayer';
 import { C } from '@/lib/design';
+import { isDesktopClient } from '@/runtime';
+import { chooseLocalSpaceDirectory, localSpaceIdentityFromPath } from '@/local-space';
+import { AgentTerminalPanel } from '@/components/terminal/AgentTerminalPanel';
+import {
+  conceptIdFromPath,
+  conceptPath,
+  firstConcept,
+  isReservedDocument,
+  pageRoute,
+  visiblePageTree,
+} from '@/lib/okf-pages';
+import {
+  clampSidebarWidth,
+  loadSidebarLayout,
+  saveSidebarLayout,
+} from '@/lib/sidebar-layout';
 
 type ActiveView =
   | { kind: 'page'; slug: string; path?: string; content: PageFull | null }
@@ -54,19 +67,13 @@ type ActiveView =
 
 export function MainLayout() {
   const [auth, setAuth] = useState(() => getCurrentAuth());
+  const desktop = isDesktopClient();
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Re-check auth on mount (handles OAuth redirect timing)
-  useEffect(() => {
-    if (!auth) {
-      const stored = getCurrentAuth();
-      if (stored) setAuth(stored);
-    }
-  }, []);
-
   // Data
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
   const [spacePages, setSpacePages] = useState<Record<string, PageMeta[]>>({});
   const [spaceSources, setSpaceSources] = useState<Record<string, SourceItem[]>>({});
   const [activeView, setActiveView] = useState<ActiveView>(null);
@@ -76,26 +83,101 @@ export function MainLayout() {
   // Cross-space unread badge for the rail; refreshed when opening the inbox.
   useEffect(() => {
     if (isRemoteAuth(auth)) notificationUnreadCount().then(setNotifUnread).catch(() => {});
-  }, [auth?.mode, auth?.id]);
+  }, [auth]);
   const articleRef = useRef<HTMLElement>(null);
+  const pageEditorRef = useRef<PageEditorHandle>(null);
+  const persistedPageBody = useRef<string | null>(null);
+  const externalConflictNotified = useRef(false);
   const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<NavTab>('wiki');
   const [reviewCount, setReviewCount] = useState(0);
+  const [sidebarLayout, setSidebarLayout] = useState(() => loadSidebarLayout(window.localStorage));
+  const [resizingSidebar, setResizingSidebar] = useState(false);
+  const sidebarResizeStart = useRef({ pointerX: 0, width: sidebarLayout.width });
+  const [agentPanelOpen, setAgentPanelOpen] = useState(false);
+  const [agentPanelWidth, setAgentPanelWidth] = useState(() => {
+    const saved = Number(window.localStorage.getItem('cowiki.agentPanelWidth'));
+    return Number.isFinite(saved) ? Math.max(320, Math.min(720, saved)) : 440;
+  });
+  const [resizingAgentPanel, setResizingAgentPanel] = useState(false);
+  const agentResizeStart = useRef({ pointerX: 0, width: agentPanelWidth });
+
+  useEffect(() => {
+    try {
+      saveSidebarLayout(window.localStorage, sidebarLayout);
+    } catch {
+      // A disabled storage API should not prevent the local workspace from opening.
+    }
+  }, [sidebarLayout]);
+
+  useEffect(() => {
+    if (!resizingSidebar) return;
+
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const onPointerMove = (event: PointerEvent) => {
+      const delta = event.clientX - sidebarResizeStart.current.pointerX;
+      setSidebarLayout((current) => ({
+        ...current,
+        width: clampSidebarWidth(sidebarResizeStart.current.width + delta),
+      }));
+    };
+    const stopResize = () => setResizingSidebar(false);
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', stopResize, { once: true });
+    window.addEventListener('pointercancel', stopResize, { once: true });
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }, [resizingSidebar]);
+
+  useEffect(() => {
+    window.localStorage.setItem('cowiki.agentPanelWidth', String(agentPanelWidth));
+  }, [agentPanelWidth]);
+
+  useEffect(() => {
+    if (!resizingAgentPanel) return;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const onPointerMove = (event: PointerEvent) => {
+      const delta = agentResizeStart.current.pointerX - event.clientX;
+      setAgentPanelWidth(Math.max(320, Math.min(720, agentResizeStart.current.width + delta)));
+    };
+    const stopResize = () => setResizingAgentPanel(false);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', stopResize, { once: true });
+    window.addEventListener('pointercancel', stopResize, { once: true });
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }, [resizingAgentPanel]);
 
   // Modals
   const [showCreate, setShowCreate] = useState(false);
+  const [createSpaceMode, setCreateSpaceMode] = useState<CreateSpaceMode>('choose');
   const [showNewPage, setShowNewPage] = useState<Workspace | null>(null);
   const [showNewFolder, setShowNewFolder] = useState<Workspace | null>(null);
   const [newPageFolder, setNewPageFolder] = useState<string | null>(null);
   const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
-  const [newPageDir, setNewPageDir] = useState<ContentDir>('wiki');
-  const [newFolderDir, setNewFolderDir] = useState<ContentDir>('wiki');
   const [newName, setNewName] = useState('');
   const [newSlug, setNewSlug] = useState('');
+  const [newLocalPath, setNewLocalPath] = useState('');
   const [creating, setCreating] = useState(false);
   const [showIngest, setShowIngest] = useState(false);
-  const [compiling, setCompiling] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [showRename, setShowRename] = useState<Workspace | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -105,7 +187,6 @@ export function MainLayout() {
     return () => clearTimeout(t);
   }, [message]);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [editingPage, setEditingPage] = useState(false);
   // Tree path ops (rename/delete of pages & folders on the draft branch)
   const [pathOp, setPathOp] = useState<
@@ -124,14 +205,18 @@ export function MainLayout() {
   // Load workspaces + restore state from URL
   const loadWorkspaces = useCallback(async () => {
     if (!auth) return;
-    if (!isRemoteAuth(auth)) {
+    // Local sessions are full accounts on the local backend — only a
+    // credential-less placeholder (backend unreachable) shows the empty state.
+    if (!desktop && !hasAuth(auth)) {
       setWorkspaces([]);
       setActiveWorkspace(null);
       setActiveView(null);
+      setWorkspacesLoaded(true);
       return;
     }
     const ws = await listWorkspaces();
     setWorkspaces(ws);
+    setWorkspacesLoaded(true);
 
     // Auto-expand personal space and load its pages
     const personal = ws.find((w) => w.visibility === 'private' && w.role === 'owner');
@@ -141,13 +226,14 @@ export function MainLayout() {
       await loadSpaceSources(personal);
     }
 
-    // Restore page from URL: /:wsSlug/:pageSlug
+    // Restore a Concept from its stable bundle-relative ID:
+    // /:workspaceSlug/:folder/:concept (the .md suffix is not exposed).
     const pathParts = location.pathname.split('/').filter(Boolean);
     if (pathParts.length >= 2) {
       const [wsSlug, ...pageParts] = pathParts;
-      const pageSlug = pageParts.join('/');
-      const targetWs = ws.find((w) => w.slug === wsSlug);
-      if (targetWs) {
+      const conceptId = pageParts.map((part) => decodeURIComponent(part)).join('/');
+      const targetWs = ws.find((w) => w.slug === decodeURIComponent(wsSlug));
+      if (targetWs && !isReservedDocument(conceptPath(conceptId))) {
         setActiveWorkspace(targetWs);
         if (!spacePages[targetWs.id]) {
           await loadSpacePages(targetWs);
@@ -156,51 +242,42 @@ export function MainLayout() {
           await loadSpaceSources(targetWs);
         }
         const branch = targetWs.visibility === 'private' ? userBranch : 'main';
-        // Find the page in the tree to get its path
-        const findPath = (items: PageMeta[], targetSlug: string): string | undefined => {
-          for (const p of items) {
-            if (p.kind !== 'folder' && p.slug === targetSlug) return p.path;
-            if (p.children) {
-              const found = findPath(p.children, targetSlug);
-              if (found) return found;
-            }
-          }
-          return undefined;
-        };
-        const pagePath = findPath(spacePages[targetWs.id] || [], pageSlug);
-        const dir = pagePath?.split('/')[0] || 'wiki';
         try {
-          const page = await getPage(pageSlug, branch, targetWs.slug, dir);
-          setActiveView({ kind: 'page', slug: pageSlug, path: pagePath, content: page });
+          const page = await getPage(conceptId, branch, targetWs.slug, 'wiki');
+          persistedPageBody.current = page.body;
+          setActiveView({ kind: 'page', slug: conceptId, path: conceptPath(conceptId), content: page });
         } catch {
           // Page not found, just show home
         }
       }
     } else if (personal) {
-      const personalPages = await listPages(userBranch, personal.slug, 'all');
-      const firstPage = personalPages.find((p) => p.kind === 'page');
+      const personalPages = visiblePageTree(await listPages(userBranch, personal.slug, 'all'));
+      const firstPage = firstConcept(personalPages);
       if (firstPage) {
-        setActiveView({ kind: 'page', slug: firstPage.slug, path: firstPage.path, content: null });
-        navigate(`/${personal.slug}/${firstPage.slug}`, { replace: true });
-        const firstDir = firstPage.path?.split('/')[0] || 'wiki';
+        const conceptId = conceptIdFromPath(firstPage.path);
+        setActiveView({ kind: 'page', slug: conceptId, path: firstPage.path, content: null });
+        navigate(pageRoute(personal.slug, conceptId), { replace: true });
         try {
-          const page = await getPage(firstPage.slug, userBranch, personal.slug, firstDir);
+          const page = await getPage(conceptId, userBranch, personal.slug, 'wiki');
           setActiveView(prev => prev?.kind === 'page' ? { ...prev, content: page } : prev);
         } catch {
           // Page not found
         }
       }
     }
-  }, [auth?.id]);
+  }, [auth?.id, desktop]);
 
   useEffect(() => {
-    if (auth) loadWorkspaces();
-  }, [auth?.id, loadWorkspaces]);
+    if (!auth) return;
+    const task = window.setTimeout(() => { void loadWorkspaces(); }, 0);
+    return () => window.clearTimeout(task);
+  }, [auth, loadWorkspaces]);
 
   // Load review count when workspace changes
   useEffect(() => {
-    if (!activeWorkspace || isPersonalSpace(activeWorkspace)) {
-      setReviewCount(0);
+    if (!activeWorkspace || (!desktop && isPersonalSpace(activeWorkspace))) {
+      const task = window.setTimeout(() => setReviewCount(0), 0);
+      return () => window.clearTimeout(task);
       return;
     }
     let cancelled = false;
@@ -208,16 +285,13 @@ export function MainLayout() {
       .then((s) => !cancelled && setReviewCount(s.filter((r) => r.status === 'pending').length))
       .catch(() => !cancelled && setReviewCount(0));
     return () => { cancelled = true; };
-  }, [activeWorkspace?.slug, reviewRefreshKey]);
+  }, [activeWorkspace, reviewRefreshKey]);
 
   function isPersonalSpace(ws: Workspace): boolean {
     return ws.visibility === 'private' && ws.role === 'owner';
   }
 
-  /** Walk the page tree and recursively merge draft pages into main pages by path.
-   *  When both trees have a folder at the same path, their children are merged
-   *  recursively so that draft-only pages under existing section nodes (wiki,
-   *  entities, concepts) are not silently dropped. */
+  /** Merge main and draft recursively by stable bundle-relative path. */
   function mergePageTrees(main: PageMeta[], draft: PageMeta[]): PageMeta[] {
     const merged: PageMeta[] = [...main];
     const pathToIndex = new Map(merged.map((p, i) => [p.path, i] as const));
@@ -242,14 +316,14 @@ export function MainLayout() {
   // Load pages for a space
   const loadSpacePages = async (ws: Workspace) => {
     if (ws.visibility === 'private') {
-      const pages = await listPages(userBranch, ws.slug, 'all');
+      const pages = visiblePageTree(await listPages(userBranch, ws.slug, 'all'));
       setSpacePages((prev) => ({ ...prev, [ws.id]: pages }));
     } else {
       const [mainPages, draftPages] = await Promise.all([
         listPages('main', ws.slug, 'all'),
         listPages(userBranch, ws.slug, 'all').catch(() => [] as PageMeta[]),
       ]);
-      const merged = mergePageTrees(mainPages, draftPages);
+      const merged = visiblePageTree(mergePageTrees(mainPages, draftPages));
       setSpacePages((prev) => ({ ...prev, [ws.id]: merged }));
     }
   };
@@ -311,9 +385,9 @@ export function MainLayout() {
     if (!spaceSources[ws.id]) loadSpaceSources(ws);
     // Navigate to first page
     const pages = spacePages[ws.id] || [];
-    const first = pages.find((p) => p.kind === 'page');
+    const first = firstConcept(pages);
     if (first) {
-      selectPage(ws, first.slug, first.path);
+      selectPage(ws, conceptIdFromPath(first.path), first.path);
     } else {
       setActiveView(null);
     }
@@ -321,55 +395,106 @@ export function MainLayout() {
 
   // Select a page
   const selectPage = async (ws: Workspace, slug: string, path?: string) => {
+    const conceptId = path ? conceptIdFromPath(path) : conceptIdFromPath(slug);
+    const repoPath = path ? conceptPath(conceptIdFromPath(path)) : conceptPath(conceptId);
+    if (isReservedDocument(repoPath)) return;
     setActiveWorkspace(ws);
     setActiveTab('wiki');
     setEditingPage(false);
-    setActiveView({ kind: 'page', slug, path, content: null });
-    navigate(`/${ws.slug}/${slug}`, { replace: true });
-
-    const dir = path?.split('/')[0] || 'wiki';
-    const setContent = (content: PageFull | null) =>
+    persistedPageBody.current = null;
+    externalConflictNotified.current = false;
+    setActiveView({ kind: 'page', slug: conceptId, path: repoPath, content: null });
+    navigate(pageRoute(ws.slug, conceptId), { replace: true });
+    const setContent = (content: PageFull | null) => {
+      persistedPageBody.current = content?.body ?? null;
       setActiveView(prev => prev?.kind === 'page' ? { ...prev, content } : prev);
+    };
 
     if (ws.visibility === 'private') {
       try {
-        const page = await getPage(slug, userBranch, ws.slug, dir);
+        const page = await getPage(conceptId, userBranch, ws.slug, 'wiki');
         setContent(page);
       } catch {
         setContent(null);
-        setMessage({ text: `Page "${slug}" not found`, type: 'error' });
+        setMessage({ text: `Page "${conceptId}" not found`, type: 'error' });
       }
     } else {
       try {
-        const page = await getPage(slug, userBranch, ws.slug, dir);
+        const page = await getPage(conceptId, userBranch, ws.slug, 'wiki');
         setContent(page);
       } catch {
         try {
-          const page = await getPage(slug, 'main', ws.slug, dir);
+          const page = await getPage(conceptId, 'main', ws.slug, 'wiki');
           setContent(page);
         } catch {
           setContent(null);
-          setMessage({ text: `Page "${slug}" not found`, type: 'error' });
+          setMessage({ text: `Page "${conceptId}" not found`, type: 'error' });
         }
       }
     }
   };
 
   // Create workspace
+  const handleChooseLocalFolder = useCallback(async () => {
+    try {
+      const localPath = await chooseLocalSpaceDirectory();
+      if (!localPath) return;
+      const { name, slug } = localSpaceIdentityFromPath(localPath);
+      setNewLocalPath(localPath);
+      if (createSpaceMode === 'import' && !newName.trim()) {
+        setNewName(name);
+        setNewSlug(slug);
+      }
+    } catch (error) {
+      setMessage({
+        text: error instanceof Error ? error.message : 'Could not choose this folder',
+        type: 'error',
+      });
+    }
+  }, [createSpaceMode, newName]);
+
+  useEffect(() => {
+    if (!desktop || !workspacesLoaded || workspaces.length > 0) return;
+    const openOnShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'o') {
+        event.preventDefault();
+        if (!creating) setShowCreate(true);
+      }
+    };
+    window.addEventListener('keydown', openOnShortcut);
+    return () => window.removeEventListener('keydown', openOnShortcut);
+  }, [creating, desktop, workspaces.length, workspacesLoaded]);
+
   const handleCreateWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isRemoteAuth(auth)) {
+    if (!desktop && !hasAuth(auth)) {
       navigate('/login');
       return;
     }
-    if (!newName.trim() || !newSlug.trim()) return;
+    if (!newName.trim() || (!desktop && !newSlug.trim()) || (desktop && !newLocalPath)) return;
     setCreating(true);
     try {
-      await createWorkspace(newName.trim(), newSlug.trim(), 'public');
+      const internalSlug = desktop
+        ? `${newSlug || 'space'}-${crypto.randomUUID().slice(0, 8)}`
+        : newSlug.trim();
+      await createWorkspace(
+        newName.trim(),
+        internalSlug,
+        desktop ? 'private' : 'public',
+        desktop ? newLocalPath : undefined,
+        desktop && createSpaceMode === 'local',
+      );
       setShowCreate(false);
       setNewName('');
       setNewSlug('');
-      loadWorkspaces();
+      setNewLocalPath('');
+      setCreateSpaceMode('choose');
+      await loadWorkspaces();
+    } catch (error) {
+      setMessage({
+        text: error instanceof Error ? error.message : 'Could not create this Space',
+        type: 'error',
+      });
     } finally {
       setCreating(false);
     }
@@ -380,24 +505,21 @@ export function MainLayout() {
     e.preventDefault();
     if (!newName.trim() || !showNewPage) return;
     const ws = showNewPage;
-    const baseSlug = newName.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim();
-    // Strip dir prefix from folder path if creating inside a folder
-    const folderRelative = newPageFolder
-      ? newPageFolder.slice(newPageDir.length + 1) // e.g. "wiki/some/path" → "some/path"
-      : null;
-    const slug = folderRelative ? `${folderRelative}/${baseSlug}` : baseSlug;
-    const body = `---\ntitle: "${newName.trim()}"\nsummary: ""\nkind: concept\n---\n\n`;
+    const baseSlug = newName.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim()
+      || `page-${crypto.randomUUID().slice(0, 8)}`;
+    const conceptId = newPageFolder ? `${newPageFolder}/${baseSlug}` : baseSlug;
+    const body = `---\ntype: Note\ntitle: "${newName.trim().replaceAll('"', '\\"')}"\ndescription: ""\n---\n\n`;
     try {
-      await writePage(slug, body, userBranch, ws.slug, newPageDir);
+      await writePage(conceptId, body, userBranch, ws.slug, 'wiki', undefined, true);
       const title = newName.trim();
       setShowNewPage(null);
       setNewName('');
       setNewPageFolder(null);
-      setNewPageDir('wiki');
       await loadSpacePages(ws);
-      const newPath = `${newPageDir}/${slug}`;
-      setActiveView({ kind: 'page', slug, path: newPath, content: { slug, path: newPath, title, summary: '', body, branch: userBranch, kind: 'page', children: [] } });
-      navigate(`/${ws.slug}/${slug}`, { replace: true });
+      const newPath = conceptPath(conceptId);
+      persistedPageBody.current = body;
+      setActiveView({ kind: 'page', slug: conceptId, path: newPath, content: { slug: conceptId, path: newPath, title, summary: '', body, branch: userBranch, kind: 'page', children: [] } });
+      navigate(pageRoute(ws.slug, conceptId), { replace: true });
     } catch {
       setMessage({ text: 'Failed to create page', type: 'error' });
     }
@@ -409,93 +531,13 @@ export function MainLayout() {
     if (!newName.trim() || !showNewFolder) return;
     const ws = showNewFolder;
     try {
-      await createFolder(newName.trim(), userBranch, newFolderParent || newFolderDir, ws.slug);
+      await createFolder(newName.trim(), userBranch, newFolderParent || undefined, ws.slug);
       setShowNewFolder(null);
       setNewName('');
       setNewFolderParent(null);
-      setNewFolderDir('wiki');
       await loadSpacePages(ws);
     } catch {
       setMessage({ text: 'Failed to create folder', type: 'error' });
-    }
-  };
-
-  // Compile
-  const handleCompile = async () => {
-    if (!activeWorkspace) return;
-    const ws = activeWorkspace;
-    setCompiling(true);
-    setMessage(null);
-    try {
-      const res = await compile(userBranch, ws.slug);
-      const count = res.pages?.length || 0;
-      const skipped = res.skipped || 0;
-      setMessage({ text: `Compiled ${count} page(s)${skipped > 0 ? `, ${skipped} skipped` : ''}`, type: 'success' });
-      loadSpacePages(ws);
-      loadSpaceSources(ws);
-    } catch {
-      setMessage({ text: 'Compilation failed', type: 'error' });
-    } finally {
-      setCompiling(false);
-    }
-  };
-
-  // Submit pages for review (or direct commit for personal)
-  const handleSubmit = async () => {
-    if (!activeWorkspace) return;
-    const ws = activeWorkspace;
-    setSubmitting(true);
-    setMessage(null);
-    try {
-      const pages = spacePages[ws.id] || [];
-      if (pages.length === 0) {
-        setMessage({ text: 'No pages to submit', type: 'error' });
-        return;
-      }
-      // Flatten page tree to paths, skipping folders
-      const flatten = (items: PageMeta[]): string[] => {
-        const result: string[] = [];
-        for (const p of items) {
-          if (p.kind === 'folder' && p.children && p.children.length > 0) {
-            result.push(...flatten(p.children));
-          } else if (p.kind !== 'folder') {
-            result.push(p.path);
-          }
-        }
-        return result;
-      };
-      const paths = flatten(pages);
-      const personal = isPersonalSpace(ws);
-      await submit(userBranch, paths, personal, ws.slug);
-      setMessage({ text: personal ? 'Committed.' : 'Submitted for review.', type: 'success' });
-    } catch {
-      setMessage({ text: 'Submit failed', type: 'error' });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  // Sync the user's draft branch with main (rebase). Conflicts are surfaced for now;
-  // proper in-app resolution is a follow-up.
-  const handleSync = async () => {
-    if (!activeWorkspace) return;
-    setSyncing(true);
-    setMessage(null);
-    try {
-      const res = await syncBranch(activeWorkspace.slug, userBranch);
-      if (res.status === 'conflict') {
-        setMessage({ text: `Conflict with main — resolve: ${res.conflicts.join(', ')}`, type: 'error' });
-      } else {
-        setMessage({
-          text: res.status === 'updated' ? 'Synced with main.' : 'Already up to date.',
-          type: 'success',
-        });
-        if (res.status === 'updated') loadWorkspaces();
-      }
-    } catch (e) {
-      setMessage({ text: e instanceof Error ? e.message : 'Sync failed', type: 'error' });
-    } finally {
-      setSyncing(false);
     }
   };
 
@@ -507,9 +549,9 @@ export function MainLayout() {
     switch (tab) {
       case 'wiki': {
         const pages = spacePages[activeWorkspace.id] || [];
-        const first = pages.find((p) => p.kind === 'page');
+        const first = firstConcept(pages);
         if (first) {
-          selectPage(activeWorkspace, first.slug, first.path);
+          selectPage(activeWorkspace, conceptIdFromPath(first.path), first.path);
         } else {
           setActiveView(null);
         }
@@ -616,10 +658,11 @@ export function MainLayout() {
           .toLowerCase()
           .replace(/[^a-z0-9\s-]/g, '')
           .trim()
-          .replace(/\s+/g, '-');
-        if (!slugified) { setMessage({ text: 'Name cannot be empty', type: 'error' }); return; }
-        const parent = pathOp.path.slice(0, pathOp.path.lastIndexOf('/'));
-        const to = pathOp.isFolder ? `${parent}/${slugified}` : `${parent}/${slugified}.md`;
+          .replace(/\s+/g, '-') || `item-${crypto.randomUUID().slice(0, 8)}`;
+        const separator = pathOp.path.lastIndexOf('/');
+        const parent = separator === -1 ? '' : pathOp.path.slice(0, separator);
+        const renamed = pathOp.isFolder ? slugified : `${slugified}.md`;
+        const to = parent ? `${parent}/${renamed}` : renamed;
         if (to === pathOp.path) { setPathOp(null); return; }
         await renamePath(ws.slug, userBranch, pathOp.path, to);
         setMessage({ text: 'Renamed in your draft.', type: 'success' });
@@ -630,8 +673,7 @@ export function MainLayout() {
       setPathOp(null);
       // If the open page lived under the changed path, drop the stale view.
       if (activeView?.kind === 'page') {
-        const dir = activeView.path?.split('/')[0] || 'wiki';
-        const viewPath = `${dir}/${activeView.slug}.md`;
+        const viewPath = activeView.path || conceptPath(activeView.slug);
         if (viewPath === pathOp.path || viewPath.startsWith(pathOp.path + '/')) {
           setActiveView(null);
           navigate(`/`, { replace: true });
@@ -643,21 +685,75 @@ export function MainLayout() {
     }
   };
 
-  // Save an in-page edit to the user's draft branch, then refresh the page + tree.
-  const handleSavePage = async (body: string) => {
+  // Autosave an in-page edit to the user's draft branch (the backend amends a
+  // single working commit, so frequent saves are fine). Refresh the tree so
+  // frontmatter title changes show up while editing.
+  const handleSavePage = async (body: string, expectedExternalBody?: string | null) => {
     if (!activeWorkspace || activeView?.kind !== 'page') return;
     const ws = activeWorkspace;
-    const slug = activeView.slug;
-    const dir = activeView.path?.split('/')[0] || 'wiki';
-    await writePage(slug, body, userBranch, ws.slug, dir);
-    setEditingPage(false);
-    setMessage({ text: 'Saved to your draft.', type: 'success' });
-    try {
-      const page = await getPage(slug, userBranch, ws.slug, dir);
-      setActiveView((prev) => (prev?.kind === 'page' ? { ...prev, content: page } : prev));
-    } catch { /* keep the stale view; tree reload below still runs */ }
+    const restoringDeletedPage = expectedExternalBody === null;
+    const expectedBody = restoringDeletedPage
+      ? undefined
+      : expectedExternalBody ?? persistedPageBody.current ?? activeView.content?.body ?? undefined;
+    await writePage(activeView.slug, body, userBranch, ws.slug, 'wiki', expectedBody, restoringDeletedPage);
+    persistedPageBody.current = body;
+    externalConflictNotified.current = false;
+    setActiveView((previous) => previous?.kind === 'page' && previous.content
+      ? { ...previous, content: { ...previous.content, body } }
+      : previous);
     loadSpacePages(ws);
   };
+
+  // Leave edit mode; pull the saved page back so the read view is fresh.
+  const handleDoneEditing = async () => {
+    setEditingPage(false);
+    if (!activeWorkspace || activeView?.kind !== 'page') return;
+    try {
+      const page = await getPage(activeView.slug, userBranch, activeWorkspace.slug, 'wiki');
+      persistedPageBody.current = page.body;
+      setActiveView((prev) => (prev?.kind === 'page' ? { ...prev, content: page } : prev));
+    } catch { /* keep the stale view */ }
+  };
+
+  // Like VS Code, keep a clean open document in step with Agent/terminal file
+  // writes. Dirty human text is never replaced: the checked-save path then
+  // keeps both versions and asks the user to review the external change.
+  useEffect(() => {
+    if (!desktop || !editingPage || !activeWorkspace || activeView?.kind !== 'page') return;
+    const workspace = activeWorkspace;
+    const slug = activeView.slug;
+    let checking = false;
+    const timer = window.setInterval(() => {
+      if (checking) return;
+      checking = true;
+      getPage(slug, userBranch, workspace.slug, 'wiki')
+        .then((latest) => {
+          if (latest.body === persistedPageBody.current) return;
+          const outcome = pageEditorRef.current?.applyExternalFile(latest.body);
+          if (outcome === 'applied') {
+            persistedPageBody.current = latest.body;
+            externalConflictNotified.current = false;
+            setActiveView((previous) => previous?.kind === 'page'
+              ? { ...previous, content: latest }
+              : previous);
+          } else if (outcome === 'conflict' && !externalConflictNotified.current) {
+            externalConflictNotified.current = true;
+          }
+        })
+        .catch((error) => {
+          if (!isMissingLocalPageError(error)) return;
+          const outcome = pageEditorRef.current?.applyExternalDeletion();
+          if (outcome === 'conflict') externalConflictNotified.current = true;
+        })
+        .finally(() => { checking = false; });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [activeView?.kind, activeView?.kind === 'page' ? activeView.slug : '', activeView?.kind === 'page' ? activeView.path : '', activeWorkspace, desktop, editingPage, userBranch]);
+
+  // Full Concept IDs prevent ambiguous [[overview]] suggestions when two
+  // folders contain the same filename.
+  const collectSlugs = (pages: PageMeta[]): string[] =>
+    pages.flatMap((p) => (p.kind === 'folder' ? collectSlugs(p.children) : [conceptIdFromPath(p.path)]));
 
   const personal = activeWorkspace ? isPersonalSpace(activeWorkspace) : false;
   const isOwner = activeWorkspace?.role === 'owner';
@@ -665,6 +761,35 @@ export function MainLayout() {
   // Determine active page/source for panel highlight
   const currentActivePage = activeView?.kind === 'page' ? activeView.slug : null;
   const currentActiveSource = activeView?.kind === 'source' ? activeView.filename : null;
+
+  if (desktop && workspacesLoaded && workspaces.length === 0) {
+    return (
+      <>
+        <LocalSpaceEmptyState
+          creating={creating}
+          error={message?.type === 'error' ? message.text : null}
+          onOpenFolder={() => {
+            setShowCreate(true); setCreateSpaceMode('choose'); setNewName(''); setNewSlug(''); setNewLocalPath('');
+          }}
+        />
+        <CreateSpaceDialog
+          open={showCreate}
+          desktop
+          creating={creating}
+          name={newName}
+          slug={newSlug}
+          localPath={newLocalPath}
+          mode={createSpaceMode}
+          onModeChange={setCreateSpaceMode}
+          onOpenChange={setShowCreate}
+          onNameChange={handleNameChange}
+          onSlugChange={setNewSlug}
+          onChooseFolder={() => { void handleChooseLocalFolder(); }}
+          onSubmit={handleCreateWorkspace}
+        />
+      </>
+    );
+  }
 
   return (
     <>
@@ -677,45 +802,89 @@ export function MainLayout() {
             userName={auth?.name || 'User'}
             onSelectWorkspace={handleSelectWorkspace}
             onCreateWorkspace={() => {
-              if (!isRemoteAuth(auth)) { navigate('/login'); return; }
+              if (desktop) {
+                setShowCreate(true); setCreateSpaceMode('choose'); setNewName(''); setNewSlug(''); setNewLocalPath(''); return;
+              }
+              if (!hasAuth(auth)) { navigate('/login'); return; }
               setShowCreate(true); setNewName(''); setNewSlug('');
             }}
             onSettings={() => setSettingsOpen(true)}
             onDiscover={() => { setActiveView(null); navigate('/discover'); }}
             onLogout={handleLogout}
+            onConnectCloud={() => navigate('/login')}
             notifUnread={notifUnread}
             onShowNotifications={() => setActiveView({ kind: 'notifications' })}
+            showBell={isRemoteAuth(auth)}
+            showCloudActions={isRemoteAuth(auth)}
           />
 
           {/* Secondary Panel */}
-          <SpacePanel
-            workspace={activeWorkspace}
-            activeTab={activeTab}
-            onTabChange={handleTabChange}
-            pages={activeWorkspace ? (spacePages[activeWorkspace.id] || []) : []}
-            sources={activeWorkspace ? (spaceSources[activeWorkspace.id] || []) : []}
-            activePage={currentActivePage}
-            activeSource={currentActiveSource}
-            reviewCount={reviewCount}
-            isPersonal={personal}
-            isOwner={isOwner}
-            onSelectPage={(slug, path) => activeWorkspace && selectPage(activeWorkspace, slug, path)}
-            onSelectSource={(filename) => activeWorkspace && selectSource(activeWorkspace, filename)}
-            onNewPage={(dir?: ContentDir) => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(null); setNewPageDir(dir || 'wiki'); } }}
-            onNewFolder={(dir?: ContentDir) => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(null); setNewFolderDir(dir || 'wiki'); } }}
-            onAddPageInFolder={(folderPath, dir) => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(folderPath); setNewPageDir(dir); } }}
-            onAddFolderInFolder={(parentPath, dir) => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(parentPath); setNewFolderDir(dir); } }}
-            onRenamePath={(path, isFolder, title) => setPathOp({ kind: 'rename', path, isFolder, title, value: title })}
-            onDeletePath={(path, isFolder, title) => setPathOp({ kind: 'delete', path, isFolder, title })}
-            onShowIngest={() => setShowIngest(true)}
-            onCompile={handleCompile}
-            onSettings={() => setSettingsOpen(true)}
-          />
+          {!sidebarLayout.collapsed && (
+            <div style={{
+              width: sidebarLayout.width, minWidth: sidebarLayout.width, height: '100vh',
+              position: 'relative', flexShrink: 0,
+            }}>
+              <SpacePanel
+                workspace={activeWorkspace}
+                activeTab={activeTab}
+                onTabChange={handleTabChange}
+                pages={activeWorkspace ? (spacePages[activeWorkspace.id] || []) : []}
+                sources={activeWorkspace ? (spaceSources[activeWorkspace.id] || []) : []}
+                activePage={currentActivePage}
+                activeSource={currentActiveSource}
+                reviewCount={reviewCount}
+                isPersonal={personal}
+                showReviews={desktop || !personal}
+                isOwner={isOwner}
+                onSelectPage={(slug, path) => activeWorkspace && selectPage(activeWorkspace, slug, path)}
+                onSelectSource={(filename) => activeWorkspace && selectSource(activeWorkspace, filename)}
+                onNewPage={() => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(null); } }}
+                onNewFolder={() => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(null); } }}
+                onAddPageInFolder={(folderPath) => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(folderPath); } }}
+                onAddFolderInFolder={(parentPath) => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(parentPath); } }}
+                onRenamePath={(path, isFolder, title) => setPathOp({ kind: 'rename', path, isFolder, title, value: title })}
+                onDeletePath={(path, isFolder, title) => setPathOp({ kind: 'delete', path, isFolder, title })}
+                onShowIngest={() => setShowIngest(true)}
+                onSettings={() => setSettingsOpen(true)}
+                onCollapse={() => setSidebarLayout((current) => ({ ...current, collapsed: true }))}
+              />
+              <div
+                role="separator"
+                aria-label="Resize sidebar"
+                aria-orientation="vertical"
+                aria-valuemin={220}
+                aria-valuemax={480}
+                aria-valuenow={sidebarLayout.width}
+                tabIndex={0}
+                onPointerDown={(event) => {
+                  sidebarResizeStart.current = { pointerX: event.clientX, width: sidebarLayout.width };
+                  setResizingSidebar(true);
+                }}
+                onKeyDown={(event) => {
+                  const step = event.shiftKey ? 40 : 12;
+                  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                    event.preventDefault();
+                    const direction = event.key === 'ArrowLeft' ? -1 : 1;
+                    setSidebarLayout((current) => ({ ...current, width: clampSidebarWidth(current.width + direction * step) }));
+                  }
+                }}
+                style={{
+                  position: 'absolute', top: 0, right: -3, zIndex: 30,
+                  width: 6, height: '100%', cursor: 'col-resize', touchAction: 'none',
+                  background: resizingSidebar ? C.accent : 'transparent', opacity: resizingSidebar ? 0.32 : 1,
+                }}
+                onMouseEnter={(event) => { if (!resizingSidebar) event.currentTarget.style.background = C.line; }}
+                onMouseLeave={(event) => { if (!resizingSidebar) event.currentTarget.style.background = 'transparent'; }}
+              />
+            </div>
+          )}
 
           {/* Main Content Area */}
-          <main style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+          <main style={{ flex: 1, minWidth: 0, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
             <CommentsProvider
-              workspaceSlug={activeWorkspace?.slug ?? ''}
+              // Local Spaces never contact CoWiki Cloud implicitly. Comments
+              // become available only after the Space gains Cloud capability.
+              workspaceSlug={desktop ? '' : (activeWorkspace?.slug ?? '')}
               pageSlug={commentPageSlug}
               source={commentSource}
               articleRef={articleRef}
@@ -730,6 +899,24 @@ export function MainLayout() {
             }}>
               {/* Left: breadcrumb */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: C.muted, minWidth: 0, overflow: 'hidden' }}>
+                {sidebarLayout.collapsed && (
+                  <button
+                    type="button"
+                    aria-label="Expand sidebar"
+                    title="Expand sidebar"
+                    onClick={() => setSidebarLayout((current) => ({ ...current, collapsed: false }))}
+                    style={{
+                      width: 28, height: 28, padding: 0, marginRight: 4,
+                      border: 'none', borderRadius: 7, background: 'transparent',
+                      color: C.faint, cursor: 'pointer', flexShrink: 0,
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                    onMouseEnter={(event) => { event.currentTarget.style.background = C.rail; event.currentTarget.style.color = C.ink2; }}
+                    onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = C.faint; }}
+                  >
+                    <PanelLeft size={16} />
+                  </button>
+                )}
                 {activeWorkspace && (
                   <span style={{ color: C.ink2 }}>{activeWorkspace.name}</span>
                 )}
@@ -781,15 +968,18 @@ export function MainLayout() {
               {/* Right: actions */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
 
-                {/* Sync draft branch with main */}
-                {activeWorkspace && (
+                {desktop && activeWorkspace?.localPath && (
                   <button
-                    onClick={handleSync}
-                    disabled={syncing}
-                    style={{ ...headerBtnStyle, opacity: syncing ? 0.4 : 1 }}
-                    title="Sync your draft with the latest main"
+                    type="button"
+                    onClick={() => setAgentPanelOpen((open) => !open)}
+                    style={{
+                      ...headerBtnStyle,
+                      color: agentPanelOpen ? C.accent : C.muted,
+                      background: agentPanelOpen ? C.accentSoft : 'transparent',
+                    }}
+                    title="Open Codex or Claude in this Space"
                   >
-                    <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} /> Sync
+                    <Bot size={14} /> Agent
                   </button>
                 )}
 
@@ -800,7 +990,7 @@ export function MainLayout() {
                       <button
                         onClick={() => setEditingPage(true)}
                         style={headerBtnStyle}
-                        title="Edit this page (saved to your draft branch)"
+                        title={desktop ? 'Edit this local file' : 'Edit this page in your draft'}
                       >
                         <Pencil size={13} /> Edit
                       </button>
@@ -812,28 +1002,7 @@ export function MainLayout() {
                     >
                       <Upload size={13} /> Add Source
                     </button>
-                    <button
-                      onClick={handleCompile}
-                      disabled={compiling}
-                      style={{ ...headerBtnStyle, opacity: compiling ? 0.4 : 1 }}
-                    >
-                      {compiling ? <RefreshCw size={13} className="animate-spin" /> : <Zap size={13} color="#e2590b" />}
-                      {compiling ? 'Compiling...' : 'Compile'}
-                    </button>
                     <CommentsHeaderToggle style={{ ...headerBtnStyle, marginLeft: 2 }} />
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button style={{ ...headerBtnStyle, padding: '4px 6px' }} aria-label="More actions">
-                          <MoreHorizontal size={16} />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-40">
-                        <DropdownMenuItem onClick={handleSubmit} disabled={submitting}>
-                          <ArrowUpRight size={14} className="mr-2" />
-                          {submitting ? 'Submitting...' : 'Submit'}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
                   </>
                 )}
 
@@ -916,35 +1085,7 @@ export function MainLayout() {
                     }}>
                       Source File
                     </span>
-                    {activeView.content.compiled ? (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: C.green }}>
-                        <CheckCircle2 size={12} /> Compiled
-                      </span>
-                    ) : (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: C.amber }}>
-                        <Clock size={12} /> Pending Compile
-                      </span>
-                    )}
                   </div>
-                  {activeView.content.compiled && activeView.content.compiled_pages.length > 0 && (
-                    <div style={{
-                      marginBottom: 16, padding: 12, borderRadius: 8,
-                      background: C.sidebar, border: `1px solid ${C.line}`,
-                    }}>
-                      <span style={{ fontSize: 12, color: C.muted }}>Compiled to: </span>
-                      {activeView.content.compiled_pages.map((slug, i) => (
-                        <span key={slug}>
-                          {i > 0 && ', '}
-                          <button
-                            onClick={() => activeWorkspace && selectPage(activeWorkspace, slug)}
-                            style={{ fontSize: 12, color: C.blue, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
-                          >
-                            {slug}
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
                   <article>
                     <h1 className="page-title page-title--compact">
                       {activeView.content.filename}
@@ -959,11 +1100,27 @@ export function MainLayout() {
               ) : activeView?.kind === 'page' && activeView.content ? (
                 editingPage ? (
                   <PageEditor
-                    key={activeView.slug}
+                    ref={pageEditorRef}
+                    key={activeView.path ?? activeView.slug}
                     initialBody={activeView.content.body}
-                    stripFrontmatter={renderBody}
                     onSave={handleSavePage}
-                    onCancel={() => setEditingPage(false)}
+                    onExternalReload={(fullBody) => {
+                      persistedPageBody.current = fullBody;
+                      externalConflictNotified.current = false;
+                      setActiveView((previous) => previous?.kind === 'page' && previous.content
+                        ? { ...previous, content: { ...previous.content, body: fullBody } }
+                        : previous);
+                    }}
+                    onExternalDeleted={() => {
+                      externalConflictNotified.current = false;
+                      setEditingPage(false);
+                      setActiveView(null);
+                      navigate('/', { replace: true });
+                      if (activeWorkspace) loadSpacePages(activeWorkspace);
+                    }}
+                    onDone={() => { void handleDoneEditing(); }}
+                    onWikilink={(target) => activeWorkspace && selectPage(activeWorkspace, target)}
+                    getPageSlugs={() => (activeWorkspace ? collectSlugs(spacePages[activeWorkspace.id] || []) : [])}
                   />
                 ) : (
                   // Fill the content box edge-to-edge: the doc scrolls on the left
@@ -997,31 +1154,64 @@ export function MainLayout() {
             </div>
             </CommentsProvider>
           </main>
+
+          {desktop && agentPanelOpen && activeWorkspace?.localPath && (
+            <div style={{
+              width: agentPanelWidth, minWidth: agentPanelWidth, height: '100vh',
+              position: 'relative', flexShrink: 0,
+            }}>
+              <div
+                role="separator"
+                aria-label="Resize agent terminal"
+                aria-orientation="vertical"
+                aria-valuemin={320}
+                aria-valuemax={720}
+                aria-valuenow={agentPanelWidth}
+                tabIndex={0}
+                onPointerDown={(event) => {
+                  agentResizeStart.current = { pointerX: event.clientX, width: agentPanelWidth };
+                  setResizingAgentPanel(true);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                  event.preventDefault();
+                  const step = event.shiftKey ? 40 : 12;
+                  const delta = event.key === 'ArrowLeft' ? step : -step;
+                  setAgentPanelWidth((width) => Math.max(320, Math.min(720, width + delta)));
+                }}
+                style={{
+                  position: 'absolute', top: 0, left: -3, zIndex: 40,
+                  width: 6, height: '100%', cursor: 'col-resize', touchAction: 'none',
+                  background: resizingAgentPanel ? C.accent : 'transparent',
+                  opacity: resizingAgentPanel ? 0.45 : 1,
+                }}
+              />
+              <AgentTerminalPanel
+                spacePath={activeWorkspace.localPath}
+                onClose={() => setAgentPanelOpen(false)}
+              />
+            </div>
+          )}
         </div>
       </TooltipProvider>
 
       {/* ── Modals ── */}
 
-      {/* Create team space */}
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Create Team Space</DialogTitle></DialogHeader>
-          <form onSubmit={handleCreateWorkspace} className="space-y-4 mt-2">
-            <div>
-              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Name</label>
-              <Input value={newName} onChange={(e) => handleNameChange(e.target.value)} placeholder="e.g. Engineering Wiki" autoFocus />
-            </div>
-            <div>
-              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">URL slug</label>
-              <Input value={newSlug} onChange={(e) => setNewSlug(e.target.value)} placeholder="engineering-wiki" className="font-mono" />
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" type="button" onClick={() => setShowCreate(false)}>Cancel</Button>
-              <Button type="submit" disabled={creating || !newName.trim() || !newSlug.trim()}>{creating ? 'Creating...' : 'Create'}</Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <CreateSpaceDialog
+        open={showCreate}
+        desktop={desktop}
+        creating={creating}
+        name={newName}
+        slug={newSlug}
+        localPath={newLocalPath}
+        mode={createSpaceMode}
+        onModeChange={setCreateSpaceMode}
+        onOpenChange={setShowCreate}
+        onNameChange={handleNameChange}
+        onSlugChange={setNewSlug}
+        onChooseFolder={() => { void handleChooseLocalFolder(); }}
+        onSubmit={handleCreateWorkspace}
+      />
 
       {/* New page */}
       <Dialog open={!!showNewPage} onOpenChange={(open) => !open && setShowNewPage(null)}>
@@ -1140,8 +1330,10 @@ export function MainLayout() {
           <div className="space-y-4 mt-2">
             <p className="text-sm text-[var(--color-text-secondary)]">
               Delete <strong>{pathOp?.title}</strong>
-              {pathOp?.isFolder ? ' and everything inside it' : ''} from your draft?
-              The change lands on the shared wiki when your submission is merged.
+              {pathOp?.isFolder ? ' and everything inside it' : ''}?
+              {desktop
+                ? ' The deletion remains a local Git change until you keep it from Reviews.'
+                : ' The change lands on the shared wiki when your submission is merged.'}
             </p>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setPathOp(null)}>Cancel</Button>
@@ -1157,12 +1349,186 @@ export function MainLayout() {
   );
 }
 
+function CreateSpaceDialog({
+  open,
+  desktop,
+  creating,
+  name,
+  slug,
+  localPath,
+  mode,
+  onModeChange,
+  onOpenChange,
+  onNameChange,
+  onSlugChange,
+  onChooseFolder,
+  onSubmit,
+}: {
+  open: boolean;
+  desktop: boolean;
+  creating: boolean;
+  name: string;
+  slug: string;
+  localPath: string;
+  mode: CreateSpaceMode;
+  onModeChange: (mode: CreateSpaceMode) => void;
+  onOpenChange: (open: boolean) => void;
+  onNameChange: (name: string) => void;
+  onSlugChange: (slug: string) => void;
+  onChooseFolder: () => void;
+  onSubmit: (event: React.FormEvent) => void;
+}) {
+  const choice = (
+    <div className="grid gap-2 mt-2">
+      <SpaceChoice icon={<HardDrive size={19} />} title="Create local Space" description="Start a new OKF knowledge space on this Mac." onClick={() => onModeChange('local')} />
+      <SpaceChoice icon={<FolderInput size={19} />} title="Import a folder" description="Open an existing Markdown folder or Git repository." onClick={() => onModeChange('import')} />
+      <SpaceChoice icon={<Cloud size={19} />} title="Create Cloud Space" description="Create locally and enable Cloud collaboration." disabled badge="Coming soon" />
+      <SpaceChoice icon={<UserPlus size={19} />} title="Join Cloud Space" description="Download a shared Space as a local copy." disabled badge="Coming soon" />
+    </div>
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{desktop ? (mode === 'choose' ? 'Add a Space' : mode === 'local' ? 'Create local Space' : 'Import a folder') : 'Create a Space'}</DialogTitle>
+        </DialogHeader>
+        {desktop && mode === 'choose' ? choice : (
+          <form onSubmit={onSubmit} className="space-y-4 mt-2">
+            {desktop && (
+              <button type="button" onClick={() => onModeChange('choose')} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+                <ChevronLeft size={14} /> Back
+              </button>
+            )}
+            <div>
+              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Space name</label>
+              <Input value={name} onChange={(event) => onNameChange(event.target.value)} placeholder="e.g. Research Notes" autoFocus />
+            </div>
+            {desktop ? (
+              <div>
+                <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">
+                  {mode === 'local' ? 'Create inside' : 'Folder'}
+                </label>
+                <button type="button" onClick={onChooseFolder} className="w-full rounded-md border px-3 py-2.5 text-left text-sm hover:bg-muted/50">
+                  {localPath || (mode === 'local' ? 'Choose a parent folder…' : 'Choose an existing folder…')}
+                </button>
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  {mode === 'local' ? `CoWiki will create “${name || 'Space name'}” here.` : 'Existing files stay in place and remain the source of truth.'}
+                </p>
+              </div>
+            ) : (
+              <input type="hidden" value={slug} onChange={(event) => onSlugChange(event.target.value)} />
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button type="submit" disabled={creating || !name.trim() || (desktop && !localPath)}>
+                {creating ? 'Creating…' : mode === 'import' ? 'Import' : 'Create'}
+              </Button>
+            </div>
+          </form>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SpaceChoice({ icon, title, description, onClick, disabled, badge }: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  badge?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex items-center gap-3 rounded-xl border p-3 text-left transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-45"
+    >
+      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2 text-sm font-semibold">{title}{badge && <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">{badge}</span>}</span>
+        <span className="mt-0.5 block text-xs text-muted-foreground">{description}</span>
+      </span>
+    </button>
+  );
+}
+
+function LocalSpaceEmptyState({
+  creating,
+  error,
+  onOpenFolder,
+}: {
+  creating: boolean;
+  error: string | null;
+  onOpenFolder: () => void;
+}) {
+  return (
+    <main style={{
+      minHeight: '100vh', display: 'grid', placeItems: 'center',
+      background: C.bg, color: C.ink, fontFamily: 'var(--font-sans)',
+    }}>
+      <section style={{ width: 'min(560px, calc(100vw - 48px))', textAlign: 'center', marginTop: -32 }}>
+        <div style={{
+          width: 68, height: 68, margin: '0 auto 28px', borderRadius: 20,
+          display: 'grid', placeItems: 'center', color: C.accent,
+          background: C.accentSoft, border: '1px solid rgba(226, 89, 11, 0.2)',
+        }}>
+          <FolderOpen size={31} strokeWidth={1.8} />
+        </div>
+        <h1 style={{
+          margin: '0 0 18px', fontFamily: 'var(--font-serif)', fontSize: 40,
+          lineHeight: 1.1, letterSpacing: '-0.025em', fontWeight: 700,
+        }}>
+          Add your first Space
+        </h1>
+        <p style={{ margin: '0 auto 34px', maxWidth: 490, color: C.ink2, fontSize: 17, lineHeight: 1.65 }}>
+          Create a new local knowledge space or import an existing folder.<br />
+          Cloud can be enabled later without changing its local-first foundation.
+        </p>
+        <button
+          type="button"
+          onClick={onOpenFolder}
+          disabled={creating}
+          style={{
+            minWidth: 220, height: 58, padding: '0 24px', border: 'none', borderRadius: 14,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 18,
+            background: C.accent, color: '#fff', fontSize: 17, fontWeight: 700,
+            cursor: creating ? 'default' : 'pointer', opacity: creating ? 0.7 : 1,
+            boxShadow: '0 8px 22px rgba(226, 89, 11, 0.2)',
+          }}
+        >
+          {creating ? 'Creating…' : 'Add a Space'}
+          {!creating && (
+            <kbd style={{
+              padding: '2px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.2)',
+              font: '600 13px var(--font-sans)',
+            }}>
+              ⌘O
+            </kbd>
+          )}
+        </button>
+        {error && <p role="alert" style={{ color: C.red, fontSize: 13, marginTop: 18 }}>{error}</p>}
+      </section>
+    </main>
+  );
+}
+
 const headerBtnStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 6,
   padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer',
   background: 'transparent', color: C.muted, fontSize: 12,
   transition: 'background 0.1s',
 };
+
+function isMissingLocalPageError(error: unknown): boolean {
+  const message = String(error).toLowerCase();
+  return message.includes('no such file or directory')
+    || message.includes('not found')
+    || message.includes('cannot find the file');
+}
 
 // ── Discover View ──
 function DiscoverView() {

@@ -1,22 +1,32 @@
 import { useEffect, useState } from 'react';
 import { GitBranch, MessageSquare } from 'lucide-react';
-import { listReviews, type Submission } from '../../api';
+import { getLocalWorkingDiff, keepLocalWorkingDiff, listReviews, type FileDiff, type Submission } from '../../api';
 import { C } from '@/lib/design';
 import { timeAgo } from '../../lib/time';
 import { AvatarBadge } from '@/components/ui/avatar-badge';
 import { statusBadge } from '@/lib/review';
+import { isDesktopClient } from '@/runtime';
+import { DiffView } from './DiffView';
 
 type Filter = 'open' | 'merged' | 'all';
 
-export function ReviewList({
-  workspaceSlug,
-  onOpen,
-  refreshKey,
-}: {
+type ReviewListProps = {
   workspaceSlug: string;
   onOpen: (id: string) => void;
   refreshKey?: number;
-}) {
+};
+
+export function ReviewList(props: ReviewListProps) {
+  return isDesktopClient()
+    ? <LocalReviewInbox workspaceSlug={props.workspaceSlug} refreshKey={props.refreshKey} />
+    : <CloudReviewList {...props} />;
+}
+
+function CloudReviewList({
+  workspaceSlug,
+  onOpen,
+  refreshKey,
+}: ReviewListProps) {
   const [subs, setSubs] = useState<Submission[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('open');
@@ -140,6 +150,78 @@ export function ReviewList({
             );
           })}
         </div>
+      )}
+    </div>
+  );
+}
+
+function LocalReviewInbox({ workspaceSlug, refreshKey }: { workspaceSlug: string; refreshKey?: number }) {
+  const [diffs, setDiffs] = useState<FileDiff[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [keeping, setKeeping] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getLocalWorkingDiff(workspaceSlug)
+      .then((nextDiffs) => { if (!cancelled) setDiffs(nextDiffs); })
+      .catch((cause) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => { cancelled = true; };
+  }, [workspaceSlug, refreshKey]);
+
+  const keep = async () => {
+    if (!diffs?.length || keeping) return;
+    setKeeping(true);
+    setError(null);
+    try {
+      await keepLocalWorkingDiff(workspaceSlug, diffs);
+      await getLocalWorkingDiff(workspaceSlug).then(setDiffs);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setKeeping(false);
+    }
+  };
+
+  const additions = diffs?.reduce((total, diff) => total + diff.additions, 0) ?? 0;
+  const deletions = diffs?.reduce((total, diff) => total + diff.deletions, 0) ?? 0;
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 20 }}>
+        <div>
+          <h1 className="page-title" style={{ marginBottom: 5 }}>Review local changes</h1>
+          <p style={{ color: C.muted, fontSize: 13, margin: 0 }}>
+            Review edits made by you and local agents before recording one Git checkpoint.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={keep}
+          disabled={!diffs?.length || keeping}
+          style={{
+            border: 'none', borderRadius: 8, padding: '9px 15px', fontSize: 13, fontWeight: 650,
+            background: diffs?.length ? C.ink : C.rail, color: diffs?.length ? '#fff' : C.faint,
+            cursor: diffs?.length && !keeping ? 'pointer' : 'default', whiteSpace: 'nowrap',
+          }}
+        >
+          {keeping ? 'Keeping…' : 'Keep changes'}
+        </button>
+      </div>
+      {error && <p style={{ color: C.red, fontSize: 13 }}>{error}</p>}
+      {diffs == null ? (
+        <p style={{ color: C.muted, fontSize: 14 }}>Loading local changes…</p>
+      ) : diffs.length === 0 ? (
+        <div style={{ padding: 32, textAlign: 'center', color: C.muted, fontSize: 14, border: `1px solid ${C.line}`, borderRadius: 10 }}>
+          Everything is kept. New human or agent edits will appear here automatically when you reopen Reviews.
+        </div>
+      ) : (
+        <>
+          <div style={{ marginBottom: 12, color: C.muted, fontSize: 12.5 }}>
+            {diffs.length} file{diffs.length === 1 ? '' : 's'} · <span style={{ color: C.green }}>+{additions}</span> · <span style={{ color: C.red }}>−{deletions}</span>
+          </div>
+          <DiffView diffs={diffs} />
+        </>
       )}
     </div>
   );

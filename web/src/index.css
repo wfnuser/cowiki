@@ -69,6 +69,25 @@ body {
 .prose p { margin: 0.75rem 0; line-height: 1.72; }
 .prose ul, .prose ol { margin: 0.75rem 0; padding-left: 1.5rem; }
 .prose li { margin: 0.4rem 0; line-height: 1.62; }
+.prose ul.contains-task-list { list-style: none; padding-left: 0.25rem; }
+.prose li.task-list-item { display: flex; align-items: baseline; gap: 0.55rem; }
+.prose input[type="checkbox"] {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  border: 1.5px solid var(--color-border-strong);
+  border-radius: 4px;
+  background: var(--color-bg-primary);
+  opacity: 1;
+  transform: translateY(2px);
+  flex: 0 0 auto;
+}
+.prose input[type="checkbox"]:checked {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m2.2 6.2 2.2 2.2 5.3-5.3' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
 .prose code { background: var(--color-bg-hover); padding: 0.125rem 0.375rem; border-radius: 3px; font-size: 0.85em; color: var(--color-accent); }
 .prose pre { background: #282c34; color: #abb2bf; padding: 1rem; border-radius: 6px; overflow-x: auto; margin: 0.75rem 0; font-size: 0.85em; }
 .prose pre code { background: none; color: inherit; padding: 0; }

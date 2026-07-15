@@ -220,6 +220,7 @@ export function CommentsProvider({
 
   // selection → floating "Comment" toolbar
   useEffect(() => {
+    if (!enabled) return;
     const onUp = () => {
       // A composer is open — don't let the still-present selection re-arm the
       // floating "Comment" bubble (it would resurface after cancel/submit).
@@ -233,7 +234,7 @@ export function CommentsProvider({
     };
     document.addEventListener('mouseup', onUp);
     return () => document.removeEventListener('mouseup', onUp);
-  }, [articleRef]);
+  }, [articleRef, enabled]);
 
   const submitNew = async (body: string) => {
     if (!composing || !body.trim()) return;
@@ -272,7 +273,7 @@ export function CommentsProvider({
   return (
     <Ctx.Provider value={value}>
       {children}
-      {pending && !composing && (
+      {enabled && pending && !composing && (
         <div style={{
           position: 'fixed', zIndex: 60, top: pending.y - 46, left: pending.x - 52,
           display: 'flex', alignItems: 'center', background: C.ink, borderRadius: 9, padding: 4,

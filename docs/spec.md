@@ -51,19 +51,19 @@ cowiki is a collaborative knowledge base where humans and AI agents co-maintain 
 ### Git Repository Structure
 
 ```
-cowiki-data/                    ← single Git repo
-├── main (branch)               ← Shared Space
-│   ├── wiki/
-│   │   ├── concept-name.md     ← compiled wiki pages
-│   │   └── index.md            ← auto-generated TOC
-│   └── sources/
-│       └── ...                 ← reviewed source files
-│
-├── user/zhangsan (branch)      ← Personal Space
-│   ├── wiki/                   ← draft pages
-│   └── sources/                ← ingested sources
-│
-└── user/lisi (branch)          ← another Personal Space
+cowiki-data/                    ← one OKF v0.1 bundle, versioned with Git
+├── index.md                    ← bundle index + okf_version
+├── concept-name.md             ← concept ID: concept-name
+├── domain/
+│   ├── index.md                ← directory index (progressive disclosure)
+│   └── nested-concept.md       ← concept ID: domain/nested-concept
+└── .cowiki/
+    ├── sources/                ← valid `type: Source` concepts, hidden in product UI
+    └── state.json              ← rebuildable compiler state
+
+main                            ← Shared Space branch
+user/zhangsan                   ← Personal Space branch
+user/lisi                       ← another Personal Space branch
 ```
 
 ### PostgreSQL Tables
@@ -115,13 +115,13 @@ submission_pages (submission_id, page_slug, action, diff_summary)
 
 ```
 User/Agent: ingest("https://article-about-docker.com")
-  → Fetches content, saves to sources/ on user branch
+  → Fetches content, saves to .cowiki/sources/ on user branch
   → Returns: source_id
 
 User/Agent: compile()
   → LLM reads sources, extracts concepts
-  → Generates wiki pages with frontmatter + wikilinks
-  → Saves to wiki/ on user branch
+  → Generates OKF concepts with frontmatter + standard Markdown links
+  → Saves concept files at the bundle root or in producer-defined directories
   → Returns: list of generated page slugs
 
 User/Agent: submit(["docker-networking", "docker-compose-tips"])
@@ -142,7 +142,7 @@ Reviewer: review(submission_id)
 
 ```
 User/Agent: write("deployment-guide", "## Deployment\n\nNew content...")
-  → Saves directly to wiki/ on user branch
+  → Saves directly to the OKF bundle on user branch
 
 User/Agent: submit(["deployment-guide"])
   → Same review flow as above
@@ -156,7 +156,7 @@ On `compile`, the system:
 1. **Hash check** — skip unchanged sources (SHA-256)
 2. **Concept extraction** — LLM reads sources, identifies distinct concepts
 3. **Page generation** — one page per concept, with:
-   - YAML frontmatter (title, summary, sources, created_at)
+   - OKF YAML frontmatter (`type` required; `title`, `description`, `resource`, `tags`, `timestamp` optional)
    - Markdown body
    - Source attribution (`^[source.md]`)
 4. **Summary generation** — one-line summary per page (for search + review)
@@ -166,7 +166,7 @@ On `compile`, the system:
 
 On `submit`, before creating the review request:
 
-1. **Format standardization** — normalize frontmatter, heading levels, wikilink syntax
+1. **Format standardization** — validate OKF frontmatter and standard Markdown links
 2. **Dedup detection** — compare page embeddings against Shared Space pages (cosine similarity > 0.85 = flagged)
 3. **Summary generation** — LLM generates submission summary ("3 new pages about Docker networking, 1 update to deployment guide")
 4. **Source bundling** — include referenced source files in the submission
@@ -182,9 +182,9 @@ On `submit`, before creating the review request:
 │    "Deployment Guide"                │ ← LLM summary
 │                                      │
 │ Files Changed (3)                    │
-│  + wiki/docker-network-fix.md        │
-│  + wiki/docker-compose-best.md       │
-│  ~ wiki/deployment-guide.md          │
+│  + docker-network-fix.md             │
+│  + docker-compose-best.md            │
+│  ~ deployment-guide.md               │
 │                                      │
 │ ─── docker-network-fix.md ───        │
 │ + ## Docker Network Fix              │

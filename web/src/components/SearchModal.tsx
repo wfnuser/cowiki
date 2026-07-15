@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { FileText, Search, Sparkles, CornerDownLeft, X } from 'lucide-react';
 import { searchWorkspace, type SearchResponse } from '../api';
 import { C, fonts } from '@/lib/design';
+import { isDesktopClient } from '@/runtime';
+import { conceptIdFromPath, conceptPath, isSearchableConceptPath } from '@/lib/okf-pages';
 
 /** Highlight occurrences of `q` inside `text` (case-insensitive). */
 function Highlight({ text, q }: { text: string; q: string }) {
@@ -33,7 +35,7 @@ function Highlight({ text, q }: { text: string; q: string }) {
 }
 
 type Row =
-  | { kind: 'keyword'; slug: string; title: string; snippet: string; titleMatch: boolean }
+  | { kind: 'keyword'; slug: string; path?: string; title: string; snippet: string; titleMatch: boolean }
   | { kind: 'semantic'; slug: string; title: string; summary: string; source: string };
 
 /**
@@ -111,25 +113,38 @@ export function SearchModal({
         .catch(() => setKw([]))
         .finally(() => setKwLoading(false));
     }, 120);
-    setSemLoading(true);
-    semTimer.current = setTimeout(() => {
-      searchWorkspace(workspaceSlug, q.trim(), 'semantic')
-        .then((r) => setSem(r.semantic))
-        .catch(() => setSem([]))
-        .finally(() => setSemLoading(false));
-    }, 300);
+    if (isDesktopClient()) {
+      // The local index is intentionally lexical in V1. Do not scan the same
+      // repository twice for an empty semantic result.
+      setSem([]);
+      setSemLoading(false);
+    } else {
+      setSemLoading(true);
+      semTimer.current = setTimeout(() => {
+        searchWorkspace(workspaceSlug, q.trim(), 'semantic')
+          .then((r) => setSem(r.semantic))
+          .catch(() => setSem([]))
+          .finally(() => setSemLoading(false));
+      }, 300);
+    }
     return () => { clearTimeout(kwTimer.current); clearTimeout(semTimer.current); };
   }, [q, open, workspaceSlug]);
 
   // Flattened rows for keyboard navigation (semantic deduped against keyword).
   const rows: Row[] = useMemo(() => {
-    const out: Row[] = (kw ?? []).map((h) => ({
-      kind: 'keyword', slug: h.slug, title: h.title, snippet: h.snippet, titleMatch: h.title_match,
-    }));
-    const seen = new Set((kw ?? []).map((h) => h.slug));
+    const keywordHits = (kw ?? []).filter((hit) =>
+      isSearchableConceptPath(conceptPath(hit.slug)));
+    const out: Row[] = keywordHits.map((h) => {
+      const slug = conceptIdFromPath(h.slug);
+      return {
+        kind: 'keyword', slug, path: conceptPath(slug), title: h.title, snippet: h.snippet, titleMatch: h.title_match,
+      };
+    });
+    const seen = new Set(out.map((hit) => hit.slug));
     for (const h of sem ?? []) {
-      if (!seen.has(h.slug)) {
-        out.push({ kind: 'semantic', slug: h.slug, title: h.title, summary: h.summary, source: h.source });
+      const slug = conceptIdFromPath(h.slug);
+      if (!seen.has(slug)) {
+        out.push({ kind: 'semantic', slug, title: h.title, summary: h.summary, source: h.source });
       }
     }
     return out;
@@ -139,7 +154,7 @@ export function SearchModal({
   const pick = useCallback((row: Row | undefined) => {
     if (!row) return;
     onClose();
-    onSelectPage(row.slug);
+    onSelectPage(row.slug, row.kind === 'keyword' ? row.path : undefined);
   }, [onClose, onSelectPage]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {

@@ -5,7 +5,11 @@ CoWiki is moving to a split architecture:
 - `wfnuser/cowiki` — client surfaces: Web, desktop, CLI, and MCP client/server tooling.
 - `wfnuser/cowiki-backend` — centralized Rust API service, database migrations, git-backed workspace storage, and deployment files.
 
-The product direction is local-first for individual work and cloud-backed for collaboration. A user can run the client against a local backend while using local coding agents to organize documents; shared team spaces use the hosted backend as the coordination layer.
+The product direction is local-first for individual work and cloud-backed for
+collaboration. The desktop client runs its local engine in-process; local
+coding agents and the open editor operate on the same versioned document.
+Shared team spaces use the hosted backend only when cloud capabilities are
+enabled.
 
 ## Web Client
 
@@ -25,7 +29,10 @@ VITE_API_BASE=https://api-test.cowiki.app npm run build
 
 ## Desktop Client
 
-The desktop app uses Tauri 2.
+The desktop app uses Tauri 2 and owns its complete local runtime. It starts a
+private loopback API on an OS-assigned port, stores metadata in SQLite at
+`~/cowiki/.cowiki/metadata.db`, and keeps each Space as a local Git repository
+under `~/cowiki`. It does not require a separately running server or Postgres.
 
 ```bash
 cd web
@@ -33,12 +40,9 @@ npm install
 npm run desktop:dev
 ```
 
-Desktop builds default to `http://localhost:3000/api` when `VITE_API_BASE` is not set. Users can override the backend origin at runtime by setting `localStorage["cowiki.apiOrigin"]`, or at build time with `VITE_API_BASE`.
-
-```bash
-cd web
-VITE_API_BASE=https://api-test.cowiki.app npm run desktop:build
-```
+The desktop window receives the private local origin directly from Tauri. It
+never probes port 3000 and never silently reuses a running `cowiki-backend`.
+The Web build continues to use `VITE_API_BASE` for cloud spaces.
 
 ## CLI
 
