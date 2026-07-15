@@ -145,6 +145,12 @@ export interface SourceContent {
   content: string;
 }
 
+export interface IngestFileOutcome {
+  sourcePath: string;
+  source: SourceItem | null;
+  error: string | null;
+}
+
 // ── Workspaces ──
 
 export async function listWorkspaces(): Promise<Workspace[]> {

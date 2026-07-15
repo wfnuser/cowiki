@@ -1,3 +1,4 @@
+mod extract;
 mod knowledge_index;
 mod local_engine;
 mod mcp;
@@ -5,8 +6,8 @@ mod okf;
 mod terminal;
 
 use local_engine::{
-    FileDiff, LocalEngine, PageFull, PageMeta, SearchResponse, SourceContent, SourceItem, Space,
-    SubmitResult,
+    FileDiff, IngestFileOutcome, LocalEngine, PageFull, PageMeta, SearchResponse, SourceContent,
+    SourceItem, Space, SubmitResult,
 };
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -34,6 +35,18 @@ fn choose_local_space_directory() -> Option<String> {
     rfd::FileDialog::new()
         .pick_folder()
         .map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn choose_source_files() -> Vec<String> {
+    let extensions = extract::all_supported_extensions();
+    rfd::FileDialog::new()
+        .add_filter("Supported sources", &extensions)
+        .pick_files()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect()
 }
 
 #[tauri::command]
@@ -139,6 +152,19 @@ fn local_ingest(
 }
 
 #[tauri::command]
+fn local_ingest_files(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    source_paths: Vec<String>,
+) -> Result<Vec<IngestFileOutcome>, String> {
+    // A plain (non-async) command: Tauri already dispatches these through
+    // its own blocking thread pool, same as local_search / local_working_diff
+    // elsewhere in this file — extraction (PDF/DOCX/spreadsheet parsing)
+    // can take real time but never blocks the UI's async runtime.
+    engine.ingest_files(&space_slug, &source_paths)
+}
+
+#[tauri::command]
 fn local_rename_path(
     engine: State<'_, LocalEngine>,
     space_slug: String,
@@ -198,6 +224,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_desktop_oauth,
             choose_local_space_directory,
+            choose_source_files,
             local_list_spaces,
             local_add_space,
             local_list_pages,
@@ -207,6 +234,7 @@ pub fn run() {
             local_list_sources,
             local_get_source,
             local_ingest,
+            local_ingest_files,
             local_rename_path,
             local_delete_path,
             local_search,
