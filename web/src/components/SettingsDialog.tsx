@@ -11,6 +11,7 @@ import {
   type ApiKeyInfo, type ApiKeyCreated,
 } from '../api';
 import { getStoredAuth } from '../auth';
+import { isDesktopClient } from '../runtime';
 
 interface SettingsDialogProps {
   open: boolean;
@@ -294,6 +295,7 @@ function RevokeConfirmDialog({
 // ── Main Settings Dialog ──
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
+  const desktop = isDesktopClient();
   const [auth] = useState(() => getStoredAuth());
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -320,9 +322,12 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     }
   }, []);
 
+  // API keys are a Cloud-account concept — the local engine has no
+  // equivalent endpoint, so fetching would just surface a broken-looking
+  // network error for a desktop Space that was never signed in.
   useEffect(() => {
-    if (open) fetchKeys();
-  }, [open, fetchKeys]);
+    if (open && !desktop) fetchKeys();
+  }, [open, desktop, fetchKeys]);
 
   const handleRevoke = async () => {
     if (!revokeTarget) return;
@@ -351,6 +356,21 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <DialogTitle>Settings</DialogTitle>
           </DialogHeader>
 
+          {desktop ? (
+            <div className="mt-2 space-y-3" style={{ minHeight: 320 }}>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Name</label>
+                <p className="text-sm">{auth?.name || '—'}</p>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">User ID</label>
+                <p className="font-mono text-xs text-muted-foreground">{auth?.id || '—'}</p>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                This is a local Space. Sign up for CoWiki Cloud to manage API keys and collaborate with others.
+              </p>
+            </div>
+          ) : (
           <Tabs defaultValue="profile" className="w-full">
             <TabsList className="w-full">
               <TabsTrigger value="profile" className="flex-1">Profile</TabsTrigger>
@@ -431,22 +451,27 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               )}
             </TabsContent>
           </Tabs>
+          )}
         </DialogContent>
       </Dialog>
 
-      <CreateKeyDialog
-        open={showCreate}
-        onOpenChange={setShowCreate}
-        onCreated={fetchKeys}
-      />
+      {!desktop && (
+        <>
+          <CreateKeyDialog
+            open={showCreate}
+            onOpenChange={setShowCreate}
+            onCreated={fetchKeys}
+          />
 
-      <RevokeConfirmDialog
-        open={!!revokeTarget}
-        keyName={revokeTarget?.name || ''}
-        revoking={!!revoking}
-        onConfirm={handleRevoke}
-        onCancel={() => setRevokeTarget(null)}
-      />
+          <RevokeConfirmDialog
+            open={!!revokeTarget}
+            keyName={revokeTarget?.name || ''}
+            revoking={!!revoking}
+            onConfirm={handleRevoke}
+            onCancel={() => setRevokeTarget(null)}
+          />
+        </>
+      )}
     </>
   );
 }

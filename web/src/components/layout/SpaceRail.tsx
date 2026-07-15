@@ -111,21 +111,41 @@ export function SpaceRail({
       {/* Notification bell */}
       {showBell && <NotificationBell unread={notifUnread} onOpen={onShowNotifications} />}
 
-      {/* User avatar + menu */}
+      {/* User avatar + menu. Unsigned-in state reuses the app's own
+          accent-highlight language (see the Agent-panel toggle and the
+          empty-state icon) so the Cloud prompt reads as an invitation
+          rather than a plain, inert avatar placeholder. */}
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            style={{
-              width: 34, height: 34, borderRadius: '50%',
-              background: C.sidebar, border: `1px solid ${C.line}`,
-              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 13, fontWeight: 600, color: C.ink2,
-            }}
-          >
-            {showCloudActions ? (userName?.[0]?.toUpperCase() || 'U') : <Cloud size={17} />}
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent side="right" align="end" className="w-44">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <button
+                style={{
+                  width: 34, height: 34, borderRadius: '50%',
+                  background: showCloudActions ? C.sidebar : C.accentSoft,
+                  border: showCloudActions ? `1px solid ${C.line}` : '1px solid rgba(226, 89, 11, 0.25)',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 13, fontWeight: 600, color: showCloudActions ? C.ink2 : C.accent,
+                  transition: 'background 0.15s, border-color 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  if (showCloudActions) return;
+                  e.currentTarget.style.background = '#f7dcc4';
+                  e.currentTarget.style.borderColor = 'rgba(226, 89, 11, 0.4)';
+                }}
+                onMouseLeave={(e) => {
+                  if (showCloudActions) return;
+                  e.currentTarget.style.background = C.accentSoft;
+                  e.currentTarget.style.borderColor = 'rgba(226, 89, 11, 0.25)';
+                }}
+              >
+                {showCloudActions ? (userName?.[0]?.toUpperCase() || 'U') : <Cloud size={17} />}
+              </button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          {!showCloudActions && <TooltipContent side="right">Sign up / Sign in</TooltipContent>}
+        </Tooltip>
+        <DropdownMenuContent side="right" align="end" className="w-48">
           {showCloudActions ? (
             <>
               <div className="px-2 py-1.5 text-xs text-gray-500">{userName}</div>
@@ -133,21 +153,28 @@ export function SpaceRail({
             </>
           ) : (
             <>
-              <DropdownMenuItem onClick={onConnectCloud} className="items-start gap-2 py-2.5">
-                <Cloud size={16} className="mt-0.5 shrink-0" />
+              <DropdownMenuItem
+                onClick={onConnectCloud}
+                className="items-start gap-2.5 py-2.5 my-1 mx-1 w-[calc(100%-8px)] rounded-md"
+                style={{ background: C.accentSoft }}
+              >
+                <Cloud size={16} className="mt-0.5 shrink-0" style={{ color: C.accent }} />
                 <span>
-                  <span className="block font-medium">Sign up / Sign in</span>
+                  <span className="block font-medium" style={{ color: C.accent }}>Sign up / Sign in</span>
                   <span className="block text-xs text-muted-foreground">Connect to CoWiki Cloud</span>
                 </span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
             </>
           )}
+          {/* Settings is not a Cloud feature — local-only Spaces need it too.
+              Discover and Sign out stay gated: both are meaningless without
+              a connected Cloud account. */}
+          <DropdownMenuItem onClick={onSettings}>
+            <Settings size={14} className="mr-2" /> Settings
+          </DropdownMenuItem>
           {showCloudActions && (
             <>
-              <DropdownMenuItem onClick={onSettings}>
-                <Settings size={14} className="mr-2" /> Settings
-              </DropdownMenuItem>
               <DropdownMenuItem onClick={onDiscover}>
                 <Compass size={14} className="mr-2" /> Discover
               </DropdownMenuItem>
