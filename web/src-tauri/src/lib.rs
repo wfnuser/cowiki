@@ -261,14 +261,16 @@ pub fn run() {
             app.manage(engine);
             app.manage(terminal::TerminalState::default());
 
-            let window =
+            let window_builder =
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
                     .title("CoWiki")
                     .inner_size(1280.0, 860.0)
-                    .min_inner_size(980.0, 680.0)
-                    .title_bar_style(tauri::TitleBarStyle::Overlay)
-                    .hidden_title(true)
-                    .build()?;
+                    .min_inner_size(980.0, 680.0);
+            #[cfg(target_os = "macos")]
+            let window_builder = window_builder
+                .title_bar_style(tauri::TitleBarStyle::Overlay)
+                .hidden_title(true);
+            let window = window_builder.build()?;
             window.show()?;
             window.set_focus()?;
             Ok(())
