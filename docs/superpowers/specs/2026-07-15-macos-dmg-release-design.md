@@ -6,7 +6,7 @@ Build the Tauri macOS desktop client in GitHub Actions and make its DMG availabl
 
 ## Scope
 
-- Pull requests targeting `dev`, manual dispatches, and `desktop-v*` tags build one x86_64 DMG on the fixed `macos-14` runner.
+- Pull requests targeting `dev`, manual dispatches, and `desktop-v*` tags build one x86_64 DMG on the fixed `macos-15-intel` runner.
 - Every successful build uploads the DMG as a GitHub Actions artifact and fails if no DMG was produced.
 - A `desktop-v*` tag additionally creates a GitHub Release and uploads the same DMG.
 - Tauri bundling is enabled in the checked-in configuration.
@@ -15,7 +15,7 @@ Build the Tauri macOS desktop client in GitHub Actions and make its DMG availabl
 
 ## Workflow Architecture
 
-The new `.github/workflows/macos-desktop.yml` workflow has two jobs. The `build-macos` job uses read-only repository permissions, installs the locked npm and Cargo dependencies, runs `npm run desktop:build -- --bundles dmg`, and uploads `web/src-tauri/target/release/bundle/dmg/*.dmg` with a fourteen-day retention period. The artifact is named `CoWiki-macOS-x86_64` so its platform and architecture are explicit.
+The new `.github/workflows/macos-desktop.yml` workflow has two jobs. The `build-macos` job uses read-only repository permissions, installs the locked npm and Cargo dependencies, runs `npm run desktop:build -- --target x86_64-apple-darwin --bundles dmg`, and uploads `web/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg` with a fourteen-day retention period. The artifact is named `CoWiki-macOS-x86_64` so its platform and architecture are explicit.
 
 The `release` job runs only for refs matching `refs/tags/desktop-v`. It downloads the build artifact and uses the preinstalled GitHub CLI plus the job-scoped `contents: write` permission to create a release for that tag with generated notes and attach the DMG. This avoids a third-party release action and keeps write permission out of pull-request and manual builds.
 

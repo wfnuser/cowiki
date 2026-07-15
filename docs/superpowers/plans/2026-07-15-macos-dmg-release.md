@@ -4,7 +4,7 @@
 
 **Goal:** Build an unsigned x86_64 CoWiki DMG in GitHub Actions, retain it as an artifact, and attach it to GitHub Releases created from `desktop-v*` tags.
 
-**Architecture:** A dedicated macOS workflow builds on `macos-14` with explicit `x86_64-apple-darwin` targeting. A separate tag-only release job downloads the artifact and publishes it with the built-in GitHub token, while a Node contract test protects the workflow triggers, build command, artifact path, permissions, and Tauri bundle setting.
+**Architecture:** A dedicated macOS workflow builds on the standard x64 `macos-15-intel` runner with explicit `x86_64-apple-darwin` targeting. A separate tag-only release job downloads the artifact and publishes it with the built-in GitHub token, while a Node contract test protects the workflow triggers, build command, artifact path, permissions, and Tauri bundle setting.
 
 **Tech Stack:** GitHub Actions, Tauri 2, Node.js 24, npm, Rust stable, Node test runner, GitHub CLI
 
@@ -32,8 +32,8 @@ const tauriConfigPath = new URL("../src-tauri/tauri.conf.json", import.meta.url)
 test("macOS desktop builds run for dev pull requests, manual dispatches, and desktop tags", () => {
   const workflow = readFileSync(workflowPath, "utf8");
 
-  assert.match(workflow, /^on:\n  pull_request:\n    branches: \[dev\]\n  workflow_dispatch:\n  push:\n    tags:\n      - "desktop-v\\\*"/m);
-  assert.match(workflow, /build-macos:\n[\s\S]*?runs-on: macos-14/);
+  assert.match(workflow, /^on:\n  pull_request:\n    branches: \[dev\]\n  workflow_dispatch:\n  push:\n    tags:\n      - "desktop-v\*"/m);
+  assert.match(workflow, /build-macos:\n[\s\S]*?runs-on: macos-15-intel/);
   assert.match(workflow, /targets: x86_64-apple-darwin/);
   assert.match(workflow, /run: npm ci/);
   assert.match(workflow, /run: npm run desktop:build -- --target x86_64-apple-darwin --bundles dmg/);
@@ -101,7 +101,7 @@ The workflow still passes `--bundles dmg`, so CI produces only the requested mac
 
 - [ ] **Step 2: Add the build job**
 
-Create `.github/workflows/macos-desktop.yml` with pull-request targeting `dev`, manual, and `desktop-v*` tag triggers. Give the workflow default `contents: read`, run `build-macos` on `macos-14`, install Node 24 and stable Rust with the `x86_64-apple-darwin` target, restore the Rust cache, run `npm ci`, and execute the following complete workflow:
+Create `.github/workflows/macos-desktop.yml` with pull-request targeting `dev`, manual, and `desktop-v*` tag triggers. Give the workflow default `contents: read`, run `build-macos` on `macos-15-intel`, install Node 24 and stable Rust with the `x86_64-apple-darwin` target, restore the Rust cache, run `npm ci`, and execute the following complete workflow:
 
 ```yaml
 name: macOS Desktop
@@ -119,7 +119,7 @@ permissions:
 
 jobs:
   build-macos:
-    runs-on: macos-14
+    runs-on: macos-15-intel
     defaults:
       run:
         working-directory: web
@@ -210,11 +210,11 @@ cd web
 npm test
 npm run build
 cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check
-cargo check --manifest-path src-tauri/Cargo.toml --locked --target x86_64-apple-darwin
+cargo check --manifest-path src-tauri/Cargo.toml --locked
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 ```
 
-Expected: all tests, build, formatting, target check, and Rust tests pass.
+Expected: all tests, build, formatting, native check, and Rust tests pass. The pull-request workflow performs the x86_64 check and release build on its native Intel runner.
 
 - [ ] **Step 3: Build and inspect a local unsigned DMG**
 
@@ -222,12 +222,12 @@ On the macOS host, run:
 
 ```bash
 cd web
-npm run desktop:build -- --target x86_64-apple-darwin --bundles dmg
-file src-tauri/target/x86_64-apple-darwin/release/bundle/macos/CoWiki.app/Contents/MacOS/cowiki-desktop
-find src-tauri/target/x86_64-apple-darwin/release/bundle/dmg -name '*.dmg' -type f -maxdepth 1
+npm run desktop:build -- --bundles dmg
+file src-tauri/target/release/bundle/dmg/*.dmg
+find src-tauri/target/release/bundle/dmg -name '*.dmg' -type f -maxdepth 1
 ```
 
-Expected: Tauri reports a generated DMG, `file` reports an x86_64 Mach-O executable, and one `.dmg` path is printed.
+Expected: Tauri reports a generated host-native DMG, `file` recognizes the disk image, and one `.dmg` path is printed. The pull-request workflow supplies the required x86_64 artifact verification on `macos-15-intel`.
 
 - [ ] **Step 4: Review the requirements and diff**
 
