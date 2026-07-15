@@ -35,6 +35,8 @@ jobs:
           workspaces: web/src-tauri -> target
       - name: Install dependencies
         run: npm ci
+      - name: Test desktop workflow contract
+        run: npm run test:desktop-workflow
       - name: Test auth flow
         run: npm run test:auth-flow
       - name: Build frontend
