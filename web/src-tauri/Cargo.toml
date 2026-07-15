@@ -23,6 +23,7 @@ tauri = { version = "2", features = [] }
 time = "=0.3.44"
 url = "2"
 git2 = "0.20"
+libc = "0.2"
 portable-pty = "0.9"
 pulldown-cmark = "0.13"
 percent-encoding = "2"

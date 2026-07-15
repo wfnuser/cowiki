@@ -60,9 +60,23 @@ export interface FileDiff {
   path: string;
   old_content: string | null;
   new_content: string | null;
+  is_binary?: boolean;
+  old_binary_hash?: string | null;
+  new_binary_hash?: string | null;
   hunks: DiffHunk[];
   additions: number;
   deletions: number;
+}
+
+export type AgentChangeStatus = 'open' | 'needsResolution' | 'merged' | 'discarded';
+
+export interface AgentChange {
+  id: string;
+  title: string;
+  status: AgentChangeStatus;
+  createdAt: number;
+  worktreePath: string;
+  diffs: FileDiff[];
 }
 
 export interface ReviewComment {
@@ -398,9 +412,22 @@ export async function submit(branch: string, paths: string[], skipReview: boolea
 }
 
 export async function listReviews(workspaceSlug: string): Promise<Submission[]> {
-  // Local Agent Changes will populate this from Git. Until one exists, the
-  // desktop review inbox is intentionally empty and never calls cloud HTTP.
-  if (isDesktopClient()) return [];
+  if (isDesktopClient()) {
+    const changes = await localApi.listAgentChanges(workspaceSlug);
+    return changes.map((change) => ({
+      id: change.id,
+      user_id: 'local-agent',
+      status: change.status === 'merged' ? 'merged' : change.status === 'discarded' ? 'rejected' : 'pending',
+      summary: change.title,
+      paths: change.diffs.map((diff) => diff.path),
+      source_branch: `cowiki/agent/${change.id}`,
+      created_at: new Date(change.createdAt * 1000).toISOString(),
+      reviewed_by: null,
+      reviewed_at: null,
+      author_name: change.title,
+      reviewer_name: null,
+    }));
+  }
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/reviews`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -419,6 +446,35 @@ export async function getLocalWorkingDiff(workspaceSlug: string): Promise<FileDi
 export async function keepLocalWorkingDiff(workspaceSlug: string, expected: FileDiff[]): Promise<void> {
   if (!isDesktopClient()) throw new Error('Local Review is available only in the desktop app');
   await localApi.keepWorkingDiff(workspaceSlug, expected);
+}
+
+export async function createLocalAgentChange(
+  workspaceSlug: string,
+  agentName: string,
+): Promise<AgentChange> {
+  if (!isDesktopClient()) throw new Error('Local Agent Changes are available only in the desktop app');
+  return localApi.createAgentChange(workspaceSlug, agentName);
+}
+
+export async function listLocalAgentChanges(workspaceSlug: string): Promise<AgentChange[]> {
+  if (!isDesktopClient()) return [];
+  return localApi.listAgentChanges(workspaceSlug);
+}
+
+export async function mergeLocalAgentChange(
+  workspaceSlug: string,
+  changeId: string,
+): Promise<AgentChange> {
+  if (!isDesktopClient()) throw new Error('Local Agent Changes are available only in the desktop app');
+  return localApi.mergeAgentChange(workspaceSlug, changeId);
+}
+
+export async function discardLocalAgentChange(
+  workspaceSlug: string,
+  changeId: string,
+): Promise<AgentChange> {
+  if (!isDesktopClient()) throw new Error('Local Agent Changes are available only in the desktop app');
+  return localApi.discardAgentChange(workspaceSlug, changeId);
 }
 
 export async function getReview(workspaceSlug: string, id: string): Promise<ReviewDetail> {

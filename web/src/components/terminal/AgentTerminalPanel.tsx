@@ -1,7 +1,7 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { Bot, FileText, History, PanelRightClose, Plus, RotateCcw, SquareTerminal, X } from 'lucide-react';
+import { Bot, FileText, GitBranch, History, PanelRightClose, Plus, RotateCcw, SquareTerminal, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -15,8 +15,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { SUPPORTED_AGENTS } from '@/lib/agents';
+import { createLocalAgentChange } from '@/api';
 
-import { agentDisplayName, type AgentKind } from './terminal-contract';
+import {
+  agentDisplayName,
+  type AgentKind,
+  type AgentTerminalMode,
+} from './terminal-contract';
 import {
   addAgentTab,
   closeAgentTab,
@@ -28,6 +33,7 @@ import { useAgentTerminal } from './useAgentTerminal';
 
 type AgentTerminalPanelProps = {
   spacePath: string;
+  spaceSlug: string;
   defaultAgent: AgentKind;
   onClose?: () => void;
   className?: string;
@@ -42,6 +48,7 @@ function nextTerminalTabId(agent: AgentKind): string {
 
 export function AgentTerminalPanel({
   spacePath,
+  spaceSlug,
   defaultAgent,
   onClose,
   className,
@@ -50,9 +57,26 @@ export function AgentTerminalPanel({
     activeTabId: null,
     tabs: [],
   });
+  const [launchError, setLaunchError] = useState<string | null>(null);
 
-  const openAgent = (agent: AgentKind) => {
-    setTabState((state) => addAgentTab(state, agent, nextTerminalTabId(agent)));
+  const openAgent = async (agent: AgentKind, mode: AgentTerminalMode = 'live') => {
+    setLaunchError(null);
+    try {
+      if (mode === 'live') {
+        setTabState((state) => addAgentTab(state, agent, nextTerminalTabId(agent), mode));
+        return;
+      }
+      const change = await createLocalAgentChange(spaceSlug, agentDisplayName(agent));
+      setTabState((state) => addAgentTab(
+        state,
+        agent,
+        nextTerminalTabId(agent),
+        mode,
+        { changeId: change.id, worktreePath: change.worktreePath },
+      ));
+    } catch (cause) {
+      setLaunchError(cause instanceof Error ? cause.message : String(cause));
+    }
   };
 
   const closeTab = (tabId: string) => {
@@ -114,6 +138,11 @@ export function AgentTerminalPanel({
       </header>
 
       <div className="relative min-h-0 flex-1">
+        {launchError && (
+          <div className="absolute inset-x-0 top-0 z-10 bg-red-950 px-3 py-2 text-xs text-red-200">
+            {launchError}
+          </div>
+        )}
         {tabState.tabs.length === 0 ? (
           <AgentLaunchPage defaultAgent={defaultAgent} onOpenAgent={openAgent} />
         ) : (
@@ -122,6 +151,7 @@ export function AgentTerminalPanel({
               key={tab.id}
               tab={tab}
               spacePath={spacePath}
+              spaceSlug={spaceSlug}
               active={tab.id === tabState.activeTabId}
             />
           ))
@@ -136,7 +166,7 @@ function AgentLaunchPage({
   onOpenAgent,
 }: {
   defaultAgent: AgentKind;
-  onOpenAgent: (agent: AgentKind) => void;
+  onOpenAgent: (agent: AgentKind, mode?: AgentTerminalMode) => void;
 }) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-7 text-center">
@@ -145,10 +175,17 @@ function AgentLaunchPage({
       </div>
       <h2 className="text-base font-semibold text-text">Work with an agent</h2>
       <p className="mt-1.5 max-w-64 text-xs leading-relaxed text-text-tertiary">
-        Run your preferred local coding agent in this Space. Each agent gets its own terminal tab and edits the same files you see here.
+        Work live in the Current Draft, or isolate a background Agent Change for review.
       </p>
-      <Button className="mt-5 min-w-36 bg-[#e2590b] text-white hover:bg-[#c94b08]" onClick={() => onOpenAgent(defaultAgent)}>
-        Start {agentDisplayName(defaultAgent)}
+      <Button className="mt-5 min-w-44 bg-[#e2590b] text-white hover:bg-[#c94b08]" onClick={() => onOpenAgent(defaultAgent, 'live')}>
+        Start {agentDisplayName(defaultAgent)} live
+      </Button>
+      <Button
+        variant="outline"
+        className="mt-2 min-w-44"
+        onClick={() => onOpenAgent(defaultAgent, 'background')}
+      >
+        Run in background
       </Button>
       <AgentPicker defaultAgent={defaultAgent} onOpenAgent={onOpenAgent} />
     </div>
@@ -160,7 +197,7 @@ function AgentPicker({
   onOpenAgent,
 }: {
   defaultAgent: AgentKind;
-  onOpenAgent: (agent: AgentKind) => void;
+  onOpenAgent: (agent: AgentKind, mode?: AgentTerminalMode) => void;
 }) {
   return (
     <DropdownMenu>
@@ -173,9 +210,17 @@ function AgentPicker({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="center" className="w-52">
+        <DropdownMenuLabel className="text-xs text-text-tertiary">Live in Current Draft</DropdownMenuLabel>
         {SUPPORTED_AGENTS.filter((agent) => agent !== defaultAgent).map((agent) => (
-          <DropdownMenuItem key={agent} onSelect={() => onOpenAgent(agent)}>
+          <DropdownMenuItem key={`live-${agent}`} onSelect={() => onOpenAgent(agent, 'live')}>
             <Bot /> {agentDisplayName(agent)}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs text-text-tertiary">Run in background</DropdownMenuLabel>
+        {SUPPORTED_AGENTS.filter((agent) => agent !== defaultAgent).map((agent) => (
+          <DropdownMenuItem key={`background-${agent}`} onSelect={() => onOpenAgent(agent, 'background')}>
+            <GitBranch /> {agentDisplayName(agent)}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -183,7 +228,11 @@ function AgentPicker({
   );
 }
 
-function NewViewMenu({ onOpenAgent }: { onOpenAgent: (agent: AgentKind) => void }) {
+function NewViewMenu({
+  onOpenAgent,
+}: {
+  onOpenAgent: (agent: AgentKind, mode?: AgentTerminalMode) => void;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -198,10 +247,17 @@ function NewViewMenu({ onOpenAgent }: { onOpenAgent: (agent: AgentKind) => void 
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-48">
-        <DropdownMenuLabel className="text-xs text-text-tertiary">New agent</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-xs text-text-tertiary">Live in Current Draft</DropdownMenuLabel>
         {SUPPORTED_AGENTS.map((agent) => (
-          <DropdownMenuItem key={agent} onSelect={() => onOpenAgent(agent)}>
+          <DropdownMenuItem key={`live-${agent}`} onSelect={() => onOpenAgent(agent, 'live')}>
             <Bot /> {agentDisplayName(agent)}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs text-text-tertiary">Run in background</DropdownMenuLabel>
+        {SUPPORTED_AGENTS.map((agent) => (
+          <DropdownMenuItem key={`background-${agent}`} onSelect={() => onOpenAgent(agent, 'background')}>
+            <GitBranch /> {agentDisplayName(agent)}
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
@@ -217,12 +273,15 @@ function NewViewMenu({ onOpenAgent }: { onOpenAgent: (agent: AgentKind) => void 
 function AgentTerminalInstance({
   tab,
   spacePath,
+  spaceSlug,
   active,
 }: {
   tab: AgentTerminalTab;
   spacePath: string;
+  spaceSlug: string;
   active: boolean;
 }) {
+  const cwd = tab.mode === 'background' ? tab.worktreePath! : spacePath;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -237,7 +296,10 @@ function AgentTerminalInstance({
   }, []);
 
   const { error, resize, start, status, write } = useAgentTerminal({
-    cwd: spacePath,
+    cwd,
+    mode: tab.mode,
+    spaceSlug,
+    changeId: tab.changeId,
     agent: tab.agent,
     onData: handleData,
     onExit: (exitCode) => {
@@ -293,10 +355,10 @@ function AgentTerminalInstance({
   useEffect(() => {
     const terminal = terminalRef.current;
     if (!terminal) return;
-    terminal.writeln(`Starting ${agentDisplayName(tab.agent)} in ${spacePath}…`);
+    terminal.writeln(`Starting ${agentDisplayName(tab.agent)} in ${cwd}…`);
     fitAddonRef.current?.fit();
     void start({ cols: terminal.cols, rows: terminal.rows });
-  }, [spacePath, start, tab.agent]);
+  }, [cwd, start, tab.agent]);
 
   useEffect(() => {
     if (!active) return;
@@ -313,7 +375,10 @@ function AgentTerminalInstance({
     >
       <div className="flex h-7 shrink-0 items-center border-b border-white/8 px-2.5 text-[10px] text-white/35">
         <span>{status}</span>
-        <span className="ml-2 truncate">{spacePath}</span>
+        <span className="ml-2 shrink-0 text-white/55">
+          {tab.mode === 'background' ? 'Background Change' : 'Current Draft'}
+        </span>
+        <span className="ml-2 truncate">{cwd}</span>
         <Button
           type="button"
           variant="ghost"

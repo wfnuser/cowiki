@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
+  AgentChange,
   PageFull,
   PageMeta,
   FileDiff,
@@ -76,6 +77,22 @@ export function workingDiff(spaceSlug: string): Promise<FileDiff[]> {
 
 export function keepWorkingDiff(spaceSlug: string, expected: FileDiff[]): Promise<unknown> {
   return invoke('local_keep_working_diff', { spaceSlug, expected });
+}
+
+export function createAgentChange(spaceSlug: string, agentName: string): Promise<AgentChange> {
+  return invoke('local_create_agent_change', { spaceSlug, agentName });
+}
+
+export function listAgentChanges(spaceSlug: string): Promise<AgentChange[]> {
+  return invoke('local_list_agent_changes', { spaceSlug });
+}
+
+export function mergeAgentChange(spaceSlug: string, changeId: string): Promise<AgentChange> {
+  return invoke('local_merge_agent_change', { spaceSlug, changeId });
+}
+
+export function discardAgentChange(spaceSlug: string, changeId: string): Promise<AgentChange> {
+  return invoke('local_discard_agent_change', { spaceSlug, changeId });
 }
 
 export function search(spaceSlug: string, query: string, limit: number): Promise<SearchResponse> {

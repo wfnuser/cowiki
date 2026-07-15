@@ -709,6 +709,7 @@ dependencies = [
  "calamine",
  "docx-rs",
  "git2",
+ "libc",
  "pdf-extract",
  "percent-encoding",
  "portable-pty",
