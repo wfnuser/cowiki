@@ -1,5 +1,6 @@
 import { authHeaders } from './auth';
-import { apiBase } from './runtime';
+import { apiBase, isDesktopClient } from './runtime';
+import * as localApi from './local-api';
 
 const BASE = apiBase();
 
@@ -83,6 +84,8 @@ export interface ReviewDetail {
 
 export interface KeywordHit {
   slug: string;
+  /** Relative Markdown path; present for local Spaces. */
+  path?: string;
   title: string;
   snippet: string;
   title_match: boolean;
@@ -108,6 +111,8 @@ export interface Workspace {
   slug: string;
   role: string;
   visibility: string;
+  /** Present only for local desktop Spaces. Never returned by the cloud API. */
+  localPath?: string;
 }
 
 export interface MemberInfo {
@@ -131,20 +136,17 @@ export interface PendingInvitation {
 
 export interface SourceItem {
   filename: string;
-  compiled: boolean;
-  compiled_pages: string[];
 }
 
 export interface SourceContent {
   filename: string;
   content: string;
-  compiled: boolean;
-  compiled_pages: string[];
 }
 
 // ── Workspaces ──
 
 export async function listWorkspaces(): Promise<Workspace[]> {
+  if (isDesktopClient()) return localApi.listSpaces();
   const res = await fetch(`${BASE}/workspaces`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -153,7 +155,17 @@ export async function listWorkspaces(): Promise<Workspace[]> {
   return res.json();
 }
 
-export async function createWorkspace(name: string, slug: string, visibility = 'private'): Promise<Workspace> {
+export async function createWorkspace(
+  name: string,
+  slug: string,
+  visibility = 'private',
+  localPath?: string,
+  createDirectory = false,
+): Promise<Workspace> {
+  if (isDesktopClient()) {
+    if (!localPath) throw new Error('Choose a local folder before creating a Space.');
+    return localApi.addSpace(name, slug, localPath, createDirectory);
+  }
   const res = await fetch(`${BASE}/workspaces`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
@@ -201,6 +213,7 @@ export async function renameWorkspace(slug: string, name: string): Promise<Works
 }
 
 export async function inviteToWorkspace(workspaceSlug: string, user: string, role = 'viewer', _expiresInDays = 7) {
+  void _expiresInDays;
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/invite`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
@@ -304,6 +317,7 @@ export async function listMembers(workspaceSlug: string): Promise<MemberInfo[]> 
 // ── Pages ──
 
 export async function listPages(branch = 'main', workspaceSlug: string, dir = 'all'): Promise<PageMeta[]> {
+  if (isDesktopClient()) return localApi.listPages(workspaceSlug, dir);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages?branch=${encodeURIComponent(branch)}&dir=${encodeURIComponent(dir)}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -313,6 +327,7 @@ export async function listPages(branch = 'main', workspaceSlug: string, dir = 'a
 }
 
 export async function getPage(slug: string, branch = 'main', workspaceSlug: string, dir = 'wiki'): Promise<PageFull> {
+  if (isDesktopClient()) return localApi.getPage(workspaceSlug, dir, slug);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages/${encodeURIComponent(slug)}?branch=${encodeURIComponent(branch)}&dir=${encodeURIComponent(dir)}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -321,7 +336,16 @@ export async function getPage(slug: string, branch = 'main', workspaceSlug: stri
   return res.json();
 }
 
-export async function writePage(slug: string, body: string, branch: string, workspaceSlug: string, dir = 'wiki'): Promise<void> {
+export async function writePage(
+  slug: string,
+  body: string,
+  branch: string,
+  workspaceSlug: string,
+  dir = 'wiki',
+  expectedBody?: string,
+  createOnly = false,
+): Promise<void> {
+  if (isDesktopClient()) return localApi.writePage(workspaceSlug, dir, slug, body, expectedBody, createOnly);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
@@ -333,9 +357,10 @@ export async function writePage(slug: string, body: string, branch: string, work
   }
 }
 
-// ── Ingest & Compile ──
+// ── Ingest ──
 
 export async function ingest(sourceType: string, content: string, branch: string, filename: string | undefined, workspaceSlug: string) {
+  if (isDesktopClient()) return localApi.ingest(workspaceSlug, sourceType, content, filename);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/ingest`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
@@ -348,22 +373,10 @@ export async function ingest(sourceType: string, content: string, branch: string
   return res.json();
 }
 
-export async function compile(branch: string, workspaceSlug: string) {
-  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/compile`, {
-    method: 'POST',
-    headers: h({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ branch }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `Request failed: ${res.status}`);
-  }
-  return res.json();
-}
-
 // ── Submit & Review ──
 
 export async function submit(branch: string, paths: string[], skipReview: boolean, workspaceSlug: string) {
+  if (isDesktopClient()) return localApi.submit(workspaceSlug, paths);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/submit`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
@@ -377,12 +390,27 @@ export async function submit(branch: string, paths: string[], skipReview: boolea
 }
 
 export async function listReviews(workspaceSlug: string): Promise<Submission[]> {
+  // Local Agent Changes will populate this from Git. Until one exists, the
+  // desktop review inbox is intentionally empty and never calls cloud HTTP.
+  if (isDesktopClient()) return [];
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/reviews`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Request failed: ${res.status}`);
   }
   return res.json();
+}
+
+/** Uncommitted Markdown/Git changes shown by the local Review inbox. */
+export async function getLocalWorkingDiff(workspaceSlug: string): Promise<FileDiff[]> {
+  if (!isDesktopClient()) return [];
+  return localApi.workingDiff(workspaceSlug);
+}
+
+/** Commit exactly the local snapshot the user reviewed; fail if files moved meanwhile. */
+export async function keepLocalWorkingDiff(workspaceSlug: string, expected: FileDiff[]): Promise<void> {
+  if (!isDesktopClient()) throw new Error('Local Review is available only in the desktop app');
+  await localApi.keepWorkingDiff(workspaceSlug, expected);
 }
 
 export async function getReview(workspaceSlug: string, id: string): Promise<ReviewDetail> {
@@ -408,6 +436,7 @@ export async function reviewAction(workspaceSlug: string, id: string, action: st
 }
 
 export async function createFolder(name: string, branch: string, parent: string | undefined, workspaceSlug: string) {
+  if (isDesktopClient()) return localApi.createFolder(workspaceSlug, name, parent);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/folders`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
@@ -429,6 +458,7 @@ export async function searchWorkspace(
   mode: 'all' | 'keyword' | 'semantic' = 'all',
   limit = 12,
 ): Promise<SearchResponse> {
+  if (isDesktopClient()) return localApi.search(workspaceSlug, q, limit);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/search?q=${encodeURIComponent(q)}&limit=${limit}&mode=${mode}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -482,12 +512,14 @@ export async function revokeApiKey(id: string): Promise<void> {
 // ── Sources ──
 
 export async function listSources(workspaceSlug: string, branch = 'main'): Promise<SourceItem[]> {
+  if (isDesktopClient()) return localApi.listSources(workspaceSlug);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/sources?branch=${encodeURIComponent(branch)}`, { headers: h() });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function getSource(workspaceSlug: string, filename: string, branch = 'main'): Promise<SourceContent> {
+  if (isDesktopClient()) return localApi.getSource(workspaceSlug, filename);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/sources/${encodeURIComponent(filename)}?branch=${encodeURIComponent(branch)}`, { headers: h() });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
@@ -665,6 +697,7 @@ export async function syncBranch(workspaceSlug: string, branch: string): Promise
 
 /** Rename/move a file or folder on your draft branch. Paths are repo paths (wiki/...). */
 export async function renamePath(workspaceSlug: string, branch: string, from: string, to: string): Promise<void> {
+  if (isDesktopClient()) return localApi.renamePath(workspaceSlug, from, to);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/paths/rename`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
@@ -675,6 +708,7 @@ export async function renamePath(workspaceSlug: string, branch: string, from: st
 
 /** Delete a file or an entire folder on your draft branch. Path is a repo path (wiki/...). */
 export async function deletePath(workspaceSlug: string, branch: string, path: string): Promise<void> {
+  if (isDesktopClient()) return localApi.deletePath(workspaceSlug, path);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/paths/delete`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),

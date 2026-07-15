@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { FileText, Search, Sparkles, CornerDownLeft, X } from 'lucide-react';
 import { searchWorkspace, type SearchResponse } from '../api';
 import { C, fonts } from '@/lib/design';
+import { isDesktopClient } from '@/runtime';
 
 /** Highlight occurrences of `q` inside `text` (case-insensitive). */
 function Highlight({ text, q }: { text: string; q: string }) {
@@ -33,7 +34,7 @@ function Highlight({ text, q }: { text: string; q: string }) {
 }
 
 type Row =
-  | { kind: 'keyword'; slug: string; title: string; snippet: string; titleMatch: boolean }
+  | { kind: 'keyword'; slug: string; path?: string; title: string; snippet: string; titleMatch: boolean }
   | { kind: 'semantic'; slug: string; title: string; summary: string; source: string };
 
 /**
@@ -111,20 +112,27 @@ export function SearchModal({
         .catch(() => setKw([]))
         .finally(() => setKwLoading(false));
     }, 120);
-    setSemLoading(true);
-    semTimer.current = setTimeout(() => {
-      searchWorkspace(workspaceSlug, q.trim(), 'semantic')
-        .then((r) => setSem(r.semantic))
-        .catch(() => setSem([]))
-        .finally(() => setSemLoading(false));
-    }, 300);
+    if (isDesktopClient()) {
+      // The local index is intentionally lexical in V1. Do not scan the same
+      // repository twice for an empty semantic result.
+      setSem([]);
+      setSemLoading(false);
+    } else {
+      setSemLoading(true);
+      semTimer.current = setTimeout(() => {
+        searchWorkspace(workspaceSlug, q.trim(), 'semantic')
+          .then((r) => setSem(r.semantic))
+          .catch(() => setSem([]))
+          .finally(() => setSemLoading(false));
+      }, 300);
+    }
     return () => { clearTimeout(kwTimer.current); clearTimeout(semTimer.current); };
   }, [q, open, workspaceSlug]);
 
   // Flattened rows for keyboard navigation (semantic deduped against keyword).
   const rows: Row[] = useMemo(() => {
     const out: Row[] = (kw ?? []).map((h) => ({
-      kind: 'keyword', slug: h.slug, title: h.title, snippet: h.snippet, titleMatch: h.title_match,
+      kind: 'keyword', slug: h.slug, path: h.path, title: h.title, snippet: h.snippet, titleMatch: h.title_match,
     }));
     const seen = new Set((kw ?? []).map((h) => h.slug));
     for (const h of sem ?? []) {
@@ -139,7 +147,7 @@ export function SearchModal({
   const pick = useCallback((row: Row | undefined) => {
     if (!row) return;
     onClose();
-    onSelectPage(row.slug);
+    onSelectPage(row.slug, row.kind === 'keyword' ? row.path : undefined);
   }, [onClose, onSelectPage]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {

@@ -1,4 +1,4 @@
-import { Plus, Settings, Compass, LogOut, Bell } from 'lucide-react';
+import { Plus, Settings, Compass, LogOut, Bell, Cloud } from 'lucide-react';
 import type { Workspace } from '../../api';
 import {
   Tooltip, TooltipContent, TooltipTrigger,
@@ -21,10 +21,13 @@ interface SpaceRailProps {
   onSettings: () => void;
   onDiscover: () => void;
   onLogout: () => void;
+  onConnectCloud: () => void;
   notifUnread: number;
   onShowNotifications: () => void;
   /** Hosted sessions only — local mode has no one to notify you about. */
   showBell: boolean;
+  /** Discover and sign-out only make sense after connecting a cloud account. */
+  showCloudActions: boolean;
 }
 
 export function SpaceRail({
@@ -36,67 +39,51 @@ export function SpaceRail({
   onSettings,
   onDiscover,
   onLogout,
+  onConnectCloud,
   notifUnread,
   onShowNotifications,
   showBell,
+  showCloudActions,
 }: SpaceRailProps) {
-  const personalSpaces = workspaces.filter((w) => w.visibility === 'private' && w.role === 'owner');
-  const teamSpaces = workspaces.filter((w) => !(w.visibility === 'private' && w.role === 'owner'));
-
   return (
     <aside style={{
-      width: 64, minWidth: 64, height: '100vh',
+      width: 68, minWidth: 68, height: '100vh',
       background: C.rail, borderRight: `1px solid ${C.line}`,
       display: 'flex', flexDirection: 'column', alignItems: 'center',
-      padding: '0 0 12px', gap: 0, position: 'sticky', top: 0,
+      // macOS traffic lights live in the overlay titlebar. Reserve their row
+      // so they never collide with the CoWiki logo or Space buttons.
+      padding: '30px 0 12px', boxSizing: 'border-box', gap: 0, position: 'sticky', top: 0,
       zIndex: 20,
     }}>
       {/* Logo — matches panel header height (52px) */}
       <div style={{
-        width: 64, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: 68, height: 46, display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: 'default', flexShrink: 0,
       }}>
-        <span style={{
-          fontFamily: '"Source Serif 4 Variable", Georgia, serif',
-          fontWeight: 700, fontSize: 22, color: C.ink, letterSpacing: '-0.02em',
-        }}>
-          C<span style={{ color: C.accent }}>.</span>
-        </span>
+        <img src="/cowiki-logo.svg" alt="CoWiki" width={30} height={30} />
       </div>
 
       {/* Separator */}
       <div style={{ width: 26, height: 1, background: C.line, marginBottom: 6 }} />
 
-      {/* Personal space tiles */}
-      {personalSpaces.map((ws) => (
+      {/* A local Space and a cloud-enabled Space are the same product object.
+          Use a stable color + initial rather than encoding storage mode here. */}
+      {workspaces.map((ws) => {
+        const colorIndex = Array.from(ws.id || ws.slug).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+        return (
         <SpaceTile
           key={ws.id}
           workspace={ws}
           active={activeWorkspaceId === ws.id}
           onClick={() => onSelectWorkspace(ws)}
-          color={C.accent}
+          color={tileColor(colorIndex)}
           style={{
-            background: C.accent,
-            color: '#fff',
-          }}
-          icon={<svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><circle cx="10" cy="7" r="3.4"/><path d="M4 19.5a6 6 0 0 1 10.5-4"/><rect x="14.5" y="15" width="6.5" height="5.5" rx="1"/><path d="M16 15v-1.2a1.75 1.75 0 0 1 3.5 0V15"/></svg>}
-        />
-      ))}
-
-      {/* Team space tiles */}
-      {teamSpaces.map((ws, i) => (
-        <SpaceTile
-          key={ws.id}
-          workspace={ws}
-          active={activeWorkspaceId === ws.id}
-          onClick={() => onSelectWorkspace(ws)}
-          color={tileColor(i)}
-          style={{
-            background: tileColor(i),
+            background: tileColor(colorIndex),
             color: '#fff',
           }}
         />
-      ))}
+        );
+      })}
 
       {/* Add button */}
       <Tooltip>
@@ -115,7 +102,7 @@ export function SpaceRail({
             <Plus size={16} />
           </button>
         </TooltipTrigger>
-        <TooltipContent side="right">New team space</TooltipContent>
+        <TooltipContent side="right">Add a Space</TooltipContent>
       </Tooltip>
 
       {/* Spacer */}
@@ -135,22 +122,41 @@ export function SpaceRail({
               fontSize: 13, fontWeight: 600, color: C.ink2,
             }}
           >
-            {userName?.[0]?.toUpperCase() || 'U'}
+            {showCloudActions ? (userName?.[0]?.toUpperCase() || 'U') : <Cloud size={17} />}
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="right" align="end" className="w-44">
-          <div className="px-2 py-1.5 text-xs text-gray-500">{userName}</div>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={onSettings}>
-            <Settings size={14} className="mr-2" /> Settings
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={onDiscover}>
-            <Compass size={14} className="mr-2" /> Discover
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={onLogout}>
-            <LogOut size={14} className="mr-2" /> Sign out
-          </DropdownMenuItem>
+          {showCloudActions ? (
+            <>
+              <div className="px-2 py-1.5 text-xs text-gray-500">{userName}</div>
+              <DropdownMenuSeparator />
+            </>
+          ) : (
+            <>
+              <DropdownMenuItem onClick={onConnectCloud} className="items-start gap-2 py-2.5">
+                <Cloud size={16} className="mt-0.5 shrink-0" />
+                <span>
+                  <span className="block font-medium">Sign up / Sign in</span>
+                  <span className="block text-xs text-muted-foreground">Connect to CoWiki Cloud</span>
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
+          {showCloudActions && (
+            <>
+              <DropdownMenuItem onClick={onSettings}>
+                <Settings size={14} className="mr-2" /> Settings
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onDiscover}>
+                <Compass size={14} className="mr-2" /> Discover
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={onLogout}>
+                <LogOut size={14} className="mr-2" /> Sign out
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </aside>

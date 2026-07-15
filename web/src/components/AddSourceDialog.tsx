@@ -102,7 +102,7 @@ export function AddSourceDialog({
                 placeholder="https://example.com/article"
               />
               <p className="text-xs text-muted-foreground">
-                The page content will be automatically extracted and cleaned.
+                The URL is kept as an OKF source. Codex or Claude can read it and organize durable knowledge.
               </p>
             </TabsContent>
           </Tabs>

@@ -1,6 +1,17 @@
+mod knowledge_index;
+mod local_engine;
+mod mcp;
+mod terminal;
+
+use local_engine::{
+    FileDiff, LocalEngine, PageFull, PageMeta, SearchResponse, SourceContent, SourceItem, Space,
+    SubmitResult,
+};
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use tauri::{Manager, State};
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,102 +25,301 @@ struct DesktopOAuthCredential {
 async fn start_desktop_oauth(auth_base_url: String) -> Result<DesktopOAuthCredential, String> {
     tauri::async_runtime::spawn_blocking(move || run_loopback_oauth(auth_base_url))
         .await
-        .map_err(|e| format!("desktop oauth task failed: {e}"))?
+        .map_err(|error| format!("desktop OAuth task failed: {error}"))?
+}
+
+#[tauri::command]
+fn choose_local_space_directory() -> Option<String> {
+    rfd::FileDialog::new()
+        .pick_folder()
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn local_list_spaces(engine: State<'_, LocalEngine>) -> Result<Vec<Space>, String> {
+    engine.list_spaces()
+}
+
+#[tauri::command]
+fn local_add_space(
+    engine: State<'_, LocalEngine>,
+    name: String,
+    slug: String,
+    local_path: String,
+    create_directory: bool,
+) -> Result<Space, String> {
+    let selected = PathBuf::from(local_path);
+    let folder = if create_directory {
+        if name.trim().is_empty() || name.contains(['/', '\\']) || matches!(name.trim(), "." | "..")
+        {
+            return Err("Space name cannot be used as a folder name".to_string());
+        }
+        let folder = selected.join(name.trim());
+        std::fs::create_dir(&folder)
+            .map_err(|error| format!("cannot create Space folder: {error}"))?;
+        folder
+    } else {
+        selected
+    };
+    engine.add_space(&name, &slug, &folder)
+}
+
+#[tauri::command]
+fn local_list_pages(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    dir: String,
+) -> Result<Vec<PageMeta>, String> {
+    engine.list_pages(&space_slug, &dir)
+}
+
+#[tauri::command]
+fn local_get_page(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    dir: String,
+    page_slug: String,
+) -> Result<PageFull, String> {
+    engine.get_page(&space_slug, &dir, &page_slug)
+}
+
+#[tauri::command]
+fn local_write_page(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    dir: String,
+    page_slug: String,
+    content: String,
+    expected_content: Option<String>,
+    create_only: Option<bool>,
+) -> Result<(), String> {
+    engine.write_page_checked(
+        &space_slug,
+        &dir,
+        &page_slug,
+        &content,
+        expected_content.as_deref(),
+        create_only.unwrap_or(false),
+    )
+}
+
+#[tauri::command]
+fn local_create_folder(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    name: String,
+    parent: Option<String>,
+) -> Result<(), String> {
+    engine.create_folder(&space_slug, &name, parent.as_deref())
+}
+
+#[tauri::command]
+fn local_list_sources(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<Vec<SourceItem>, String> {
+    engine.list_sources(&space_slug)
+}
+
+#[tauri::command]
+fn local_get_source(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    filename: String,
+) -> Result<SourceContent, String> {
+    engine.get_source(&space_slug, &filename)
+}
+
+#[tauri::command]
+fn local_ingest(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    source_type: String,
+    content: String,
+    filename: Option<String>,
+) -> Result<SourceItem, String> {
+    engine.ingest(&space_slug, &source_type, &content, filename.as_deref())
+}
+
+#[tauri::command]
+fn local_rename_path(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    from: String,
+    to: String,
+) -> Result<(), String> {
+    engine.rename_path(&space_slug, &from, &to)
+}
+
+#[tauri::command]
+fn local_delete_path(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    path: String,
+) -> Result<(), String> {
+    engine.delete_path(&space_slug, &path)
+}
+
+#[tauri::command]
+fn local_search(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    query: String,
+    limit: usize,
+) -> Result<SearchResponse, String> {
+    engine.search(&space_slug, &query, limit)
+}
+
+#[tauri::command]
+fn local_submit(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    paths: Vec<String>,
+) -> Result<SubmitResult, String> {
+    engine.submit(&space_slug, &paths)
+}
+
+#[tauri::command]
+fn local_working_diff(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<Vec<FileDiff>, String> {
+    engine.working_diff(&space_slug)
+}
+
+#[tauri::command]
+fn local_keep_working_diff(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    expected: Vec<FileDiff>,
+) -> Result<SubmitResult, String> {
+    engine.keep_working_diff(&space_slug, &expected)
 }
 
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![start_desktop_oauth])
+        .invoke_handler(tauri::generate_handler![
+            start_desktop_oauth,
+            choose_local_space_directory,
+            local_list_spaces,
+            local_add_space,
+            local_list_pages,
+            local_get_page,
+            local_write_page,
+            local_create_folder,
+            local_list_sources,
+            local_get_source,
+            local_ingest,
+            local_rename_path,
+            local_delete_path,
+            local_search,
+            local_submit,
+            local_working_diff,
+            local_keep_working_diff,
+            terminal::terminal_create,
+            terminal::terminal_write,
+            terminal::terminal_resize,
+            terminal::terminal_kill,
+        ])
+        .setup(|app| {
+            // Keep the small, rebuildable index beside the previous local
+            // metadata so repositories opened by older CoWiki builds can be
+            // recovered automatically on upgrade.
+            let home = std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| app.path().app_data_dir().unwrap_or_default());
+            let cowiki_home = home.join("cowiki");
+            let engine = LocalEngine::open(&cowiki_home.join(".cowiki"))
+                .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
+            engine
+                .import_legacy_spaces(&cowiki_home)
+                .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
+            app.manage(engine);
+            app.manage(terminal::TerminalState::default());
+
+            let window =
+                tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+                    .title("CoWiki")
+                    .inner_size(1280.0, 860.0)
+                    .min_inner_size(980.0, 680.0)
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true)
+                    .build()?;
+            window.show()?;
+            window.set_focus()?;
+            Ok(())
+        })
         .run(tauri::generate_context!())
-        .expect("error while running cowiki desktop client");
+        .expect("error while running CoWiki desktop client");
+}
+
+pub fn run_mcp_if_requested() -> Result<bool, String> {
+    mcp::run_from_process_args()
 }
 
 fn run_loopback_oauth(auth_base_url: String) -> Result<DesktopOAuthCredential, String> {
     let listener = TcpListener::bind("127.0.0.1:0")
-        .map_err(|e| format!("failed to start local oauth callback: {e}"))?;
+        .map_err(|error| format!("failed to start local OAuth callback: {error}"))?;
     listener
         .set_nonblocking(true)
-        .map_err(|e| format!("failed to configure oauth callback listener: {e}"))?;
-
-    let callback_url = format!(
+        .map_err(|error| error.to_string())?;
+    let callback = format!(
         "http://127.0.0.1:{}/auth/callback",
         listener
             .local_addr()
-            .map_err(|e| format!("failed to read local oauth port: {e}"))?
+            .map_err(|error| error.to_string())?
             .port()
     );
-    let login_url = build_desktop_login_url(&auth_base_url, &callback_url)?;
-    open_system_browser(&login_url)?;
+    let mut login = url::Url::parse(&auth_base_url)
+        .map_err(|error| format!("invalid Cloud sign-in URL: {error}"))?;
+    login
+        .query_pairs_mut()
+        .append_pair("client", "desktop")
+        .append_pair("callback", &callback);
+    open_system_browser(login.as_str())?;
 
     let deadline = Instant::now() + Duration::from_secs(300);
     loop {
         match listener.accept() {
             Ok((mut stream, _)) => {
-                let mut buf = [0_u8; 8192];
-                let n = stream
-                    .read(&mut buf)
-                    .map_err(|e| format!("failed to read oauth callback: {e}"))?;
-                let request = String::from_utf8_lossy(&buf[..n]);
-                let first_line = request
+                let mut buffer = [0_u8; 8192];
+                let read = stream
+                    .read(&mut buffer)
+                    .map_err(|error| error.to_string())?;
+                let request = String::from_utf8_lossy(&buffer[..read]);
+                let target = request
                     .lines()
                     .next()
-                    .ok_or_else(|| "empty oauth callback request".to_string())?;
-                let credential = parse_callback_request_line(first_line)?;
-                let body = "CoWiki sign-in complete. You can return to the desktop app.";
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    body.len(),
-                    body
-                );
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .ok_or_else(|| "invalid OAuth callback".to_string())?;
+                let callback_url = url::Url::parse(&format!("http://127.0.0.1{target}"))
+                    .map_err(|error| error.to_string())?;
+                let parameters = callback_url
+                    .query_pairs()
+                    .into_owned()
+                    .collect::<std::collections::HashMap<_, _>>();
+                let credential = DesktopOAuthCredential {
+                    api_key: parameters.get("api_key").ok_or("missing api_key")?.clone(),
+                    user_name: parameters
+                        .get("user_name")
+                        .ok_or("missing user_name")?
+                        .clone(),
+                    user_id: parameters.get("user_id").ok_or("missing user_id")?.clone(),
+                };
+                let body = "CoWiki Cloud sign-in complete. You can return to the desktop app.";
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
                 let _ = stream.write_all(response.as_bytes());
                 return Ok(credential);
             }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 if Instant::now() >= deadline {
-                    return Err("desktop oauth timed out".into());
+                    return Err("Cloud sign-in timed out".to_string());
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
-            Err(e) => return Err(format!("failed to accept oauth callback: {e}")),
+            Err(error) => return Err(error.to_string()),
         }
     }
-}
-
-fn build_desktop_login_url(auth_base_url: &str, callback_url: &str) -> Result<String, String> {
-    let mut url = url::Url::parse(auth_base_url).map_err(|e| format!("invalid auth URL: {e}"))?;
-    url.query_pairs_mut()
-        .append_pair("client", "desktop")
-        .append_pair("callback", callback_url);
-    Ok(url.to_string())
-}
-
-fn parse_callback_request_line(line: &str) -> Result<DesktopOAuthCredential, String> {
-    let mut parts = line.split_whitespace();
-    let method = parts.next().unwrap_or_default();
-    let target = parts.next().unwrap_or_default();
-    if method != "GET" {
-        return Err("oauth callback must use GET".into());
-    }
-    let url = url::Url::parse(&format!("http://127.0.0.1{target}"))
-        .map_err(|e| format!("invalid oauth callback: {e}"))?;
-    if url.path() != "/auth/callback" {
-        return Err("unexpected oauth callback path".into());
-    }
-    let params: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
-    Ok(DesktopOAuthCredential {
-        api_key: params
-            .get("api_key")
-            .ok_or_else(|| "missing api_key in oauth callback".to_string())?
-            .to_string(),
-        user_name: params
-            .get("user_name")
-            .ok_or_else(|| "missing user_name in oauth callback".to_string())?
-            .to_string(),
-        user_id: params
-            .get("user_id")
-            .ok_or_else(|| "missing user_id in oauth callback".to_string())?
-            .to_string(),
-    })
 }
 
 fn open_system_browser(url: &str) -> Result<(), String> {
@@ -122,42 +332,10 @@ fn open_system_browser(url: &str) -> Result<(), String> {
     } else {
         std::process::Command::new("xdg-open").arg(url).status()
     }
-    .map_err(|e| format!("failed to open browser: {e}"))?;
-
+    .map_err(|error| error.to_string())?;
     if status.success() {
         Ok(())
     } else {
-        Err(format!("browser opener exited with status {status}"))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{build_desktop_login_url, parse_callback_request_line};
-
-    #[test]
-    fn builds_desktop_login_url_with_loopback_callback() {
-        let url = build_desktop_login_url(
-            "http://localhost:3000/api/auth/github",
-            "http://127.0.0.1:39281/auth/callback",
-        )
-        .unwrap();
-
-        assert_eq!(
-            url,
-            "http://localhost:3000/api/auth/github?client=desktop&callback=http%3A%2F%2F127.0.0.1%3A39281%2Fauth%2Fcallback",
-        );
-    }
-
-    #[test]
-    fn parses_loopback_callback_request_line() {
-        let credential = parse_callback_request_line(
-            "GET /auth/callback?api_key=cw_123&user_name=octo-cat&user_id=user-1 HTTP/1.1",
-        )
-        .unwrap();
-
-        assert_eq!(credential.api_key, "cw_123");
-        assert_eq!(credential.user_name, "octo-cat");
-        assert_eq!(credential.user_id, "user-1");
+        Err(format!("browser opener exited with {status}"))
     }
 }
