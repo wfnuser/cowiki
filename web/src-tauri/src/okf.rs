@@ -92,6 +92,7 @@ fn normalize_concept_document_as(
         Ok((None, body)) => (Mapping::new(), body),
         Err(_) => (Mapping::new(), content),
     };
+    remove_legacy_concept_kind(&mut mapping);
     set_if_missing_or_blank(&mut mapping, "type", Value::String(default_type.into()));
     set_if_missing_or_blank(
         &mut mapping,
@@ -382,11 +383,30 @@ fn concept_is_conforming(content: &str) -> bool {
     let Ok((Some(raw), _)) = split_frontmatter(content) else {
         return false;
     };
-    serde_yaml::from_str::<Mapping>(raw)
-        .ok()
-        .and_then(|mapping| mapping.get(Value::String("type".into())).cloned())
+    let Ok(mapping) = serde_yaml::from_str::<Mapping>(raw) else {
+        return false;
+    };
+    if has_legacy_concept_kind(&mapping) {
+        return false;
+    }
+    mapping
+        .get(Value::String("type".into()))
+        .cloned()
         .and_then(|value| value.as_str().map(str::to_string))
         .is_some_and(|value| !value.trim().is_empty())
+}
+
+fn has_legacy_concept_kind(mapping: &Mapping) -> bool {
+    mapping
+        .get(Value::String("kind".into()))
+        .and_then(Value::as_str)
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("concept"))
+}
+
+fn remove_legacy_concept_kind(mapping: &mut Mapping) {
+    if has_legacy_concept_kind(mapping) {
+        mapping.remove(Value::String("kind".into()));
+    }
 }
 
 fn index_body_is_conforming(content: &str) -> bool {
@@ -951,6 +971,31 @@ fn escape_target(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_concept_kind_is_removed_without_dropping_other_metadata() {
+        let original = "---\ntype: Note\ntitle: Test\nkind: concept\nowner: docs\n---\n\nBody\n";
+
+        let normalized = normalize_concept_document(original, "Test").unwrap();
+        let (frontmatter, body) = split_frontmatter(&normalized).unwrap();
+        let mapping =
+            serde_yaml::from_str::<Mapping>(frontmatter.unwrap()).expect("parse normalized YAML");
+
+        assert!(!mapping.contains_key(Value::String("kind".into())));
+        assert_eq!(
+            mapping
+                .get(Value::String("type".into()))
+                .and_then(Value::as_str),
+            Some("Note")
+        );
+        assert_eq!(
+            mapping
+                .get(Value::String("owner".into()))
+                .and_then(Value::as_str),
+            Some("docs")
+        );
+        assert_eq!(body, "\nBody\n");
+    }
 
     #[test]
     fn root_index_keeps_only_the_version_key_without_losing_legacy_metadata() {

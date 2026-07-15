@@ -1,4 +1,4 @@
-import type { AgentKind } from './terminal-contract';
+import { agentDisplayName, type AgentKind } from './terminal-contract.ts';
 
 export type AgentTerminalTab = {
   id: string;
@@ -40,6 +40,6 @@ export function closeAgentTab(
 export function terminalTabLabel(tabs: AgentTerminalTab[], tab: AgentTerminalTab): string {
   const matchingTabs = tabs.filter((candidate) => candidate.agent === tab.agent);
   const position = matchingTabs.findIndex((candidate) => candidate.id === tab.id);
-  const label = tab.agent === 'codex' ? 'Codex' : 'Claude';
+  const label = agentDisplayName(tab.agent);
   return matchingTabs.length > 1 ? `${label} ${position + 1}` : label;
 }

@@ -4,7 +4,7 @@ import test from 'node:test';
 import { restoreSystemFrontmatter, splitSystemFrontmatter } from '../src/lib/page-frontmatter.ts';
 
 test('system frontmatter is hidden from the editable document and restored exactly', () => {
-  const original = '---\ntitle: "Test"\nsummary: ""\nkind: concept\n---\n\nEditable text\n- [ ] Task';
+  const original = '---\ntype: Note\ntitle: "Test"\nsummary: ""\n---\n\nEditable text\n- [ ] Task';
   const page = splitSystemFrontmatter(original);
 
   assert.equal(page.body, 'Editable text\n- [ ] Task');

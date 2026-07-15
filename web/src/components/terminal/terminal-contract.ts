@@ -1,4 +1,6 @@
-export type AgentKind = 'codex' | 'claude';
+import { agentDefinition, type AgentKind } from '../../lib/agents.ts';
+
+export type { AgentKind } from '../../lib/agents.ts';
 
 export type TerminalSize = {
   cols: number;
@@ -16,7 +18,11 @@ export type TerminalExitEvent = {
 };
 
 export function agentInitialCommand(agent: AgentKind): string {
-  return agent;
+  return agentDefinition(agent).command;
+}
+
+export function agentDisplayName(agent: AgentKind): string {
+  return agentDefinition(agent).displayName;
 }
 
 export function normalizeTerminalSize(cols: number, rows: number): TerminalSize {

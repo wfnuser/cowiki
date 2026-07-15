@@ -54,6 +54,11 @@ import {
   loadSidebarLayout,
   saveSidebarLayout,
 } from '@/lib/sidebar-layout';
+import {
+  loadClientSettings,
+  saveClientSettings,
+  type DefaultAgent,
+} from '@/lib/client-settings';
 
 type ActiveView =
   | { kind: 'page'; slug: string; path?: string; content: PageFull | null }
@@ -95,6 +100,9 @@ export function MainLayout() {
   const [resizingSidebar, setResizingSidebar] = useState(false);
   const sidebarResizeStart = useRef({ pointerX: 0, width: sidebarLayout.width });
   const [agentPanelOpen, setAgentPanelOpen] = useState(false);
+  const [clientSettings, setClientSettings] = useState(() => (
+    loadClientSettings(window.localStorage)
+  ));
   const [agentPanelWidth, setAgentPanelWidth] = useState(() => {
     const saved = Number(window.localStorage.getItem('cowiki.agentPanelWidth'));
     return Number.isFinite(saved) ? Math.max(320, Math.min(720, saved)) : 440;
@@ -142,6 +150,12 @@ export function MainLayout() {
   useEffect(() => {
     window.localStorage.setItem('cowiki.agentPanelWidth', String(agentPanelWidth));
   }, [agentPanelWidth]);
+
+  const handleDefaultAgentChange = useCallback((defaultAgent: DefaultAgent) => {
+    const next = { defaultAgent };
+    setClientSettings(next);
+    saveClientSettings(window.localStorage, next);
+  }, []);
 
   useEffect(() => {
     if (!resizingAgentPanel) return;
@@ -891,7 +905,7 @@ export function MainLayout() {
               currentUserId={auth?.id}
             >
             {/* Top bar: breadcrumb + actions */}
-            <div style={{
+            <div data-tauri-drag-region="deep" style={{
               position: 'sticky', top: 0, zIndex: 10,
               background: C.panel, borderBottom: `1px solid ${C.line}`,
               padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -1188,6 +1202,7 @@ export function MainLayout() {
               />
               <AgentTerminalPanel
                 spacePath={activeWorkspace.localPath}
+                defaultAgent={clientSettings.defaultAgent}
                 onClose={() => setAgentPanelOpen(false)}
               />
             </div>
@@ -1344,7 +1359,16 @@ export function MainLayout() {
       </Dialog>
 
       {/* Settings dialog */}
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        clientMode={desktop}
+        cloudConnected={isRemoteAuth(auth)}
+        auth={auth}
+        defaultAgent={clientSettings.defaultAgent}
+        onDefaultAgentChange={handleDefaultAgentChange}
+        onConnectCloud={() => navigate('/login')}
+      />
     </>
   );
 }

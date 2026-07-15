@@ -14,8 +14,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { SUPPORTED_AGENTS } from '@/lib/agents';
 
-import { type AgentKind } from './terminal-contract';
+import { agentDisplayName, type AgentKind } from './terminal-contract';
 import {
   addAgentTab,
   closeAgentTab,
@@ -27,13 +28,9 @@ import { useAgentTerminal } from './useAgentTerminal';
 
 type AgentTerminalPanelProps = {
   spacePath: string;
+  defaultAgent: AgentKind;
   onClose?: () => void;
   className?: string;
-};
-
-const AGENT_LABELS: Record<AgentKind, string> = {
-  codex: 'Codex',
-  claude: 'Claude Code',
 };
 
 let terminalTabSequence = 0;
@@ -43,7 +40,12 @@ function nextTerminalTabId(agent: AgentKind): string {
   return `${agent}-${Date.now()}-${terminalTabSequence}`;
 }
 
-export function AgentTerminalPanel({ spacePath, onClose, className }: AgentTerminalPanelProps) {
+export function AgentTerminalPanel({
+  spacePath,
+  defaultAgent,
+  onClose,
+  className,
+}: AgentTerminalPanelProps) {
   const [tabState, setTabState] = useState<AgentTerminalTabsState>({
     activeTabId: null,
     tabs: [],
@@ -113,7 +115,7 @@ export function AgentTerminalPanel({ spacePath, onClose, className }: AgentTermi
 
       <div className="relative min-h-0 flex-1">
         {tabState.tabs.length === 0 ? (
-          <AgentLaunchPage onOpenAgent={openAgent} />
+          <AgentLaunchPage defaultAgent={defaultAgent} onOpenAgent={openAgent} />
         ) : (
           tabState.tabs.map((tab) => (
             <AgentTerminalInstance
@@ -129,7 +131,13 @@ export function AgentTerminalPanel({ spacePath, onClose, className }: AgentTermi
   );
 }
 
-function AgentLaunchPage({ onOpenAgent }: { onOpenAgent: (agent: AgentKind) => void }) {
+function AgentLaunchPage({
+  defaultAgent,
+  onOpenAgent,
+}: {
+  defaultAgent: AgentKind;
+  onOpenAgent: (agent: AgentKind) => void;
+}) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-7 text-center">
       <div className="mb-4 flex size-12 items-center justify-center rounded-xl border border-[#efd4c3] bg-[#fbeadd]">
@@ -137,19 +145,41 @@ function AgentLaunchPage({ onOpenAgent }: { onOpenAgent: (agent: AgentKind) => v
       </div>
       <h2 className="text-base font-semibold text-text">Work with an agent</h2>
       <p className="mt-1.5 max-w-64 text-xs leading-relaxed text-text-tertiary">
-        Codex and Claude Code run in this Space and edit the same local files you see here.
+        Run your preferred local coding agent in this Space. Each agent gets its own terminal tab and edits the same files you see here.
       </p>
-      <Button className="mt-5 min-w-36 bg-[#e2590b] text-white hover:bg-[#c94b08]" onClick={() => onOpenAgent('codex')}>
-        Start Codex
+      <Button className="mt-5 min-w-36 bg-[#e2590b] text-white hover:bg-[#c94b08]" onClick={() => onOpenAgent(defaultAgent)}>
+        Start {agentDisplayName(defaultAgent)}
       </Button>
-      <button
-        type="button"
-        className="mt-2 rounded px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-bg-hover"
-        onClick={() => onOpenAgent('claude')}
-      >
-        Use Claude Code
-      </button>
+      <AgentPicker defaultAgent={defaultAgent} onOpenAgent={onOpenAgent} />
     </div>
+  );
+}
+
+function AgentPicker({
+  defaultAgent,
+  onOpenAgent,
+}: {
+  defaultAgent: AgentKind;
+  onOpenAgent: (agent: AgentKind) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="mt-2 rounded px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-bg-hover"
+        >
+          Choose another agent
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="center" className="w-52">
+        {SUPPORTED_AGENTS.filter((agent) => agent !== defaultAgent).map((agent) => (
+          <DropdownMenuItem key={agent} onSelect={() => onOpenAgent(agent)}>
+            <Bot /> {agentDisplayName(agent)}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -169,12 +199,11 @@ function NewViewMenu({ onOpenAgent }: { onOpenAgent: (agent: AgentKind) => void 
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-48">
         <DropdownMenuLabel className="text-xs text-text-tertiary">New agent</DropdownMenuLabel>
-        <DropdownMenuItem onSelect={() => onOpenAgent('codex')}>
-          <Bot /> Codex
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onOpenAgent('claude')}>
-          <Bot /> Claude Code
-        </DropdownMenuItem>
+        {SUPPORTED_AGENTS.map((agent) => (
+          <DropdownMenuItem key={agent} onSelect={() => onOpenAgent(agent)}>
+            <Bot /> {agentDisplayName(agent)}
+          </DropdownMenuItem>
+        ))}
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-xs text-text-tertiary">Views</DropdownMenuLabel>
         <DropdownMenuItem disabled><FileText /> Files <span className="ml-auto text-[10px]">Soon</span></DropdownMenuItem>
@@ -213,7 +242,7 @@ function AgentTerminalInstance({
     onData: handleData,
     onExit: (exitCode) => {
       terminalRef.current?.writeln(
-        `\r\n[${AGENT_LABELS[tab.agent]} exited${exitCode == null ? '' : `: ${exitCode}`}]`,
+        `\r\n[${agentDisplayName(tab.agent)} exited${exitCode == null ? '' : `: ${exitCode}`}]`,
       );
     },
   });
@@ -264,7 +293,7 @@ function AgentTerminalInstance({
   useEffect(() => {
     const terminal = terminalRef.current;
     if (!terminal) return;
-    terminal.writeln(`Starting ${AGENT_LABELS[tab.agent]} in ${spacePath}…`);
+    terminal.writeln(`Starting ${agentDisplayName(tab.agent)} in ${spacePath}…`);
     fitAddonRef.current?.fit();
     void start({ cols: terminal.cols, rows: terminal.rows });
   }, [spacePath, start, tab.agent]);
@@ -290,7 +319,7 @@ function AgentTerminalInstance({
           variant="ghost"
           size="icon-xs"
           className="ml-auto text-white/45 hover:bg-white/10 hover:text-white"
-          aria-label={`Restart ${AGENT_LABELS[tab.agent]}`}
+          aria-label={`Restart ${agentDisplayName(tab.agent)}`}
           onClick={() => {
             const terminal = terminalRef.current;
             terminal?.reset();
