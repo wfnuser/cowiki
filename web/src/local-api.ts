@@ -3,6 +3,7 @@ import type {
   PageFull,
   PageMeta,
   FileDiff,
+  IngestFileOutcome,
   SearchResponse,
   SourceContent,
   SourceItem,
@@ -54,6 +55,15 @@ export function ingest(
   filename?: string,
 ): Promise<unknown> {
   return invoke('local_ingest', { spaceSlug, sourceType, content, filename });
+}
+
+/** Opens a native multi-file picker filtered to formats CoWiki can extract. */
+export function chooseSourceFiles(): Promise<string[]> {
+  return invoke('choose_source_files');
+}
+
+export function ingestFiles(spaceSlug: string, sourcePaths: string[]): Promise<IngestFileOutcome[]> {
+  return invoke('local_ingest_files', { spaceSlug, sourcePaths });
 }
 
 export function submit(spaceSlug: string, paths: string[]): Promise<unknown> {
