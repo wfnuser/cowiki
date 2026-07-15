@@ -28,6 +28,27 @@ pub struct SubmitResult {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Checkpoint {
+    pub id: String,
+    pub name: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftStatus {
+    pub changed_files: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SpaceHistory {
+    pub current_draft: DraftStatus,
+    pub checkpoints: Vec<Checkpoint>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct PageMeta {
     pub slug: String,
     pub path: String,
@@ -823,6 +844,98 @@ impl LocalEngine {
         Ok(has_changes)
     }
 
+    pub fn history(&self, space_slug: &str) -> Result<SpaceHistory, String> {
+        let repo = self.repo(space_slug)?;
+        let changed_files = draft_statuses(&repo)?.len();
+        let mut checkpoints = Vec::new();
+        let mut current = checkpoint_tip(&repo)?;
+
+        while let Some(oid) = current {
+            if repo.find_reference(&checkpoint_reference(oid)).is_err() {
+                break;
+            }
+            let commit = repo.find_commit(oid).map_err(|error| error.to_string())?;
+            checkpoints.push(Checkpoint {
+                id: oid.to_string(),
+                name: commit.summary().unwrap_or("Checkpoint").to_string(),
+                created_at: commit.time().seconds(),
+            });
+            current = if commit.parent_count() == 0 {
+                None
+            } else {
+                Some(commit.parent_id(0).map_err(|error| error.to_string())?)
+            };
+        }
+
+        Ok(SpaceHistory {
+            current_draft: DraftStatus { changed_files },
+            checkpoints,
+        })
+    }
+
+    pub fn create_checkpoint(
+        &self,
+        space_slug: &str,
+        name: Option<&str>,
+    ) -> Result<Checkpoint, String> {
+        let repo = self.repo(space_slug)?;
+        let root = repo
+            .workdir()
+            .ok_or_else(|| "local Space repository has no working directory".to_string())?;
+        let mut snapshot = repo.index().map_err(|error| error.to_string())?;
+        reset_index_to_head(&repo, &mut snapshot)?;
+        for relative in draft_statuses(&repo)? {
+            let path = Path::new(&relative);
+            if root.join(path).symlink_metadata().is_ok() {
+                snapshot.add_path(path).map_err(|error| error.to_string())?;
+            } else {
+                let _ = snapshot.remove_path(path);
+            }
+        }
+        let tree_id = snapshot.write_tree().map_err(|error| error.to_string())?;
+        let tree = repo.find_tree(tree_id).map_err(|error| error.to_string())?;
+        let parent_oid = checkpoint_tip(&repo)?.or_else(|| {
+            repo.head()
+                .ok()
+                .and_then(|head| head.peel_to_commit().ok())
+                .map(|commit| commit.id())
+        });
+        let parent = parent_oid
+            .map(|oid| repo.find_commit(oid).map_err(|error| error.to_string()))
+            .transpose()?;
+        let parents = parent.iter().collect::<Vec<_>>();
+        let signature = Signature::now("CoWiki Checkpoint", "checkpoint@cowiki.app")
+            .map_err(|error| error.to_string())?;
+        let label = name
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("Checkpoint {}", signature.when().seconds()));
+        let oid = repo
+            .commit(None, &signature, &signature, &label, &tree, &parents)
+            .map_err(|error| error.to_string())?;
+        let immutable_ref = checkpoint_reference(oid);
+        repo.reference(&immutable_ref, oid, false, "Create CoWiki checkpoint")
+            .map_err(|error| error.to_string())?;
+        if let Err(error) = repo.reference(
+            CHECKPOINT_TIP_REF,
+            oid,
+            true,
+            "Advance CoWiki checkpoint history",
+        ) {
+            if let Ok(mut reference) = repo.find_reference(&immutable_ref) {
+                let _ = reference.delete();
+            }
+            return Err(error.to_string());
+        }
+
+        Ok(Checkpoint {
+            id: oid.to_string(),
+            name: label,
+            created_at: signature.when().seconds(),
+        })
+    }
+
     pub fn submit(&self, space_slug: &str, paths: &[String]) -> Result<SubmitResult, String> {
         let repo = self.repo(space_slug)?;
         let root = repo
@@ -975,6 +1088,39 @@ impl LocalEngine {
         let space = self.find_space(space_slug)?;
         Repository::open(&space.local_path).map_err(|e| e.to_string())
     }
+}
+
+const CHECKPOINT_TIP_REF: &str = "refs/cowiki/checkpoints/latest";
+
+fn checkpoint_reference(oid: Oid) -> String {
+    format!("refs/cowiki/checkpoints/{oid}")
+}
+
+fn checkpoint_tip(repo: &Repository) -> Result<Option<Oid>, String> {
+    match repo.find_reference(CHECKPOINT_TIP_REF) {
+        Ok(reference) => reference
+            .target()
+            .map(Some)
+            .ok_or_else(|| "CoWiki checkpoint history points to a symbolic ref".to_string()),
+        Err(error) if error.code() == git2::ErrorCode::NotFound => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn draft_statuses(repo: &Repository) -> Result<Vec<String>, String> {
+    let mut options = StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false);
+    let statuses = repo
+        .statuses(Some(&mut options))
+        .map_err(|error| error.to_string())?;
+    Ok(statuses
+        .iter()
+        .filter_map(|entry| entry.path().map(str::to_string))
+        .filter(|relative| safe_repo_path(relative).is_ok())
+        .collect())
 }
 
 fn reset_index_to_head(repo: &Repository, index: &mut git2::Index) -> Result<(), String> {
@@ -1879,6 +2025,116 @@ mod tests {
             .get_path(std::path::Path::new("notes/renamed.md"))
             .is_err());
         assert!(!engine.has_uncommitted_changes(&space.slug).unwrap());
+    }
+
+    #[test]
+    fn checkpoint_snapshots_the_current_draft_without_moving_head() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        let repo = git2::Repository::open(&folder).unwrap();
+        let head_before = repo.head().unwrap().target().unwrap();
+        let branch_before = repo.head().unwrap().name().unwrap().to_string();
+        drop(repo);
+
+        engine
+            .write_page(&space.slug, "draft", "# Draft\n\nFirst checkpoint\n")
+            .unwrap();
+        let saved_draft = engine.history(&space.slug).unwrap();
+        assert_eq!(saved_draft.current_draft.changed_files, 2);
+        assert!(saved_draft.checkpoints.is_empty());
+        let index_before = std::fs::read(folder.join(".git/index")).unwrap();
+        let checkpoint = engine
+            .create_checkpoint(&space.slug, Some("Checkpoint 2026-07-15 23:45"))
+            .unwrap();
+
+        let repo = git2::Repository::open(&folder).unwrap();
+        assert_eq!(repo.head().unwrap().target().unwrap(), head_before);
+        assert_eq!(repo.head().unwrap().name().unwrap(), branch_before);
+        assert_eq!(
+            std::fs::read(folder.join(".git/index")).unwrap(),
+            index_before
+        );
+        assert!(engine.has_uncommitted_changes(&space.slug).unwrap());
+        let snapshot = repo
+            .find_commit(git2::Oid::from_str(&checkpoint.id).unwrap())
+            .unwrap()
+            .tree()
+            .unwrap();
+        let blob = repo
+            .find_blob(
+                snapshot
+                    .get_path(std::path::Path::new("draft.md"))
+                    .unwrap()
+                    .id(),
+            )
+            .unwrap();
+        assert!(std::str::from_utf8(blob.content())
+            .unwrap()
+            .contains("First checkpoint"));
+        assert_eq!(checkpoint.name, "Checkpoint 2026-07-15 23:45");
+
+        let history = engine.history(&space.slug).unwrap();
+        assert_eq!(history.current_draft.changed_files, 2);
+        assert_eq!(history.checkpoints, vec![checkpoint]);
+        assert!(repo
+            .find_reference(&format!(
+                "refs/cowiki/checkpoints/{}",
+                history.checkpoints[0].id
+            ))
+            .is_ok());
+    }
+
+    #[test]
+    fn later_checkpoints_capture_the_exact_draft_and_list_newest_first() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+
+        engine
+            .write_page(&space.slug, "temporary", "# Temporary\n")
+            .unwrap();
+        let first = engine
+            .create_checkpoint(&space.slug, Some("First checkpoint"))
+            .unwrap();
+        engine.delete_path(&space.slug, "temporary.md").unwrap();
+        let second = engine
+            .create_checkpoint(&space.slug, Some("Second checkpoint"))
+            .unwrap();
+
+        let history = engine.history(&space.slug).unwrap();
+        assert_eq!(
+            history
+                .checkpoints
+                .iter()
+                .map(|checkpoint| checkpoint.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Second checkpoint", "First checkpoint"]
+        );
+        assert_eq!(history.current_draft.changed_files, 0);
+
+        let repo = git2::Repository::open(&folder).unwrap();
+        let first_commit = repo
+            .find_commit(git2::Oid::from_str(&first.id).unwrap())
+            .unwrap();
+        let second_commit = repo
+            .find_commit(git2::Oid::from_str(&second.id).unwrap())
+            .unwrap();
+        assert_eq!(second_commit.parent_id(0).unwrap(), first_commit.id());
+        assert!(first_commit
+            .tree()
+            .unwrap()
+            .get_path(std::path::Path::new("temporary.md"))
+            .is_ok());
+        assert!(second_commit
+            .tree()
+            .unwrap()
+            .get_path(std::path::Path::new("temporary.md"))
+            .is_err());
     }
 
     #[test]

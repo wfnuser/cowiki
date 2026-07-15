@@ -6,8 +6,8 @@ mod okf;
 mod terminal;
 
 use local_engine::{
-    FileDiff, IngestFileOutcome, LocalEngine, PageFull, PageMeta, SearchResponse, SourceContent,
-    SourceItem, Space, SubmitResult,
+    Checkpoint, FileDiff, IngestFileOutcome, LocalEngine, PageFull, PageMeta, SearchResponse,
+    SourceContent, SourceItem, Space, SpaceHistory, SubmitResult,
 };
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -218,6 +218,23 @@ fn local_keep_working_diff(
     engine.keep_working_diff(&space_slug, &expected)
 }
 
+#[tauri::command]
+fn local_history(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<SpaceHistory, String> {
+    engine.history(&space_slug)
+}
+
+#[tauri::command]
+fn local_create_checkpoint(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    name: Option<String>,
+) -> Result<Checkpoint, String> {
+    engine.create_checkpoint(&space_slug, name.as_deref())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -240,6 +257,8 @@ pub fn run() {
             local_submit,
             local_working_diff,
             local_keep_working_diff,
+            local_history,
+            local_create_checkpoint,
             terminal::terminal_create,
             terminal::terminal_write,
             terminal::terminal_resize,

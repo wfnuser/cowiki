@@ -30,6 +30,7 @@ type CreateSpaceMode = 'choose' | 'local' | 'import';
 import { ReviewList } from '../components/review/ReviewList';
 import { ReviewDetail } from '../components/review/ReviewDetail';
 import { MembersView } from '../components/views/MembersView';
+import { HistoryView } from '../components/views/HistoryView';
 import { InviteDialog } from '../components/InviteDialog';
 import { PageEditor, type PageEditorHandle } from '../components/PageEditor';
 import { PageByline } from '../components/PageByline';
@@ -66,7 +67,7 @@ type ActiveView =
   | { kind: 'review-list'; workspaceSlug: string }
   | { kind: 'review-detail'; workspaceSlug: string; submissionId: string }
   | { kind: 'members'; workspaceSlug: string }
-  | { kind: 'activity'; workspaceSlug: string }
+  | { kind: 'history'; workspaceSlug: string }
   | { kind: 'notifications' }
   | null;
 
@@ -579,9 +580,9 @@ export function MainLayout() {
         setActiveView({ kind: 'members', workspaceSlug: activeWorkspace.slug });
         navigate(`/${owner}/${activeWorkspace.slug}/members`);
         break;
-      case 'activity':
-        setActiveView({ kind: 'activity', workspaceSlug: activeWorkspace.slug });
-        navigate(`/${owner}/${activeWorkspace.slug}/activity`);
+      case 'history':
+        setActiveView({ kind: 'history', workspaceSlug: activeWorkspace.slug });
+        navigate(`/${owner}/${activeWorkspace.slug}/history`);
         break;
     }
   };
@@ -968,10 +969,10 @@ export function MainLayout() {
                     <span style={{ color: C.ink }}>Members</span>
                   </>
                 )}
-                {activeView?.kind === 'activity' && (
+                {activeView?.kind === 'history' && (
                   <>
                     <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>Activity</span>
+                    <span style={{ color: C.ink }}>History</span>
                   </>
                 )}
                 {activeView?.kind === 'notifications' && (
@@ -1080,14 +1081,12 @@ export function MainLayout() {
                   onTransfer={() => setShowTransferDialog(activeWorkspace)}
                 />
 
-              /* Activity */
-              ) : activeView?.kind === 'activity' ? (
-                <div>
-                  <h1 className="page-title">
-                    Activity
-                  </h1>
-                  <p style={{ color: C.muted, fontSize: 13 }}>Activity feed coming soon.</p>
-                </div>
+              /* Space history */
+              ) : activeView?.kind === 'history' && activeWorkspace ? (
+                <HistoryView
+                  workspaceSlug={activeWorkspace.slug}
+                  local={desktop && !!activeWorkspace.localPath}
+                />
 
               /* Source view */
               ) : activeView?.kind === 'source' && activeView.content ? (

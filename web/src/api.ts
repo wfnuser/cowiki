@@ -117,6 +117,20 @@ export interface Workspace {
   localPath?: string;
 }
 
+export interface Checkpoint {
+  id: string;
+  name: string;
+  /** Unix timestamp in seconds. */
+  createdAt: number;
+}
+
+export interface SpaceHistory {
+  currentDraft: {
+    changedFiles: number;
+  };
+  checkpoints: Checkpoint[];
+}
+
 export interface MemberInfo {
   id: string;
   name: string;
@@ -419,6 +433,20 @@ export async function getLocalWorkingDiff(workspaceSlug: string): Promise<FileDi
 export async function keepLocalWorkingDiff(workspaceSlug: string, expected: FileDiff[]): Promise<void> {
   if (!isDesktopClient()) throw new Error('Local Review is available only in the desktop app');
   await localApi.keepWorkingDiff(workspaceSlug, expected);
+}
+
+export async function getSpaceHistory(workspaceSlug: string): Promise<SpaceHistory> {
+  if (!isDesktopClient()) {
+    throw new Error('History is available only for local Spaces in the desktop app');
+  }
+  return localApi.history(workspaceSlug);
+}
+
+export async function createLocalCheckpoint(workspaceSlug: string, name?: string): Promise<Checkpoint> {
+  if (!isDesktopClient()) {
+    throw new Error('Checkpoints are available only for local Spaces in the desktop app');
+  }
+  return localApi.createCheckpoint(workspaceSlug, name);
 }
 
 export async function getReview(workspaceSlug: string, id: string): Promise<ReviewDetail> {
