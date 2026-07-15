@@ -2,12 +2,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Compass,
-  Upload, ArrowUpRight, MoreHorizontal,
+  Upload,
   Pencil, FolderOpen, PanelLeft, Bot, HardDrive, FolderInput, Cloud, UserPlus, ChevronLeft,
 } from 'lucide-react';
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -18,7 +15,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   listWorkspaces, listPages, getPage, createWorkspace, writePage, createFolder,
-  submit, renameWorkspace,
+  renameWorkspace,
   deleteWorkspace,
   listPublicWorkspaces, joinWorkspace,
   listSources, getSource, listReviews, renamePath, deletePath,
@@ -50,8 +47,6 @@ import {
   firstConcept,
   isReservedDocument,
   pageRoute,
-  shouldAttemptSubmit,
-  submitConceptPaths,
   visiblePageTree,
 } from '@/lib/okf-pages';
 import {
@@ -183,7 +178,6 @@ export function MainLayout() {
   const [newLocalPath, setNewLocalPath] = useState('');
   const [creating, setCreating] = useState(false);
   const [showIngest, setShowIngest] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [showRename, setShowRename] = useState<Workspace | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -544,29 +538,6 @@ export function MainLayout() {
       await loadSpacePages(ws);
     } catch {
       setMessage({ text: 'Failed to create folder', type: 'error' });
-    }
-  };
-
-  // Submit pages for review (or direct commit for personal)
-  const handleSubmit = async () => {
-    if (!activeWorkspace) return;
-    const ws = activeWorkspace;
-    setSubmitting(true);
-    setMessage(null);
-    try {
-      const pages = spacePages[ws.id] || [];
-      const paths = submitConceptPaths(pages);
-      if (!shouldAttemptSubmit(desktop, paths)) {
-        setMessage({ text: 'No changes to submit', type: 'error' });
-        return;
-      }
-      const personal = isPersonalSpace(ws);
-      await submit(userBranch, paths, personal, ws.slug);
-      setMessage({ text: personal ? 'Committed.' : 'Submitted for review.', type: 'success' });
-    } catch {
-      setMessage({ text: 'Submit failed', type: 'error' });
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -1032,22 +1003,6 @@ export function MainLayout() {
                       <Upload size={13} /> Add Source
                     </button>
                     <CommentsHeaderToggle style={{ ...headerBtnStyle, marginLeft: 2 }} />
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button style={{ ...headerBtnStyle, padding: '4px 6px' }} aria-label="More actions">
-                          <MoreHorizontal size={16} />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-40">
-                        <DropdownMenuItem
-                          onClick={desktop ? () => handleTabChange('reviews') : handleSubmit}
-                          disabled={!desktop && submitting}
-                        >
-                          <ArrowUpRight size={14} className="mr-2" />
-                          {desktop ? 'Review changes' : submitting ? 'Submitting...' : 'Submit'}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
                   </>
                 )}
 
