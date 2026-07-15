@@ -11,11 +11,9 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { C, spaceTileColors } from '@/lib/design';
+import { conceptIdFromPath, visiblePageTree } from '@/lib/okf-pages';
 
 export type NavTab = 'wiki' | 'reviews' | 'members' | 'activity';
-
-/** Supported content directory prefixes */
-type ContentDir = 'wiki' | 'entities' | 'concepts';
 
 interface SpacePanelProps {
   workspace: Workspace | null;
@@ -31,11 +29,11 @@ interface SpacePanelProps {
   isOwner: boolean;
   onSelectPage: (slug: string, path?: string) => void;
   onSelectSource: (filename: string) => void;
-  onNewPage: (dir?: ContentDir) => void;
-  onNewFolder: (dir?: ContentDir) => void;
-  onAddPageInFolder: (folderPath: string, dir: ContentDir) => void;
-  onAddFolderInFolder: (parentPath: string, dir: ContentDir) => void;
-  /** path is the repo path: <dir>/<slug>.md for pages, <dir>/<dir> for folders */
+  onNewPage: () => void;
+  onNewFolder: () => void;
+  onAddPageInFolder: (folderPath: string) => void;
+  onAddFolderInFolder: (parentPath: string) => void;
+  /** path is the stable bundle-relative path. */
   onRenamePath: (path: string, isFolder: boolean, title: string) => void;
   onDeletePath: (path: string, isFolder: boolean, title: string) => void;
   onShowIngest: () => void;
@@ -224,22 +222,21 @@ export function SpacePanel({
           }
         />
 
-        {/* Section 2: Wiki */}
+        {/* OKF concepts form one arbitrary bundle-relative hierarchy. */}
         <ContentSection
-          title="Wiki"
+          title="Knowledge"
           defaultExpanded
-          items={filterAndSortPages(pages, 'wiki')}
+          items={visiblePageTree(pages)}
           emptyText="No pages yet"
           renderItem={(p) => (
             <PageTreeItem
-              key={`${p.kind}:${p.slug}`}
+              key={`${p.kind}:${p.path}`}
               page={p}
-              dir="wiki"
               activePage={wikiActive ? activePage : null}
               depth={0}
               onSelectPage={onSelectPage}
-              onAddPageInFolder={(fp) => onAddPageInFolder(fp, 'wiki')}
-              onAddFolderInFolder={(pp) => onAddFolderInFolder(pp, 'wiki')}
+              onAddPageInFolder={onAddPageInFolder}
+              onAddFolderInFolder={onAddFolderInFolder}
               onRenamePath={onRenamePath}
               onDeletePath={onDeletePath}
             />
@@ -255,82 +252,8 @@ export function SpacePanel({
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-40">
-                <DropdownMenuItem onClick={() => onNewPage('wiki')}><FileText size={14} className="mr-2" /> New Page</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onNewFolder('wiki')}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          }
-        />
-
-        {/* Section 3: Entities */}
-        <ContentSection
-          title="Entities"
-          items={filterAndSortPages(pages, 'entities')}
-          emptyText="No pages yet"
-          renderItem={(p) => (
-            <PageTreeItem
-              key={`${p.kind}:${p.slug}`}
-              page={p}
-              dir="entities"
-              activePage={wikiActive ? activePage : null}
-              depth={0}
-              onSelectPage={onSelectPage}
-              onAddPageInFolder={(fp) => onAddPageInFolder(fp, 'entities')}
-              onAddFolderInFolder={(pp) => onAddFolderInFolder(pp, 'entities')}
-              onRenamePath={onRenamePath}
-              onDeletePath={onDeletePath}
-            />
-          )}
-          menuItems={
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button style={{
-                  background: 'none', border: 'none', cursor: 'pointer', padding: 2, borderRadius: 4,
-                  color: C.faint, display: 'flex',
-                }} onClick={(e) => e.stopPropagation()}>
-                  <Plus size={14} />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-40">
-                <DropdownMenuItem onClick={() => onNewPage('entities')}><FileText size={14} className="mr-2" /> New Page</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onNewFolder('entities')}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          }
-        />
-
-        {/* Section 4: Concepts */}
-        <ContentSection
-          title="Concepts"
-          items={filterAndSortPages(pages, 'concepts')}
-          emptyText="No pages yet"
-          renderItem={(p) => (
-            <PageTreeItem
-              key={`${p.kind}:${p.slug}`}
-              page={p}
-              dir="concepts"
-              activePage={wikiActive ? activePage : null}
-              depth={0}
-              onSelectPage={onSelectPage}
-              onAddPageInFolder={(fp) => onAddPageInFolder(fp, 'concepts')}
-              onAddFolderInFolder={(pp) => onAddFolderInFolder(pp, 'concepts')}
-              onRenamePath={onRenamePath}
-              onDeletePath={onDeletePath}
-            />
-          )}
-          menuItems={
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button style={{
-                  background: 'none', border: 'none', cursor: 'pointer', padding: 2, borderRadius: 4,
-                  color: C.faint, display: 'flex',
-                }} onClick={(e) => e.stopPropagation()}>
-                  <Plus size={14} />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-40">
-                <DropdownMenuItem onClick={() => onNewPage('concepts')}><FileText size={14} className="mr-2" /> New Page</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onNewFolder('concepts')}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
+                <DropdownMenuItem onClick={onNewPage}><FileText size={14} className="mr-2" /> New Page</DropdownMenuItem>
+                <DropdownMenuItem onClick={onNewFolder}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           }
@@ -351,13 +274,6 @@ export function SpacePanel({
 }
 
 /* ── Helpers ── */
-
-/** Filter pages by slug prefix and sort folders-first, then A→Z */
-function filterAndSortPages(pages: PageMeta[], prefix: ContentDir): PageMeta[] {
-  const dirNode = pages.find((p) => p.slug === prefix && p.kind === 'folder');
-  if (!dirNode || !dirNode.children) return [];
-  return sortPages(dirNode.children);
-}
 
 /** Sort pages: folders first, then A→Z within each group */
 function sortPages(pages: PageMeta[]): PageMeta[] {
@@ -472,7 +388,6 @@ function SourceEntry({
 /* ── Page tree item ── */
 function PageTreeItem({
   page,
-  dir,
   activePage,
   depth,
   onSelectPage,
@@ -482,7 +397,6 @@ function PageTreeItem({
   onDeletePath,
 }: {
   page: PageMeta;
-  dir: ContentDir;
   activePage: string | null;
   depth: number;
   onSelectPage: (slug: string, path?: string) => void;
@@ -493,7 +407,7 @@ function PageTreeItem({
 }) {
   const [open, setOpen] = useState(false);
   const pl = depth * 14;
-  const isActive = activePage === page.slug;
+  const isActive = activePage === conceptIdFromPath(page.path);
   const title = page.title || page.slug;
 
   // Hook must be at top level — not inside a conditional
@@ -503,8 +417,7 @@ function PageTreeItem({
   }, [page.kind, page.children]);
 
   if (page.kind === 'folder') {
-    // page.slug is the folder's path relative to the content dir; prepend the dir prefix
-    const folderPath = dir + '/' + page.slug;
+    const folderPath = page.path;
 
     return (
       <>
@@ -551,9 +464,8 @@ function PageTreeItem({
         </div>
         {open && sortedChildren.map((child) => (
           <PageTreeItem
-            key={`${child.kind}:${child.slug}`}
+            key={`${child.kind}:${child.path}`}
             page={child}
-            dir={dir}
             activePage={activePage}
             depth={depth + 1}
             onSelectPage={onSelectPage}
@@ -567,7 +479,8 @@ function PageTreeItem({
     );
   }
 
-  const pagePath = `${dir}/${page.slug}.md`;
+  const pagePath = page.path;
+  const conceptId = conceptIdFromPath(pagePath);
   return (
     <div
       style={{
@@ -590,7 +503,7 @@ function PageTreeItem({
         if (btn) btn.style.opacity = '0';
       }}
     >
-      <span onClick={() => onSelectPage(page.slug, page.path)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+      <span onClick={() => onSelectPage(conceptId, pagePath)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
         <FileText size={14} style={{ flexShrink: 0 }} />
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
       </span>

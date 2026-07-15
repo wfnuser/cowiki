@@ -29,7 +29,6 @@ import { SettingsDialog } from '../components/SettingsDialog';
 import { getCurrentAuth, clearAuth, isRemoteAuth, hasAuth } from '../auth';
 import { SpaceRail } from '../components/layout/SpaceRail';
 import { SpacePanel, type NavTab } from '../components/layout/SpacePanel';
-type ContentDir = 'wiki' | 'entities' | 'concepts';
 type CreateSpaceMode = 'choose' | 'local' | 'import';
 import { ReviewList } from '../components/review/ReviewList';
 import { ReviewDetail } from '../components/review/ReviewDetail';
@@ -45,6 +44,16 @@ import { C } from '@/lib/design';
 import { isDesktopClient } from '@/runtime';
 import { chooseLocalSpaceDirectory, localSpaceIdentityFromPath } from '@/local-space';
 import { AgentTerminalPanel } from '@/components/terminal/AgentTerminalPanel';
+import {
+  conceptIdFromPath,
+  conceptPath,
+  firstConcept,
+  isReservedDocument,
+  pageRoute,
+  shouldAttemptSubmit,
+  submitConceptPaths,
+  visiblePageTree,
+} from '@/lib/okf-pages';
 import {
   clampSidebarWidth,
   loadSidebarLayout,
@@ -169,8 +178,6 @@ export function MainLayout() {
   const [showNewFolder, setShowNewFolder] = useState<Workspace | null>(null);
   const [newPageFolder, setNewPageFolder] = useState<string | null>(null);
   const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
-  const [newPageDir, setNewPageDir] = useState<ContentDir>('wiki');
-  const [newFolderDir, setNewFolderDir] = useState<ContentDir>('wiki');
   const [newName, setNewName] = useState('');
   const [newSlug, setNewSlug] = useState('');
   const [newLocalPath, setNewLocalPath] = useState('');
@@ -225,13 +232,14 @@ export function MainLayout() {
       await loadSpaceSources(personal);
     }
 
-    // Restore page from URL: /:wsSlug/:pageSlug
+    // Restore a Concept from its stable bundle-relative ID:
+    // /:workspaceSlug/:folder/:concept (the .md suffix is not exposed).
     const pathParts = location.pathname.split('/').filter(Boolean);
     if (pathParts.length >= 2) {
       const [wsSlug, ...pageParts] = pathParts;
-      const pageSlug = pageParts.join('/');
-      const targetWs = ws.find((w) => w.slug === wsSlug);
-      if (targetWs) {
+      const conceptId = pageParts.map((part) => decodeURIComponent(part)).join('/');
+      const targetWs = ws.find((w) => w.slug === decodeURIComponent(wsSlug));
+      if (targetWs && !isReservedDocument(conceptPath(conceptId))) {
         setActiveWorkspace(targetWs);
         if (!spacePages[targetWs.id]) {
           await loadSpacePages(targetWs);
@@ -240,39 +248,23 @@ export function MainLayout() {
           await loadSpaceSources(targetWs);
         }
         const branch = targetWs.visibility === 'private' ? userBranch : 'main';
-        // Find the page in the tree to get its path
-        const findPath = (items: PageMeta[], targetSlug: string): string | undefined => {
-          for (const p of items) {
-            if (p.kind !== 'folder' && p.slug === targetSlug) return p.path;
-            if (p.children) {
-              const found = findPath(p.children, targetSlug);
-              if (found) return found;
-            }
-          }
-          return undefined;
-        };
-        const pagePath = findPath(spacePages[targetWs.id] || [], pageSlug);
-        const requestedDir = new URLSearchParams(location.search).get('dir');
-        const dir = requestedDir && ['wiki', 'entities', 'concepts'].includes(requestedDir)
-          ? requestedDir
-          : (pagePath?.split('/')[0] || 'wiki');
         try {
-          const page = await getPage(pageSlug, branch, targetWs.slug, dir);
+          const page = await getPage(conceptId, branch, targetWs.slug, 'wiki');
           persistedPageBody.current = page.body;
-          setActiveView({ kind: 'page', slug: pageSlug, path: pagePath ?? `${dir}/${pageSlug}.md`, content: page });
+          setActiveView({ kind: 'page', slug: conceptId, path: conceptPath(conceptId), content: page });
         } catch {
           // Page not found, just show home
         }
       }
     } else if (personal) {
-      const personalPages = await listPages(userBranch, personal.slug, 'all');
-      const firstPage = personalPages.find((p) => p.kind === 'page');
+      const personalPages = visiblePageTree(await listPages(userBranch, personal.slug, 'all'));
+      const firstPage = firstConcept(personalPages);
       if (firstPage) {
-        setActiveView({ kind: 'page', slug: firstPage.slug, path: firstPage.path, content: null });
-        navigate(`/${personal.slug}/${firstPage.slug}`, { replace: true });
-        const firstDir = firstPage.path?.split('/')[0] || 'wiki';
+        const conceptId = conceptIdFromPath(firstPage.path);
+        setActiveView({ kind: 'page', slug: conceptId, path: firstPage.path, content: null });
+        navigate(pageRoute(personal.slug, conceptId), { replace: true });
         try {
-          const page = await getPage(firstPage.slug, userBranch, personal.slug, firstDir);
+          const page = await getPage(conceptId, userBranch, personal.slug, 'wiki');
           setActiveView(prev => prev?.kind === 'page' ? { ...prev, content: page } : prev);
         } catch {
           // Page not found
@@ -305,10 +297,7 @@ export function MainLayout() {
     return ws.visibility === 'private' && ws.role === 'owner';
   }
 
-  /** Walk the page tree and recursively merge draft pages into main pages by path.
-   *  When both trees have a folder at the same path, their children are merged
-   *  recursively so that draft-only pages under existing section nodes (wiki,
-   *  entities, concepts) are not silently dropped. */
+  /** Merge main and draft recursively by stable bundle-relative path. */
   function mergePageTrees(main: PageMeta[], draft: PageMeta[]): PageMeta[] {
     const merged: PageMeta[] = [...main];
     const pathToIndex = new Map(merged.map((p, i) => [p.path, i] as const));
@@ -333,14 +322,14 @@ export function MainLayout() {
   // Load pages for a space
   const loadSpacePages = async (ws: Workspace) => {
     if (ws.visibility === 'private') {
-      const pages = await listPages(userBranch, ws.slug, 'all');
+      const pages = visiblePageTree(await listPages(userBranch, ws.slug, 'all'));
       setSpacePages((prev) => ({ ...prev, [ws.id]: pages }));
     } else {
       const [mainPages, draftPages] = await Promise.all([
         listPages('main', ws.slug, 'all'),
         listPages(userBranch, ws.slug, 'all').catch(() => [] as PageMeta[]),
       ]);
-      const merged = mergePageTrees(mainPages, draftPages);
+      const merged = visiblePageTree(mergePageTrees(mainPages, draftPages));
       setSpacePages((prev) => ({ ...prev, [ws.id]: merged }));
     }
   };
@@ -402,9 +391,9 @@ export function MainLayout() {
     if (!spaceSources[ws.id]) loadSpaceSources(ws);
     // Navigate to first page
     const pages = spacePages[ws.id] || [];
-    const first = pages.find((p) => p.kind === 'page');
+    const first = firstConcept(pages);
     if (first) {
-      selectPage(ws, first.slug, first.path);
+      selectPage(ws, conceptIdFromPath(first.path), first.path);
     } else {
       setActiveView(null);
     }
@@ -412,14 +401,16 @@ export function MainLayout() {
 
   // Select a page
   const selectPage = async (ws: Workspace, slug: string, path?: string) => {
+    const conceptId = path ? conceptIdFromPath(path) : conceptIdFromPath(slug);
+    const repoPath = path ? conceptPath(conceptIdFromPath(path)) : conceptPath(conceptId);
+    if (isReservedDocument(repoPath)) return;
     setActiveWorkspace(ws);
     setActiveTab('wiki');
     setEditingPage(false);
     persistedPageBody.current = null;
     externalConflictNotified.current = false;
-    setActiveView({ kind: 'page', slug, path, content: null });
-    const dir = path?.split('/')[0] || 'wiki';
-    navigate(`/${ws.slug}/${slug}?dir=${encodeURIComponent(dir)}`, { replace: true });
+    setActiveView({ kind: 'page', slug: conceptId, path: repoPath, content: null });
+    navigate(pageRoute(ws.slug, conceptId), { replace: true });
     const setContent = (content: PageFull | null) => {
       persistedPageBody.current = content?.body ?? null;
       setActiveView(prev => prev?.kind === 'page' ? { ...prev, content } : prev);
@@ -427,23 +418,23 @@ export function MainLayout() {
 
     if (ws.visibility === 'private') {
       try {
-        const page = await getPage(slug, userBranch, ws.slug, dir);
+        const page = await getPage(conceptId, userBranch, ws.slug, 'wiki');
         setContent(page);
       } catch {
         setContent(null);
-        setMessage({ text: `Page "${slug}" not found`, type: 'error' });
+        setMessage({ text: `Page "${conceptId}" not found`, type: 'error' });
       }
     } else {
       try {
-        const page = await getPage(slug, userBranch, ws.slug, dir);
+        const page = await getPage(conceptId, userBranch, ws.slug, 'wiki');
         setContent(page);
       } catch {
         try {
-          const page = await getPage(slug, 'main', ws.slug, dir);
+          const page = await getPage(conceptId, 'main', ws.slug, 'wiki');
           setContent(page);
         } catch {
           setContent(null);
-          setMessage({ text: `Page "${slug}" not found`, type: 'error' });
+          setMessage({ text: `Page "${conceptId}" not found`, type: 'error' });
         }
       }
     }
@@ -522,25 +513,19 @@ export function MainLayout() {
     const ws = showNewPage;
     const baseSlug = newName.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim()
       || `page-${crypto.randomUUID().slice(0, 8)}`;
-    // Strip dir prefix from folder path if creating inside a folder
-    const folderRelative = newPageFolder
-      ? newPageFolder.slice(newPageDir.length + 1) // e.g. "wiki/some/path" → "some/path"
-      : null;
-    const slug = folderRelative ? `${folderRelative}/${baseSlug}` : baseSlug;
-    const body = `---\ntype: Note\ntitle: "${newName.trim().replaceAll('"', '\\"')}"\ndescription: ""\npage_id: "${crypto.randomUUID()}"\n---\n\n`;
-    const pageDir = newPageDir;
+    const conceptId = newPageFolder ? `${newPageFolder}/${baseSlug}` : baseSlug;
+    const body = `---\ntype: Note\ntitle: "${newName.trim().replaceAll('"', '\\"')}"\ndescription: ""\n---\n\n`;
     try {
-      await writePage(slug, body, userBranch, ws.slug, pageDir, undefined, true);
+      await writePage(conceptId, body, userBranch, ws.slug, 'wiki', undefined, true);
       const title = newName.trim();
       setShowNewPage(null);
       setNewName('');
       setNewPageFolder(null);
-      setNewPageDir('wiki');
       await loadSpacePages(ws);
-      const newPath = `${pageDir}/${slug}`;
+      const newPath = conceptPath(conceptId);
       persistedPageBody.current = body;
-      setActiveView({ kind: 'page', slug, path: newPath, content: { slug, path: newPath, title, summary: '', body, branch: userBranch, kind: 'page', children: [] } });
-      navigate(`/${ws.slug}/${slug}?dir=${encodeURIComponent(pageDir)}`, { replace: true });
+      setActiveView({ kind: 'page', slug: conceptId, path: newPath, content: { slug: conceptId, path: newPath, title, summary: '', body, branch: userBranch, kind: 'page', children: [] } });
+      navigate(pageRoute(ws.slug, conceptId), { replace: true });
     } catch {
       setMessage({ text: 'Failed to create page', type: 'error' });
     }
@@ -552,11 +537,10 @@ export function MainLayout() {
     if (!newName.trim() || !showNewFolder) return;
     const ws = showNewFolder;
     try {
-      await createFolder(newName.trim(), userBranch, newFolderParent || newFolderDir, ws.slug);
+      await createFolder(newName.trim(), userBranch, newFolderParent || undefined, ws.slug);
       setShowNewFolder(null);
       setNewName('');
       setNewFolderParent(null);
-      setNewFolderDir('wiki');
       await loadSpacePages(ws);
     } catch {
       setMessage({ text: 'Failed to create folder', type: 'error' });
@@ -571,23 +555,11 @@ export function MainLayout() {
     setMessage(null);
     try {
       const pages = spacePages[ws.id] || [];
-      if (pages.length === 0) {
-        setMessage({ text: 'No pages to submit', type: 'error' });
+      const paths = submitConceptPaths(pages);
+      if (!shouldAttemptSubmit(desktop, paths)) {
+        setMessage({ text: 'No changes to submit', type: 'error' });
         return;
       }
-      // Flatten page tree to paths, skipping folders
-      const flatten = (items: PageMeta[]): string[] => {
-        const result: string[] = [];
-        for (const p of items) {
-          if (p.kind === 'folder' && p.children && p.children.length > 0) {
-            result.push(...flatten(p.children));
-          } else if (p.kind !== 'folder') {
-            result.push(p.path);
-          }
-        }
-        return result;
-      };
-      const paths = flatten(pages);
       const personal = isPersonalSpace(ws);
       await submit(userBranch, paths, personal, ws.slug);
       setMessage({ text: personal ? 'Committed.' : 'Submitted for review.', type: 'success' });
@@ -606,9 +578,9 @@ export function MainLayout() {
     switch (tab) {
       case 'wiki': {
         const pages = spacePages[activeWorkspace.id] || [];
-        const first = pages.find((p) => p.kind === 'page');
+        const first = firstConcept(pages);
         if (first) {
-          selectPage(activeWorkspace, first.slug, first.path);
+          selectPage(activeWorkspace, conceptIdFromPath(first.path), first.path);
         } else {
           setActiveView(null);
         }
@@ -716,8 +688,10 @@ export function MainLayout() {
           .replace(/[^a-z0-9\s-]/g, '')
           .trim()
           .replace(/\s+/g, '-') || `item-${crypto.randomUUID().slice(0, 8)}`;
-        const parent = pathOp.path.slice(0, pathOp.path.lastIndexOf('/'));
-        const to = pathOp.isFolder ? `${parent}/${slugified}` : `${parent}/${slugified}.md`;
+        const separator = pathOp.path.lastIndexOf('/');
+        const parent = separator === -1 ? '' : pathOp.path.slice(0, separator);
+        const renamed = pathOp.isFolder ? slugified : `${slugified}.md`;
+        const to = parent ? `${parent}/${renamed}` : renamed;
         if (to === pathOp.path) { setPathOp(null); return; }
         await renamePath(ws.slug, userBranch, pathOp.path, to);
         setMessage({ text: 'Renamed in your draft.', type: 'success' });
@@ -728,8 +702,7 @@ export function MainLayout() {
       setPathOp(null);
       // If the open page lived under the changed path, drop the stale view.
       if (activeView?.kind === 'page') {
-        const dir = activeView.path?.split('/')[0] || 'wiki';
-        const viewPath = `${dir}/${activeView.slug}.md`;
+        const viewPath = activeView.path || conceptPath(activeView.slug);
         if (viewPath === pathOp.path || viewPath.startsWith(pathOp.path + '/')) {
           setActiveView(null);
           navigate(`/`, { replace: true });
@@ -747,12 +720,11 @@ export function MainLayout() {
   const handleSavePage = async (body: string, expectedExternalBody?: string | null) => {
     if (!activeWorkspace || activeView?.kind !== 'page') return;
     const ws = activeWorkspace;
-    const dir = activeView.path?.split('/')[0] || 'wiki';
     const restoringDeletedPage = expectedExternalBody === null;
     const expectedBody = restoringDeletedPage
       ? undefined
       : expectedExternalBody ?? persistedPageBody.current ?? activeView.content?.body ?? undefined;
-    await writePage(activeView.slug, body, userBranch, ws.slug, dir, expectedBody, restoringDeletedPage);
+    await writePage(activeView.slug, body, userBranch, ws.slug, 'wiki', expectedBody, restoringDeletedPage);
     persistedPageBody.current = body;
     externalConflictNotified.current = false;
     setActiveView((previous) => previous?.kind === 'page' && previous.content
@@ -765,9 +737,8 @@ export function MainLayout() {
   const handleDoneEditing = async () => {
     setEditingPage(false);
     if (!activeWorkspace || activeView?.kind !== 'page') return;
-    const dir = activeView.path?.split('/')[0] || 'wiki';
     try {
-      const page = await getPage(activeView.slug, userBranch, activeWorkspace.slug, dir);
+      const page = await getPage(activeView.slug, userBranch, activeWorkspace.slug, 'wiki');
       persistedPageBody.current = page.body;
       setActiveView((prev) => (prev?.kind === 'page' ? { ...prev, content: page } : prev));
     } catch { /* keep the stale view */ }
@@ -780,12 +751,11 @@ export function MainLayout() {
     if (!desktop || !editingPage || !activeWorkspace || activeView?.kind !== 'page') return;
     const workspace = activeWorkspace;
     const slug = activeView.slug;
-    const dir = activeView.path?.split('/')[0] || 'wiki';
     let checking = false;
     const timer = window.setInterval(() => {
       if (checking) return;
       checking = true;
-      getPage(slug, userBranch, workspace.slug, dir)
+      getPage(slug, userBranch, workspace.slug, 'wiki')
         .then((latest) => {
           if (latest.body === persistedPageBody.current) return;
           const outcome = pageEditorRef.current?.applyExternalFile(latest.body);
@@ -809,9 +779,10 @@ export function MainLayout() {
     return () => window.clearInterval(timer);
   }, [activeView?.kind, activeView?.kind === 'page' ? activeView.slug : '', activeView?.kind === 'page' ? activeView.path : '', activeWorkspace, desktop, editingPage, userBranch]);
 
-  // Flat slug list for the editor's [[wikilink]] autocompletion.
+  // Full Concept IDs prevent ambiguous [[overview]] suggestions when two
+  // folders contain the same filename.
   const collectSlugs = (pages: PageMeta[]): string[] =>
-    pages.flatMap((p) => (p.kind === 'folder' ? collectSlugs(p.children) : [p.slug]));
+    pages.flatMap((p) => (p.kind === 'folder' ? collectSlugs(p.children) : [conceptIdFromPath(p.path)]));
 
   const personal = activeWorkspace ? isPersonalSpace(activeWorkspace) : false;
   const isOwner = activeWorkspace?.role === 'owner';
@@ -896,10 +867,10 @@ export function MainLayout() {
                 isOwner={isOwner}
                 onSelectPage={(slug, path) => activeWorkspace && selectPage(activeWorkspace, slug, path)}
                 onSelectSource={(filename) => activeWorkspace && selectSource(activeWorkspace, filename)}
-                onNewPage={(dir?: ContentDir) => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(null); setNewPageDir(dir || 'wiki'); } }}
-                onNewFolder={(dir?: ContentDir) => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(null); setNewFolderDir(dir || 'wiki'); } }}
-                onAddPageInFolder={(folderPath, dir) => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(folderPath); setNewPageDir(dir); } }}
-                onAddFolderInFolder={(parentPath, dir) => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(parentPath); setNewFolderDir(dir); } }}
+                onNewPage={() => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(null); } }}
+                onNewFolder={() => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(null); } }}
+                onAddPageInFolder={(folderPath) => { if (activeWorkspace) { setShowNewPage(activeWorkspace); setNewName(''); setNewPageFolder(folderPath); } }}
+                onAddFolderInFolder={(parentPath) => { if (activeWorkspace) { setShowNewFolder(activeWorkspace); setNewName(''); setNewFolderParent(parentPath); } }}
                 onRenamePath={(path, isFolder, title) => setPathOp({ kind: 'rename', path, isFolder, title, value: title })}
                 onDeletePath={(path, isFolder, title) => setPathOp({ kind: 'delete', path, isFolder, title })}
                 onShowIngest={() => setShowIngest(true)}

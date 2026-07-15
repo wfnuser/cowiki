@@ -1,3 +1,4 @@
+use git2::build::CheckoutBuilder;
 use git2::{IndexEntry, IndexTime, Oid, Repository, Signature, StatusOptions};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -6,6 +7,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::knowledge_index::{self, SearchHit};
+use crate::okf::{self, DocumentKind};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -145,28 +147,58 @@ impl LocalEngine {
         }
         let mut imported = 0;
         for entry in std::fs::read_dir(cowiki_home).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
-            let repo = entry.path().join("repo");
-            if !repo.join(".git").exists() {
-                continue;
-            }
-            let repo = repo.canonicalize().map_err(|e| e.to_string())?;
-            let slug = entry.file_name().to_string_lossy().to_string();
-            if self.space_by_path(&repo)?.is_some() {
-                continue;
-            }
-            let name = if slug.starts_with("personal-") {
-                "My Space".to_string()
-            } else if slug.starts_with("general-") {
-                "General".to_string()
-            } else {
-                slug.replace(['-', '_'], " ")
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    eprintln!("CoWiki skipped an unreadable legacy Space entry: {error}");
+                    continue;
+                }
             };
-            let space = self.insert_space(&name, &slug, &repo)?;
-            self.rebuild_search_index(&space.slug)?;
-            imported += 1;
+            let legacy_path = entry.path();
+            match self.import_legacy_space(&legacy_path) {
+                Ok(true) => imported += 1,
+                Ok(false) => {}
+                Err(error) => eprintln!(
+                    "CoWiki skipped legacy Space '{}': {error}",
+                    legacy_path.display()
+                ),
+            }
         }
         Ok(imported)
+    }
+
+    fn import_legacy_space(&self, legacy_path: &Path) -> Result<bool, String> {
+        let repo = legacy_path.join("repo");
+        if !repo.join(".git").exists() {
+            return Ok(false);
+        }
+        let repo = repo.canonicalize().map_err(|e| e.to_string())?;
+        if self.space_by_path(&repo)?.is_some() {
+            return Ok(false);
+        }
+
+        let slug = legacy_path
+            .file_name()
+            .ok_or_else(|| "legacy Space directory has no name".to_string())?
+            .to_string_lossy()
+            .to_string();
+        let git = Repository::open(&repo).map_err(|error| error.to_string())?;
+        prepare_okf_repository(&git, &repo)?;
+        let name = if slug.starts_with("personal-") {
+            "My Space".to_string()
+        } else if slug.starts_with("general-") {
+            "General".to_string()
+        } else {
+            slug.replace(['-', '_'], " ")
+        };
+        let space = self.insert_space(&name, &slug, &repo)?;
+        if let Err(error) = self.rebuild_search_index(&space.slug) {
+            eprintln!(
+                "CoWiki imported legacy Space '{}' without its search index: {error}",
+                space.slug
+            );
+        }
+        Ok(true)
     }
 
     pub fn add_space(&self, name: &str, slug: &str, folder: &Path) -> Result<Space, String> {
@@ -178,9 +210,10 @@ impl LocalEngine {
         if let Some(existing) = self.space_by_path(&local_path)? {
             return Ok(existing);
         }
-        Repository::open(&local_path)
+        let repo = Repository::open(&local_path)
             .or_else(|_| Repository::init(&local_path))
             .map_err(|e| format!("cannot initialize local Git repository: {e}"))?;
+        prepare_okf_repository(&repo, &local_path)?;
 
         let space = self.insert_space(name, slug, &local_path)?;
         self.rebuild_search_index(&space.slug)?;
@@ -237,24 +270,24 @@ impl LocalEngine {
     pub fn write_page(
         &self,
         space_slug: &str,
-        dir: &str,
         page_slug: &str,
         content: &str,
     ) -> Result<(), String> {
-        self.write_page_checked(space_slug, dir, page_slug, content, None, false)
+        self.write_page_checked(space_slug, page_slug, content, None, false)
     }
 
     pub fn write_page_checked(
         &self,
         space_slug: &str,
-        dir: &str,
         page_slug: &str,
         content: &str,
         expected_content: Option<&str>,
         create_only: bool,
     ) -> Result<(), String> {
         let space = self.find_space(space_slug)?;
-        let path = content_path(&space.local_path, dir, page_slug, true)?;
+        okf::ensure_supported_for_write(&space.local_path)?;
+        let relative = okf::concept_relative_path(page_slug)?;
+        let path = checked_space_path(&space.local_path, &relative)?;
         if let Some(expected) = expected_content {
             let current = std::fs::read_to_string(&path)
                 .map_err(|error| format!("cannot verify the current page: {error}"))?;
@@ -270,7 +303,9 @@ impl LocalEngine {
         }
         let temporary =
             path.with_extension(format!("md.cowiki-{}.tmp", uuid::Uuid::new_v4().simple()));
-        std::fs::write(&temporary, content).map_err(|e| e.to_string())?;
+        let fallback_title = relative.file_stem().unwrap_or_default().to_string_lossy();
+        let normalized = okf::normalize_concept_document(content, &fallback_title)?;
+        std::fs::write(&temporary, normalized).map_err(|e| e.to_string())?;
         if create_only {
             // `exists` followed by `rename` is a TOCTOU overwrite on macOS.
             // A hard link publishes the completed temp file atomically and
@@ -288,11 +323,12 @@ impl LocalEngine {
         } else {
             std::fs::rename(&temporary, &path).map_err(|e| e.to_string())?;
         }
+        okf::refresh_progressive_indexes(&space.local_path)?;
         let mut db = self
             .db
             .lock()
             .map_err(|_| "local database lock poisoned".to_string())?;
-        knowledge_index::index_file(&mut db, &space.id, &space.local_path, &path)
+        knowledge_index::rebuild_space(&mut db, &space.id, &space.local_path)
     }
 
     pub fn create_folder(
@@ -302,12 +338,19 @@ impl LocalEngine {
         parent: Option<&str>,
     ) -> Result<(), String> {
         let space = self.find_space(space_slug)?;
+        okf::ensure_supported_for_write(&space.local_path)?;
         let clean_name = safe_component(name, "folder name")?;
-        let parent = parent.unwrap_or("wiki");
-        let parent_path = ui_path(&space.local_path, parent)?;
+        let parent_path = match parent {
+            Some(parent) => ui_path(&space.local_path, parent)?,
+            None => space.local_path.clone(),
+        };
         let folder = parent_path.join(clean_name);
         ensure_inside(&space.local_path, &folder)?;
-        std::fs::create_dir(&folder).map_err(|error| format!("cannot create folder: {error}"))
+        std::fs::create_dir(&folder).map_err(|error| format!("cannot create folder: {error}"))?;
+        std::fs::write(folder.join("index.md"), okf::folder_index(clean_name))
+            .map_err(|error| error.to_string())?;
+        okf::refresh_progressive_indexes(&space.local_path)?;
+        self.rebuild_search_index(space_slug)
     }
 
     pub fn ingest(
@@ -318,9 +361,7 @@ impl LocalEngine {
         filename: Option<&str>,
     ) -> Result<SourceItem, String> {
         let space = self.find_space(space_slug)?;
-        let sources = section_root(&space.local_path, "sources")?;
-        std::fs::create_dir_all(&sources).map_err(|error| error.to_string())?;
-
+        okf::ensure_supported_for_write(&space.local_path)?;
         let fallback = match source_type {
             "url" => url::Url::parse(content.trim())
                 .ok()
@@ -329,15 +370,19 @@ impl LocalEngine {
             _ => "source".to_string(),
         };
         let requested = filename.unwrap_or(&fallback);
-        let stem = slugify_filename(requested);
-        let mut candidate = sources.join(format!("{stem}.md"));
+        let relative = okf::source_storage_path(requested)?;
+        let mut candidate = checked_space_path(&space.local_path, &relative)?;
         if candidate.exists() {
-            candidate = sources.join(format!(
+            let stem = candidate.file_stem().unwrap_or_default().to_string_lossy();
+            candidate.set_file_name(format!(
                 "{stem}-{}.md",
                 &uuid::Uuid::new_v4().simple().to_string()[..8]
             ));
         }
         ensure_inside(&space.local_path, &candidate)?;
+        if let Some(parent) = candidate.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
 
         let title = if source_type == "url" {
             content.trim()
@@ -350,26 +395,33 @@ impl LocalEngine {
             content.trim()
         );
         std::fs::write(&candidate, body).map_err(|error| error.to_string())?;
+        okf::refresh_progressive_indexes(&space.local_path)?;
         let mut db = self
             .db
             .lock()
             .map_err(|_| "local database lock poisoned".to_string())?;
-        knowledge_index::index_file(&mut db, &space.id, &space.local_path, &candidate)?;
+        knowledge_index::rebuild_space(&mut db, &space.id, &space.local_path)?;
         Ok(SourceItem {
             filename: candidate
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned(),
+                .strip_prefix(space.local_path.join(okf::RAW_SOURCES_DIR))
+                .map(normalize_path)
+                .map_err(|error| error.to_string())?,
         })
     }
 
     pub fn rename_path(&self, space_slug: &str, from: &str, to: &str) -> Result<(), String> {
         let space = self.find_space(space_slug)?;
+        okf::ensure_supported_for_write(&space.local_path)?;
         let from = ui_path(&space.local_path, from)?;
         let to = ui_path(&space.local_path, to)?;
         ensure_inside(&space.local_path, &from)?;
         ensure_inside(&space.local_path, &to)?;
+        if from.is_file()
+            && (DocumentKind::from_path(&from) != DocumentKind::Concept
+                || DocumentKind::from_path(&to) != DocumentKind::Concept)
+        {
+            return Err("index.md and log.md are reserved by OKF".to_string());
+        }
         if !from.exists() {
             return Err("the item to rename no longer exists".to_string());
         }
@@ -380,11 +432,13 @@ impl LocalEngine {
             std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
         std::fs::rename(&from, &to).map_err(|error| format!("cannot rename item: {error}"))?;
+        okf::refresh_progressive_indexes(&space.local_path)?;
         self.rebuild_search_index(space_slug)
     }
 
     pub fn delete_path(&self, space_slug: &str, value: &str) -> Result<(), String> {
         let space = self.find_space(space_slug)?;
+        okf::ensure_supported_for_write(&space.local_path)?;
         let path = ui_path(&space.local_path, value)?;
         ensure_inside(&space.local_path, &path)?;
         if path == space.local_path {
@@ -398,36 +452,19 @@ impl LocalEngine {
         } else {
             return Err("the item to delete no longer exists".to_string());
         }
+        okf::refresh_progressive_indexes(&space.local_path)?;
         self.rebuild_search_index(space_slug)
     }
 
-    pub fn list_pages(&self, space_slug: &str, dir: &str) -> Result<Vec<PageMeta>, String> {
+    pub fn list_pages(&self, space_slug: &str) -> Result<Vec<PageMeta>, String> {
         let space = self.find_space(space_slug)?;
-        let sections = if dir == "all" {
-            vec!["wiki", "entities", "concepts"]
-        } else {
-            vec![dir]
-        };
-        sections
-            .into_iter()
-            .map(|section| {
-                let root = section_root(&space.local_path, section)?;
-                Ok(PageMeta {
-                    slug: section.to_string(),
-                    path: section.to_string(),
-                    title: title_case(section),
-                    summary: String::new(),
-                    branch: "local".to_string(),
-                    kind: "folder".to_string(),
-                    children: read_page_tree(&root, section, &root)?,
-                })
-            })
-            .collect()
+        read_page_tree(&space.local_path, &space.local_path)
     }
 
-    pub fn get_page(&self, space_slug: &str, dir: &str, slug: &str) -> Result<PageFull, String> {
+    pub fn get_page(&self, space_slug: &str, slug: &str) -> Result<PageFull, String> {
         let space = self.find_space(space_slug)?;
-        let path = content_path(&space.local_path, dir, slug, true)?;
+        let relative = okf::concept_relative_path(slug)?;
+        let path = checked_space_path(&space.local_path, &relative)?;
         let body = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
         let title = markdown_title(&body).unwrap_or_else(|| {
             path.file_stem()
@@ -438,7 +475,7 @@ impl LocalEngine {
         Ok(PageFull {
             meta: PageMeta {
                 slug: slug.to_string(),
-                path: format!("{dir}/{slug}.md"),
+                path: normalize_path(&relative),
                 title,
                 summary: String::new(),
                 branch: "local".to_string(),
@@ -453,28 +490,27 @@ impl LocalEngine {
 
     pub fn list_sources(&self, space_slug: &str) -> Result<Vec<SourceItem>, String> {
         let space = self.find_space(space_slug)?;
-        let root = section_root(&space.local_path, "sources")?;
+        let root = space.local_path.join(okf::RAW_SOURCES_DIR);
         if !root.is_dir() {
             return Ok(vec![]);
         }
         let mut sources = Vec::new();
-        for entry in walkdir::WalkDir::new(root)
+        for entry in walkdir::WalkDir::new(&root)
             .into_iter()
             .filter_map(Result::ok)
         {
             if entry.file_type().is_file()
-                && !entry
+                && entry
                     .path()
-                    .components()
-                    .any(|component| component.as_os_str().to_string_lossy().starts_with('.'))
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
             {
                 sources.push(SourceItem {
                     filename: entry
                         .path()
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string(),
+                        .strip_prefix(&root)
+                        .map(normalize_path)
+                        .unwrap_or_default(),
                 });
             }
         }
@@ -483,7 +519,11 @@ impl LocalEngine {
 
     pub fn get_source(&self, space_slug: &str, filename: &str) -> Result<SourceContent, String> {
         let space = self.find_space(space_slug)?;
-        let path = content_path(&space.local_path, "sources", filename, false)?;
+        let relative = safe_source_relative_path(filename)?;
+        let path = checked_space_path(
+            &space.local_path,
+            &Path::new(okf::RAW_SOURCES_DIR).join(relative),
+        )?;
         Ok(SourceContent {
             filename: filename.to_string(),
             content: std::fs::read_to_string(path).map_err(|e| e.to_string())?,
@@ -502,11 +542,34 @@ impl LocalEngine {
     pub fn rebuild_all_search_indexes(&self) -> Result<(), String> {
         for space in self.list_spaces()? {
             if space.local_path.is_dir() {
+                match Repository::open(&space.local_path) {
+                    Ok(repo) => {
+                        if let Err(error) = prepare_okf_repository(&repo, &space.local_path) {
+                            eprintln!(
+                                "CoWiki skipped startup migration for Space '{}': {error}",
+                                space.slug
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "CoWiki could not open the Git repository for Space '{}': {error}",
+                            space.slug
+                        );
+                    }
+                }
                 let mut db = self
                     .db
                     .lock()
                     .map_err(|_| "local database lock poisoned".to_string())?;
-                knowledge_index::rebuild_space(&mut db, &space.id, &space.local_path)?;
+                if let Err(error) =
+                    knowledge_index::rebuild_space(&mut db, &space.id, &space.local_path)
+                {
+                    eprintln!(
+                        "CoWiki skipped startup indexing for Space '{}': {error}",
+                        space.slug
+                    );
+                }
             }
         }
         Ok(())
@@ -574,19 +637,8 @@ impl LocalEngine {
         relative_path: &str,
     ) -> Result<PageFull, String> {
         let space = self.find_space(space_slug)?;
-        let relative = Path::new(relative_path);
-        if relative.as_os_str().is_empty()
-            || relative
-                .extension()
-                .is_none_or(|extension| !extension.eq_ignore_ascii_case("md"))
-            || relative.components().any(|component| {
-                !matches!(component, Component::Normal(_))
-                    || component.as_os_str().to_string_lossy().starts_with('.')
-            })
-        {
-            return Err("invalid Markdown path".to_string());
-        }
-        let path = space.local_path.join(relative);
+        let relative = safe_knowledge_relative_path(relative_path)?;
+        let path = checked_space_path(&space.local_path, relative)?;
         let body = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
         let title = markdown_title(&body).unwrap_or_else(|| {
             path.file_stem()
@@ -594,15 +646,17 @@ impl LocalEngine {
                 .to_string_lossy()
                 .to_string()
         });
-        let normalized = relative
-            .components()
-            .map(|component| component.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/");
+        let normalized = normalize_path(relative);
         let slug = normalized
             .strip_suffix(".md")
             .unwrap_or(&normalized)
             .to_string();
+        let kind = match DocumentKind::from_path(relative) {
+            DocumentKind::Index => "index",
+            DocumentKind::Log => "log",
+            DocumentKind::Concept if normalized.starts_with(".cowiki/sources/") => "source",
+            _ => "page",
+        };
         Ok(PageFull {
             meta: PageMeta {
                 slug,
@@ -610,7 +664,7 @@ impl LocalEngine {
                 title,
                 summary: String::new(),
                 branch: "local".to_string(),
-                kind: "page".to_string(),
+                kind: kind.to_string(),
                 children: Vec::new(),
             },
             body,
@@ -643,6 +697,15 @@ impl LocalEngine {
 
     pub fn submit(&self, space_slug: &str, paths: &[String]) -> Result<SubmitResult, String> {
         let repo = self.repo(space_slug)?;
+        let root = repo
+            .workdir()
+            .ok_or_else(|| "local Space repository has no working directory".to_string())?;
+        okf::ensure_supported_for_write(root)?;
+        let backup = create_migration_backup(&repo, root)?;
+        if let Err(error) = okf::ensure_bundle(root) {
+            rollback_migration(&repo, root, &backup)?;
+            return Err(error);
+        }
         let mut index = repo.index().map_err(|e| e.to_string())?;
         if let Ok(head) = repo.head().and_then(|head| head.peel_to_commit()) {
             let tree = head.tree().map_err(|error| error.to_string())?;
@@ -658,6 +721,7 @@ impl LocalEngine {
                 let _ = index.remove_path(path);
             }
         }
+        stage_all_okf_changes(&repo, &mut index)?;
         index.write().map_err(|e| e.to_string())?;
         let tree_id = index.write_tree().map_err(|e| e.to_string())?;
 
@@ -666,6 +730,7 @@ impl LocalEngine {
             .as_ref()
             .is_some_and(|commit| commit.tree_id() == tree_id)
         {
+            delete_migration_backup(&repo, &backup.reference)?;
             return Ok(SubmitResult { committed: false });
         }
 
@@ -673,15 +738,18 @@ impl LocalEngine {
         let signature =
             Signature::now("CoWiki Local", "local@cowiki.app").map_err(|e| e.to_string())?;
         let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
-        repo.commit(
+        if let Err(error) = repo.commit(
             Some("HEAD"),
             &signature,
             &signature,
             "Update local Space",
             &tree,
             &parents,
-        )
-        .map_err(|e| e.to_string())?;
+        ) {
+            rollback_migration(&repo, root, &backup)?;
+            return Err(error.to_string());
+        }
+        delete_migration_backup(&repo, &backup.reference)?;
         Ok(SubmitResult { committed: true })
     }
 
@@ -690,6 +758,11 @@ impl LocalEngine {
         space_slug: &str,
         expected: &[FileDiff],
     ) -> Result<SubmitResult, String> {
+        let repo = self.repo(space_slug)?;
+        let root = repo
+            .workdir()
+            .ok_or_else(|| "local Space repository has no working directory".to_string())?;
+        okf::ensure_supported_for_write(root)?;
         let current = self.working_diff(space_slug)?;
         if current != expected {
             return Err(
@@ -697,7 +770,6 @@ impl LocalEngine {
                     .to_string(),
             );
         }
-        let repo = self.repo(space_slug)?;
         let mut index = repo.index().map_err(|error| error.to_string())?;
         reset_index_to_head(&repo, &mut index)?;
         for diff in expected {
@@ -724,12 +796,21 @@ impl LocalEngine {
                 let _ = index.remove_path(path);
             }
         }
+        stage_deterministic_okf_artifacts(&repo, &mut index)?;
         commit_index(&repo, &mut index)
     }
 
     pub fn working_diff(&self, space_slug: &str) -> Result<Vec<FileDiff>, String> {
         let space = self.find_space(space_slug)?;
         let repo = Repository::open(&space.local_path).map_err(|error| error.to_string())?;
+        if okf::ensure_supported_for_write(&space.local_path).is_ok() {
+            let backup = create_migration_backup(&repo, &space.local_path)?;
+            if let Err(error) = okf::ensure_bundle(&space.local_path) {
+                rollback_migration(&repo, &space.local_path, &backup)?;
+                return Err(error);
+            }
+            delete_migration_backup(&repo, &backup.reference)?;
+        }
         let mut options = StatusOptions::new();
         options
             .include_untracked(true)
@@ -743,10 +824,7 @@ impl LocalEngine {
             let Some(relative) = entry.path() else {
                 continue;
             };
-            if Path::new(relative)
-                .components()
-                .any(|component| component.as_os_str().to_string_lossy().starts_with('.'))
-            {
+            if safe_repo_path(relative).is_err() {
                 continue;
             }
             let old_content = head_text(&repo, relative)?;
@@ -806,35 +884,353 @@ fn commit_index(repo: &Repository, index: &mut git2::Index) -> Result<SubmitResu
     Ok(SubmitResult { committed: true })
 }
 
-fn ui_search_hit(root: &Path, mut hit: SearchHit) -> Option<SearchHit> {
+fn stage_all_okf_changes(repo: &Repository, index: &mut git2::Index) -> Result<(), String> {
+    let root = repo
+        .workdir()
+        .ok_or_else(|| "local Space repository has no working directory".to_string())?;
+    let mut options = StatusOptions::new();
+    options.include_untracked(true).recurse_untracked_dirs(true);
+    for status in repo
+        .statuses(Some(&mut options))
+        .map_err(|error| error.to_string())?
+        .iter()
+    {
+        let Some(relative) = status.path() else {
+            continue;
+        };
+        let markdown = DocumentKind::from_path(Path::new(relative)) != DocumentKind::Other;
+        let controlled_artifact = relative.starts_with(".cowiki/legacy/");
+        if (!markdown || safe_repo_path(relative).is_err()) && !controlled_artifact {
+            continue;
+        }
+        let path = Path::new(relative);
+        if root.join(path).is_file() {
+            index.add_path(path).map_err(|error| error.to_string())?;
+        } else {
+            let _ = index.remove_path(path);
+        }
+    }
+    Ok(())
+}
+
+fn stage_deterministic_okf_artifacts(
+    repo: &Repository,
+    index: &mut git2::Index,
+) -> Result<(), String> {
+    let root = repo
+        .workdir()
+        .ok_or_else(|| "local Space repository has no working directory".to_string())?;
+    let mut options = StatusOptions::new();
+    options.include_untracked(true).recurse_untracked_dirs(true);
+    for status in repo
+        .statuses(Some(&mut options))
+        .map_err(|error| error.to_string())?
+        .iter()
+    {
+        let Some(relative) = status.path() else {
+            continue;
+        };
+        if DocumentKind::from_path(Path::new(relative)) != DocumentKind::Index {
+            continue;
+        }
+        let path = Path::new(relative);
+        if root.join(path).is_file() {
+            index.add_path(path).map_err(|error| error.to_string())?;
+        } else {
+            let _ = index.remove_path(path);
+        }
+    }
+    for entry in walkdir::WalkDir::new(root.join(".cowiki/legacy"))
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+    {
+        let relative = entry
+            .path()
+            .strip_prefix(root)
+            .map_err(|error| error.to_string())?;
+        index
+            .add_path(relative)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn ui_search_hit(_root: &Path, mut hit: SearchHit) -> Option<SearchHit> {
     let without_extension = hit.path.strip_suffix(".md").unwrap_or(&hit.path);
-    let (section, slug) = if let Some(slug) = without_extension.strip_prefix("entities/") {
-        ("entities", slug)
-    } else if let Some(slug) = without_extension.strip_prefix("concepts/") {
-        ("concepts", slug)
-    } else if without_extension == "sources" || without_extension.starts_with("sources/") {
+    if without_extension == "index"
+        || without_extension == "log"
+        || without_extension.ends_with("/index")
+        || without_extension.ends_with("/log")
+        || without_extension.starts_with(".cowiki/sources/")
+    {
         return None;
-    } else if root.join("wiki").is_dir() {
-        ("wiki", without_extension.strip_prefix("wiki/")?)
-    } else {
-        ("wiki", without_extension)
-    };
-    hit.slug = slug.to_string();
-    hit.path = format!("{section}/{slug}.md");
+    }
+    hit.slug = without_extension.to_string();
     Some(hit)
 }
 
 fn safe_repo_path(value: &str) -> Result<&Path, String> {
     let path = Path::new(value);
     if path.as_os_str().is_empty()
-        || path.components().any(|component| {
-            !matches!(component, Component::Normal(_))
-                || component.as_os_str().to_string_lossy().starts_with('.')
-        })
+        || path
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
     {
         return Err("invalid reviewed path".to_string());
     }
+    let parts = path
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>();
+    let controlled_source = parts.first().is_some_and(|part| part == ".cowiki")
+        && parts.get(1).is_some_and(|part| part == "sources")
+        && parts.len() > 2
+        && parts[2..].iter().all(|part| !part.starts_with('.'));
+    if parts.iter().any(|part| part.starts_with('.')) && !controlled_source {
+        return Err("invalid reviewed path".to_string());
+    }
     Ok(path)
+}
+
+fn commit_initial_okf_indexes(repo: &Repository, root: &Path) -> Result<(), String> {
+    if repo.head().is_ok() {
+        return Ok(());
+    }
+    let mut index = repo.index().map_err(|error| error.to_string())?;
+    for entry in walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_entry(|entry| {
+            entry.path() == root
+                || !entry
+                    .path()
+                    .strip_prefix(root)
+                    .unwrap_or(entry.path())
+                    .components()
+                    .any(|component| component.as_os_str().to_string_lossy().starts_with('.'))
+        })
+        .filter_map(Result::ok)
+    {
+        if entry.file_type().is_file() && entry.file_name() == "index.md" {
+            let relative = entry
+                .path()
+                .strip_prefix(root)
+                .map_err(|error| error.to_string())?;
+            index
+                .add_path(relative)
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    index.write().map_err(|error| error.to_string())?;
+    let tree_id = index.write_tree().map_err(|error| error.to_string())?;
+    let tree = repo.find_tree(tree_id).map_err(|error| error.to_string())?;
+    let signature =
+        Signature::now("CoWiki Local", "local@cowiki.app").map_err(|error| error.to_string())?;
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        "Initialize OKF Space",
+        &tree,
+        &[],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn prepare_okf_repository(repo: &Repository, root: &Path) -> Result<(), String> {
+    if !okf::needs_migration(root)? {
+        return Ok(());
+    }
+    let has_head = repo.head().is_ok();
+    if has_head {
+        let mut options = StatusOptions::new();
+        options.include_untracked(true).recurse_untracked_dirs(true);
+        if !repo
+            .statuses(Some(&mut options))
+            .map_err(|error| error.to_string())?
+            .is_empty()
+        {
+            if okf::needs_content_migration(root)? {
+                return Err(
+                    "Cannot upgrade this Space to OKF while it has uncommitted files. Commit or discard the local draft, then open it again."
+                        .to_string(),
+                );
+            }
+            return Ok(());
+        }
+    }
+    // A temporary Git tree snapshots every working-tree byte, including ignored
+    // and non-UTF-8 files. HEAD alone cannot restore those after a failed move.
+    let backup = create_migration_backup(repo, root)?;
+    if let Err(error) = okf::ensure_bundle(root) {
+        rollback_migration(repo, root, &backup)?;
+        return Err(error);
+    }
+    if !has_head {
+        return match commit_initial_okf_indexes(repo, root) {
+            Ok(()) => delete_migration_backup(repo, &backup.reference),
+            Err(error) => {
+                rollback_migration(repo, root, &backup)?;
+                Err(error)
+            }
+        };
+    }
+    if let Err(error) = commit_okf_migration(repo) {
+        rollback_migration(repo, root, &backup)?;
+        return Err(error);
+    }
+    delete_migration_backup(repo, &backup.reference)
+}
+
+struct MigrationBackup {
+    reference: String,
+    original_index: Option<Vec<u8>>,
+    directories: Vec<PathBuf>,
+}
+
+fn create_migration_backup(repo: &Repository, root: &Path) -> Result<MigrationBackup, String> {
+    let original_index = std::fs::read(repo.path().join("index")).ok();
+    let mut index = repo.index().map_err(|error| error.to_string())?;
+    index.clear().map_err(|error| error.to_string())?;
+    let mut directories = Vec::new();
+    for entry in walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_entry(|entry| {
+            entry.path() == root
+                || entry
+                    .path()
+                    .strip_prefix(root)
+                    .ok()
+                    .and_then(|relative| relative.components().next())
+                    .is_some_and(|component| component.as_os_str() != ".git")
+        })
+        .filter_map(Result::ok)
+    {
+        let relative = entry
+            .path()
+            .strip_prefix(root)
+            .map_err(|error| error.to_string())?;
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+        if entry.file_type().is_dir() {
+            directories.push(relative.to_path_buf());
+        } else if entry.file_type().is_file() || entry.file_type().is_symlink() {
+            index
+                .add_path(relative)
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    let tree_id = index.write_tree().map_err(|error| error.to_string())?;
+    let tree = repo.find_tree(tree_id).map_err(|error| error.to_string())?;
+    let signature =
+        Signature::now("CoWiki Migration", "migration@cowiki.app").map_err(|e| e.to_string())?;
+    let reference = format!(
+        "refs/cowiki/migration-backup/{}",
+        uuid::Uuid::new_v4().simple()
+    );
+    repo.commit(
+        Some(&reference),
+        &signature,
+        &signature,
+        "Temporary pre-OKF migration snapshot",
+        &tree,
+        &[],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(MigrationBackup {
+        reference,
+        original_index,
+        directories,
+    })
+}
+
+fn rollback_migration(
+    repo: &Repository,
+    root: &Path,
+    backup: &MigrationBackup,
+) -> Result<(), String> {
+    let commit = repo
+        .find_reference(&backup.reference)
+        .and_then(|reference| reference.peel_to_commit())
+        .map_err(|error| error.to_string())?;
+    repo.checkout_tree(
+        commit.as_object(),
+        Some(
+            CheckoutBuilder::new()
+                .force()
+                .remove_untracked(true)
+                .remove_ignored(true),
+        ),
+    )
+    .map_err(|error| error.to_string())?;
+    for directory in &backup.directories {
+        std::fs::create_dir_all(root.join(directory)).map_err(|error| error.to_string())?;
+    }
+    let index_path = repo.path().join("index");
+    match &backup.original_index {
+        Some(bytes) => std::fs::write(index_path, bytes).map_err(|error| error.to_string())?,
+        None if index_path.exists() => {
+            std::fs::remove_file(index_path).map_err(|error| error.to_string())?
+        }
+        None => {}
+    }
+    delete_migration_backup(repo, &backup.reference)
+}
+
+fn delete_migration_backup(repo: &Repository, reference: &str) -> Result<(), String> {
+    let mut reference = repo
+        .find_reference(reference)
+        .map_err(|error| error.to_string())?;
+    reference.delete().map_err(|error| error.to_string())
+}
+
+fn commit_okf_migration(repo: &Repository) -> Result<(), String> {
+    let mut index = repo.index().map_err(|error| error.to_string())?;
+    reset_index_to_head(repo, &mut index)?;
+    let root = repo
+        .workdir()
+        .ok_or_else(|| "local Space repository has no working directory".to_string())?;
+    let mut options = StatusOptions::new();
+    options.include_untracked(true).recurse_untracked_dirs(true);
+    for status in repo
+        .statuses(Some(&mut options))
+        .map_err(|error| error.to_string())?
+        .iter()
+    {
+        let Some(relative) = status.path() else {
+            continue;
+        };
+        let path = Path::new(relative);
+        if root.join(path).is_file() {
+            index.add_path(path).map_err(|error| error.to_string())?;
+        } else {
+            let _ = index.remove_path(path);
+        }
+    }
+    index.write().map_err(|error| error.to_string())?;
+    let tree_id = index.write_tree().map_err(|error| error.to_string())?;
+    let parent = repo
+        .head()
+        .and_then(|head| head.peel_to_commit())
+        .map_err(|error| error.to_string())?;
+    if parent.tree_id() == tree_id {
+        return Ok(());
+    }
+    let tree = repo.find_tree(tree_id).map_err(|error| error.to_string())?;
+    let signature =
+        Signature::now("CoWiki Migration", "migration@cowiki.app").map_err(|e| e.to_string())?;
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        "Migrate Space to OKF v0.1",
+        &tree,
+        &[&parent],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn head_text(repo: &Repository, relative: &str) -> Result<Option<String>, String> {
@@ -930,36 +1326,6 @@ fn validate_slug(value: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn content_path(root: &Path, dir: &str, slug: &str, markdown: bool) -> Result<PathBuf, String> {
-    let base = section_root(root, dir)?;
-    let relative = Path::new(slug);
-    if relative.as_os_str().is_empty()
-        || relative.components().any(|component| {
-            !matches!(component, Component::Normal(_))
-                || component.as_os_str().to_string_lossy().starts_with('.')
-        })
-    {
-        return Err("invalid local content path".to_string());
-    }
-    let path = base.join(relative);
-    Ok(if markdown {
-        path.with_extension("md")
-    } else {
-        path
-    })
-}
-
-fn section_root(root: &Path, dir: &str) -> Result<PathBuf, String> {
-    match dir {
-        // Legacy CoWiki repositories have an explicit wiki/ folder. An
-        // arbitrary folder opened by the user is itself the Wiki root.
-        "wiki" if root.join("wiki").is_dir() => Ok(root.join("wiki")),
-        "wiki" => Ok(root.to_path_buf()),
-        "entities" | "concepts" | "sources" => Ok(root.join(dir)),
-        _ => Err(format!("unsupported local content directory: {dir}")),
-    }
-}
-
 fn ui_path(root: &Path, value: &str) -> Result<PathBuf, String> {
     let relative = Path::new(value);
     if relative.as_os_str().is_empty()
@@ -970,13 +1336,27 @@ fn ui_path(root: &Path, value: &str) -> Result<PathBuf, String> {
     {
         return Err("invalid local content path".to_string());
     }
-    let mut components = relative.components();
-    let section = components
-        .next()
-        .and_then(|component| component.as_os_str().to_str())
-        .ok_or_else(|| "invalid local content path".to_string())?;
-    let base = section_root(root, section)?;
-    Ok(components.fold(base, |path, component| path.join(component.as_os_str())))
+    checked_space_path(root, relative)
+}
+
+fn checked_space_path(root: &Path, relative: &Path) -> Result<PathBuf, String> {
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(component) = component else {
+            return Err("path may not escape the Space".to_string());
+        };
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err("symbolic links are not allowed inside a Space".to_string());
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    ensure_inside(root, &current)?;
+    Ok(current)
 }
 
 fn ensure_inside(root: &Path, path: &Path) -> Result<(), String> {
@@ -999,26 +1379,6 @@ fn safe_component<'a>(value: &'a str, label: &str) -> Result<&'a str, String> {
     Ok(trimmed)
 }
 
-fn slugify_filename(value: &str) -> String {
-    let mut slug = String::new();
-    let mut separator = false;
-    for character in value.chars() {
-        if character.is_ascii_alphanumeric() {
-            slug.push(character.to_ascii_lowercase());
-            separator = false;
-        } else if !separator && !slug.is_empty() {
-            slug.push('-');
-            separator = true;
-        }
-    }
-    let slug = slug.trim_matches('-');
-    if slug.is_empty() {
-        "source".to_string()
-    } else {
-        slug.to_string()
-    }
-}
-
 fn yaml_string(value: &str) -> String {
     format!(
         "\"{}\"",
@@ -1029,7 +1389,7 @@ fn yaml_string(value: &str) -> String {
     )
 }
 
-fn read_page_tree(root: &Path, section: &str, current: &Path) -> Result<Vec<PageMeta>, String> {
+fn read_page_tree(root: &Path, current: &Path) -> Result<Vec<PageMeta>, String> {
     if !current.is_dir() {
         return Ok(vec![]);
     }
@@ -1037,40 +1397,42 @@ fn read_page_tree(root: &Path, section: &str, current: &Path) -> Result<Vec<Page
     for entry in std::fs::read_dir(current).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        if file_type.is_symlink() {
+            continue;
+        }
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.')
-            || (current == root && ["entities", "concepts", "sources"].contains(&name.as_str()))
-        {
+        if name.starts_with('.') {
             continue;
         }
         let relative = path.strip_prefix(root).map_err(|e| e.to_string())?;
-        if path.is_dir() {
-            let slug = relative.to_string_lossy().to_string();
+        if file_type.is_dir() {
+            let slug = normalize_path(relative);
+            let index = std::fs::read_to_string(path.join("index.md")).unwrap_or_default();
+            let (index_title, summary) = okf::display_metadata(&index);
             result.push(PageMeta {
                 slug: slug.clone(),
-                path: format!("{section}/{slug}"),
-                title: name,
-                summary: String::new(),
+                path: slug.clone(),
+                title: index_title.unwrap_or(name),
+                summary: summary.unwrap_or_default(),
                 branch: "local".into(),
                 kind: "folder".into(),
-                children: read_page_tree(root, section, &path)?,
+                children: read_page_tree(root, &path)?,
             });
-        } else if path
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-        {
+        } else if DocumentKind::from_path(&path) == DocumentKind::Concept {
             let body = std::fs::read_to_string(&path).unwrap_or_default();
-            let slug = relative.with_extension("").to_string_lossy().to_string();
+            let slug = normalize_path(&relative.with_extension(""));
+            let (title, summary) = okf::display_metadata(&body);
             result.push(PageMeta {
                 slug: slug.clone(),
-                path: format!("{section}/{slug}.md"),
-                title: markdown_title(&body).unwrap_or_else(|| {
+                path: format!("{slug}.md"),
+                title: title.unwrap_or_else(|| {
                     path.file_stem()
                         .unwrap_or_default()
                         .to_string_lossy()
                         .to_string()
                 }),
-                summary: String::new(),
+                summary: summary.unwrap_or_default(),
                 branch: "local".into(),
                 kind: "page".into(),
                 children: vec![],
@@ -1083,6 +1445,54 @@ fn read_page_tree(root: &Path, section: &str, current: &Path) -> Result<Vec<Page
             .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
     });
     Ok(result)
+}
+
+fn safe_source_relative_path(value: &str) -> Result<&Path, String> {
+    let path = Path::new(value);
+    if path.as_os_str().is_empty()
+        || path
+            .extension()
+            .is_none_or(|extension| !extension.eq_ignore_ascii_case("md"))
+        || path.components().any(|component| {
+            !matches!(component, Component::Normal(_))
+                || component.as_os_str().to_string_lossy().starts_with('.')
+        })
+    {
+        return Err("invalid Source path".to_string());
+    }
+    Ok(path)
+}
+
+fn safe_knowledge_relative_path(value: &str) -> Result<&Path, String> {
+    let path = Path::new(value);
+    if path.as_os_str().is_empty()
+        || path
+            .extension()
+            .is_none_or(|extension| !extension.eq_ignore_ascii_case("md"))
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err("invalid Markdown path".to_string());
+    }
+    if path
+        .components()
+        .any(|component| component.as_os_str().to_string_lossy().starts_with('.'))
+        && !value.starts_with(".cowiki/sources/")
+    {
+        return Err("invalid Markdown path".to_string());
+    }
+    if value.starts_with(".cowiki/sources/") {
+        safe_source_relative_path(value.trim_start_matches(".cowiki/sources/"))?;
+    }
+    Ok(path)
+}
+
+fn normalize_path(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 pub(crate) fn markdown_title(body: &str) -> Option<String> {
@@ -1107,14 +1517,6 @@ pub(crate) fn markdown_title(body: &str) -> Option<String> {
     None
 }
 
-fn title_case(value: &str) -> String {
-    let mut chars = value.chars();
-    chars
-        .next()
-        .map(|first| first.to_uppercase().collect::<String>() + chars.as_str())
-        .unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::LocalEngine;
@@ -1125,6 +1527,112 @@ mod tests {
         let engine = LocalEngine::open(temp.path()).unwrap();
 
         assert!(engine.list_spaces().unwrap().is_empty());
+    }
+
+    #[test]
+    fn startup_isolates_a_registered_dirty_legacy_space_without_mutating_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join("metadata");
+        let folder = temp.path().join("legacy");
+        std::fs::create_dir_all(&folder).unwrap();
+        let engine = LocalEngine::open(&metadata).unwrap();
+        let space = engine.add_space("Legacy", "legacy", &folder).unwrap();
+        std::fs::write(
+            folder.join("dirty.md"),
+            "# Dirty legacy page\n\nSearchable startup evidence.\n",
+        )
+        .unwrap();
+        let healthy_folder = temp.path().join("healthy");
+        std::fs::create_dir_all(&healthy_folder).unwrap();
+        let healthy = engine
+            .add_space("Healthy", "healthy", &healthy_folder)
+            .unwrap();
+        engine
+            .write_page(
+                &healthy.slug,
+                "ready",
+                "---\ntype: Note\n---\n\nHealthy startup evidence.\n",
+            )
+            .unwrap();
+        drop(engine);
+
+        let repo = git2::Repository::open(&folder).unwrap();
+        let head_before = repo.head().unwrap().target().unwrap();
+        let bytes_before = std::fs::read(folder.join("dirty.md")).unwrap();
+        let statuses_before = repo
+            .statuses(None)
+            .unwrap()
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .path()
+                    .map(|path| (path.to_string(), entry.status().bits()))
+            })
+            .collect::<Vec<_>>();
+        drop(repo);
+
+        let reopened =
+            LocalEngine::open(&metadata).expect("one dirty Space must not abort startup");
+        let spaces = reopened.list_spaces().unwrap();
+        assert_eq!(spaces.len(), 2);
+        assert!(spaces.contains(&space));
+        assert!(spaces.contains(&healthy));
+        let hits = reopened
+            .search_pages(&space.slug, "startup evidence", 10)
+            .unwrap();
+        assert!(hits.iter().any(|hit| hit.path == "dirty.md"));
+        assert!(reopened
+            .search_pages(&healthy.slug, "healthy startup", 10)
+            .unwrap()
+            .iter()
+            .any(|hit| hit.path == "ready.md"));
+
+        let repo = git2::Repository::open(&folder).unwrap();
+        assert_eq!(repo.head().unwrap().target().unwrap(), head_before);
+        assert_eq!(
+            std::fs::read(folder.join("dirty.md")).unwrap(),
+            bytes_before
+        );
+        let statuses_after = repo
+            .statuses(None)
+            .unwrap()
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .path()
+                    .map(|path| (path.to_string(), entry.status().bits()))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(statuses_after, statuses_before);
+    }
+
+    #[test]
+    fn local_page_methods_use_full_concept_ids_without_a_directory_selector() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(temp.path()).unwrap();
+        let folder = temp.path().join("Full Concept IDs");
+        std::fs::create_dir(&folder).unwrap();
+        let space = engine
+            .add_space("Full Concept IDs", "full-concept-ids", &folder)
+            .unwrap();
+
+        engine
+            .write_page(
+                &space.slug,
+                "notes/first",
+                "---\ntype: Note\n---\n\nLocal draft",
+            )
+            .unwrap();
+
+        assert_eq!(engine.list_pages(&space.slug).unwrap().len(), 1);
+        assert_eq!(
+            engine
+                .get_page(&space.slug, "notes/first")
+                .unwrap()
+                .meta
+                .path,
+            "notes/first.md"
+        );
     }
 
     #[test]
@@ -1142,7 +1650,6 @@ mod tests {
         engine
             .write_page(
                 &space.slug,
-                "wiki",
                 "notes/first",
                 "---\ntitle: \"First\"\n---\n\nLocal draft",
             )
@@ -1159,6 +1666,32 @@ mod tests {
             engine.commit_count(&space.slug).unwrap(),
             initial_commits + 1
         );
+        assert!(!engine.has_uncommitted_changes(&space.slug).unwrap());
+
+        engine
+            .rename_path(&space.slug, "notes/first.md", "notes/renamed.md")
+            .unwrap();
+        engine
+            .submit(&space.slug, &["notes/renamed.md".to_string()])
+            .unwrap();
+        let repo = git2::Repository::open(&folder).unwrap();
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        assert!(tree
+            .get_path(std::path::Path::new("notes/first.md"))
+            .is_err());
+        assert!(tree
+            .get_path(std::path::Path::new("notes/renamed.md"))
+            .is_ok());
+        drop(tree);
+        drop(repo);
+
+        engine.delete_path(&space.slug, "notes/renamed.md").unwrap();
+        engine.submit(&space.slug, &[]).unwrap();
+        let repo = git2::Repository::open(&folder).unwrap();
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        assert!(tree
+            .get_path(std::path::Path::new("notes/renamed.md"))
+            .is_err());
         assert!(!engine.has_uncommitted_changes(&space.slug).unwrap());
     }
 
@@ -1180,6 +1713,89 @@ mod tests {
     }
 
     #[test]
+    fn legacy_discovery_skips_a_dirty_repo_and_imports_a_healthy_repo_without_mutation() {
+        fn commit_legacy_page(folder: &std::path::Path, content: &str) -> git2::Repository {
+            std::fs::create_dir_all(folder).unwrap();
+            std::fs::write(folder.join("legacy.md"), content).unwrap();
+            let repo = git2::Repository::init(folder).unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(std::path::Path::new("legacy.md")).unwrap();
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let signature = git2::Signature::now("legacy", "legacy@example.com").unwrap();
+            repo.commit(Some("HEAD"), &signature, &signature, "legacy", &tree, &[])
+                .unwrap();
+            drop(tree);
+            repo
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let legacy = temp.path().join("cowiki");
+        let dirty_folder = legacy.join("dirty-device").join("repo");
+        let dirty_repo = commit_legacy_page(&dirty_folder, "# Committed\n");
+        std::fs::write(dirty_folder.join("legacy.md"), "# Unsaved local draft\n").unwrap();
+        let dirty_head_before = dirty_repo.head().unwrap().target().unwrap();
+        let dirty_bytes_before = std::fs::read(dirty_folder.join("legacy.md")).unwrap();
+        let dirty_index_before = std::fs::read(dirty_repo.path().join("index")).unwrap();
+        let dirty_status_before = dirty_repo
+            .statuses(None)
+            .unwrap()
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .path()
+                    .map(|path| (path.to_string(), entry.status().bits()))
+            })
+            .collect::<Vec<_>>();
+        drop(dirty_repo);
+
+        let healthy_folder = legacy.join("healthy-device").join("repo");
+        drop(commit_legacy_page(
+            &healthy_folder,
+            "# Healthy legacy page\n\nImport evidence.\n",
+        ));
+
+        assert_eq!(engine.import_legacy_spaces(&legacy).unwrap(), 1);
+        let spaces = engine.list_spaces().unwrap();
+        assert_eq!(spaces.len(), 1);
+        assert_eq!(spaces[0].slug, "healthy-device");
+        assert_eq!(spaces[0].local_path, healthy_folder.canonicalize().unwrap());
+        assert!(engine
+            .search_pages("healthy-device", "import evidence", 10)
+            .unwrap()
+            .iter()
+            .any(|hit| hit.path == "legacy.md"));
+
+        let dirty_repo = git2::Repository::open(&dirty_folder).unwrap();
+        assert_eq!(
+            dirty_repo.head().unwrap().target().unwrap(),
+            dirty_head_before
+        );
+        assert_eq!(
+            std::fs::read(dirty_folder.join("legacy.md")).unwrap(),
+            dirty_bytes_before
+        );
+        assert_eq!(
+            std::fs::read(dirty_repo.path().join("index")).unwrap(),
+            dirty_index_before
+        );
+        let dirty_status_after = dirty_repo
+            .statuses(None)
+            .unwrap()
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .path()
+                    .map(|path| (path.to_string(), entry.status().bits()))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(dirty_status_after, dirty_status_before);
+        assert!(!dirty_folder.join("index.md").exists());
+    }
+
+    #[test]
     fn local_file_operations_stay_inside_the_registered_space() {
         let temp = tempfile::tempdir().unwrap();
         let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
@@ -1187,28 +1803,414 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         let space = engine.add_space("Notes", "notes", &folder).unwrap();
 
+        engine.create_folder(&space.slug, "Projects", None).unwrap();
         engine
-            .create_folder(&space.slug, "Projects", Some("wiki"))
+            .write_page(&space.slug, "Projects/brief", "# Brief\n")
             .unwrap();
         engine
-            .write_page(&space.slug, "wiki", "Projects/brief", "# Brief\n")
-            .unwrap();
-        engine
-            .rename_path(
-                &space.slug,
-                "wiki/Projects/brief.md",
-                "wiki/Projects/plan.md",
-            )
+            .rename_path(&space.slug, "Projects/brief.md", "Projects/plan.md")
             .unwrap();
         assert!(folder.join("Projects/plan.md").is_file());
         assert!(!folder.join("Projects/brief.md").exists());
+        assert!(engine
+            .rename_path(&space.slug, "Projects/plan.md", "Projects/log.md")
+            .is_err());
+        assert!(engine
+            .rename_path(&space.slug, "Projects/plan.md", "Projects/index.md")
+            .is_err());
 
-        engine.delete_path(&space.slug, "wiki/Projects").unwrap();
+        engine.delete_path(&space.slug, "Projects").unwrap();
         assert!(!folder.join("Projects").exists());
         assert!(engine
             .create_folder(&space.slug, "../escape", Some("wiki"))
             .is_err());
-        assert!(engine.delete_path(&space.slug, "wiki/../outside").is_err());
+        assert!(engine.delete_path(&space.slug, "../outside").is_err());
+    }
+
+    #[test]
+    fn okf_space_lists_arbitrary_root_hierarchy_and_hides_reserved_documents() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(folder.join("research")).unwrap();
+        std::fs::create_dir_all(folder.join("wiki")).unwrap();
+        std::fs::create_dir_all(folder.join("entities")).unwrap();
+        std::fs::write(
+            folder.join("index.md"),
+            "---\nokf_version: \"0.1\"\n---\n\n# Knowledge\n",
+        )
+        .unwrap();
+        std::fs::write(
+            folder.join("log.md"),
+            "# Directory Update Log\n\n## 2026-07-14\n* Imported.\n",
+        )
+        .unwrap();
+        std::fs::write(folder.join("research/index.md"), "# Research Library\n").unwrap();
+        std::fs::write(
+            folder.join("research/paper.md"),
+            "---\ntype: Note\ntitle: Paper\n---\n",
+        )
+        .unwrap();
+        std::fs::write(folder.join("wiki/legacy.md"), "---\ntype: Note\n---\n").unwrap();
+        std::fs::write(
+            folder.join("entities/person.md"),
+            "---\ntype: Person\n---\n",
+        )
+        .unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+
+        let sections = engine.list_pages(&space.slug).unwrap();
+        let children = &sections;
+        assert!(children.iter().any(|item| item.kind == "folder"
+            && item.slug == "research"
+            && item.title == "Research Library"));
+        assert!(children
+            .iter()
+            .any(|item| item.kind == "folder" && item.slug == "wiki"));
+        assert!(children
+            .iter()
+            .any(|item| item.kind == "folder" && item.slug == "entities"));
+        assert!(!children
+            .iter()
+            .any(|item| matches!(item.slug.as_str(), "index" | "log")));
+    }
+
+    #[test]
+    fn okf_reserves_index_and_log_and_folder_creation_writes_an_index() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+
+        let root_index = std::fs::read_to_string(folder.join("index.md")).unwrap();
+        assert!(root_index.contains("okf_version"));
+        assert!(engine
+            .write_page(&space.slug, "index", "# Not a concept")
+            .is_err());
+        assert!(engine
+            .write_page(&space.slug, "log", "# Not a concept")
+            .is_err());
+
+        engine.create_folder(&space.slug, "Projects", None).unwrap();
+        let folder_index = std::fs::read_to_string(folder.join("Projects/index.md")).unwrap();
+        assert!(folder_index.starts_with("# Projects\n"));
+        assert!(folder_index.contains("cowiki:generated-index"));
+    }
+
+    #[test]
+    fn opening_a_space_normalizes_only_invalid_okf_documents_losslessly() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(folder.join("research")).unwrap();
+        let conforming = "---\ntype: Custom\nunknown: keep-me\n---\n\nExact bytes.\n";
+        std::fs::write(folder.join("stable.md"), conforming).unwrap();
+        std::fs::write(folder.join("draft.md"), "# Draft without frontmatter\n").unwrap();
+        std::fs::write(
+            folder.join("research/index.md"),
+            "---\ntitle: Research Library\nsummary: Curated.\n---\n",
+        )
+        .unwrap();
+        std::fs::write(folder.join("log.md"), "Legacy log without OKF groups.\n").unwrap();
+
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(folder.join("stable.md")).unwrap(),
+            conforming
+        );
+        let draft = std::fs::read_to_string(folder.join("draft.md")).unwrap();
+        assert!(draft.contains("type: Note"));
+        assert!(draft.contains("# Draft without frontmatter"));
+        let nested = std::fs::read_to_string(folder.join("research/index.md")).unwrap();
+        assert!(!nested.starts_with("---"));
+        assert!(nested.contains("# Research Library"));
+        assert!(nested.contains("Curated."));
+        let log = std::fs::read_to_string(folder.join("log.md")).unwrap();
+        assert!(log.starts_with("# Directory Update Log"));
+        assert!(folder.join(".cowiki/legacy/log.md.legacy").is_file());
+
+        let before = std::fs::read_to_string(folder.join("index.md")).unwrap();
+        engine.rebuild_search_index(&space.slug).unwrap();
+        crate::okf::ensure_bundle(&folder).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(folder.join("index.md")).unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn legacy_sources_move_to_the_controlled_okf_namespace_and_remain_reviewable() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(folder.join("sources/nested")).unwrap();
+        std::fs::write(folder.join("sources/.gitkeep"), "").unwrap();
+        std::fs::write(folder.join("sources/raw.md"), "Legacy source body.\n").unwrap();
+        std::fs::write(
+            folder.join("sources/nested/index.md"),
+            "Legacy reserved source body.\n",
+        )
+        .unwrap();
+        std::fs::write(folder.join("sources/nested/report.pdf"), [0xff, 0x00, 0xfe]).unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+
+        assert!(!folder.join("sources").exists());
+        let source = std::fs::read_to_string(folder.join(".cowiki/sources/raw.md")).unwrap();
+        assert!(source.contains("type: Source"));
+        assert!(source.contains("Legacy source body."));
+        let migrated = engine.list_sources(&space.slug).unwrap();
+        assert_eq!(migrated.len(), 3);
+        assert!(!migrated.iter().any(|item| {
+            engine
+                .get_source(&space.slug, &item.filename)
+                .is_ok_and(|source| source.content.contains("title: .gitkeep"))
+        }));
+        let migrated_bodies = migrated
+            .iter()
+            .map(|item| {
+                engine
+                    .get_source(&space.slug, &item.filename)
+                    .unwrap()
+                    .content
+            })
+            .collect::<Vec<_>>();
+        assert!(migrated_bodies
+            .iter()
+            .any(|body| body.contains("title: nested/index.md")));
+        assert!(migrated_bodies
+            .iter()
+            .any(|body| body.contains("title: nested/report.pdf")
+                && body.contains("original non-UTF-8 Source bytes")));
+        assert_eq!(
+            std::fs::read(folder.join(".cowiki/legacy/source-binaries/nested/report.md.legacy"))
+                .unwrap(),
+            [0xff, 0x00, 0xfe]
+        );
+        let diffs = engine.working_diff(&space.slug).unwrap();
+        assert!(diffs
+            .iter()
+            .any(|diff| diff.path == ".cowiki/sources/raw.md"));
+    }
+
+    #[test]
+    fn clean_existing_git_space_gets_one_explicit_idempotent_migration_commit() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("legacy.md"), "# Legacy\n").unwrap();
+        let repo = git2::Repository::init(&folder).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("legacy.md")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let signature = git2::Signature::now("legacy", "legacy@example.com").unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "legacy", &tree, &[])
+            .unwrap();
+        drop(tree);
+        drop(repo);
+
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+        assert_eq!(engine.commit_count(&space.slug).unwrap(), 2);
+        assert!(!engine.has_uncommitted_changes(&space.slug).unwrap());
+        assert!(folder.join("index.md").is_file());
+
+        crate::okf::ensure_bundle(&folder).unwrap();
+        assert!(!engine.has_uncommitted_changes(&space.slug).unwrap());
+        assert_eq!(engine.commit_count(&space.slug).unwrap(), 2);
+    }
+
+    #[test]
+    fn dirty_existing_git_space_is_not_partially_migrated() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("legacy.md"), "# Committed\n").unwrap();
+        let repo = git2::Repository::init(&folder).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("legacy.md")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let signature = git2::Signature::now("legacy", "legacy@example.com").unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "legacy", &tree, &[])
+            .unwrap();
+        drop(tree);
+        drop(repo);
+        std::fs::write(folder.join("legacy.md"), "# Unsaved local draft\n").unwrap();
+
+        let error = engine
+            .add_space("Knowledge", "knowledge", &folder)
+            .unwrap_err();
+        assert!(error.contains("uncommitted"));
+        assert!(!folder.join("index.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(folder.join("legacy.md")).unwrap(),
+            "# Unsaved local draft\n"
+        );
+    }
+
+    #[test]
+    fn dirty_conforming_bundles_open_without_optional_indexes_or_version() {
+        fn commit_all(folder: &std::path::Path, paths: &[&str]) {
+            let repo = git2::Repository::init(folder).unwrap();
+            let mut index = repo.index().unwrap();
+            for path in paths {
+                index.add_path(std::path::Path::new(path)).unwrap();
+            }
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let signature = git2::Signature::now("author", "author@example.com").unwrap();
+            repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+                .unwrap();
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let missing = temp.path().join("missing-index");
+        std::fs::create_dir_all(&missing).unwrap();
+        std::fs::write(
+            missing.join("note.md"),
+            "---\ntype: Note\n---\n\nCommitted.\n",
+        )
+        .unwrap();
+        commit_all(&missing, &["note.md"]);
+        std::fs::write(missing.join("note.md"), "---\ntype: Note\n---\n\nDirty.\n").unwrap();
+        let first = engine.add_space("Missing", "missing", &missing).unwrap();
+        assert!(!missing.join("index.md").exists());
+        assert!(engine.has_uncommitted_changes(&first.slug).unwrap());
+
+        let versionless = temp.path().join("versionless");
+        std::fs::create_dir_all(&versionless).unwrap();
+        let versionless_index = "# Versionless root\n";
+        std::fs::write(versionless.join("index.md"), versionless_index).unwrap();
+        std::fs::write(
+            versionless.join("note.md"),
+            "---\ntype: Note\n---\n\nCommitted.\n",
+        )
+        .unwrap();
+        commit_all(&versionless, &["index.md", "note.md"]);
+        std::fs::write(
+            versionless.join("note.md"),
+            "---\ntype: Note\n---\n\nDirty.\n",
+        )
+        .unwrap();
+        let second = engine
+            .add_space("Versionless", "versionless", &versionless)
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(versionless.join("index.md")).unwrap(),
+            versionless_index
+        );
+        assert!(engine.has_uncommitted_changes(&second.slug).unwrap());
+    }
+
+    #[test]
+    fn failed_clean_migration_restores_head_worktree_and_index() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        let malformed = "---\nokf_version: \"0.1\"\n---\n\n# Knowledge\n\n<!-- cowiki:generated-index:start -->\n";
+        std::fs::write(folder.join("index.md"), malformed).unwrap();
+        std::fs::write(
+            folder.join("stable.md"),
+            "---\ntype: Note\ntitle: Stable\n---\n",
+        )
+        .unwrap();
+        std::fs::write(folder.join(".gitignore"), "sources/\n").unwrap();
+        std::fs::create_dir_all(folder.join("sources")).unwrap();
+        std::fs::write(folder.join("sources/raw.md"), [0xff, 0x00, 0xfe]).unwrap();
+        let repo = git2::Repository::init(&folder).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new(".gitignore")).unwrap();
+        index.add_path(std::path::Path::new("index.md")).unwrap();
+        index.add_path(std::path::Path::new("stable.md")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let signature = git2::Signature::now("legacy", "legacy@example.com").unwrap();
+        let head = repo
+            .commit(Some("HEAD"), &signature, &signature, "legacy", &tree, &[])
+            .unwrap();
+        drop(tree);
+        drop(repo);
+
+        assert!(engine.add_space("Knowledge", "knowledge", &folder).is_err());
+        let repo = git2::Repository::open(&folder).unwrap();
+        assert_eq!(repo.head().unwrap().target().unwrap(), head);
+        let statuses = repo.statuses(None).unwrap();
+        assert!(statuses.iter().all(|status| status.status().is_ignored()));
+        assert_eq!(
+            std::fs::read_to_string(folder.join("index.md")).unwrap(),
+            malformed
+        );
+        assert_eq!(
+            std::fs::read(folder.join("sources/raw.md")).unwrap(),
+            [0xff, 0x00, 0xfe]
+        );
+        assert!(!folder.join(".cowiki").exists());
+    }
+
+    #[test]
+    fn failed_unborn_migration_restores_every_local_file_and_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(folder.join("sources/empty")).unwrap();
+        std::fs::write(folder.join("sources/raw.md"), "Original source\n").unwrap();
+        let malformed = "---\nokf_version: \"0.1\"\n---\n\n# Knowledge\n\n<!-- cowiki:generated-index:start -->\n";
+        std::fs::write(folder.join("index.md"), malformed).unwrap();
+
+        assert!(engine.add_space("Knowledge", "knowledge", &folder).is_err());
+        assert_eq!(
+            std::fs::read_to_string(folder.join("sources/raw.md")).unwrap(),
+            "Original source\n"
+        );
+        assert!(folder.join("sources/empty").is_dir());
+        assert!(!folder.join(".cowiki").exists());
+        assert_eq!(
+            std::fs::read_to_string(folder.join("index.md")).unwrap(),
+            malformed
+        );
+        let repo = git2::Repository::open(&folder).unwrap();
+        assert!(repo.head().is_err());
+        assert!(repo
+            .references_glob("refs/cowiki/migration-backup/*")
+            .unwrap()
+            .next()
+            .is_none());
+    }
+
+    #[test]
+    fn linked_git_worktree_can_be_migrated_without_indexing_its_git_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let main = temp.path().join("main");
+        let linked = temp.path().join("linked");
+        std::fs::create_dir_all(&main).unwrap();
+        std::fs::write(main.join("legacy.md"), "# Legacy\n").unwrap();
+        let repo = git2::Repository::init(&main).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("legacy.md")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let signature = git2::Signature::now("legacy", "legacy@example.com").unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "legacy", &tree, &[])
+            .unwrap();
+        drop(tree);
+        repo.worktree("linked", &linked, None).unwrap();
+        drop(repo);
+        assert!(linked.join(".git").is_file());
+
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let space = engine.add_space("Linked", "linked", &linked).unwrap();
+        assert!(linked.join("index.md").is_file());
+        assert_eq!(engine.commit_count(&space.slug).unwrap(), 2);
     }
 
     #[test]
@@ -1219,14 +2221,13 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         let space = engine.add_space("Notes", "notes", &folder).unwrap();
         engine
-            .write_page(&space.slug, "wiki", "shared", "# Shared\n\nHuman base")
+            .write_page(&space.slug, "shared", "# Shared\n\nHuman base")
             .unwrap();
 
         std::fs::write(folder.join("shared.md"), "# Shared\n\nAgent result").unwrap();
         let error = engine
             .write_page_checked(
                 &space.slug,
-                "wiki",
                 "shared",
                 "# Shared\n\nHuman newer edit",
                 Some("# Shared\n\nHuman base"),
@@ -1248,16 +2249,15 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         let space = engine.add_space("Notes", "notes", &folder).unwrap();
         engine
-            .write_page(&space.slug, "wiki", "same", "# Original")
+            .write_page(&space.slug, "same", "# Original")
             .unwrap();
 
         assert!(engine
-            .write_page_checked(&space.slug, "wiki", "same", "# Replacement", None, true)
+            .write_page_checked(&space.slug, "same", "# Replacement", None, true)
             .is_err());
-        assert_eq!(
-            std::fs::read_to_string(folder.join("same.md")).unwrap(),
-            "# Original"
-        );
+        let preserved = std::fs::read_to_string(folder.join("same.md")).unwrap();
+        assert!(preserved.contains("# Original"));
+        assert!(!preserved.contains("Replacement"));
     }
 
     #[test]
@@ -1268,24 +2268,55 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         let space = engine.add_space("Notes", "notes", &folder).unwrap();
         engine
-            .write_page(&space.slug, "wiki", "draft", "# Draft\n\nAgent proposal\n")
+            .write_page(&space.slug, "draft", "# Draft\n\nAgent proposal\n")
             .unwrap();
 
         let diffs = engine.working_diff(&space.slug).unwrap();
-        assert_eq!(diffs.len(), 1);
-        assert_eq!(diffs[0].path, "draft.md");
-        assert!(diffs[0].old_content.is_none());
-        assert!(diffs[0]
+        let draft = diffs.iter().find(|diff| diff.path == "draft.md").unwrap();
+        assert!(draft.old_content.is_none());
+        assert!(draft
             .new_content
             .as_deref()
             .unwrap()
             .contains("Agent proposal"));
-        assert!(diffs[0].additions > 0);
+        assert!(draft.additions > 0);
+        assert!(diffs.iter().any(|diff| diff.path == "index.md"));
 
         engine
             .submit(&space.slug, &["draft.md".to_string()])
             .unwrap();
         assert!(engine.working_diff(&space.slug).unwrap().is_empty());
+    }
+
+    #[test]
+    fn submit_normalizes_external_agent_edits_and_refreshes_reserved_documents() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        std::fs::write(
+            folder.join("agent.md"),
+            "# Agent draft without frontmatter\n",
+        )
+        .unwrap();
+        std::fs::write(folder.join("log.md"), "invalid agent log\n").unwrap();
+
+        engine.submit(&space.slug, &[]).unwrap();
+
+        let concept = std::fs::read_to_string(folder.join("agent.md")).unwrap();
+        let log = std::fs::read_to_string(folder.join("log.md")).unwrap();
+        let index = std::fs::read_to_string(folder.join("index.md")).unwrap();
+        assert!(concept.contains("type: Note"));
+        assert!(log.starts_with("# Directory Update Log"));
+        assert!(index.contains("agent.md"));
+        assert!(folder.join(".cowiki/legacy/log.md.legacy").is_file());
+        assert!(!engine.has_uncommitted_changes(&space.slug).unwrap());
+        let repo = git2::Repository::open(&folder).unwrap();
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        assert!(tree
+            .get_path(std::path::Path::new(".cowiki/legacy/log.md.legacy"))
+            .is_ok());
     }
 
     #[test]
@@ -1296,6 +2327,7 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         let space = engine.add_space("Notes", "notes", &folder).unwrap();
         std::fs::write(folder.join("proposal.md"), "# First\n").unwrap();
+        let initial_commits = engine.commit_count(&space.slug).unwrap();
         let reviewed = engine.working_diff(&space.slug).unwrap();
 
         std::fs::write(folder.join("proposal.md"), "# Changed after review\n").unwrap();
@@ -1303,7 +2335,51 @@ mod tests {
             .keep_working_diff(&space.slug, &reviewed)
             .unwrap_err();
         assert!(error.contains("changed after this Review opened"));
-        assert_eq!(engine.commit_count(&space.slug).unwrap(), 0);
+        assert_eq!(engine.commit_count(&space.slug).unwrap(), initial_commits);
+    }
+
+    #[test]
+    fn review_prepares_external_agent_pages_before_keep_without_false_conflicts() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        std::fs::write(
+            folder.join("agent.md"),
+            "---\ntype: Note\n---\n\nConforming external page.\n",
+        )
+        .unwrap();
+
+        let reviewed = engine.working_diff(&space.slug).unwrap();
+        assert!(reviewed.iter().any(|diff| diff.path == "agent.md"));
+        assert!(reviewed.iter().any(|diff| diff.path == "index.md"));
+        assert!(
+            engine
+                .keep_working_diff(&space.slug, &reviewed)
+                .unwrap()
+                .committed
+        );
+        assert!(engine.working_diff(&space.slug).unwrap().is_empty());
+
+        std::fs::write(folder.join("malformed.md"), "# Missing frontmatter\n").unwrap();
+        let normalized_review = engine.working_diff(&space.slug).unwrap();
+        let malformed = normalized_review
+            .iter()
+            .find(|diff| diff.path == "malformed.md")
+            .unwrap();
+        assert!(malformed
+            .new_content
+            .as_deref()
+            .unwrap()
+            .contains("type: Note"));
+        assert!(
+            engine
+                .keep_working_diff(&space.slug, &normalized_review)
+                .unwrap()
+                .committed
+        );
+        assert!(engine.working_diff(&space.slug).unwrap().is_empty());
     }
 
     #[test]
@@ -1311,14 +2387,18 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
         let folder = temp.path().join("notes");
-        std::fs::create_dir_all(folder.join("sources")).unwrap();
+        std::fs::create_dir_all(folder.join(".cowiki/sources")).unwrap();
         std::fs::write(folder.join("guide.md"), "# Offline Guide\n").unwrap();
-        std::fs::write(folder.join("sources/raw.md"), "# Offline Raw Source\n").unwrap();
+        std::fs::write(
+            folder.join(".cowiki/sources/raw.md"),
+            "---\ntype: Source\ntitle: Raw\n---\n\n# Offline Raw Source\n",
+        )
+        .unwrap();
         let space = engine.add_space("Notes", "notes", &folder).unwrap();
 
         let response = engine.search(&space.slug, "offline", 10).unwrap();
         assert_eq!(response.keyword.len(), 1);
-        assert_eq!(response.keyword[0].path, "wiki/guide.md");
+        assert_eq!(response.keyword[0].path, "guide.md");
         assert_eq!(response.keyword[0].slug, "guide");
     }
 
@@ -1338,8 +2418,10 @@ mod tests {
                 Some("Research Note"),
             )
             .unwrap();
-        assert_eq!(item.filename, "research-note.md");
-        let body = std::fs::read_to_string(folder.join("sources/research-note.md")).unwrap();
+        assert!(item.filename.starts_with("_encoded/"));
+        assert!(item.filename.ends_with(".md"));
+        let body =
+            std::fs::read_to_string(folder.join(".cowiki/sources").join(&item.filename)).unwrap();
         assert!(body.contains("type: Source"));
         assert!(body.contains("keeps working offline"));
         assert_eq!(
@@ -1349,6 +2431,45 @@ mod tests {
                 .len(),
             1
         );
+        assert!(engine
+            .working_diff(&space.slug)
+            .unwrap()
+            .iter()
+            .any(|diff| diff.path == format!(".cowiki/sources/{}", item.filename)));
+        assert!(engine.submit(&space.slug, &[]).unwrap().committed);
+        assert!(!engine.has_uncommitted_changes(&space.slug).unwrap());
+    }
+
+    #[test]
+    fn source_storage_is_collision_safe_for_reserved_and_non_markdown_names() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+
+        let markdown = engine
+            .ingest(&space.slug, "text", "Markdown", Some("foo.md"))
+            .unwrap();
+        let plain = engine
+            .ingest(&space.slug, "text", "Plain", Some("foo"))
+            .unwrap();
+        let reserved = engine
+            .ingest(&space.slug, "text", "Reserved", Some("index.md"))
+            .unwrap();
+        let duplicate = engine
+            .ingest(&space.slug, "text", "Duplicate", Some("foo.md"))
+            .unwrap();
+
+        assert_eq!(markdown.filename, "foo.md");
+        assert!(plain.filename.starts_with("_encoded/"));
+        assert!(reserved.filename.starts_with("_encoded/"));
+        assert_ne!(plain.filename, reserved.filename);
+        assert_ne!(markdown.filename, duplicate.filename);
+        for item in [markdown, plain, reserved, duplicate] {
+            let source = engine.get_source(&space.slug, &item.filename).unwrap();
+            assert!(source.content.contains("type: Source"));
+        }
     }
 
     #[test]
@@ -1399,12 +2520,7 @@ mod tests {
         assert!(before[0].title_match);
 
         engine
-            .write_page(
-                &space.slug,
-                "wiki",
-                "new-page",
-                "# New Page\n\nOrchid field notes",
-            )
+            .write_page(&space.slug, "new-page", "# New Page\n\nOrchid field notes")
             .unwrap();
         let after = engine.search_pages(&space.slug, "field notes", 10).unwrap();
         assert_eq!(after[0].path, "new-page.md");
@@ -1436,6 +2552,47 @@ mod tests {
         engine.rebuild_search_index(&space.slug).unwrap();
         assert!(engine
             .list_backlinks(&space.slug, "alice.md")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn backlinks_resolve_standard_markdown_links_with_case_sensitive_full_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(folder.join("notes/deep")).unwrap();
+        std::fs::write(folder.join("Target.md"), "# Uppercase Target\n").unwrap();
+        std::fs::write(folder.join("My Doc.md"), "# Encoded target\n").unwrap();
+        std::fs::write(folder.join("Fake.md"), "# Must not receive a backlink\n").unwrap();
+        std::fs::write(folder.join("notes/Target.md"), "# Nested Target\n").unwrap();
+        std::fs::write(
+            folder.join("notes/deep/source.md"),
+            "# Source\n\n[Root][root], [nested](../Target.md), and [encoded](../../My%20Doc.md).\n\n[root]: ../../Target.md#details\n\n`[not a link](../../Fake.md)`\n\n```md\n[fake](../../Fake.md)\n```\n",
+        )
+        .unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+
+        let root_links = engine.list_backlinks(&space.slug, "Target.md").unwrap();
+        assert_eq!(root_links.len(), 1);
+        assert_eq!(root_links[0].path, "notes/deep/source.md");
+        let nested_links = engine
+            .list_backlinks(&space.slug, "notes/Target.md")
+            .unwrap();
+        assert_eq!(nested_links.len(), 1);
+        assert_eq!(
+            engine
+                .list_backlinks(&space.slug, "My Doc.md")
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(engine
+            .list_backlinks(&space.slug, "Fake.md")
+            .unwrap()
+            .is_empty());
+        assert!(engine
+            .list_backlinks(&space.slug, "target.md")
             .unwrap()
             .is_empty());
     }
@@ -1475,5 +2632,86 @@ mod tests {
         let hits = engine.search_pages(&space.slug, "platypus", 5).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].path, "valid.md");
+        let replacement = std::fs::read_to_string(folder.join("invalid.md")).unwrap();
+        assert!(replacement.contains("type: Note"));
+        assert!(replacement.contains("original non-UTF-8 bytes"));
+        assert_eq!(
+            std::fs::read(folder.join(".cowiki/legacy/invalid.md.legacy")).unwrap(),
+            [0xff, 0xfe, 0xfd]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symbolic_links_never_escape_the_selected_space() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let secret = "---\ntype: Note\n---\n\nSecret outside.\n";
+        std::fs::write(outside.join("secret.md"), secret).unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+        symlink(&outside, folder.join("notes")).unwrap();
+        symlink(outside.join("secret.md"), folder.join("linked.md")).unwrap();
+
+        let tree = engine.list_pages(&space.slug).unwrap();
+        assert!(!tree
+            .iter()
+            .any(|page| page.slug == "notes" || page.slug == "linked"));
+        assert!(engine.get_page(&space.slug, "notes/secret").is_err());
+        assert!(engine
+            .write_page(&space.slug, "notes/secret", "changed")
+            .is_err());
+        assert!(engine
+            .rename_path(&space.slug, "notes/secret.md", "moved.md")
+            .is_err());
+        assert!(engine.delete_path(&space.slug, "notes/secret.md").is_err());
+        assert_eq!(
+            std::fs::read_to_string(outside.join("secret.md")).unwrap(),
+            secret
+        );
+
+        symlink(&outside, folder.join(".cowiki")).unwrap();
+        assert!(engine
+            .ingest(&space.slug, "text", "must stay inside", Some("source.md"))
+            .is_err());
+        assert!(!outside.join("sources/source.md").exists());
+    }
+
+    #[test]
+    fn future_okf_bundles_are_read_only_and_never_silently_downgraded() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("future");
+        std::fs::create_dir_all(&folder).unwrap();
+        let index = "---\nokf_version: \"0.2\"\n---\n\n# Future\n";
+        let page = "---\ntype: Future\n---\n\nUnchanged.\n";
+        std::fs::write(folder.join("index.md"), index).unwrap();
+        std::fs::write(folder.join("page.md"), page).unwrap();
+        let space = engine.add_space("Future", "future", &folder).unwrap();
+
+        assert!(engine
+            .write_page(&space.slug, "page", "---\ntype: Future\n---\nchanged")
+            .is_err());
+        assert!(engine
+            .rename_path(&space.slug, "page.md", "renamed.md")
+            .is_err());
+        assert!(engine
+            .ingest(&space.slug, "text", "source", Some("source.md"))
+            .is_err());
+        assert!(engine.create_folder(&space.slug, "New", None).is_err());
+        assert!(engine.delete_path(&space.slug, "page.md").is_err());
+        assert_eq!(
+            std::fs::read_to_string(folder.join("index.md")).unwrap(),
+            index
+        );
+        assert_eq!(
+            std::fs::read_to_string(folder.join("page.md")).unwrap(),
+            page
+        );
     }
 }

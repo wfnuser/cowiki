@@ -11,7 +11,9 @@ function h(extra: Record<string, string> = {}): Record<string, string> {
 // ── Types ──
 
 export interface PageMeta {
+  /** Stable Concept ID: the bundle-relative Markdown path without `.md`. */
   slug: string;
+  /** Stable bundle-relative path, including `.md` for a page. */
   path: string;
   title: string;
   summary: string;
@@ -317,7 +319,7 @@ export async function listMembers(workspaceSlug: string): Promise<MemberInfo[]> 
 // ── Pages ──
 
 export async function listPages(branch = 'main', workspaceSlug: string, dir = 'all'): Promise<PageMeta[]> {
-  if (isDesktopClient()) return localApi.listPages(workspaceSlug, dir);
+  if (isDesktopClient()) return localApi.listPages(workspaceSlug);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages?branch=${encodeURIComponent(branch)}&dir=${encodeURIComponent(dir)}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -326,9 +328,9 @@ export async function listPages(branch = 'main', workspaceSlug: string, dir = 'a
   return res.json();
 }
 
-export async function getPage(slug: string, branch = 'main', workspaceSlug: string, dir = 'wiki'): Promise<PageFull> {
-  if (isDesktopClient()) return localApi.getPage(workspaceSlug, dir, slug);
-  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages/${encodeURIComponent(slug)}?branch=${encodeURIComponent(branch)}&dir=${encodeURIComponent(dir)}`, { headers: h() });
+export async function getPage(conceptId: string, branch = 'main', workspaceSlug: string, dir = 'wiki'): Promise<PageFull> {
+  if (isDesktopClient()) return localApi.getPage(workspaceSlug, conceptId);
+  const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages/${encodeURIComponent(conceptId)}?branch=${encodeURIComponent(branch)}&dir=${encodeURIComponent(dir)}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Request failed: ${res.status}`);
@@ -337,7 +339,7 @@ export async function getPage(slug: string, branch = 'main', workspaceSlug: stri
 }
 
 export async function writePage(
-  slug: string,
+  conceptId: string,
   body: string,
   branch: string,
   workspaceSlug: string,
@@ -345,11 +347,11 @@ export async function writePage(
   expectedBody?: string,
   createOnly = false,
 ): Promise<void> {
-  if (isDesktopClient()) return localApi.writePage(workspaceSlug, dir, slug, body, expectedBody, createOnly);
+  if (isDesktopClient()) return localApi.writePage(workspaceSlug, conceptId, body, expectedBody, createOnly);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ slug, body, branch, dir }),
+    body: JSON.stringify({ slug: conceptId, body, branch, dir }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -695,7 +697,7 @@ export async function syncBranch(workspaceSlug: string, branch: string): Promise
   return res.json();
 }
 
-/** Rename/move a file or folder on your draft branch. Paths are repo paths (wiki/...). */
+/** Rename/move a file or folder using stable bundle-relative paths. */
 export async function renamePath(workspaceSlug: string, branch: string, from: string, to: string): Promise<void> {
   if (isDesktopClient()) return localApi.renamePath(workspaceSlug, from, to);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/paths/rename`, {
@@ -706,7 +708,7 @@ export async function renamePath(workspaceSlug: string, branch: string, from: st
   if (!res.ok) throw new Error(await res.text().catch(() => `Request failed: ${res.status}`));
 }
 
-/** Delete a file or an entire folder on your draft branch. Path is a repo path (wiki/...). */
+/** Delete a file or folder using its stable bundle-relative path. */
 export async function deletePath(workspaceSlug: string, branch: string, path: string): Promise<void> {
   if (isDesktopClient()) return localApi.deletePath(workspaceSlug, path);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/paths/delete`, {

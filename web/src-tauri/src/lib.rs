@@ -1,6 +1,7 @@
 mod knowledge_index;
 mod local_engine;
 mod mcp;
+mod okf;
 mod terminal;
 
 use local_engine::{
@@ -68,26 +69,23 @@ fn local_add_space(
 fn local_list_pages(
     engine: State<'_, LocalEngine>,
     space_slug: String,
-    dir: String,
 ) -> Result<Vec<PageMeta>, String> {
-    engine.list_pages(&space_slug, &dir)
+    engine.list_pages(&space_slug)
 }
 
 #[tauri::command]
 fn local_get_page(
     engine: State<'_, LocalEngine>,
     space_slug: String,
-    dir: String,
     page_slug: String,
 ) -> Result<PageFull, String> {
-    engine.get_page(&space_slug, &dir, &page_slug)
+    engine.get_page(&space_slug, &page_slug)
 }
 
 #[tauri::command]
 fn local_write_page(
     engine: State<'_, LocalEngine>,
     space_slug: String,
-    dir: String,
     page_slug: String,
     content: String,
     expected_content: Option<String>,
@@ -95,7 +93,6 @@ fn local_write_page(
 ) -> Result<(), String> {
     engine.write_page_checked(
         &space_slug,
-        &dir,
         &page_slug,
         &content,
         expected_content.as_deref(),
