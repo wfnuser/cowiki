@@ -62,6 +62,7 @@ fn local_add_space(
     local_path: String,
     create_directory: bool,
 ) -> Result<Space, String> {
+    let _mutation = engine.lock_mutations()?;
     let selected = PathBuf::from(local_path);
     let folder = if create_directory {
         if name.trim().is_empty() || name.contains(['/', '\\']) || matches!(name.trim(), "." | "..")
@@ -104,6 +105,7 @@ fn local_write_page(
     expected_content: Option<String>,
     create_only: Option<bool>,
 ) -> Result<(), String> {
+    let _mutation = engine.lock_mutations()?;
     engine.write_page_checked(
         &space_slug,
         &page_slug,
@@ -120,6 +122,7 @@ fn local_create_folder(
     name: String,
     parent: Option<String>,
 ) -> Result<(), String> {
+    let _mutation = engine.lock_mutations()?;
     engine.create_folder(&space_slug, &name, parent.as_deref())
 }
 
@@ -148,6 +151,7 @@ fn local_ingest(
     content: String,
     filename: Option<String>,
 ) -> Result<SourceItem, String> {
+    let _mutation = engine.lock_mutations()?;
     engine.ingest(&space_slug, &source_type, &content, filename.as_deref())
 }
 
@@ -158,9 +162,12 @@ async fn local_ingest_files(
     source_paths: Vec<String>,
 ) -> Result<Vec<IngestFileOutcome>, String> {
     let engine = engine.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || engine.ingest_files(&space_slug, &source_paths))
-        .await
-        .map_err(|error| format!("local source import task failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        let _mutation = engine.lock_mutations()?;
+        engine.ingest_files(&space_slug, &source_paths)
+    })
+    .await
+    .map_err(|error| format!("local source import task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -170,6 +177,7 @@ fn local_rename_path(
     from: String,
     to: String,
 ) -> Result<(), String> {
+    let _mutation = engine.lock_mutations()?;
     engine.rename_path(&space_slug, &from, &to)
 }
 
@@ -179,6 +187,7 @@ fn local_delete_path(
     space_slug: String,
     path: String,
 ) -> Result<(), String> {
+    let _mutation = engine.lock_mutations()?;
     engine.delete_path(&space_slug, &path)
 }
 
@@ -198,6 +207,7 @@ fn local_submit(
     space_slug: String,
     paths: Vec<String>,
 ) -> Result<SubmitResult, String> {
+    let _mutation = engine.lock_mutations()?;
     engine.submit(&space_slug, &paths)
 }
 
@@ -206,6 +216,7 @@ fn local_working_diff(
     engine: State<'_, LocalEngine>,
     space_slug: String,
 ) -> Result<Vec<FileDiff>, String> {
+    let _mutation = engine.lock_mutations()?;
     engine.working_diff(&space_slug)
 }
 
@@ -215,6 +226,7 @@ fn local_keep_working_diff(
     space_slug: String,
     expected: Vec<FileDiff>,
 ) -> Result<SubmitResult, String> {
+    let _mutation = engine.lock_mutations()?;
     engine.keep_working_diff(&space_slug, &expected)
 }
 
@@ -224,6 +236,7 @@ fn local_create_agent_change(
     space_slug: String,
     agent_name: String,
 ) -> Result<AgentChange, String> {
+    let _mutation = engine.lock_mutations()?;
     engine.create_agent_change(&space_slug, &agent_name)
 }
 
@@ -242,7 +255,10 @@ fn local_merge_agent_change(
     space_slug: String,
     change_id: String,
 ) -> Result<AgentChange, String> {
+    // Lock order is terminal close gate, then Draft mutation. Terminal starts
+    // only touch their registry and never wait on the mutation lock.
     let _closing = terminals.begin_change_close(&space_slug, &change_id)?;
+    let _mutation = engine.lock_mutations()?;
     engine.merge_agent_change(&space_slug, &change_id)
 }
 
@@ -253,7 +269,9 @@ fn local_discard_agent_change(
     space_slug: String,
     change_id: String,
 ) -> Result<AgentChange, String> {
+    // Keep the same order as merge to avoid a registry/mutation lock cycle.
     let _closing = terminals.begin_change_close(&space_slug, &change_id)?;
+    let _mutation = engine.lock_mutations()?;
     engine.discard_agent_change(&space_slug, &change_id)
 }
 

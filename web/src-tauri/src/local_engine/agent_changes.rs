@@ -82,6 +82,7 @@ impl LocalEngine {
     }
 
     pub fn list_agent_changes(&self, space_slug: &str) -> Result<Vec<AgentChange>, String> {
+        let space = self.find_space(space_slug)?;
         let repo = self.repo(space_slug)?;
         let mut ids = Vec::new();
         let references = repo
@@ -95,6 +96,13 @@ impl LocalEngine {
             {
                 if uuid::Uuid::parse_str(id).is_ok() {
                     ids.push(id.to_string());
+                }
+            }
+        }
+        for id in &ids {
+            if matches!(change_status(&repo, id), "merged" | "discarded") {
+                if let Err(error) = self.cleanup_agent_worktree(&repo, &space.id, id) {
+                    warn_cleanup_failure(id, &error);
                 }
             }
         }
@@ -118,7 +126,12 @@ impl LocalEngine {
         space_slug: &str,
         change_id: &str,
     ) -> Result<AgentChange, String> {
-        self.merge_agent_change_internal(space_slug, change_id, |_| Ok(()))
+        self.merge_agent_change_internal(
+            space_slug,
+            change_id,
+            |_| Ok(()),
+            |engine, repo, space_id, id| engine.cleanup_agent_worktree(repo, space_id, id),
+        )
     }
 
     #[cfg(test)]
@@ -131,17 +144,42 @@ impl LocalEngine {
     where
         F: FnMut(&Path) -> Result<(), String>,
     {
-        self.merge_agent_change_internal(space_slug, change_id, before_write)
+        self.merge_agent_change_internal(
+            space_slug,
+            change_id,
+            before_write,
+            |engine, repo, space_id, id| engine.cleanup_agent_worktree(repo, space_id, id),
+        )
     }
 
-    fn merge_agent_change_internal<F>(
+    #[cfg(test)]
+    pub fn merge_agent_change_with_cleanup_hook<C>(
+        &self,
+        space_slug: &str,
+        change_id: &str,
+        mut cleanup: C,
+    ) -> Result<AgentChange, String>
+    where
+        C: FnMut() -> Result<(), String>,
+    {
+        self.merge_agent_change_internal(
+            space_slug,
+            change_id,
+            |_| Ok(()),
+            move |_, _, _, _| cleanup(),
+        )
+    }
+
+    fn merge_agent_change_internal<F, C>(
         &self,
         space_slug: &str,
         change_id: &str,
         mut before_write: F,
+        mut cleanup: C,
     ) -> Result<AgentChange, String>
     where
         F: FnMut(&Path) -> Result<(), String>,
+        C: FnMut(&LocalEngine, &Repository, &str, &str) -> Result<(), String>,
     {
         validate_change_id(change_id)?;
         let space = self.find_space(space_slug)?;
@@ -200,7 +238,9 @@ impl LocalEngine {
         )
         .map_err(|error| error.to_string())?;
         delete_reference_if_present(&repo, &conflict_ref(change_id));
-        self.cleanup_agent_worktree(&repo, &space.id, change_id)?;
+        if let Err(error) = cleanup(self, &repo, &space.id, change_id) {
+            warn_cleanup_failure(change_id, &error);
+        }
         drop(merged_tree);
         drop(result_tree);
         drop(base_tree);
@@ -216,6 +256,33 @@ impl LocalEngine {
         space_slug: &str,
         change_id: &str,
     ) -> Result<AgentChange, String> {
+        self.discard_agent_change_internal(space_slug, change_id, |engine, repo, space_id, id| {
+            engine.cleanup_agent_worktree(repo, space_id, id)
+        })
+    }
+
+    #[cfg(test)]
+    pub fn discard_agent_change_with_cleanup_hook<C>(
+        &self,
+        space_slug: &str,
+        change_id: &str,
+        mut cleanup: C,
+    ) -> Result<AgentChange, String>
+    where
+        C: FnMut() -> Result<(), String>,
+    {
+        self.discard_agent_change_internal(space_slug, change_id, move |_, _, _, _| cleanup())
+    }
+
+    fn discard_agent_change_internal<C>(
+        &self,
+        space_slug: &str,
+        change_id: &str,
+        mut cleanup: C,
+    ) -> Result<AgentChange, String>
+    where
+        C: FnMut(&LocalEngine, &Repository, &str, &str) -> Result<(), String>,
+    {
         validate_change_id(change_id)?;
         let space = self.find_space(space_slug)?;
         let repo = Repository::open(&space.local_path).map_err(|error| error.to_string())?;
@@ -229,7 +296,9 @@ impl LocalEngine {
         )
         .map_err(|error| error.to_string())?;
         delete_reference_if_present(&repo, &conflict_ref(change_id));
-        self.cleanup_agent_worktree(&repo, &space.id, change_id)?;
+        if let Err(error) = cleanup(self, &repo, &space.id, change_id) {
+            warn_cleanup_failure(change_id, &error);
+        }
         drop(repo);
         self.agent_change(space_slug, change_id)
     }
@@ -368,13 +437,27 @@ impl LocalEngine {
         space_id: &str,
         change_id: &str,
     ) -> Result<(), String> {
-        let worktree_path = self.validate_managed_worktree_path(space_id, change_id)?;
-        std::fs::remove_dir_all(&worktree_path).map_err(|error| error.to_string())?;
-        let worktree = repo
-            .find_worktree(&worktree_name(change_id))
-            .map_err(|error| error.to_string())?;
-        worktree.prune(None).map_err(|error| error.to_string())
+        let worktree_path = self.change_worktree_path(space_id, change_id);
+        match std::fs::symlink_metadata(&worktree_path) {
+            Ok(_) => {
+                let worktree_path = self.validate_managed_worktree_path(space_id, change_id)?;
+                std::fs::remove_dir_all(&worktree_path).map_err(|error| error.to_string())?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
+        match repo.find_worktree(&worktree_name(change_id)) {
+            Ok(worktree) => worktree.prune(None).map_err(|error| error.to_string()),
+            Err(error) if error.code() == git2::ErrorCode::NotFound => Ok(()),
+            Err(error) => Err(error.to_string()),
+        }
     }
+}
+
+fn warn_cleanup_failure(change_id: &str, error: &str) {
+    eprintln!(
+        "CoWiki closed Agent Change '{change_id}' but could not clean its worktree; cleanup will retry when Reviews reload: {error}"
+    );
 }
 
 fn snapshot_worktree(repo: &Repository) -> Result<Oid, String> {

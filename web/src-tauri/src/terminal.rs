@@ -115,30 +115,45 @@ struct AgentChangeIdentity {
     change_id: String,
 }
 
-enum TerminalSlot {
-    Starting(TerminalIdentity),
-    Running(TerminalSession),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalPhase {
+    Starting,
+    Running,
+    Stopping,
+}
+
+struct TerminalSlot {
+    identity: TerminalIdentity,
+    phase: TerminalPhase,
+    session: Option<TerminalSession>,
 }
 
 impl TerminalSlot {
-    fn identity(&self) -> &TerminalIdentity {
-        match self {
-            Self::Starting(identity) => identity,
-            Self::Running(session) => &session.identity,
+    fn starting(identity: TerminalIdentity) -> Self {
+        Self {
+            identity,
+            phase: TerminalPhase::Starting,
+            session: None,
         }
     }
 
+    fn identity(&self) -> &TerminalIdentity {
+        &self.identity
+    }
+
     fn running(&self) -> Option<&TerminalSession> {
-        match self {
-            Self::Running(session) => Some(session),
-            Self::Starting(_) => None,
+        if self.phase == TerminalPhase::Running {
+            self.session.as_ref()
+        } else {
+            None
         }
     }
 
     fn running_mut(&mut self) -> Option<&mut TerminalSession> {
-        match self {
-            Self::Running(session) => Some(session),
-            Self::Starting(_) => None,
+        if self.phase == TerminalPhase::Running {
+            self.session.as_mut()
+        } else {
+            None
         }
     }
 }
@@ -147,6 +162,23 @@ impl TerminalSlot {
 struct TerminalRegistry {
     sessions: HashMap<String, TerminalSlot>,
     closing_changes: HashSet<AgentChangeIdentity>,
+}
+
+impl TerminalRegistry {
+    fn mark_stopping(&mut self, session_id: &str) -> Result<(), String> {
+        let slot = self
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| format!("unknown terminal session: {session_id}"))?;
+        match slot.phase {
+            TerminalPhase::Starting => Err("terminal session is still starting".to_string()),
+            TerminalPhase::Running => {
+                slot.phase = TerminalPhase::Stopping;
+                Ok(())
+            }
+            TerminalPhase::Stopping => Ok(()),
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -226,10 +258,19 @@ impl TerminalState {
             if registry.closing_changes.contains(&change) {
                 return Err("Agent Change is being closed; its terminal cannot restart".to_string());
             }
+        } else if registry
+            .closing_changes
+            .iter()
+            .any(|change| change.space_slug == identity.space_slug)
+        {
+            return Err(
+                "Agent Change in this Space is being closed; a Live terminal cannot start"
+                    .to_string(),
+            );
         }
         registry
             .sessions
-            .insert(session_id.to_string(), TerminalSlot::Starting(identity));
+            .insert(session_id.to_string(), TerminalSlot::starting(identity));
         Ok(())
     }
 
@@ -238,15 +279,17 @@ impl TerminalState {
             .registry
             .lock()
             .map_err(|_| "terminal state is unavailable".to_string())?;
-        let Some(TerminalSlot::Starting(identity)) = registry.sessions.get(session_id) else {
+        let Some(slot) = registry.sessions.get_mut(session_id) else {
             return Err("terminal session reservation was lost".to_string());
         };
-        if identity != &session.identity {
+        if slot.phase != TerminalPhase::Starting {
+            return Err("terminal session reservation is no longer starting".to_string());
+        }
+        if slot.identity != session.identity {
             return Err("terminal session identity changed while starting".to_string());
         }
-        registry
-            .sessions
-            .insert(session_id.to_string(), TerminalSlot::Running(session));
+        slot.phase = TerminalPhase::Running;
+        slot.session = Some(session);
         Ok(())
     }
 
@@ -256,10 +299,25 @@ impl TerminalState {
             .ok()?
             .sessions
             .remove(session_id)
-            .and_then(|slot| match slot {
-                TerminalSlot::Running(session) => Some(session),
-                TerminalSlot::Starting(_) => None,
-            })
+            .and_then(|slot| slot.session)
+    }
+
+    fn request_stop(&self, session_id: &str) -> Result<(), String> {
+        let mut registry = self
+            .registry
+            .lock()
+            .map_err(|_| "terminal state is unavailable".to_string())?;
+        let Some(slot) = registry.sessions.get_mut(session_id) else {
+            return Ok(());
+        };
+        if slot.phase == TerminalPhase::Stopping {
+            return Ok(());
+        }
+        let session = slot
+            .running_mut()
+            .ok_or_else(|| "terminal session is still starting".to_string())?;
+        stop_terminal_processes(session)?;
+        registry.mark_stopping(session_id)
     }
 
     pub(crate) fn begin_change_close(
@@ -275,12 +333,19 @@ impl TerminalState {
             .registry
             .lock()
             .map_err(|_| "terminal state is unavailable".to_string())?;
-        let has_active_terminal = registry.sessions.values().any(|slot| {
+        let blocking_terminal = registry.sessions.values().find(|slot| {
             let terminal = slot.identity();
             terminal.space_slug == identity.space_slug
-                && terminal.change_id.as_deref() == Some(identity.change_id.as_str())
+                && (terminal.change_id.is_none()
+                    || terminal.change_id.as_deref() == Some(identity.change_id.as_str()))
         });
-        if has_active_terminal {
+        if let Some(slot) = blocking_terminal {
+            if slot.identity().change_id.is_none() {
+                return Err(
+                    "Stop the active Live terminal before merging or discarding an Agent Change in this Space."
+                        .to_string(),
+                );
+            }
             return Err(
                 "Stop the active background terminal before merging or discarding this Agent Change."
                     .to_string(),
@@ -492,18 +557,31 @@ pub fn terminal_resize(
 
 #[tauri::command]
 pub fn terminal_kill(state: State<'_, TerminalState>, session_id: String) -> Result<(), String> {
-    let mut registry = state
-        .registry
-        .lock()
-        .map_err(|_| "terminal state is unavailable".to_string())?;
-    if let Some(TerminalSlot::Running(session)) = registry.sessions.get_mut(&session_id) {
-        session
-            .killer
-            .kill()
-            .map_err(|error| format!("failed to stop terminal: {error}"))?;
+    state.request_stop(&session_id)
+}
+
+fn stop_terminal_processes(session: &mut TerminalSession) -> Result<(), String> {
+    #[cfg(unix)]
+    if let Some(process_group) = session.master.process_group_leader() {
+        // portable-pty makes the shell a session leader, but its cloned killer
+        // signals only the shell PID. Signal the current foreground process
+        // group as well so an interactive Agent CLI is asked to stop before
+        // the shell. The registry remains Stopping until child.wait confirms
+        // that the PTY child has actually exited.
+        let result = unsafe { libc::kill(-process_group, libc::SIGHUP) };
+        if result != 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::ESRCH) {
+                return Err(format!("failed to stop terminal process group: {error}"));
+            }
+        }
     }
-    registry.sessions.remove(&session_id);
-    Ok(())
+    match session.killer.kill() {
+        Ok(()) => Ok(()),
+        #[cfg(unix)]
+        Err(error) if error.raw_os_error() == Some(libc::ESRCH) => Ok(()),
+        Err(error) => Err(format!("failed to stop terminal: {error}")),
+    }
 }
 
 fn spawn_output_forwarder(app: AppHandle, session_id: String, mut reader: Box<dyn Read + Send>) {
@@ -645,6 +723,8 @@ mod tests {
         build_agent_command, normalized_pty_size, resolve_terminal_cwd, validate_initial_command,
         validate_session_id, AgentKind, TerminalIdentity, TerminalMode, TerminalState,
     };
+    #[cfg(unix)]
+    use super::{TerminalPhase, TerminalSession};
     use crate::local_engine::LocalEngine;
     use std::path::Path;
 
@@ -823,6 +903,97 @@ mod tests {
 
         drop(closing);
         state.reserve_session("terminal:restart", identity).unwrap();
+    }
+
+    #[test]
+    fn live_terminals_share_the_space_close_gate() {
+        let state = TerminalState::default();
+        let live = TerminalIdentity {
+            space_slug: "notes".to_string(),
+            change_id: None,
+        };
+        state
+            .reserve_session("terminal:live", live.clone())
+            .unwrap();
+
+        let active_error = state.begin_change_close("notes", "change-1").unwrap_err();
+        assert!(active_error.contains("active Live terminal"));
+
+        state.release_session("terminal:live");
+        let closing = state.begin_change_close("notes", "change-1").unwrap();
+        let restart_error = state
+            .reserve_session("terminal:live-restart", live)
+            .unwrap_err();
+        assert!(restart_error.contains("being closed"));
+        assert!(state
+            .reserve_session(
+                "terminal:other-space",
+                TerminalIdentity {
+                    space_slug: "other".to_string(),
+                    change_id: None,
+                },
+            )
+            .is_ok());
+        drop(closing);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stopping_terminal_blocks_close_until_exit_releases_its_slot() {
+        let state = TerminalState::default();
+        let pair = portable_pty::native_pty_system()
+            .openpty(normalized_pty_size(None, None))
+            .unwrap();
+        let mut command = portable_pty::CommandBuilder::new("/bin/sh");
+        command.arg("-c");
+        command.arg("sleep 10");
+        let mut child = pair.slave.spawn_command(command).unwrap();
+        drop(pair.slave);
+        let writer = pair.master.take_writer().unwrap();
+        let killer = child.clone_killer();
+        let identity = TerminalIdentity {
+            space_slug: "notes".to_string(),
+            change_id: Some("change-1".to_string()),
+        };
+        state
+            .reserve_session("terminal:stopping", identity.clone())
+            .unwrap();
+        state
+            .install_session(
+                "terminal:stopping",
+                TerminalSession {
+                    identity,
+                    master: pair.master,
+                    writer,
+                    killer,
+                },
+            )
+            .unwrap();
+
+        state.request_stop("terminal:stopping").unwrap();
+        {
+            let registry = state.registry.lock().unwrap();
+            assert_eq!(
+                registry.sessions["terminal:stopping"].phase,
+                TerminalPhase::Stopping
+            );
+        }
+
+        let stopping_error = state.begin_change_close("notes", "change-1").unwrap_err();
+        assert!(stopping_error.contains("active background terminal"));
+
+        let exited = (0..100).any(|_| {
+            if child.try_wait().unwrap().is_some() {
+                true
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                false
+            }
+        });
+        assert!(exited, "terminal child did not exit after Stop");
+        // This is the exit watcher's only release point after child.wait().
+        state.release_session("terminal:stopping");
+        assert!(state.begin_change_close("notes", "change-1").is_ok());
     }
 
     #[test]

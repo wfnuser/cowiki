@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use similar::{ChangeTag, TextDiff};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::knowledge_index::{self, SearchHit};
 use crate::okf::{self, DocumentKind};
@@ -109,6 +109,10 @@ pub struct FileDiff {
 pub struct LocalEngine {
     db: Arc<Mutex<Connection>>,
     metadata_dir: PathBuf,
+    // Product-owned Draft writers serialize here. External filesystem writers
+    // cannot join this protocol, so merge still performs its final no-follow
+    // content CAS immediately before each replacement.
+    mutation_lock: Arc<Mutex<()>>,
 }
 
 impl LocalEngine {
@@ -131,9 +135,16 @@ impl LocalEngine {
         let engine = Self {
             db: Arc::new(Mutex::new(connection)),
             metadata_dir: metadata_dir.to_path_buf(),
+            mutation_lock: Arc::new(Mutex::new(())),
         };
         engine.rebuild_all_search_indexes()?;
         Ok(engine)
+    }
+
+    pub(crate) fn lock_mutations(&self) -> Result<MutexGuard<'_, ()>, String> {
+        self.mutation_lock
+            .lock()
+            .map_err(|_| "local mutation lock is unavailable".to_string())
     }
 
     pub fn list_spaces(&self) -> Result<Vec<Space>, String> {
@@ -1771,6 +1782,8 @@ pub(crate) fn markdown_title(body: &str) -> Option<String> {
 mod tests {
     use super::{sha256_file, LocalEngine};
     use git2::Repository;
+    use std::sync::{mpsc, Arc, Barrier};
+    use std::time::Duration;
 
     #[test]
     fn fresh_local_engine_waits_for_a_folder() {
@@ -1778,6 +1791,28 @@ mod tests {
         let engine = LocalEngine::open(temp.path()).unwrap();
 
         assert!(engine.list_spaces().unwrap().is_empty());
+    }
+
+    #[test]
+    fn cloned_engines_share_a_live_mutation_lock_that_releases_cleanly() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(temp.path()).unwrap();
+        let held = engine.lock_mutations().unwrap();
+        let contender = engine.clone();
+        let barrier = Arc::new(Barrier::new(2));
+        let worker_barrier = barrier.clone();
+        let (acquired_tx, acquired_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            worker_barrier.wait();
+            let _guard = contender.lock_mutations().unwrap();
+            acquired_tx.send(()).unwrap();
+        });
+
+        barrier.wait();
+        assert!(acquired_rx.recv_timeout(Duration::from_millis(50)).is_err());
+        drop(held);
+        acquired_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        worker.join().unwrap();
     }
 
     #[test]
@@ -2891,6 +2926,67 @@ mod tests {
             engine.list_agent_changes(&space.slug).unwrap()[0].status,
             "open"
         );
+    }
+
+    #[test]
+    fn merged_change_succeeds_when_cleanup_fails_and_list_retries_cleanup() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        let change = engine.create_agent_change(&space.slug, "Codex").unwrap();
+        std::fs::write(change.worktree_path.join("agent.md"), "# Agent result\n").unwrap();
+
+        let merged = engine
+            .merge_agent_change_with_cleanup_hook(&space.slug, &change.id, || {
+                Err("injected cleanup failure".to_string())
+            })
+            .unwrap();
+        assert_eq!(merged.status, "merged");
+        assert!(merged.diffs.iter().any(|diff| diff.path == "agent.md"));
+        assert!(change.worktree_path.exists());
+        assert_eq!(
+            std::fs::read_to_string(folder.join("agent.md")).unwrap(),
+            "# Agent result\n"
+        );
+
+        let listed = engine.list_agent_changes(&space.slug).unwrap();
+        assert_eq!(listed[0].status, "merged");
+        assert!(listed[0].diffs.iter().any(|diff| diff.path == "agent.md"));
+        assert!(!change.worktree_path.exists());
+        assert!(engine
+            .agent_change_worktree(&space.slug, &change.id)
+            .is_err());
+    }
+
+    #[test]
+    fn discarded_change_succeeds_when_cleanup_fails_and_list_retries_cleanup() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        let change = engine.create_agent_change(&space.slug, "Codex").unwrap();
+        std::fs::write(change.worktree_path.join("agent.md"), "# Discard me\n").unwrap();
+
+        let discarded = engine
+            .discard_agent_change_with_cleanup_hook(&space.slug, &change.id, || {
+                Err("injected cleanup failure".to_string())
+            })
+            .unwrap();
+        assert_eq!(discarded.status, "discarded");
+        assert!(discarded.diffs.iter().any(|diff| diff.path == "agent.md"));
+        assert!(change.worktree_path.exists());
+        assert!(!folder.join("agent.md").exists());
+
+        let listed = engine.list_agent_changes(&space.slug).unwrap();
+        assert_eq!(listed[0].status, "discarded");
+        assert!(listed[0].diffs.iter().any(|diff| diff.path == "agent.md"));
+        assert!(!change.worktree_path.exists());
+        assert!(engine
+            .agent_change_worktree(&space.slug, &change.id)
+            .is_err());
     }
 
     #[test]
