@@ -6,8 +6,8 @@ mod okf;
 mod terminal;
 
 use local_engine::{
-    FileDiff, IngestFileOutcome, LocalEngine, PageFull, PageMeta, SearchResponse, SourceContent,
-    SourceItem, Space, SubmitResult,
+    AgentChange, FileDiff, IngestFileOutcome, LocalEngine, PageFull, PageMeta, SearchResponse,
+    SourceContent, SourceItem, Space, SubmitResult,
 };
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -218,6 +218,41 @@ fn local_keep_working_diff(
     engine.keep_working_diff(&space_slug, &expected)
 }
 
+#[tauri::command]
+fn local_create_agent_change(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    agent_name: String,
+) -> Result<AgentChange, String> {
+    engine.create_agent_change(&space_slug, &agent_name)
+}
+
+#[tauri::command]
+fn local_list_agent_changes(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<Vec<AgentChange>, String> {
+    engine.list_agent_changes(&space_slug)
+}
+
+#[tauri::command]
+fn local_merge_agent_change(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    change_id: String,
+) -> Result<AgentChange, String> {
+    engine.merge_agent_change(&space_slug, &change_id)
+}
+
+#[tauri::command]
+fn local_discard_agent_change(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    change_id: String,
+) -> Result<AgentChange, String> {
+    engine.discard_agent_change(&space_slug, &change_id)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -240,6 +275,10 @@ pub fn run() {
             local_submit,
             local_working_diff,
             local_keep_working_diff,
+            local_create_agent_change,
+            local_list_agent_changes,
+            local_merge_agent_change,
+            local_discard_agent_change,
             terminal::terminal_create,
             terminal::terminal_write,
             terminal::terminal_resize,

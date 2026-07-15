@@ -7,6 +7,7 @@ import {
   belongsToTerminalSession,
   normalizeTerminalSize,
   type AgentKind,
+  type AgentTerminalMode,
   type TerminalDataEvent,
   type TerminalExitEvent,
   type TerminalSize,
@@ -17,11 +18,22 @@ type TerminalStatus = 'idle' | 'starting' | 'running' | 'exited' | 'error';
 type UseAgentTerminalOptions = {
   cwd: string;
   agent: AgentKind;
+  mode: AgentTerminalMode;
+  spaceSlug: string;
+  changeId?: string;
   onData: (data: string) => void;
   onExit?: (exitCode: number | null) => void;
 };
 
-export function useAgentTerminal({ cwd, agent, onData, onExit }: UseAgentTerminalOptions) {
+export function useAgentTerminal({
+  agent,
+  changeId,
+  cwd,
+  mode,
+  onData,
+  onExit,
+  spaceSlug,
+}: UseAgentTerminalOptions) {
   const sessionIdRef = useRef<string | null>(null);
   const generationRef = useRef(0);
   const listenersReadyRef = useRef<Promise<void> | null>(null);
@@ -66,6 +78,9 @@ export function useAgentTerminal({ cwd, agent, onData, onExit }: UseAgentTermina
         request: {
           sessionId: requestedSessionId,
           cwd,
+          mode,
+          spaceSlug,
+          changeId,
           agent,
           initialCommand: agentInitialCommand(agent),
           ...normalized,
@@ -91,7 +106,7 @@ export function useAgentTerminal({ cwd, agent, onData, onExit }: UseAgentTermina
       setStatus('error');
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [agent, cwd]);
+  }, [agent, changeId, cwd, mode, spaceSlug]);
 
   const write = useCallback(async (data: string) => {
     const sessionId = sessionIdRef.current;

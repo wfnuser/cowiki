@@ -11,6 +11,9 @@ use std::sync::{Arc, Mutex};
 use crate::knowledge_index::{self, SearchHit};
 use crate::okf::{self, DocumentKind};
 
+mod agent_changes;
+pub use agent_changes::AgentChange;
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Space {
@@ -102,6 +105,7 @@ pub struct FileDiff {
 #[derive(Clone)]
 pub struct LocalEngine {
     db: Arc<Mutex<Connection>>,
+    metadata_dir: PathBuf,
 }
 
 impl LocalEngine {
@@ -123,6 +127,7 @@ impl LocalEngine {
         knowledge_index::initialize(&connection)?;
         let engine = Self {
             db: Arc::new(Mutex::new(connection)),
+            metadata_dir: metadata_dir.to_path_buf(),
         };
         engine.rebuild_all_search_indexes()?;
         Ok(engine)
@@ -272,12 +277,6 @@ impl LocalEngine {
             .into_iter()
             .find(|space| space.slug == slug)
             .ok_or_else(|| format!("Space '{slug}' is not registered on this device"))
-    }
-
-    pub fn find_space_by_path(&self, path: &Path) -> Result<Space, String> {
-        let canonical = path.canonicalize().map_err(|e| e.to_string())?;
-        self.space_by_path(&canonical)?
-            .ok_or_else(|| "directory is not an opened CoWiki Space".to_string())
     }
 
     #[cfg(test)]
@@ -2472,6 +2471,173 @@ mod tests {
             .submit(&space.slug, &["draft.md".to_string()])
             .unwrap();
         assert!(engine.working_diff(&space.slug).unwrap().is_empty());
+    }
+
+    #[test]
+    fn background_agent_change_is_isolated_and_lists_its_diff() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        std::fs::write(folder.join("draft.md"), "# Draft at dispatch\n").unwrap();
+        let index_before = std::fs::read(folder.join(".git/index")).unwrap();
+
+        let change = engine.create_agent_change(&space.slug, "Codex").unwrap();
+        assert_eq!(
+            std::fs::read(folder.join(".git/index")).unwrap(),
+            index_before
+        );
+        assert_eq!(
+            std::fs::read_to_string(change.worktree_path.join("draft.md")).unwrap(),
+            "# Draft at dispatch\n"
+        );
+        std::fs::write(
+            change.worktree_path.join("agent.md"),
+            "# Background result\n",
+        )
+        .unwrap();
+
+        assert!(!folder.join("agent.md").exists());
+        let changes = engine.list_agent_changes(&space.slug).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].id, change.id);
+        assert_eq!(changes[0].status, "open");
+        let diff = changes[0]
+            .diffs
+            .iter()
+            .find(|diff| diff.path == "agent.md")
+            .unwrap();
+        assert!(diff.old_content.is_none());
+        assert_eq!(diff.new_content.as_deref(), Some("# Background result\n"));
+    }
+
+    #[test]
+    fn clean_agent_merge_preserves_human_draft_and_head() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        std::fs::write(folder.join("human.md"), "# Human baseline\n").unwrap();
+        std::fs::write(folder.join("agent.md"), "# Agent baseline\n").unwrap();
+        engine.submit(&space.slug, &[]).unwrap();
+        let change = engine.create_agent_change(&space.slug, "Codex").unwrap();
+        let head_before = git2::Repository::open(&folder)
+            .unwrap()
+            .head()
+            .unwrap()
+            .target()
+            .unwrap();
+
+        std::fs::write(folder.join("human.md"), "# Human latest Draft\n").unwrap();
+        let index_repo = git2::Repository::open(&folder).unwrap();
+        let mut user_index = index_repo.index().unwrap();
+        user_index
+            .add_path(std::path::Path::new("human.md"))
+            .unwrap();
+        user_index.write().unwrap();
+        drop(user_index);
+        drop(index_repo);
+        let index_before = std::fs::read(folder.join(".git/index")).unwrap();
+        std::fs::write(
+            change.worktree_path.join("agent.md"),
+            "# Background Agent result\n",
+        )
+        .unwrap();
+
+        let merged = engine.merge_agent_change(&space.slug, &change.id).unwrap();
+        assert_eq!(merged.status, "merged");
+        assert_eq!(
+            std::fs::read_to_string(folder.join("human.md")).unwrap(),
+            "# Human latest Draft\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(folder.join("agent.md")).unwrap(),
+            "# Background Agent result\n"
+        );
+        let repo = git2::Repository::open(&folder).unwrap();
+        assert_eq!(repo.head().unwrap().target().unwrap(), head_before);
+        assert_eq!(
+            std::fs::read(folder.join(".git/index")).unwrap(),
+            index_before
+        );
+        drop(repo);
+        let draft = engine.working_diff(&space.slug).unwrap();
+        assert!(draft.iter().any(|diff| diff.path == "human.md"));
+        assert!(draft.iter().any(|diff| diff.path == "agent.md"));
+    }
+
+    #[test]
+    fn conflicting_agent_merge_leaves_draft_bytes_unchanged() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        std::fs::write(folder.join("shared.md"), "# Shared baseline\n").unwrap();
+        engine.submit(&space.slug, &[]).unwrap();
+        let change = engine
+            .create_agent_change(&space.slug, "Claude Code")
+            .unwrap();
+
+        std::fs::write(folder.join("shared.md"), "# Human latest Draft\n").unwrap();
+        std::fs::write(
+            change.worktree_path.join("shared.md"),
+            "# Background Agent result\n",
+        )
+        .unwrap();
+        let draft_before = std::fs::read(folder.join("shared.md")).unwrap();
+
+        let conflict = engine.merge_agent_change(&space.slug, &change.id).unwrap();
+        assert_eq!(conflict.status, "needsResolution");
+        assert_eq!(
+            std::fs::read(folder.join("shared.md")).unwrap(),
+            draft_before
+        );
+        let listed = engine.list_agent_changes(&space.slug).unwrap();
+        assert_eq!(listed[0].status, "needsResolution");
+    }
+
+    #[test]
+    fn discarding_agent_change_does_not_modify_draft() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        std::fs::write(folder.join("shared.md"), "# Baseline\n").unwrap();
+        engine.submit(&space.slug, &[]).unwrap();
+        let change = engine
+            .create_agent_change(&space.slug, "Gemini CLI")
+            .unwrap();
+        std::fs::write(folder.join("shared.md"), "# Human Draft\n").unwrap();
+        std::fs::write(change.worktree_path.join("shared.md"), "# Agent result\n").unwrap();
+        let draft_before = std::fs::read(folder.join("shared.md")).unwrap();
+        let head_before = git2::Repository::open(&folder)
+            .unwrap()
+            .head()
+            .unwrap()
+            .target()
+            .unwrap();
+
+        let discarded = engine
+            .discard_agent_change(&space.slug, &change.id)
+            .unwrap();
+        assert_eq!(discarded.status, "discarded");
+        assert_eq!(
+            std::fs::read(folder.join("shared.md")).unwrap(),
+            draft_before
+        );
+        assert_eq!(
+            git2::Repository::open(&folder)
+                .unwrap()
+                .head()
+                .unwrap()
+                .target()
+                .unwrap(),
+            head_before
+        );
     }
 
     #[test]

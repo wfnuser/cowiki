@@ -31,6 +31,22 @@ pub enum AgentKind {
     Hermes,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TerminalMode {
+    Live,
+    Background,
+}
+
+impl TerminalMode {
+    fn prompt(self) -> &'static str {
+        match self {
+            Self::Live => "You are editing the current Draft working tree directly. Re-read files immediately before every edit and never overwrite concurrent human or Agent changes.",
+            Self::Background => "You are in a CoWiki-managed background worktree captured from the Draft at dispatch time. Only edit files in this worktree. Do not checkout, merge, commit, or push; CoWiki collects the result and merges it into the latest Draft after review.",
+        }
+    }
+}
+
 impl AgentKind {
     fn command(self) -> &'static str {
         match self {
@@ -49,6 +65,9 @@ impl AgentKind {
 pub struct TerminalCreateRequest {
     session_id: String,
     cwd: String,
+    mode: TerminalMode,
+    space_slug: String,
+    change_id: Option<String>,
     agent: AgentKind,
     initial_command: Option<String>,
     cols: Option<u16>,
@@ -95,8 +114,14 @@ pub fn terminal_create(
     request: TerminalCreateRequest,
 ) -> Result<TerminalCreated, String> {
     let session_id = validate_session_id(&request.session_id)?;
-    let cwd = canonical_space_path(&request.cwd)?;
-    let space = local_engine.find_space_by_path(&cwd)?;
+    let cwd = resolve_terminal_cwd(
+        &local_engine,
+        request.mode,
+        &request.space_slug,
+        request.change_id.as_deref(),
+        &request.cwd,
+    )?;
+    let space = local_engine.find_space(&request.space_slug)?;
     validate_initial_command(request.agent, request.initial_command.as_deref())?;
     let size = normalized_pty_size(request.cols, request.rows);
 
@@ -129,7 +154,7 @@ pub fn terminal_create(
     // renderer cannot provide arbitrary flags or commands.
     let executable = std::env::current_exe()
         .map_err(|error| format!("cannot locate CoWiki MCP executable: {error}"))?;
-    let agent_command = build_agent_command(request.agent, &space.slug, &executable);
+    let agent_command = build_agent_command(request.agent, request.mode, &space.slug, &executable);
     writer
         .write_all(format!("{agent_command}\r").as_bytes())
         .and_then(|_| writer.flush())
@@ -168,9 +193,15 @@ fn validate_session_id(value: &str) -> Result<String, String> {
 
 const SPACE_PROTOCOL: &str = "You are maintaining a CoWiki knowledge Space. Markdown files are the source of truth. Follow the Open Knowledge Format and the Space's own rules. Before answering about the Space, use the cowiki MCP search tools and read the relevant pages; cite their relative paths. Before claiming that knowledge is absent, search and list evidence first. Raw sources are immutable. Integrate durable knowledge into the maintained wiki, reconcile contradictions, keep links/index/log consistent, and make every change reversible. Re-read a file immediately before editing it; never silently overwrite concurrent human changes. Do not commit, checkout, merge, push, or edit CoWiki SQLite metadata unless the user explicitly asks.";
 
-fn build_agent_command(agent: AgentKind, space_slug: &str, executable: &Path) -> String {
+fn build_agent_command(
+    agent: AgentKind,
+    mode: TerminalMode,
+    space_slug: &str,
+    executable: &Path,
+) -> String {
     let executable_text = executable.to_string_lossy();
     let mcp_args = vec!["--mcp", "--space", space_slug];
+    let prompt = format!("{SPACE_PROTOCOL} {}", mode.prompt());
     match agent {
         AgentKind::Claude => {
             let config = serde_json::json!({
@@ -185,7 +216,7 @@ fn build_agent_command(agent: AgentKind, space_slug: &str, executable: &Path) ->
             format!(
                 "claude --mcp-config {} --append-system-prompt {}",
                 shell_quote(&config.to_string()),
-                shell_quote(SPACE_PROTOCOL),
+                shell_quote(&prompt),
             )
         }
         AgentKind::Codex => {
@@ -202,16 +233,13 @@ fn build_agent_command(agent: AgentKind, space_slug: &str, executable: &Path) ->
                 "codex -c {} -c {} {}",
                 shell_quote(&format!("mcp_servers.cowiki.command={command_toml}")),
                 shell_quote(&format!("mcp_servers.cowiki.args={args_toml}")),
-                shell_quote(SPACE_PROTOCOL),
+                shell_quote(&prompt),
             )
         }
-        AgentKind::Grok => format!("grok --rules {}", shell_quote(SPACE_PROTOCOL)),
-        AgentKind::Gemini => format!(
-            "gemini --prompt-interactive {}",
-            shell_quote(SPACE_PROTOCOL)
-        ),
+        AgentKind::Grok => format!("grok --rules {}", shell_quote(&prompt)),
+        AgentKind::Gemini => format!("gemini --prompt-interactive {}", shell_quote(&prompt)),
         AgentKind::OpenCode => {
-            format!("opencode --prompt {}", shell_quote(SPACE_PROTOCOL))
+            format!("opencode --prompt {}", shell_quote(&prompt))
         }
         // Hermes discovers the Space's AGENTS.md and skills from its working
         // directory. Its interactive command has no system-prompt override.
@@ -336,6 +364,37 @@ fn canonical_space_path(raw_path: &str) -> Result<PathBuf, String> {
     Ok(canonical)
 }
 
+fn resolve_terminal_cwd(
+    local_engine: &LocalEngine,
+    mode: TerminalMode,
+    space_slug: &str,
+    change_id: Option<&str>,
+    raw_cwd: &str,
+) -> Result<PathBuf, String> {
+    let requested = canonical_space_path(raw_cwd)?;
+    let space = local_engine.find_space(space_slug)?;
+    let expected = match mode {
+        TerminalMode::Live => {
+            if change_id.is_some() {
+                return Err("a Live terminal cannot claim an Agent Change".to_string());
+            }
+            space
+                .local_path
+                .canonicalize()
+                .map_err(|error| error.to_string())?
+        }
+        TerminalMode::Background => {
+            let change_id = change_id
+                .ok_or_else(|| "a background terminal requires an Agent Change".to_string())?;
+            local_engine.agent_change_worktree(space_slug, change_id)?
+        }
+    };
+    if requested != expected {
+        return Err("terminal directory does not match its Space and Agent Change".to_string());
+    }
+    Ok(requested)
+}
+
 fn validate_initial_command(agent: AgentKind, initial_command: Option<&str>) -> Result<(), String> {
     if initial_command.is_some_and(|command| command != agent.command()) {
         return Err("terminal initial command must match the selected agent".to_string());
@@ -390,9 +449,10 @@ fn add_shell_args(command: &mut CommandBuilder, shell: &Path) {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_agent_command, normalized_pty_size, validate_initial_command, validate_session_id,
-        AgentKind,
+        build_agent_command, normalized_pty_size, resolve_terminal_cwd, validate_initial_command,
+        validate_session_id, AgentKind, TerminalMode,
     };
+    use crate::local_engine::LocalEngine;
     use std::path::Path;
 
     #[test]
@@ -424,21 +484,54 @@ mod tests {
     #[test]
     fn launches_agents_with_read_only_cowiki_mcp_and_maintenance_protocol() {
         let executable = Path::new("/Applications/CoWiki.app/Contents/MacOS/cowiki-desktop");
-        let codex = build_agent_command(AgentKind::Codex, "research-space", executable);
-        let claude = build_agent_command(AgentKind::Claude, "research-space", executable);
+        let codex = build_agent_command(
+            AgentKind::Codex,
+            TerminalMode::Live,
+            "research-space",
+            executable,
+        );
+        let claude = build_agent_command(
+            AgentKind::Claude,
+            TerminalMode::Background,
+            "research-space",
+            executable,
+        );
 
         assert!(codex.contains("mcp_servers.cowiki.command"));
         assert!(codex.contains("--space"));
         assert!(codex.contains("research-space"));
         assert!(codex.contains("Before claiming that knowledge is absent"));
+        assert!(codex.contains("current Draft working tree"));
         assert!(claude.contains("--mcp-config"));
         assert!(claude.contains("cowiki"));
         assert!(claude.contains("--append-system-prompt"));
+        assert!(claude.contains("managed background worktree"));
+        assert!(claude.contains("Do not checkout, merge, commit, or push"));
 
-        let grok = build_agent_command(AgentKind::Grok, "research-space", executable);
-        let gemini = build_agent_command(AgentKind::Gemini, "research-space", executable);
-        let opencode = build_agent_command(AgentKind::OpenCode, "research-space", executable);
-        let hermes = build_agent_command(AgentKind::Hermes, "research-space", executable);
+        let grok = build_agent_command(
+            AgentKind::Grok,
+            TerminalMode::Live,
+            "research-space",
+            executable,
+        );
+        let gemini = build_agent_command(
+            AgentKind::Gemini,
+            TerminalMode::Live,
+            "research-space",
+            executable,
+        );
+        let opencode = build_agent_command(
+            AgentKind::OpenCode,
+            TerminalMode::Live,
+            "research-space",
+            executable,
+        );
+        let hermes = build_agent_command(
+            AgentKind::Hermes,
+            TerminalMode::Live,
+            "research-space",
+            executable,
+        );
 
         assert!(grok.starts_with("grok --rules "));
         assert!(grok.contains("Before claiming that knowledge is absent"));
@@ -447,5 +540,70 @@ mod tests {
         assert!(opencode.starts_with("opencode --prompt "));
         assert!(opencode.contains("Before claiming that knowledge is absent"));
         assert_eq!(hermes, "hermes chat");
+    }
+
+    #[test]
+    fn terminal_mode_and_identity_control_the_only_allowed_cwd() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let notes = temp.path().join("notes");
+        let other = temp.path().join("other");
+        std::fs::create_dir_all(&notes).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        let notes_space = engine.add_space("Notes", "notes", &notes).unwrap();
+        let other_space = engine.add_space("Other", "other", &other).unwrap();
+        let notes_change = engine
+            .create_agent_change(&notes_space.slug, "Codex")
+            .unwrap();
+        let other_change = engine
+            .create_agent_change(&other_space.slug, "Claude Code")
+            .unwrap();
+
+        assert_eq!(
+            resolve_terminal_cwd(
+                &engine,
+                TerminalMode::Live,
+                &notes_space.slug,
+                None,
+                notes.to_str().unwrap(),
+            )
+            .unwrap(),
+            notes.canonicalize().unwrap()
+        );
+        assert!(resolve_terminal_cwd(
+            &engine,
+            TerminalMode::Live,
+            &notes_space.slug,
+            None,
+            other.to_str().unwrap(),
+        )
+        .is_err());
+        assert_eq!(
+            resolve_terminal_cwd(
+                &engine,
+                TerminalMode::Background,
+                &notes_space.slug,
+                Some(&notes_change.id),
+                notes_change.worktree_path.to_str().unwrap(),
+            )
+            .unwrap(),
+            notes_change.worktree_path.canonicalize().unwrap()
+        );
+        assert!(resolve_terminal_cwd(
+            &engine,
+            TerminalMode::Background,
+            &notes_space.slug,
+            Some(&notes_change.id),
+            notes.to_str().unwrap(),
+        )
+        .is_err());
+        assert!(resolve_terminal_cwd(
+            &engine,
+            TerminalMode::Background,
+            &notes_space.slug,
+            Some(&other_change.id),
+            other_change.worktree_path.to_str().unwrap(),
+        )
+        .is_err());
     }
 }

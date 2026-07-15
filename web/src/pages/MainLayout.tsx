@@ -1201,7 +1201,9 @@ export function MainLayout() {
                 }}
               />
               <AgentTerminalPanel
+                key={activeWorkspace.id}
                 spacePath={activeWorkspace.localPath}
+                spaceSlug={activeWorkspace.slug}
                 defaultAgent={clientSettings.defaultAgent}
                 onClose={() => setAgentPanelOpen(false)}
               />
