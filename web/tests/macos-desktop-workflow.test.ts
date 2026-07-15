@@ -42,6 +42,7 @@ test("the x86_64 DMG is retained and desktop tags publish the same artifact", ()
     workflow,
     /uses: actions\/download-artifact@v4\n\s+with:\n\s+name: CoWiki-macOS-x86_64/,
   )
+  assert.ok(workflow.includes("GH_REPO: ${{ github.repository }}"))
   assert.match(workflow, /gh release view "\$GITHUB_REF_NAME"/)
   assert.match(
     workflow,
@@ -50,6 +51,11 @@ test("the x86_64 DMG is retained and desktop tags publish the same artifact", ()
   assert.match(
     workflow,
     /gh release upload "\$GITHUB_REF_NAME" release-assets\/\*\.dmg --clobber/,
+  )
+  assert.ok(
+    workflow.includes(
+      "This DMG is unsigned and unnotarized. macOS Gatekeeper may require explicit approval through Finder or Privacy & Security.",
+    ),
   )
 })
 
