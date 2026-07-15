@@ -18,3 +18,9 @@ export function orderedLocalReviewRows<T extends LocalReviewChangeIdentity>(
     ...newestFirst.map((change) => ({ kind: 'agent' as const, id: change.id, change })),
   ];
 }
+
+export type LocalReviewAction = 'commit' | 'merge' | 'discard';
+
+export function localReviewActionRefreshesDraft(action: LocalReviewAction): boolean {
+  return action === 'merge';
+}

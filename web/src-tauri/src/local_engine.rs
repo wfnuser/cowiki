@@ -97,6 +97,9 @@ pub struct FileDiff {
     pub path: String,
     pub old_content: Option<String>,
     pub new_content: Option<String>,
+    pub is_binary: bool,
+    pub old_binary_hash: Option<String>,
+    pub new_binary_hash: Option<String>,
     pub hunks: Vec<DiffHunk>,
     pub additions: usize,
     pub deletions: usize,
@@ -901,6 +904,14 @@ impl LocalEngine {
         reset_index_to_head(&repo, &mut index)?;
         for diff in expected {
             let path = safe_repo_path(&diff.path)?;
+            if diff.is_binary {
+                if diff.new_binary_hash.is_some() {
+                    index.add_path(path).map_err(|error| error.to_string())?;
+                } else {
+                    let _ = index.remove_path(path);
+                }
+                continue;
+            }
             if let Some(content) = &diff.new_content {
                 let entry = IndexEntry {
                     ctime: IndexTime::new(0, 0),
@@ -954,17 +965,17 @@ impl LocalEngine {
             if safe_repo_path(relative).is_err() {
                 continue;
             }
-            let old_content = head_text(&repo, relative)?;
+            let old_bytes = head_bytes(&repo, relative)?;
             let new_path = space.local_path.join(relative);
-            let new_content = if new_path.is_file() {
-                std::fs::read_to_string(&new_path).ok()
+            let new_bytes = if new_path.is_file() {
+                std::fs::read(&new_path).ok()
             } else {
                 None
             };
-            if old_content.is_none() && new_content.is_none() {
+            if old_bytes.is_none() && new_bytes.is_none() {
                 continue;
             }
-            result.push(text_file_diff(relative, old_content, new_content));
+            result.push(file_diff_from_bytes(relative, old_bytes, new_bytes));
         }
         result.sort_by(|left, right| left.path.cmp(&right.path));
         Ok(result)
@@ -1360,7 +1371,7 @@ fn commit_okf_migration(repo: &Repository) -> Result<(), String> {
     Ok(())
 }
 
-fn head_text(repo: &Repository, relative: &str) -> Result<Option<String>, String> {
+fn head_bytes(repo: &Repository, relative: &str) -> Result<Option<Vec<u8>>, String> {
     let Ok(head) = repo.head() else {
         return Ok(None);
     };
@@ -1372,9 +1383,60 @@ fn head_text(repo: &Repository, relative: &str) -> Result<Option<String>, String
     let blob = repo
         .find_blob(entry.id())
         .map_err(|error| error.to_string())?;
-    Ok(std::str::from_utf8(blob.content())
+    Ok(Some(blob.content().to_vec()))
+}
+
+fn file_diff_from_bytes(
+    path: &str,
+    old_bytes: Option<Vec<u8>>,
+    new_bytes: Option<Vec<u8>>,
+) -> FileDiff {
+    let old_content = old_bytes
+        .as_deref()
+        .map(std::str::from_utf8)
+        .transpose()
         .ok()
-        .map(ToOwned::to_owned))
+        .flatten()
+        .map(ToOwned::to_owned);
+    let new_content = new_bytes
+        .as_deref()
+        .map(std::str::from_utf8)
+        .transpose()
+        .ok()
+        .flatten()
+        .map(ToOwned::to_owned);
+    let is_binary = old_bytes.as_deref().is_some_and(is_binary_content)
+        || new_bytes.as_deref().is_some_and(is_binary_content);
+    if !is_binary {
+        return text_file_diff(path, old_content, new_content);
+    }
+    FileDiff {
+        path: path.to_string(),
+        old_content: None,
+        new_content: None,
+        is_binary: true,
+        old_binary_hash: old_bytes.as_deref().map(sha256_bytes),
+        new_binary_hash: new_bytes.as_deref().map(sha256_bytes),
+        hunks: vec![DiffHunk {
+            header: "Binary file changed".to_string(),
+            lines: vec![DiffLine {
+                kind: "ctx".to_string(),
+                old_line: None,
+                new_line: None,
+                text: "Binary file changed (contents cannot be displayed).".to_string(),
+            }],
+        }],
+        additions: 0,
+        deletions: 0,
+    }
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn is_binary_content(bytes: &[u8]) -> bool {
+    bytes.contains(&0) || std::str::from_utf8(bytes).is_err()
 }
 
 fn text_file_diff(
@@ -1429,6 +1491,9 @@ fn text_file_diff(
         path: path.to_string(),
         old_content,
         new_content,
+        is_binary: false,
+        old_binary_hash: None,
+        new_binary_hash: None,
         hunks: vec![DiffHunk {
             header: format!(
                 "@@ -1,{} +1,{} @@",
@@ -1705,6 +1770,7 @@ pub(crate) fn markdown_title(body: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{sha256_file, LocalEngine};
+    use git2::Repository;
 
     #[test]
     fn fresh_local_engine_waits_for_a_folder() {
@@ -2513,6 +2579,140 @@ mod tests {
     }
 
     #[test]
+    fn binary_draft_and_agent_deltas_remain_visible_and_merge_raw_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        let baseline = [0_u8, 159, 146, 150];
+        std::fs::write(folder.join("asset.bin"), baseline).unwrap();
+        engine
+            .submit(&space.slug, &["asset.bin".to_string()])
+            .unwrap();
+
+        let human_bytes = [0_u8, 255, 1, 2, 3];
+        std::fs::write(folder.join("asset.bin"), human_bytes).unwrap();
+        let draft = engine.working_diff(&space.slug).unwrap();
+        let binary_draft = draft.iter().find(|diff| diff.path == "asset.bin").unwrap();
+        assert!(binary_draft.is_binary);
+        assert!(binary_draft.old_binary_hash.is_some());
+        assert!(binary_draft.new_binary_hash.is_some());
+        assert!(binary_draft.hunks[0].lines[0].text.contains("Binary file"));
+        engine.keep_working_diff(&space.slug, &draft).unwrap();
+        assert!(engine.working_diff(&space.slug).unwrap().is_empty());
+
+        let change = engine.create_agent_change(&space.slug, "Codex").unwrap();
+        let agent_bytes = [255_u8, 0, 42, 11];
+        std::fs::write(change.worktree_path.join("asset.bin"), agent_bytes).unwrap();
+        let added_bytes = [254_u8, 253, 0, 1];
+        std::fs::write(change.worktree_path.join("new.bin"), added_bytes).unwrap();
+        let listed = engine.list_agent_changes(&space.slug).unwrap();
+        let modified = listed[0]
+            .diffs
+            .iter()
+            .find(|diff| diff.path == "asset.bin")
+            .unwrap();
+        let added = listed[0]
+            .diffs
+            .iter()
+            .find(|diff| diff.path == "new.bin")
+            .unwrap();
+        assert!(modified.is_binary);
+        assert!(modified.old_binary_hash.is_some());
+        assert!(modified.new_binary_hash.is_some());
+        assert!(added.is_binary);
+        assert!(added.old_binary_hash.is_none());
+        assert!(added.new_binary_hash.is_some());
+
+        let merged = engine.merge_agent_change(&space.slug, &change.id).unwrap();
+        assert_eq!(merged.status, "merged");
+        assert_eq!(
+            std::fs::read(folder.join("asset.bin")).unwrap(),
+            agent_bytes
+        );
+        assert_eq!(std::fs::read(folder.join("new.bin")).unwrap(), added_bytes);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ignored_symlink_parent_cannot_escape_draft_during_merge() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        let change = engine.create_agent_change(&space.slug, "Codex").unwrap();
+        std::fs::create_dir_all(change.worktree_path.join("redirect")).unwrap();
+        std::fs::write(
+            change.worktree_path.join("redirect/escaped.md"),
+            "# Must stay inside\n",
+        )
+        .unwrap();
+        engine.list_agent_changes(&space.slug).unwrap();
+
+        std::fs::write(folder.join(".git/info/exclude"), "redirect/\n").unwrap();
+        symlink(&outside, folder.join("redirect")).unwrap();
+        let error = engine
+            .merge_agent_change(&space.slug, &change.id)
+            .unwrap_err();
+        assert!(error.to_lowercase().contains("symbolic link"));
+        assert!(!outside.join("escaped.md").exists());
+        assert!(folder.join("redirect").is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ignored_symlink_target_cannot_be_replaced_during_merge() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        let outside = temp.path().join("outside.md");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(&outside, "# Outside\n").unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        let change = engine.create_agent_change(&space.slug, "Codex").unwrap();
+        std::fs::write(change.worktree_path.join("escaped.md"), "# Agent result\n").unwrap();
+        engine.list_agent_changes(&space.slug).unwrap();
+
+        std::fs::write(folder.join(".git/info/exclude"), "escaped.md\n").unwrap();
+        symlink(&outside, folder.join("escaped.md")).unwrap();
+        let error = engine
+            .merge_agent_change(&space.slug, &change.id)
+            .unwrap_err();
+        assert!(error.to_lowercase().contains("symbolic link"));
+        assert_eq!(std::fs::read_to_string(outside).unwrap(), "# Outside\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn managed_agent_worktree_rejects_symlink_replacement() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        let change = engine.create_agent_change(&space.slug, "Codex").unwrap();
+        std::fs::remove_dir_all(&change.worktree_path).unwrap();
+        symlink(&outside, &change.worktree_path).unwrap();
+
+        let error = engine
+            .agent_change_worktree(&space.slug, &change.id)
+            .unwrap_err();
+        assert!(error.to_lowercase().contains("symbolic link"));
+    }
+
+    #[test]
     fn clean_agent_merge_preserves_human_draft_and_head() {
         let temp = tempfile::tempdir().unwrap();
         let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
@@ -2566,6 +2766,19 @@ mod tests {
         let draft = engine.working_diff(&space.slug).unwrap();
         assert!(draft.iter().any(|diff| diff.path == "human.md"));
         assert!(draft.iter().any(|diff| diff.path == "agent.md"));
+        assert!(!change.worktree_path.exists());
+        let repo = Repository::open(&folder).unwrap();
+        assert!(!repo
+            .path()
+            .join("worktrees")
+            .join(format!("cowiki-agent-{}", change.id))
+            .exists());
+        let closed = engine.list_agent_changes(&space.slug).unwrap();
+        assert_eq!(closed[0].status, "merged");
+        assert!(closed[0].diffs.iter().any(|diff| diff.path == "agent.md"));
+        assert!(engine
+            .agent_change_worktree(&space.slug, &change.id)
+            .is_err());
     }
 
     #[test]
@@ -2637,6 +2850,46 @@ mod tests {
                 .target()
                 .unwrap(),
             head_before
+        );
+        assert!(!change.worktree_path.exists());
+        let repo = Repository::open(&folder).unwrap();
+        assert!(!repo
+            .path()
+            .join("worktrees")
+            .join(format!("cowiki-agent-{}", change.id))
+            .exists());
+        let closed = engine.list_agent_changes(&space.slug).unwrap();
+        assert_eq!(closed[0].status, "discarded");
+        assert!(closed[0].diffs.iter().any(|diff| diff.path == "shared.md"));
+        assert!(engine
+            .agent_change_worktree(&space.slug, &change.id)
+            .is_err());
+    }
+
+    #[test]
+    fn concurrent_draft_change_before_write_is_not_overwritten() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        std::fs::write(folder.join("shared.md"), "# Baseline\n").unwrap();
+        engine.submit(&space.slug, &[]).unwrap();
+        let change = engine.create_agent_change(&space.slug, "Codex").unwrap();
+        std::fs::write(change.worktree_path.join("shared.md"), "# Agent result\n").unwrap();
+        let concurrent = b"# Concurrent human change\n".to_vec();
+
+        let error = engine
+            .merge_agent_change_with_pre_write_hook(&space.slug, &change.id, |_| {
+                std::fs::write(folder.join("shared.md"), &concurrent)
+                    .map_err(|error| error.to_string())
+            })
+            .unwrap_err();
+        assert!(error.contains("changed while"));
+        assert_eq!(std::fs::read(folder.join("shared.md")).unwrap(), concurrent);
+        assert_eq!(
+            engine.list_agent_changes(&space.slug).unwrap()[0].status,
+            "open"
         );
     }
 

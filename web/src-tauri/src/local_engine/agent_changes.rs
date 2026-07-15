@@ -1,7 +1,8 @@
-use super::{safe_repo_path, text_file_diff, FileDiff, LocalEngine};
+use super::{file_diff_from_bytes, safe_repo_path, FileDiff, LocalEngine};
 use git2::{Oid, Repository, Signature, StatusOptions};
 use serde::Serialize;
 use std::collections::BTreeSet;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 const BASE_REF_PREFIX: &str = "refs/cowiki/agent-bases/";
@@ -58,10 +59,14 @@ impl LocalEngine {
             return Err(error.to_string());
         }
 
-        let worktree_path = self.change_worktree_path(&space.id, &id);
-        if let Some(parent) = worktree_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
+        let worktree_path = match self.prepare_change_worktree_path(&space.id, &id) {
+            Ok(path) => path,
+            Err(error) => {
+                delete_reference_if_present(&repo, &branch_ref);
+                delete_reference_if_present(&repo, &base_ref);
+                return Err(error);
+            }
+        };
         let branch = repo
             .find_reference(&branch_ref)
             .map_err(|error| error.to_string())?;
@@ -113,6 +118,31 @@ impl LocalEngine {
         space_slug: &str,
         change_id: &str,
     ) -> Result<AgentChange, String> {
+        self.merge_agent_change_internal(space_slug, change_id, |_| Ok(()))
+    }
+
+    #[cfg(test)]
+    pub fn merge_agent_change_with_pre_write_hook<F>(
+        &self,
+        space_slug: &str,
+        change_id: &str,
+        before_write: F,
+    ) -> Result<AgentChange, String>
+    where
+        F: FnMut(&Path) -> Result<(), String>,
+    {
+        self.merge_agent_change_internal(space_slug, change_id, before_write)
+    }
+
+    fn merge_agent_change_internal<F>(
+        &self,
+        space_slug: &str,
+        change_id: &str,
+        mut before_write: F,
+    ) -> Result<AgentChange, String>
+    where
+        F: FnMut(&Path) -> Result<(), String>,
+    {
         validate_change_id(change_id)?;
         let space = self.find_space(space_slug)?;
         let repo = Repository::open(&space.local_path).map_err(|error| error.to_string())?;
@@ -155,7 +185,13 @@ impl LocalEngine {
         let merged_tree = repo
             .find_tree(merged_tree_id)
             .map_err(|error| error.to_string())?;
-        apply_tree_transition(&repo, &space.local_path, &draft_tree, &merged_tree)?;
+        apply_tree_transition(
+            &repo,
+            &space.local_path,
+            &draft_tree,
+            &merged_tree,
+            &mut before_write,
+        )?;
         repo.reference(
             &merged_ref(change_id),
             result_id,
@@ -164,6 +200,7 @@ impl LocalEngine {
         )
         .map_err(|error| error.to_string())?;
         delete_reference_if_present(&repo, &conflict_ref(change_id));
+        self.cleanup_agent_worktree(&repo, &space.id, change_id)?;
         drop(merged_tree);
         drop(result_tree);
         drop(base_tree);
@@ -192,6 +229,7 @@ impl LocalEngine {
         )
         .map_err(|error| error.to_string())?;
         delete_reference_if_present(&repo, &conflict_ref(change_id));
+        self.cleanup_agent_worktree(&repo, &space.id, change_id)?;
         drop(repo);
         self.agent_change(space_slug, change_id)
     }
@@ -204,11 +242,8 @@ impl LocalEngine {
         validate_change_id(change_id)?;
         let space = self.find_space(space_slug)?;
         let repo = Repository::open(&space.local_path).map_err(|error| error.to_string())?;
-        reference_commit(&repo, &base_ref(change_id))?;
-        let worktree_path = self.change_worktree_path(&space.id, change_id);
-        worktree_path
-            .canonicalize()
-            .map_err(|error| format!("Agent Change worktree is unavailable: {error}"))
+        ensure_active_change(&repo, change_id)?;
+        self.validate_managed_worktree_path(&space.id, change_id)
     }
 
     fn agent_change(&self, space_slug: &str, change_id: &str) -> Result<AgentChange, String> {
@@ -247,10 +282,7 @@ impl LocalEngine {
     ) -> Result<Oid, String> {
         let branch_ref = branch_ref(change_id);
         let current = reference_commit(repo, &branch_ref)?;
-        let worktree_path = self.change_worktree_path(space_id, change_id);
-        if !worktree_path.is_dir() {
-            return Ok(current.id());
-        }
+        let worktree_path = self.validate_managed_worktree_path(space_id, change_id)?;
         let worktree_repo = Repository::open(&worktree_path).map_err(|error| error.to_string())?;
         let head_name = worktree_repo
             .head()
@@ -279,9 +311,69 @@ impl LocalEngine {
 
     fn change_worktree_path(&self, space_id: &str, change_id: &str) -> PathBuf {
         self.metadata_dir
+            .canonicalize()
+            .unwrap_or_else(|_| self.metadata_dir.clone())
             .join("agent-worktrees")
             .join(space_id)
             .join(change_id)
+    }
+
+    fn prepare_change_worktree_path(
+        &self,
+        space_id: &str,
+        change_id: &str,
+    ) -> Result<PathBuf, String> {
+        validate_change_id(change_id)?;
+        let metadata = self
+            .metadata_dir
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        let parent = ensure_safe_directory_tree(
+            &metadata,
+            Path::new("agent-worktrees").join(space_id).as_path(),
+        )?;
+        let path = parent.join(change_id);
+        if std::fs::symlink_metadata(&path).is_ok() {
+            return Err("Agent Change worktree path already exists".to_string());
+        }
+        Ok(path)
+    }
+
+    fn validate_managed_worktree_path(
+        &self,
+        space_id: &str,
+        change_id: &str,
+    ) -> Result<PathBuf, String> {
+        let metadata = self
+            .metadata_dir
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        let expected = metadata
+            .join("agent-worktrees")
+            .join(space_id)
+            .join(change_id);
+        validate_no_symlink_components(&metadata, &expected)?;
+        let canonical = expected
+            .canonicalize()
+            .map_err(|error| format!("Agent Change worktree is unavailable: {error}"))?;
+        if canonical != expected || !canonical.starts_with(&metadata) || !canonical.is_dir() {
+            return Err("Agent Change worktree escaped its managed location".to_string());
+        }
+        Ok(canonical)
+    }
+
+    fn cleanup_agent_worktree(
+        &self,
+        repo: &Repository,
+        space_id: &str,
+        change_id: &str,
+    ) -> Result<(), String> {
+        let worktree_path = self.validate_managed_worktree_path(space_id, change_id)?;
+        std::fs::remove_dir_all(&worktree_path).map_err(|error| error.to_string())?;
+        let worktree = repo
+            .find_worktree(&worktree_name(change_id))
+            .map_err(|error| error.to_string())?;
+        worktree.prune(None).map_err(|error| error.to_string())
     }
 }
 
@@ -313,7 +405,9 @@ fn snapshot_worktree(repo: &Repository) -> Result<Oid, String> {
         let Some(relative) = status.path() else {
             continue;
         };
-        let relative = safe_repo_path(relative)?;
+        let Ok(relative) = safe_repo_path(relative) else {
+            continue;
+        };
         if std::fs::symlink_metadata(root.join(relative)).is_ok() {
             index
                 .add_path(relative)
@@ -350,22 +444,26 @@ fn tree_diffs(
         if safe_repo_path(path_text).is_err() {
             continue;
         }
-        let old_content = tree_text(repo, old_tree, &path)?;
-        let new_content = tree_text(repo, new_tree, &path)?;
-        if old_content.is_none() && new_content.is_none() {
+        let old_bytes = tree_bytes(repo, old_tree, &path)?;
+        let new_bytes = tree_bytes(repo, new_tree, &path)?;
+        if old_bytes.is_none() && new_bytes.is_none() {
             continue;
         }
-        result.push(text_file_diff(path_text, old_content, new_content));
+        result.push(file_diff_from_bytes(path_text, old_bytes, new_bytes));
     }
     Ok(result)
 }
 
-fn apply_tree_transition(
+fn apply_tree_transition<F>(
     repo: &Repository,
     root: &Path,
     from_tree: &git2::Tree<'_>,
     to_tree: &git2::Tree<'_>,
-) -> Result<(), String> {
+    before_write: &mut F,
+) -> Result<(), String>
+where
+    F: FnMut(&Path) -> Result<(), String>,
+{
     let diff = repo
         .diff_tree_to_tree(Some(from_tree), Some(to_tree), None)
         .map_err(|error| error.to_string())?;
@@ -385,9 +483,8 @@ fn apply_tree_transition(
             .to_str()
             .ok_or_else(|| "merged Agent Change contains a non-UTF-8 path".to_string())?;
         safe_repo_path(relative_text)?;
-        let path = root.join(&relative);
         let expected = tree_bytes(repo, from_tree, &relative)?;
-        let actual = read_optional_file(&path)?;
+        let actual = read_optional_file_no_follow(root, &relative)?;
         if actual != expected {
             return Err(
                 "The current Draft changed while the Agent Change was merging. Retry the merge."
@@ -395,28 +492,37 @@ fn apply_tree_transition(
             );
         }
         let target = tree_bytes(repo, to_tree, &relative)?;
-        operations.push((path, actual, target));
+        operations.push((relative, actual, target));
     }
 
-    let mut applied = 0usize;
-    for (path, _, target) in &operations {
-        if let Err(error) = write_optional_file(path, target.as_deref()) {
-            for (rollback_path, previous, _) in operations[..applied].iter().rev() {
-                let _ = write_optional_file(rollback_path, previous.as_deref());
+    for (applied, (relative, previous, target)) in operations.iter().enumerate() {
+        before_write(&root.join(relative))?;
+        if let Err(error) =
+            write_optional_file_cas(root, relative, previous.as_deref(), target.as_deref())
+        {
+            let mut rollback_errors = Vec::new();
+            for (rollback_path, rollback_previous, rollback_target) in
+                operations[..applied].iter().rev()
+            {
+                if let Err(rollback_error) = write_optional_file_cas(
+                    root,
+                    rollback_path,
+                    rollback_target.as_deref(),
+                    rollback_previous.as_deref(),
+                ) {
+                    rollback_errors.push(format!("{}: {rollback_error}", rollback_path.display()));
+                }
+            }
+            if !rollback_errors.is_empty() {
+                return Err(format!(
+                    "{error}; concurrent changes prevented rollback for {}",
+                    rollback_errors.join(", ")
+                ));
             }
             return Err(error);
         }
-        applied += 1;
     }
     Ok(())
-}
-
-fn tree_text(
-    repo: &Repository,
-    tree: &git2::Tree<'_>,
-    path: &Path,
-) -> Result<Option<String>, String> {
-    Ok(tree_bytes(repo, tree, path)?.and_then(|bytes| String::from_utf8(bytes).ok()))
 }
 
 fn tree_bytes(
@@ -436,37 +542,203 @@ fn tree_bytes(
     Ok(Some(blob.content().to_vec()))
 }
 
-fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>, String> {
-    match std::fs::read(path) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error.to_string()),
+fn read_optional_file_no_follow(root: &Path, relative: &Path) -> Result<Option<Vec<u8>>, String> {
+    let path = root.join(relative);
+    validate_no_symlink_components(root, &path)?;
+    let metadata = match std::fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(format!(
+            "symbolic link target is not allowed while merging: {}",
+            path.display()
+        ));
     }
+    if !metadata.is_file() {
+        return Err(format!(
+            "merged path is not a regular file: {}",
+            path.display()
+        ));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options.open(&path).map_err(|error| error.to_string())?;
+    if !file
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
+        return Err(format!(
+            "merged path is not a regular file: {}",
+            path.display()
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    Ok(Some(bytes))
 }
 
-fn write_optional_file(path: &Path, content: Option<&[u8]>) -> Result<(), String> {
+fn write_optional_file_cas(
+    root: &Path,
+    relative: &Path,
+    expected: Option<&[u8]>,
+    content: Option<&[u8]>,
+) -> Result<(), String> {
+    let path = root.join(relative);
+    if content.is_some() {
+        ensure_safe_parent_directories(root, relative)?;
+    }
+    ensure_expected_content(root, relative, expected)?;
     match content {
         Some(content) => {
             let parent = path
                 .parent()
                 .ok_or_else(|| "merged path has no parent directory".to_string())?;
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            validate_no_symlink_components(root, parent)?;
             let temporary = parent.join(format!(
                 ".cowiki-merge-{}.tmp",
                 uuid::Uuid::new_v4().simple()
             ));
-            std::fs::write(&temporary, content).map_err(|error| error.to_string())?;
-            if let Err(error) = std::fs::rename(&temporary, path) {
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+            }
+            let mut file = options
+                .open(&temporary)
+                .map_err(|error| error.to_string())?;
+            if let Err(error) = file.write_all(content).and_then(|_| file.flush()) {
+                drop(file);
+                let _ = std::fs::remove_file(&temporary);
+                return Err(error.to_string());
+            }
+            drop(file);
+            validate_no_symlink_components(root, parent)?;
+            if let Err(error) = ensure_expected_content(root, relative, expected) {
+                let _ = std::fs::remove_file(&temporary);
+                return Err(error);
+            }
+            if let Err(error) = std::fs::rename(&temporary, &path) {
                 let _ = std::fs::remove_file(&temporary);
                 return Err(error.to_string());
             }
             Ok(())
         }
-        None => match std::fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error.to_string()),
-        },
+        None => {
+            ensure_expected_content(root, relative, expected)?;
+            match std::fs::remove_file(&path) {
+                Ok(()) => Ok(()),
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::NotFound && expected.is_none() =>
+                {
+                    Ok(())
+                }
+                Err(error) => Err(error.to_string()),
+            }
+        }
+    }
+}
+
+fn ensure_expected_content(
+    root: &Path,
+    relative: &Path,
+    expected: Option<&[u8]>,
+) -> Result<(), String> {
+    let current = read_optional_file_no_follow(root, relative)?;
+    if current.as_deref() != expected {
+        return Err(
+            "The current Draft changed while the Agent Change was merging. Retry the merge."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn ensure_safe_parent_directories(root: &Path, relative: &Path) -> Result<(), String> {
+    let parent = relative
+        .parent()
+        .ok_or_else(|| "merged path has no parent directory".to_string())?;
+    ensure_safe_directory_tree(root, parent).map(|_| ())
+}
+
+fn ensure_safe_directory_tree(root: &Path, relative: &Path) -> Result<PathBuf, String> {
+    let mut current = root.to_path_buf();
+    validate_directory(&current)?;
+    for component in relative.components() {
+        let std::path::Component::Normal(component) = component else {
+            return Err("managed path may not escape its root".to_string());
+        };
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) => validate_directory_metadata(&current, &metadata)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match std::fs::create_dir(&current) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(error) => return Err(error.to_string()),
+                }
+                validate_directory(&current)?;
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(current)
+}
+
+fn validate_no_symlink_components(root: &Path, path: &Path) -> Result<(), String> {
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| "managed path escaped its root".to_string())?;
+    validate_directory(root)?;
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        let std::path::Component::Normal(component) = component else {
+            return Err("managed path may not escape its root".to_string());
+        };
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(format!(
+                    "symbolic link is not allowed in managed path: {}",
+                    current.display()
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(())
+}
+
+fn validate_directory(path: &Path) -> Result<(), String> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    validate_directory_metadata(path, &metadata)
+}
+
+fn validate_directory_metadata(path: &Path, metadata: &std::fs::Metadata) -> Result<(), String> {
+    if metadata.file_type().is_symlink() {
+        Err(format!(
+            "symbolic link is not allowed in managed path: {}",
+            path.display()
+        ))
+    } else if !metadata.is_dir() {
+        Err(format!(
+            "managed path is not a directory: {}",
+            path.display()
+        ))
+    } else {
+        Ok(())
     }
 }
 

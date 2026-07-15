@@ -7,8 +7,10 @@ import { timeAgo } from '../../lib/time';
 const mono = fonts.mono;
 
 function fileStatus(f: FileDiff): 'added' | 'deleted' | 'modified' {
-  if (f.old_content == null) return 'added';
-  if (f.new_content == null) return 'deleted';
+  const hasOldContent = f.old_content != null || f.old_binary_hash != null;
+  const hasNewContent = f.new_content != null || f.new_binary_hash != null;
+  if (!hasOldContent) return 'added';
+  if (!hasNewContent) return 'deleted';
   return 'modified';
 }
 

@@ -60,6 +60,9 @@ export interface FileDiff {
   path: string;
   old_content: string | null;
   new_content: string | null;
+  is_binary?: boolean;
+  old_binary_hash?: string | null;
+  new_binary_hash?: string | null;
   hunks: DiffHunk[];
   additions: number;
   deletions: number;

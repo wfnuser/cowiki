@@ -13,7 +13,10 @@ import {
   terminalTabLabel,
   type AgentTerminalTabsState,
 } from '../src/components/terminal/terminal-tabs.ts';
-import { orderedLocalReviewRows } from '../src/components/review/local-review-model.ts';
+import {
+  localReviewActionRefreshesDraft,
+  orderedLocalReviewRows,
+} from '../src/components/review/local-review-model.ts';
 
 test('maps the supported agents to their local CLI command', () => {
   assert.equal(agentInitialCommand('codex'), 'codex');
@@ -125,4 +128,10 @@ test('local Reviews always order Current Draft before Agent Changes', () => {
       { kind: 'agent', id: 'older', change: { id: 'older', createdAt: 10 } },
     ],
   );
+});
+
+test('only merging an Agent Change refreshes the Draft navigation trees', () => {
+  assert.equal(localReviewActionRefreshesDraft('merge'), true);
+  assert.equal(localReviewActionRefreshesDraft('discard'), false);
+  assert.equal(localReviewActionRefreshesDraft('commit'), false);
 });

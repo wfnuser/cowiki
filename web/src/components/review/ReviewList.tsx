@@ -13,12 +13,19 @@ type Filter = 'open' | 'merged' | 'all';
 type ReviewListProps = {
   workspaceSlug: string;
   onOpen: (id: string) => void;
+  onLocalDraftChanged?: () => void;
   refreshKey?: number;
 };
 
 export function ReviewList(props: ReviewListProps) {
   return isDesktopClient()
-    ? <LocalReviewInbox workspaceSlug={props.workspaceSlug} refreshKey={props.refreshKey} />
+    ? (
+      <LocalReviewInbox
+        workspaceSlug={props.workspaceSlug}
+        refreshKey={props.refreshKey}
+        onDraftChanged={props.onLocalDraftChanged}
+      />
+    )
     : <CloudReviewList {...props} />;
 }
 

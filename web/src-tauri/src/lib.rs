@@ -238,18 +238,22 @@ fn local_list_agent_changes(
 #[tauri::command]
 fn local_merge_agent_change(
     engine: State<'_, LocalEngine>,
+    terminals: State<'_, terminal::TerminalState>,
     space_slug: String,
     change_id: String,
 ) -> Result<AgentChange, String> {
+    let _closing = terminals.begin_change_close(&space_slug, &change_id)?;
     engine.merge_agent_change(&space_slug, &change_id)
 }
 
 #[tauri::command]
 fn local_discard_agent_change(
     engine: State<'_, LocalEngine>,
+    terminals: State<'_, terminal::TerminalState>,
     space_slug: String,
     change_id: String,
 ) -> Result<AgentChange, String> {
+    let _closing = terminals.begin_change_close(&space_slug, &change_id)?;
     engine.discard_agent_change(&space_slug, &change_id)
 }
 

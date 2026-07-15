@@ -1065,6 +1065,11 @@ export function MainLayout() {
                 <ReviewList
                   workspaceSlug={activeView.workspaceSlug}
                   onOpen={openReviewDetail}
+                  onLocalDraftChanged={() => {
+                    if (!activeWorkspace || activeWorkspace.slug !== activeView.workspaceSlug) return;
+                    void loadSpacePages(activeWorkspace);
+                    void loadSpaceSources(activeWorkspace);
+                  }}
                   refreshKey={reviewRefreshKey}
                 />
 

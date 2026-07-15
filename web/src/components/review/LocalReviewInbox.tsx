@@ -12,14 +12,19 @@ import {
 } from '@/api';
 import { C } from '@/lib/design';
 import { DiffView } from './DiffView';
-import { orderedLocalReviewRows } from './local-review-model';
+import {
+  localReviewActionRefreshesDraft,
+  orderedLocalReviewRows,
+  type LocalReviewAction,
+} from './local-review-model';
 
 type LocalReviewInboxProps = {
   workspaceSlug: string;
   refreshKey?: number;
+  onDraftChanged?: () => void;
 };
 
-export function LocalReviewInbox({ workspaceSlug, refreshKey }: LocalReviewInboxProps) {
+export function LocalReviewInbox({ workspaceSlug, refreshKey, onDraftChanged }: LocalReviewInboxProps) {
   const [draftDiffs, setDraftDiffs] = useState<FileDiff[] | null>(null);
   const [changes, setChanges] = useState<AgentChange[] | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['current-draft']));
@@ -60,13 +65,18 @@ export function LocalReviewInbox({ workspaceSlug, refreshKey }: LocalReviewInbox
     });
   };
 
-  const runAction = async (id: string, action: () => Promise<unknown>) => {
+  const runAction = async (
+    id: string,
+    actionKind: LocalReviewAction,
+    action: () => Promise<unknown>,
+  ) => {
     if (pendingAction) return;
     setPendingAction(id);
     setError(null);
     try {
       await action();
       await reload();
+      if (localReviewActionRefreshesDraft(actionKind)) onDraftChanged?.();
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -103,7 +113,11 @@ export function LocalReviewInbox({ workspaceSlug, refreshKey }: LocalReviewInbox
                   actions={(
                     <ActionButton
                       disabled={!draftDiffs.length || pendingAction != null}
-                      onClick={() => runAction(row.id, () => keepLocalWorkingDiff(workspaceSlug, draftDiffs))}
+                      onClick={() => runAction(
+                        row.id,
+                        'commit',
+                        () => keepLocalWorkingDiff(workspaceSlug, draftDiffs),
+                      )}
                     >
                       {pendingAction === row.id ? 'Committing…' : 'Commit Draft'}
                     </ActionButton>
@@ -128,14 +142,22 @@ export function LocalReviewInbox({ workspaceSlug, refreshKey }: LocalReviewInbox
                   <>
                     <ActionButton
                       disabled={pendingAction != null}
-                      onClick={() => runAction(row.id, () => mergeLocalAgentChange(workspaceSlug, change.id))}
+                      onClick={() => runAction(
+                        row.id,
+                        'merge',
+                        () => mergeLocalAgentChange(workspaceSlug, change.id),
+                      )}
                     >
                       {pendingAction === row.id ? 'Working…' : 'Merge into Draft'}
                     </ActionButton>
                     <ActionButton
                       subtle
                       disabled={pendingAction != null}
-                      onClick={() => runAction(row.id, () => discardLocalAgentChange(workspaceSlug, change.id))}
+                      onClick={() => runAction(
+                        row.id,
+                        'discard',
+                        () => discardLocalAgentChange(workspaceSlug, change.id),
+                      )}
                     >
                       Discard
                     </ActionButton>
