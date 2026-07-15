@@ -15,7 +15,11 @@ import {
 } from '@/api';
 import { Button } from '@/components/ui/button';
 import { C } from '@/lib/design';
-import { defaultCheckpointName, draftChangeLabel } from '@/lib/history';
+import {
+  canCreateCheckpoint,
+  defaultCheckpointName,
+  draftChangeLabel,
+} from '@/lib/history';
 
 interface HistoryViewProps {
   workspaceSlug: string;
@@ -27,6 +31,7 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
   const [loading, setLoading] = useState(local);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
+  const checkpointReady = canCreateCheckpoint(spaceHistory?.currentDraft.changedFiles);
 
   const refresh = useCallback(async () => {
     if (!local) return;
@@ -97,7 +102,9 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
                   <span style={currentBadgeStyle}>Live</span>
                 </div>
                 <p style={{ margin: '5px 0 0', color: C.ink2, fontSize: 12.5 }}>
-                  {spaceHistory ? draftChangeLabel(spaceHistory.currentDraft.changedFiles) : 'Reading saved Draft…'}
+                  {spaceHistory
+                    ? draftChangeLabel(spaceHistory.currentDraft.changedFiles, spaceHistory.checkpoints.length > 0)
+                    : 'Reading saved Draft…'}
                 </p>
                 <p style={{ margin: '8px 0 0', color: C.muted, fontSize: 12, lineHeight: 1.55 }}>
                   Auto Save updates this Draft only. It never creates a checkpoint.
@@ -107,12 +114,15 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
             <Button
               type="button"
               onClick={() => { void createCheckpoint(); }}
-              disabled={creating || loading}
+              disabled={creating || loading || !checkpointReady}
+              title={checkpointReady ? 'Record the current Draft as a local Git snapshot' : 'Save a change before creating another checkpoint'}
               style={{ flexShrink: 0 }}
             >
               {creating
                 ? <><LoaderCircle size={14} className="animate-spin" /> Creating…</>
-                : <><BookmarkPlus size={14} /> Create checkpoint</>}
+                : checkpointReady
+                  ? <><BookmarkPlus size={14} /> Create checkpoint</>
+                  : <><BookmarkPlus size={14} /> No new changes</>}
             </Button>
           </article>
 

@@ -1,5 +1,5 @@
 use git2::build::CheckoutBuilder;
-use git2::{IndexEntry, IndexTime, Oid, Repository, Signature, StatusOptions};
+use git2::{DiffOptions, IndexEntry, IndexTime, Oid, Repository, Signature, StatusOptions};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -846,7 +846,7 @@ impl LocalEngine {
 
     pub fn history(&self, space_slug: &str) -> Result<SpaceHistory, String> {
         let repo = self.repo(space_slug)?;
-        let changed_files = draft_statuses(&repo)?.len();
+        let changed_files = draft_changed_files(&repo)?;
         let mut checkpoints = Vec::new();
         let mut current = checkpoint_tip(&repo)?;
 
@@ -1121,6 +1121,28 @@ fn draft_statuses(repo: &Repository) -> Result<Vec<String>, String> {
         .filter_map(|entry| entry.path().map(str::to_string))
         .filter(|relative| safe_repo_path(relative).is_ok())
         .collect())
+}
+
+fn draft_changed_files(repo: &Repository) -> Result<usize, String> {
+    let baseline_oid = checkpoint_tip(repo)?.or_else(|| {
+        repo.head()
+            .ok()
+            .and_then(|head| head.peel_to_commit().ok())
+            .map(|commit| commit.id())
+    });
+    let baseline = baseline_oid
+        .map(|oid| {
+            repo.find_commit(oid)
+                .and_then(|commit| commit.tree())
+                .map_err(|error| error.to_string())
+        })
+        .transpose()?;
+    let mut options = DiffOptions::new();
+    options.include_untracked(true).recurse_untracked_dirs(true);
+    let diff = repo
+        .diff_tree_to_workdir(baseline.as_ref(), Some(&mut options))
+        .map_err(|error| error.to_string())?;
+    Ok(diff.deltas().count())
 }
 
 fn reset_index_to_head(repo: &Repository, index: &mut git2::Index) -> Result<(), String> {
@@ -2077,8 +2099,12 @@ mod tests {
         assert_eq!(checkpoint.name, "Checkpoint 2026-07-15 23:45");
 
         let history = engine.history(&space.slug).unwrap();
-        assert_eq!(history.current_draft.changed_files, 2);
+        assert_eq!(history.current_draft.changed_files, 0);
         assert_eq!(history.checkpoints, vec![checkpoint]);
+        assert_eq!(
+            std::fs::read(folder.join(".git/index")).unwrap(),
+            index_before
+        );
         assert!(repo
             .find_reference(&format!(
                 "refs/cowiki/checkpoints/{}",
@@ -2102,6 +2128,14 @@ mod tests {
             .create_checkpoint(&space.slug, Some("First checkpoint"))
             .unwrap();
         engine.delete_path(&space.slug, "temporary.md").unwrap();
+        assert_eq!(
+            engine
+                .history(&space.slug)
+                .unwrap()
+                .current_draft
+                .changed_files,
+            2
+        );
         let second = engine
             .create_checkpoint(&space.slug, Some("Second checkpoint"))
             .unwrap();
@@ -2135,6 +2169,47 @@ mod tests {
             .unwrap()
             .get_path(std::path::Path::new("temporary.md"))
             .is_err());
+    }
+
+    #[test]
+    fn draft_changes_are_measured_from_the_latest_checkpoint() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        engine
+            .write_page(&space.slug, "draft", "# Draft\n\nFirst version\n")
+            .unwrap();
+
+        engine
+            .create_checkpoint(&space.slug, Some("First checkpoint"))
+            .unwrap();
+        assert_eq!(
+            engine
+                .history(&space.slug)
+                .unwrap()
+                .current_draft
+                .changed_files,
+            0
+        );
+
+        std::fs::write(folder.join("draft.md"), "# Draft\n\nSecond version\n").unwrap();
+        assert_eq!(
+            engine
+                .history(&space.slug)
+                .unwrap()
+                .current_draft
+                .changed_files,
+            1
+        );
+
+        engine
+            .create_checkpoint(&space.slug, Some("Second checkpoint"))
+            .unwrap();
+        let history = engine.history(&space.slug).unwrap();
+        assert_eq!(history.current_draft.changed_files, 0);
+        assert_eq!(history.checkpoints.len(), 2);
     }
 
     #[test]
