@@ -111,10 +111,8 @@ export function SpaceRail({
       {/* Notification bell */}
       {showBell && <NotificationBell unread={notifUnread} onOpen={onShowNotifications} />}
 
-      {/* User avatar + menu. Unsigned-in state reuses the app's own
-          accent-highlight language (see the Agent-panel toggle and the
-          empty-state icon) so the Cloud prompt reads as an invitation
-          rather than a plain, inert avatar placeholder. */}
+      {/* User avatar + menu. The trigger carries the Cloud accent while the
+          menu itself stays neutral so it does not resemble selected state. */}
       <DropdownMenu>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -155,8 +153,7 @@ export function SpaceRail({
             <>
               <DropdownMenuItem
                 onClick={onConnectCloud}
-                className="items-start gap-2.5 py-2.5 my-1 mx-1 w-[calc(100%-8px)] rounded-md"
-                style={{ background: C.accentSoft }}
+                className="mx-1 my-1 w-[calc(100%-8px)] items-start gap-2.5 rounded-md py-2.5 focus:bg-[#f5f4f1] focus:text-inherit"
               >
                 <Cloud size={16} className="mt-0.5 shrink-0" style={{ color: C.accent }} />
                 <span>

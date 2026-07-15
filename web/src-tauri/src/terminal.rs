@@ -25,6 +25,10 @@ const MAX_ROWS: u16 = 200;
 pub enum AgentKind {
     Codex,
     Claude,
+    Grok,
+    Gemini,
+    OpenCode,
+    Hermes,
 }
 
 impl AgentKind {
@@ -32,6 +36,10 @@ impl AgentKind {
         match self {
             Self::Codex => "codex",
             Self::Claude => "claude",
+            Self::Grok => "grok",
+            Self::Gemini => "gemini",
+            Self::OpenCode => "opencode",
+            Self::Hermes => "hermes",
         }
     }
 }
@@ -115,10 +123,10 @@ pub fn terminal_create(
         .take_writer()
         .map_err(|error| format!("failed to open terminal input: {error}"))?;
     let killer = child.clone_killer();
-    // Queue a fully controlled command in the login shell. Alongside the
-    // short maintenance protocol, every agent receives CoWiki's read-only MCP
-    // tools for ranked search, page reads, and backlinks. The renderer cannot
-    // provide arbitrary flags or commands.
+    // Queue a fully controlled command in the login shell. Codex and Claude
+    // receive CoWiki's read-only MCP tools directly; every CLI that supports
+    // an initial instruction also receives the maintenance protocol. The
+    // renderer cannot provide arbitrary flags or commands.
     let executable = std::env::current_exe()
         .map_err(|error| format!("cannot locate CoWiki MCP executable: {error}"))?;
     let agent_command = build_agent_command(request.agent, &space.slug, &executable);
@@ -197,6 +205,17 @@ fn build_agent_command(agent: AgentKind, space_slug: &str, executable: &Path) ->
                 shell_quote(SPACE_PROTOCOL),
             )
         }
+        AgentKind::Grok => format!("grok --rules {}", shell_quote(SPACE_PROTOCOL)),
+        AgentKind::Gemini => format!(
+            "gemini --prompt-interactive {}",
+            shell_quote(SPACE_PROTOCOL)
+        ),
+        AgentKind::OpenCode => {
+            format!("opencode --prompt {}", shell_quote(SPACE_PROTOCOL))
+        }
+        // Hermes discovers the Space's AGENTS.md and skills from its working
+        // directory. Its interactive command has no system-prompt override.
+        AgentKind::Hermes => "hermes chat".to_string(),
     }
 }
 
@@ -387,6 +406,10 @@ mod tests {
     fn accepts_only_the_selected_agent_as_initial_command() {
         assert!(validate_initial_command(AgentKind::Codex, Some("codex")).is_ok());
         assert!(validate_initial_command(AgentKind::Claude, Some("claude")).is_ok());
+        assert!(validate_initial_command(AgentKind::Grok, Some("grok")).is_ok());
+        assert!(validate_initial_command(AgentKind::Gemini, Some("gemini")).is_ok());
+        assert!(validate_initial_command(AgentKind::OpenCode, Some("opencode")).is_ok());
+        assert!(validate_initial_command(AgentKind::Hermes, Some("hermes")).is_ok());
         assert!(validate_initial_command(AgentKind::Codex, Some("rm -rf ~")).is_err());
     }
 
@@ -411,5 +434,18 @@ mod tests {
         assert!(claude.contains("--mcp-config"));
         assert!(claude.contains("cowiki"));
         assert!(claude.contains("--append-system-prompt"));
+
+        let grok = build_agent_command(AgentKind::Grok, "research-space", executable);
+        let gemini = build_agent_command(AgentKind::Gemini, "research-space", executable);
+        let opencode = build_agent_command(AgentKind::OpenCode, "research-space", executable);
+        let hermes = build_agent_command(AgentKind::Hermes, "research-space", executable);
+
+        assert!(grok.starts_with("grok --rules "));
+        assert!(grok.contains("Before claiming that knowledge is absent"));
+        assert!(gemini.starts_with("gemini --prompt-interactive "));
+        assert!(gemini.contains("Before claiming that knowledge is absent"));
+        assert!(opencode.starts_with("opencode --prompt "));
+        assert!(opencode.contains("Before claiming that knowledge is absent"));
+        assert_eq!(hermes, "hermes chat");
     }
 }
