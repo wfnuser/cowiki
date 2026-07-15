@@ -735,6 +735,15 @@ fn migrate_legacy_sources(root: &Path) -> Result<(), String> {
         .map(|entry| entry.into_path())
         .collect::<Vec<_>>();
     for source in files {
+        if source.file_name().is_some_and(|name| name == ".gitkeep")
+            && std::fs::read(&source)
+                .map_err(|error| error.to_string())?
+                .iter()
+                .all(u8::is_ascii_whitespace)
+        {
+            std::fs::remove_file(&source).map_err(|error| error.to_string())?;
+            continue;
+        }
         let relative = source
             .strip_prefix(&legacy)
             .map_err(|error| error.to_string())?

@@ -1945,6 +1945,7 @@ mod tests {
         let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
         let folder = temp.path().join("knowledge");
         std::fs::create_dir_all(folder.join("sources/nested")).unwrap();
+        std::fs::write(folder.join("sources/.gitkeep"), "").unwrap();
         std::fs::write(folder.join("sources/raw.md"), "Legacy source body.\n").unwrap();
         std::fs::write(
             folder.join("sources/nested/index.md"),
@@ -1960,6 +1961,11 @@ mod tests {
         assert!(source.contains("Legacy source body."));
         let migrated = engine.list_sources(&space.slug).unwrap();
         assert_eq!(migrated.len(), 3);
+        assert!(!migrated.iter().any(|item| {
+            engine
+                .get_source(&space.slug, &item.filename)
+                .is_ok_and(|source| source.content.contains("title: .gitkeep"))
+        }));
         let migrated_bodies = migrated
             .iter()
             .map(|item| {
