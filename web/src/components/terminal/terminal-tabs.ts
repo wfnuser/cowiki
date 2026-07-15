@@ -1,8 +1,15 @@
-import { agentDisplayName, type AgentKind } from './terminal-contract.ts';
+import {
+  agentDisplayName,
+  type AgentKind,
+  type AgentTerminalMode,
+} from './terminal-contract.ts';
 
 export type AgentTerminalTab = {
   id: string;
   agent: AgentKind;
+  mode: AgentTerminalMode;
+  changeId?: string;
+  worktreePath?: string;
 };
 
 export type AgentTerminalTabsState = {
@@ -14,10 +21,23 @@ export function addAgentTab(
   state: AgentTerminalTabsState,
   agent: AgentKind,
   id: string,
+  mode: AgentTerminalMode = 'live',
+  background?: { changeId: string; worktreePath: string },
 ): AgentTerminalTabsState {
+  if (mode === 'background' && !background) {
+    throw new Error('background Agent tabs require a managed Change');
+  }
   return {
     activeTabId: id,
-    tabs: [...state.tabs, { id, agent }],
+    tabs: [
+      ...state.tabs,
+      {
+        id,
+        agent,
+        mode,
+        ...(background ?? {}),
+      },
+    ],
   };
 }
 
@@ -41,5 +61,6 @@ export function terminalTabLabel(tabs: AgentTerminalTab[], tab: AgentTerminalTab
   const matchingTabs = tabs.filter((candidate) => candidate.agent === tab.agent);
   const position = matchingTabs.findIndex((candidate) => candidate.id === tab.id);
   const label = agentDisplayName(tab.agent);
-  return matchingTabs.length > 1 ? `${label} ${position + 1}` : label;
+  const numbered = matchingTabs.length > 1 ? `${label} ${position + 1}` : label;
+  return tab.mode === 'background' ? `${numbered} · Background` : numbered;
 }

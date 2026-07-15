@@ -2,6 +2,8 @@ import { agentDefinition, type AgentKind } from '../../lib/agents.ts';
 
 export type { AgentKind } from '../../lib/agents.ts';
 
+export type AgentTerminalMode = 'live' | 'background';
+
 export type TerminalSize = {
   cols: number;
   rows: number;

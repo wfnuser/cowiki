@@ -7,7 +7,8 @@
 use crate::local_engine::LocalEngine;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -31,6 +32,22 @@ pub enum AgentKind {
     Hermes,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TerminalMode {
+    Live,
+    Background,
+}
+
+impl TerminalMode {
+    fn prompt(self) -> &'static str {
+        match self {
+            Self::Live => "You are editing the current Draft working tree directly. Re-read files immediately before every edit and never overwrite concurrent human or Agent changes.",
+            Self::Background => "You are in a CoWiki-managed background worktree captured from the Draft at dispatch time. Only edit files in this worktree. Do not checkout, merge, commit, or push; CoWiki collects the result and merges it into the latest Draft after review.",
+        }
+    }
+}
+
 impl AgentKind {
     fn command(self) -> &'static str {
         match self {
@@ -49,6 +66,9 @@ impl AgentKind {
 pub struct TerminalCreateRequest {
     session_id: String,
     cwd: String,
+    mode: TerminalMode,
+    space_slug: String,
+    change_id: Option<String>,
     agent: AgentKind,
     initial_command: Option<String>,
     cols: Option<u16>,
@@ -76,15 +96,270 @@ struct TerminalExitEvent {
 }
 
 struct TerminalSession {
+    identity: TerminalIdentity,
     // Keeping the master alive owns the PTY and enables resize.
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct TerminalIdentity {
+    space_slug: String,
+    change_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct AgentChangeIdentity {
+    space_slug: String,
+    change_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalPhase {
+    Starting,
+    Running,
+    Stopping,
+}
+
+struct TerminalSlot {
+    identity: TerminalIdentity,
+    phase: TerminalPhase,
+    session: Option<TerminalSession>,
+}
+
+impl TerminalSlot {
+    fn starting(identity: TerminalIdentity) -> Self {
+        Self {
+            identity,
+            phase: TerminalPhase::Starting,
+            session: None,
+        }
+    }
+
+    fn identity(&self) -> &TerminalIdentity {
+        &self.identity
+    }
+
+    fn running(&self) -> Option<&TerminalSession> {
+        if self.phase == TerminalPhase::Running {
+            self.session.as_ref()
+        } else {
+            None
+        }
+    }
+
+    fn running_mut(&mut self) -> Option<&mut TerminalSession> {
+        if self.phase == TerminalPhase::Running {
+            self.session.as_mut()
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Default)]
+struct TerminalRegistry {
+    sessions: HashMap<String, TerminalSlot>,
+    closing_changes: HashSet<AgentChangeIdentity>,
+}
+
+impl TerminalRegistry {
+    fn mark_stopping(&mut self, session_id: &str) -> Result<(), String> {
+        let slot = self
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| format!("unknown terminal session: {session_id}"))?;
+        match slot.phase {
+            TerminalPhase::Starting => Err("terminal session is still starting".to_string()),
+            TerminalPhase::Running => {
+                slot.phase = TerminalPhase::Stopping;
+                Ok(())
+            }
+            TerminalPhase::Stopping => Ok(()),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct TerminalState {
-    sessions: Arc<Mutex<HashMap<String, TerminalSession>>>,
+    registry: Arc<Mutex<TerminalRegistry>>,
+}
+
+pub(crate) struct TerminalChangeGuard {
+    registry: Arc<Mutex<TerminalRegistry>>,
+    identity: AgentChangeIdentity,
+}
+
+struct TerminalStartReservation {
+    state: TerminalState,
+    session_id: String,
+    active: bool,
+}
+
+impl TerminalStartReservation {
+    fn new(
+        state: TerminalState,
+        session_id: &str,
+        identity: TerminalIdentity,
+    ) -> Result<Self, String> {
+        state.reserve_session(session_id, identity)?;
+        Ok(Self {
+            state,
+            session_id: session_id.to_string(),
+            active: true,
+        })
+    }
+
+    fn finish(&mut self) {
+        self.active = false;
+    }
+}
+
+impl Drop for TerminalStartReservation {
+    fn drop(&mut self) {
+        if self.active {
+            self.state.release_session(&self.session_id);
+        }
+    }
+}
+
+impl fmt::Debug for TerminalChangeGuard {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TerminalChangeGuard")
+            .field("identity", &self.identity)
+            .finish()
+    }
+}
+
+impl Drop for TerminalChangeGuard {
+    fn drop(&mut self) {
+        if let Ok(mut registry) = self.registry.lock() {
+            registry.closing_changes.remove(&self.identity);
+        }
+    }
+}
+
+impl TerminalState {
+    fn reserve_session(&self, session_id: &str, identity: TerminalIdentity) -> Result<(), String> {
+        let mut registry = self
+            .registry
+            .lock()
+            .map_err(|_| "terminal state is unavailable".to_string())?;
+        if registry.sessions.contains_key(session_id) {
+            return Err("terminal session already exists".to_string());
+        }
+        if let Some(change_id) = identity.change_id.as_ref() {
+            let change = AgentChangeIdentity {
+                space_slug: identity.space_slug.clone(),
+                change_id: change_id.clone(),
+            };
+            if registry.closing_changes.contains(&change) {
+                return Err("Agent Change is being closed; its terminal cannot restart".to_string());
+            }
+        } else if registry
+            .closing_changes
+            .iter()
+            .any(|change| change.space_slug == identity.space_slug)
+        {
+            return Err(
+                "Agent Change in this Space is being closed; a Live terminal cannot start"
+                    .to_string(),
+            );
+        }
+        registry
+            .sessions
+            .insert(session_id.to_string(), TerminalSlot::starting(identity));
+        Ok(())
+    }
+
+    fn install_session(&self, session_id: &str, session: TerminalSession) -> Result<(), String> {
+        let mut registry = self
+            .registry
+            .lock()
+            .map_err(|_| "terminal state is unavailable".to_string())?;
+        let Some(slot) = registry.sessions.get_mut(session_id) else {
+            return Err("terminal session reservation was lost".to_string());
+        };
+        if slot.phase != TerminalPhase::Starting {
+            return Err("terminal session reservation is no longer starting".to_string());
+        }
+        if slot.identity != session.identity {
+            return Err("terminal session identity changed while starting".to_string());
+        }
+        slot.phase = TerminalPhase::Running;
+        slot.session = Some(session);
+        Ok(())
+    }
+
+    fn release_session(&self, session_id: &str) -> Option<TerminalSession> {
+        self.registry
+            .lock()
+            .ok()?
+            .sessions
+            .remove(session_id)
+            .and_then(|slot| slot.session)
+    }
+
+    fn request_stop(&self, session_id: &str) -> Result<(), String> {
+        let mut registry = self
+            .registry
+            .lock()
+            .map_err(|_| "terminal state is unavailable".to_string())?;
+        let Some(slot) = registry.sessions.get_mut(session_id) else {
+            return Ok(());
+        };
+        if slot.phase == TerminalPhase::Stopping {
+            return Ok(());
+        }
+        let session = slot
+            .running_mut()
+            .ok_or_else(|| "terminal session is still starting".to_string())?;
+        stop_terminal_processes(session)?;
+        registry.mark_stopping(session_id)
+    }
+
+    pub(crate) fn begin_change_close(
+        &self,
+        space_slug: &str,
+        change_id: &str,
+    ) -> Result<TerminalChangeGuard, String> {
+        let identity = AgentChangeIdentity {
+            space_slug: space_slug.to_string(),
+            change_id: change_id.to_string(),
+        };
+        let mut registry = self
+            .registry
+            .lock()
+            .map_err(|_| "terminal state is unavailable".to_string())?;
+        let blocking_terminal = registry.sessions.values().find(|slot| {
+            let terminal = slot.identity();
+            terminal.space_slug == identity.space_slug
+                && (terminal.change_id.is_none()
+                    || terminal.change_id.as_deref() == Some(identity.change_id.as_str()))
+        });
+        if let Some(slot) = blocking_terminal {
+            if slot.identity().change_id.is_none() {
+                return Err(
+                    "Stop the active Live terminal before merging or discarding an Agent Change in this Space."
+                        .to_string(),
+                );
+            }
+            return Err(
+                "Stop the active background terminal before merging or discarding this Agent Change."
+                    .to_string(),
+            );
+        }
+        if !registry.closing_changes.insert(identity.clone()) {
+            return Err("Agent Change is already being closed".to_string());
+        }
+        drop(registry);
+        Ok(TerminalChangeGuard {
+            registry: self.registry.clone(),
+            identity,
+        })
+    }
 }
 
 #[tauri::command]
@@ -95,10 +370,22 @@ pub fn terminal_create(
     request: TerminalCreateRequest,
 ) -> Result<TerminalCreated, String> {
     let session_id = validate_session_id(&request.session_id)?;
-    let cwd = canonical_space_path(&request.cwd)?;
-    let space = local_engine.find_space_by_path(&cwd)?;
+    let cwd = resolve_terminal_cwd(
+        &local_engine,
+        request.mode,
+        &request.space_slug,
+        request.change_id.as_deref(),
+        &request.cwd,
+    )?;
+    let space = local_engine.find_space(&request.space_slug)?;
     validate_initial_command(request.agent, request.initial_command.as_deref())?;
     let size = normalized_pty_size(request.cols, request.rows);
+    let identity = TerminalIdentity {
+        space_slug: request.space_slug.clone(),
+        change_id: request.change_id.clone(),
+    };
+    let mut reservation =
+        TerminalStartReservation::new(state.inner().clone(), &session_id, identity.clone())?;
 
     let pair = native_pty_system()
         .openpty(size)
@@ -129,31 +416,25 @@ pub fn terminal_create(
     // renderer cannot provide arbitrary flags or commands.
     let executable = std::env::current_exe()
         .map_err(|error| format!("cannot locate CoWiki MCP executable: {error}"))?;
-    let agent_command = build_agent_command(request.agent, &space.slug, &executable);
+    let agent_command = build_agent_command(request.agent, request.mode, &space.slug, &executable);
     writer
         .write_all(format!("{agent_command}\r").as_bytes())
         .and_then(|_| writer.flush())
         .map_err(|error| format!("failed to start {}: {error}", request.agent.command()))?;
 
-    let mut sessions = state
-        .sessions
-        .lock()
-        .map_err(|_| "terminal state is unavailable".to_string())?;
-    if sessions.contains_key(&session_id) {
-        return Err("terminal session already exists".to_string());
-    }
-    sessions.insert(
-        session_id.clone(),
+    state.install_session(
+        &session_id,
         TerminalSession {
+            identity,
             master: pair.master,
             writer,
             killer,
         },
-    );
-    drop(sessions);
+    )?;
+    reservation.finish();
 
     spawn_output_forwarder(app.clone(), session_id.clone(), reader);
-    spawn_exit_watcher(app, session_id.clone(), state.sessions.clone(), child);
+    spawn_exit_watcher(app, session_id.clone(), state.inner().clone(), child);
 
     Ok(TerminalCreated { session_id })
 }
@@ -168,9 +449,15 @@ fn validate_session_id(value: &str) -> Result<String, String> {
 
 const SPACE_PROTOCOL: &str = "You are maintaining a CoWiki knowledge Space. Markdown files are the source of truth. Follow the Open Knowledge Format and the Space's own rules. Before answering about the Space, use the cowiki MCP search tools and read the relevant pages; cite their relative paths. Before claiming that knowledge is absent, search and list evidence first. Raw sources are immutable. Integrate durable knowledge into the maintained wiki, reconcile contradictions, keep links/index/log consistent, and make every change reversible. Re-read a file immediately before editing it; never silently overwrite concurrent human changes. Do not commit, checkout, merge, push, or edit CoWiki SQLite metadata unless the user explicitly asks.";
 
-fn build_agent_command(agent: AgentKind, space_slug: &str, executable: &Path) -> String {
+fn build_agent_command(
+    agent: AgentKind,
+    mode: TerminalMode,
+    space_slug: &str,
+    executable: &Path,
+) -> String {
     let executable_text = executable.to_string_lossy();
     let mcp_args = vec!["--mcp", "--space", space_slug];
+    let prompt = format!("{SPACE_PROTOCOL} {}", mode.prompt());
     match agent {
         AgentKind::Claude => {
             let config = serde_json::json!({
@@ -185,7 +472,7 @@ fn build_agent_command(agent: AgentKind, space_slug: &str, executable: &Path) ->
             format!(
                 "claude --mcp-config {} --append-system-prompt {}",
                 shell_quote(&config.to_string()),
-                shell_quote(SPACE_PROTOCOL),
+                shell_quote(&prompt),
             )
         }
         AgentKind::Codex => {
@@ -202,16 +489,13 @@ fn build_agent_command(agent: AgentKind, space_slug: &str, executable: &Path) ->
                 "codex -c {} -c {} {}",
                 shell_quote(&format!("mcp_servers.cowiki.command={command_toml}")),
                 shell_quote(&format!("mcp_servers.cowiki.args={args_toml}")),
-                shell_quote(SPACE_PROTOCOL),
+                shell_quote(&prompt),
             )
         }
-        AgentKind::Grok => format!("grok --rules {}", shell_quote(SPACE_PROTOCOL)),
-        AgentKind::Gemini => format!(
-            "gemini --prompt-interactive {}",
-            shell_quote(SPACE_PROTOCOL)
-        ),
+        AgentKind::Grok => format!("grok --rules {}", shell_quote(&prompt)),
+        AgentKind::Gemini => format!("gemini --prompt-interactive {}", shell_quote(&prompt)),
         AgentKind::OpenCode => {
-            format!("opencode --prompt {}", shell_quote(SPACE_PROTOCOL))
+            format!("opencode --prompt {}", shell_quote(&prompt))
         }
         // Hermes discovers the Space's AGENTS.md and skills from its working
         // directory. Its interactive command has no system-prompt override.
@@ -233,12 +517,14 @@ pub fn terminal_write(
     session_id: String,
     data: String,
 ) -> Result<(), String> {
-    let mut sessions = state
-        .sessions
+    let mut registry = state
+        .registry
         .lock()
         .map_err(|_| "terminal state is unavailable".to_string())?;
-    let session = sessions
+    let session = registry
+        .sessions
         .get_mut(&session_id)
+        .and_then(TerminalSlot::running_mut)
         .ok_or_else(|| format!("unknown terminal session: {session_id}"))?;
     session
         .writer
@@ -254,12 +540,14 @@ pub fn terminal_resize(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let sessions = state
-        .sessions
+    let registry = state
+        .registry
         .lock()
         .map_err(|_| "terminal state is unavailable".to_string())?;
-    let session = sessions
+    let session = registry
+        .sessions
         .get(&session_id)
+        .and_then(TerminalSlot::running)
         .ok_or_else(|| format!("unknown terminal session: {session_id}"))?;
     session
         .master
@@ -269,18 +557,31 @@ pub fn terminal_resize(
 
 #[tauri::command]
 pub fn terminal_kill(state: State<'_, TerminalState>, session_id: String) -> Result<(), String> {
-    let session = state
-        .sessions
-        .lock()
-        .map_err(|_| "terminal state is unavailable".to_string())?
-        .remove(&session_id);
-    if let Some(mut session) = session {
-        session
-            .killer
-            .kill()
-            .map_err(|error| format!("failed to stop terminal: {error}"))?;
+    state.request_stop(&session_id)
+}
+
+fn stop_terminal_processes(session: &mut TerminalSession) -> Result<(), String> {
+    #[cfg(unix)]
+    if let Some(process_group) = session.master.process_group_leader() {
+        // portable-pty makes the shell a session leader, but its cloned killer
+        // signals only the shell PID. Signal the current foreground process
+        // group as well so an interactive Agent CLI is asked to stop before
+        // the shell. The registry remains Stopping until child.wait confirms
+        // that the PTY child has actually exited.
+        let result = unsafe { libc::kill(-process_group, libc::SIGHUP) };
+        if result != 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::ESRCH) {
+                return Err(format!("failed to stop terminal process group: {error}"));
+            }
+        }
     }
-    Ok(())
+    match session.killer.kill() {
+        Ok(()) => Ok(()),
+        #[cfg(unix)]
+        Err(error) if error.raw_os_error() == Some(libc::ESRCH) => Ok(()),
+        Err(error) => Err(format!("failed to stop terminal: {error}")),
+    }
 }
 
 fn spawn_output_forwarder(app: AppHandle, session_id: String, mut reader: Box<dyn Read + Send>) {
@@ -307,14 +608,12 @@ fn spawn_output_forwarder(app: AppHandle, session_id: String, mut reader: Box<dy
 fn spawn_exit_watcher(
     app: AppHandle,
     session_id: String,
-    sessions: Arc<Mutex<HashMap<String, TerminalSession>>>,
+    state: TerminalState,
     mut child: Box<dyn portable_pty::Child + Send + Sync>,
 ) {
     std::thread::spawn(move || {
         let exit_code = child.wait().ok().map(|status| status.exit_code());
-        if let Ok(mut sessions) = sessions.lock() {
-            sessions.remove(&session_id);
-        }
+        state.release_session(&session_id);
         let _ = app.emit(
             "terminal:exit",
             TerminalExitEvent {
@@ -334,6 +633,37 @@ fn canonical_space_path(raw_path: &str) -> Result<PathBuf, String> {
         return Err("Space path must be a directory".to_string());
     }
     Ok(canonical)
+}
+
+fn resolve_terminal_cwd(
+    local_engine: &LocalEngine,
+    mode: TerminalMode,
+    space_slug: &str,
+    change_id: Option<&str>,
+    raw_cwd: &str,
+) -> Result<PathBuf, String> {
+    let requested = canonical_space_path(raw_cwd)?;
+    let space = local_engine.find_space(space_slug)?;
+    let expected = match mode {
+        TerminalMode::Live => {
+            if change_id.is_some() {
+                return Err("a Live terminal cannot claim an Agent Change".to_string());
+            }
+            space
+                .local_path
+                .canonicalize()
+                .map_err(|error| error.to_string())?
+        }
+        TerminalMode::Background => {
+            let change_id = change_id
+                .ok_or_else(|| "a background terminal requires an Agent Change".to_string())?;
+            local_engine.agent_change_worktree(space_slug, change_id)?
+        }
+    };
+    if requested != expected {
+        return Err("terminal directory does not match its Space and Agent Change".to_string());
+    }
+    Ok(requested)
 }
 
 fn validate_initial_command(agent: AgentKind, initial_command: Option<&str>) -> Result<(), String> {
@@ -390,9 +720,12 @@ fn add_shell_args(command: &mut CommandBuilder, shell: &Path) {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_agent_command, normalized_pty_size, validate_initial_command, validate_session_id,
-        AgentKind,
+        build_agent_command, normalized_pty_size, resolve_terminal_cwd, validate_initial_command,
+        validate_session_id, AgentKind, TerminalIdentity, TerminalMode, TerminalState,
     };
+    #[cfg(unix)]
+    use super::{TerminalPhase, TerminalSession};
+    use crate::local_engine::LocalEngine;
     use std::path::Path;
 
     #[test]
@@ -424,21 +757,54 @@ mod tests {
     #[test]
     fn launches_agents_with_read_only_cowiki_mcp_and_maintenance_protocol() {
         let executable = Path::new("/Applications/CoWiki.app/Contents/MacOS/cowiki-desktop");
-        let codex = build_agent_command(AgentKind::Codex, "research-space", executable);
-        let claude = build_agent_command(AgentKind::Claude, "research-space", executable);
+        let codex = build_agent_command(
+            AgentKind::Codex,
+            TerminalMode::Live,
+            "research-space",
+            executable,
+        );
+        let claude = build_agent_command(
+            AgentKind::Claude,
+            TerminalMode::Background,
+            "research-space",
+            executable,
+        );
 
         assert!(codex.contains("mcp_servers.cowiki.command"));
         assert!(codex.contains("--space"));
         assert!(codex.contains("research-space"));
         assert!(codex.contains("Before claiming that knowledge is absent"));
+        assert!(codex.contains("current Draft working tree"));
         assert!(claude.contains("--mcp-config"));
         assert!(claude.contains("cowiki"));
         assert!(claude.contains("--append-system-prompt"));
+        assert!(claude.contains("managed background worktree"));
+        assert!(claude.contains("Do not checkout, merge, commit, or push"));
 
-        let grok = build_agent_command(AgentKind::Grok, "research-space", executable);
-        let gemini = build_agent_command(AgentKind::Gemini, "research-space", executable);
-        let opencode = build_agent_command(AgentKind::OpenCode, "research-space", executable);
-        let hermes = build_agent_command(AgentKind::Hermes, "research-space", executable);
+        let grok = build_agent_command(
+            AgentKind::Grok,
+            TerminalMode::Live,
+            "research-space",
+            executable,
+        );
+        let gemini = build_agent_command(
+            AgentKind::Gemini,
+            TerminalMode::Live,
+            "research-space",
+            executable,
+        );
+        let opencode = build_agent_command(
+            AgentKind::OpenCode,
+            TerminalMode::Live,
+            "research-space",
+            executable,
+        );
+        let hermes = build_agent_command(
+            AgentKind::Hermes,
+            TerminalMode::Live,
+            "research-space",
+            executable,
+        );
 
         assert!(grok.starts_with("grok --rules "));
         assert!(grok.contains("Before claiming that knowledge is absent"));
@@ -447,5 +813,208 @@ mod tests {
         assert!(opencode.starts_with("opencode --prompt "));
         assert!(opencode.contains("Before claiming that knowledge is absent"));
         assert_eq!(hermes, "hermes chat");
+    }
+
+    #[test]
+    fn terminal_mode_and_identity_control_the_only_allowed_cwd() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let notes = temp.path().join("notes");
+        let other = temp.path().join("other");
+        std::fs::create_dir_all(&notes).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        let notes_space = engine.add_space("Notes", "notes", &notes).unwrap();
+        let other_space = engine.add_space("Other", "other", &other).unwrap();
+        let notes_change = engine
+            .create_agent_change(&notes_space.slug, "Codex")
+            .unwrap();
+        let other_change = engine
+            .create_agent_change(&other_space.slug, "Claude Code")
+            .unwrap();
+
+        assert_eq!(
+            resolve_terminal_cwd(
+                &engine,
+                TerminalMode::Live,
+                &notes_space.slug,
+                None,
+                notes.to_str().unwrap(),
+            )
+            .unwrap(),
+            notes.canonicalize().unwrap()
+        );
+        assert!(resolve_terminal_cwd(
+            &engine,
+            TerminalMode::Live,
+            &notes_space.slug,
+            None,
+            other.to_str().unwrap(),
+        )
+        .is_err());
+        assert_eq!(
+            resolve_terminal_cwd(
+                &engine,
+                TerminalMode::Background,
+                &notes_space.slug,
+                Some(&notes_change.id),
+                notes_change.worktree_path.to_str().unwrap(),
+            )
+            .unwrap(),
+            notes_change.worktree_path.canonicalize().unwrap()
+        );
+        assert!(resolve_terminal_cwd(
+            &engine,
+            TerminalMode::Background,
+            &notes_space.slug,
+            Some(&notes_change.id),
+            notes.to_str().unwrap(),
+        )
+        .is_err());
+        assert!(resolve_terminal_cwd(
+            &engine,
+            TerminalMode::Background,
+            &notes_space.slug,
+            Some(&other_change.id),
+            other_change.worktree_path.to_str().unwrap(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn active_background_terminals_block_close_and_closing_blocks_restart() {
+        let state = TerminalState::default();
+        let identity = TerminalIdentity {
+            space_slug: "notes".to_string(),
+            change_id: Some("change-1".to_string()),
+        };
+        state
+            .reserve_session("terminal:active", identity.clone())
+            .unwrap();
+
+        let active_error = state.begin_change_close("notes", "change-1").unwrap_err();
+        assert!(active_error.contains("active background terminal"));
+
+        state.release_session("terminal:active");
+        let closing = state.begin_change_close("notes", "change-1").unwrap();
+        let restart_error = state
+            .reserve_session("terminal:restart", identity.clone())
+            .unwrap_err();
+        assert!(restart_error.contains("being closed"));
+
+        drop(closing);
+        state.reserve_session("terminal:restart", identity).unwrap();
+    }
+
+    #[test]
+    fn live_terminals_share_the_space_close_gate() {
+        let state = TerminalState::default();
+        let live = TerminalIdentity {
+            space_slug: "notes".to_string(),
+            change_id: None,
+        };
+        state
+            .reserve_session("terminal:live", live.clone())
+            .unwrap();
+
+        let active_error = state.begin_change_close("notes", "change-1").unwrap_err();
+        assert!(active_error.contains("active Live terminal"));
+
+        state.release_session("terminal:live");
+        let closing = state.begin_change_close("notes", "change-1").unwrap();
+        let restart_error = state
+            .reserve_session("terminal:live-restart", live)
+            .unwrap_err();
+        assert!(restart_error.contains("being closed"));
+        assert!(state
+            .reserve_session(
+                "terminal:other-space",
+                TerminalIdentity {
+                    space_slug: "other".to_string(),
+                    change_id: None,
+                },
+            )
+            .is_ok());
+        drop(closing);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stopping_terminal_blocks_close_until_exit_releases_its_slot() {
+        let state = TerminalState::default();
+        let pair = portable_pty::native_pty_system()
+            .openpty(normalized_pty_size(None, None))
+            .unwrap();
+        let mut command = portable_pty::CommandBuilder::new("/bin/sh");
+        command.arg("-c");
+        command.arg("sleep 10");
+        let mut child = pair.slave.spawn_command(command).unwrap();
+        drop(pair.slave);
+        let writer = pair.master.take_writer().unwrap();
+        let killer = child.clone_killer();
+        let identity = TerminalIdentity {
+            space_slug: "notes".to_string(),
+            change_id: Some("change-1".to_string()),
+        };
+        state
+            .reserve_session("terminal:stopping", identity.clone())
+            .unwrap();
+        state
+            .install_session(
+                "terminal:stopping",
+                TerminalSession {
+                    identity,
+                    master: pair.master,
+                    writer,
+                    killer,
+                },
+            )
+            .unwrap();
+
+        state.request_stop("terminal:stopping").unwrap();
+        {
+            let registry = state.registry.lock().unwrap();
+            assert_eq!(
+                registry.sessions["terminal:stopping"].phase,
+                TerminalPhase::Stopping
+            );
+        }
+
+        let stopping_error = state.begin_change_close("notes", "change-1").unwrap_err();
+        assert!(stopping_error.contains("active background terminal"));
+
+        let exited = (0..100).any(|_| {
+            if child.try_wait().unwrap().is_some() {
+                true
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                false
+            }
+        });
+        assert!(exited, "terminal child did not exit after Stop");
+        // This is the exit watcher's only release point after child.wait().
+        state.release_session("terminal:stopping");
+        assert!(state.begin_change_close("notes", "change-1").is_ok());
+    }
+
+    #[test]
+    fn closed_agent_change_cannot_restart_a_background_terminal() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let notes = temp.path().join("notes");
+        std::fs::create_dir_all(&notes).unwrap();
+        let space = engine.add_space("Notes", "notes", &notes).unwrap();
+        let change = engine.create_agent_change(&space.slug, "Codex").unwrap();
+        engine
+            .discard_agent_change(&space.slug, &change.id)
+            .unwrap();
+
+        assert!(resolve_terminal_cwd(
+            &engine,
+            TerminalMode::Background,
+            &space.slug,
+            Some(&change.id),
+            change.worktree_path.to_str().unwrap(),
+        )
+        .is_err());
     }
 }
