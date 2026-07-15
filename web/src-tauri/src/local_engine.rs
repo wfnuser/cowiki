@@ -270,17 +270,15 @@ impl LocalEngine {
     pub fn write_page(
         &self,
         space_slug: &str,
-        dir: &str,
         page_slug: &str,
         content: &str,
     ) -> Result<(), String> {
-        self.write_page_checked(space_slug, dir, page_slug, content, None, false)
+        self.write_page_checked(space_slug, page_slug, content, None, false)
     }
 
     pub fn write_page_checked(
         &self,
         space_slug: &str,
-        dir: &str,
         page_slug: &str,
         content: &str,
         expected_content: Option<&str>,
@@ -288,7 +286,7 @@ impl LocalEngine {
     ) -> Result<(), String> {
         let space = self.find_space(space_slug)?;
         okf::ensure_supported_for_write(&space.local_path)?;
-        let relative = page_relative_path(dir, page_slug)?;
+        let relative = okf::concept_relative_path(page_slug)?;
         let path = checked_space_path(&space.local_path, &relative)?;
         if let Some(expected) = expected_content {
             let current = std::fs::read_to_string(&path)
@@ -458,17 +456,14 @@ impl LocalEngine {
         self.rebuild_search_index(space_slug)
     }
 
-    pub fn list_pages(&self, space_slug: &str, dir: &str) -> Result<Vec<PageMeta>, String> {
+    pub fn list_pages(&self, space_slug: &str) -> Result<Vec<PageMeta>, String> {
         let space = self.find_space(space_slug)?;
-        if !matches!(dir, "all" | "wiki") {
-            return Err(format!("unsupported local content directory: {dir}"));
-        }
         read_page_tree(&space.local_path, &space.local_path)
     }
 
-    pub fn get_page(&self, space_slug: &str, dir: &str, slug: &str) -> Result<PageFull, String> {
+    pub fn get_page(&self, space_slug: &str, slug: &str) -> Result<PageFull, String> {
         let space = self.find_space(space_slug)?;
-        let relative = page_relative_path(dir, slug)?;
+        let relative = okf::concept_relative_path(slug)?;
         let path = checked_space_path(&space.local_path, &relative)?;
         let body = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
         let title = markdown_title(&body).unwrap_or_else(|| {
@@ -1331,14 +1326,6 @@ fn validate_slug(value: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn page_relative_path(dir: &str, slug: &str) -> Result<PathBuf, String> {
-    let relative = okf::concept_relative_path(slug)?;
-    match dir {
-        "wiki" | "all" => Ok(relative),
-        _ => Err(format!("unsupported local content directory: {dir}")),
-    }
-}
-
 fn ui_path(root: &Path, value: &str) -> Result<PathBuf, String> {
     let relative = Path::new(value);
     if relative.as_os_str().is_empty()
@@ -1563,7 +1550,6 @@ mod tests {
         engine
             .write_page(
                 &healthy.slug,
-                "wiki",
                 "ready",
                 "---\ntype: Note\n---\n\nHealthy startup evidence.\n",
             )
@@ -1621,6 +1607,35 @@ mod tests {
     }
 
     #[test]
+    fn local_page_methods_use_full_concept_ids_without_a_directory_selector() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(temp.path()).unwrap();
+        let folder = temp.path().join("Full Concept IDs");
+        std::fs::create_dir(&folder).unwrap();
+        let space = engine
+            .add_space("Full Concept IDs", "full-concept-ids", &folder)
+            .unwrap();
+
+        engine
+            .write_page(
+                &space.slug,
+                "notes/first",
+                "---\ntype: Note\n---\n\nLocal draft",
+            )
+            .unwrap();
+
+        assert_eq!(engine.list_pages(&space.slug).unwrap().len(), 1);
+        assert_eq!(
+            engine
+                .get_page(&space.slug, "notes/first")
+                .unwrap()
+                .meta
+                .path,
+            "notes/first.md"
+        );
+    }
+
+    #[test]
     fn save_stays_uncommitted_until_submit() {
         let temp = tempfile::tempdir().unwrap();
         let engine = LocalEngine::open(temp.path()).unwrap();
@@ -1635,7 +1650,6 @@ mod tests {
         engine
             .write_page(
                 &space.slug,
-                "wiki",
                 "notes/first",
                 "---\ntitle: \"First\"\n---\n\nLocal draft",
             )
@@ -1791,7 +1805,7 @@ mod tests {
 
         engine.create_folder(&space.slug, "Projects", None).unwrap();
         engine
-            .write_page(&space.slug, "wiki", "Projects/brief", "# Brief\n")
+            .write_page(&space.slug, "Projects/brief", "# Brief\n")
             .unwrap();
         engine
             .rename_path(&space.slug, "Projects/brief.md", "Projects/plan.md")
@@ -1845,7 +1859,7 @@ mod tests {
         .unwrap();
         let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
 
-        let sections = engine.list_pages(&space.slug, "all").unwrap();
+        let sections = engine.list_pages(&space.slug).unwrap();
         let children = &sections;
         assert!(children.iter().any(|item| item.kind == "folder"
             && item.slug == "research"
@@ -1872,10 +1886,10 @@ mod tests {
         let root_index = std::fs::read_to_string(folder.join("index.md")).unwrap();
         assert!(root_index.contains("okf_version"));
         assert!(engine
-            .write_page(&space.slug, "wiki", "index", "# Not a concept")
+            .write_page(&space.slug, "index", "# Not a concept")
             .is_err());
         assert!(engine
-            .write_page(&space.slug, "wiki", "log", "# Not a concept")
+            .write_page(&space.slug, "log", "# Not a concept")
             .is_err());
 
         engine.create_folder(&space.slug, "Projects", None).unwrap();
@@ -2201,14 +2215,13 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         let space = engine.add_space("Notes", "notes", &folder).unwrap();
         engine
-            .write_page(&space.slug, "wiki", "shared", "# Shared\n\nHuman base")
+            .write_page(&space.slug, "shared", "# Shared\n\nHuman base")
             .unwrap();
 
         std::fs::write(folder.join("shared.md"), "# Shared\n\nAgent result").unwrap();
         let error = engine
             .write_page_checked(
                 &space.slug,
-                "wiki",
                 "shared",
                 "# Shared\n\nHuman newer edit",
                 Some("# Shared\n\nHuman base"),
@@ -2230,11 +2243,11 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         let space = engine.add_space("Notes", "notes", &folder).unwrap();
         engine
-            .write_page(&space.slug, "wiki", "same", "# Original")
+            .write_page(&space.slug, "same", "# Original")
             .unwrap();
 
         assert!(engine
-            .write_page_checked(&space.slug, "wiki", "same", "# Replacement", None, true)
+            .write_page_checked(&space.slug, "same", "# Replacement", None, true)
             .is_err());
         let preserved = std::fs::read_to_string(folder.join("same.md")).unwrap();
         assert!(preserved.contains("# Original"));
@@ -2249,7 +2262,7 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         let space = engine.add_space("Notes", "notes", &folder).unwrap();
         engine
-            .write_page(&space.slug, "wiki", "draft", "# Draft\n\nAgent proposal\n")
+            .write_page(&space.slug, "draft", "# Draft\n\nAgent proposal\n")
             .unwrap();
 
         let diffs = engine.working_diff(&space.slug).unwrap();
@@ -2501,12 +2514,7 @@ mod tests {
         assert!(before[0].title_match);
 
         engine
-            .write_page(
-                &space.slug,
-                "wiki",
-                "new-page",
-                "# New Page\n\nOrchid field notes",
-            )
+            .write_page(&space.slug, "new-page", "# New Page\n\nOrchid field notes")
             .unwrap();
         let after = engine.search_pages(&space.slug, "field notes", 10).unwrap();
         assert_eq!(after[0].path, "new-page.md");
@@ -2644,15 +2652,13 @@ mod tests {
         symlink(&outside, folder.join("notes")).unwrap();
         symlink(outside.join("secret.md"), folder.join("linked.md")).unwrap();
 
-        let tree = engine.list_pages(&space.slug, "all").unwrap();
+        let tree = engine.list_pages(&space.slug).unwrap();
         assert!(!tree
             .iter()
             .any(|page| page.slug == "notes" || page.slug == "linked"));
+        assert!(engine.get_page(&space.slug, "notes/secret").is_err());
         assert!(engine
-            .get_page(&space.slug, "wiki", "notes/secret")
-            .is_err());
-        assert!(engine
-            .write_page(&space.slug, "wiki", "notes/secret", "changed")
+            .write_page(&space.slug, "notes/secret", "changed")
             .is_err());
         assert!(engine
             .rename_path(&space.slug, "notes/secret.md", "moved.md")
@@ -2683,12 +2689,7 @@ mod tests {
         let space = engine.add_space("Future", "future", &folder).unwrap();
 
         assert!(engine
-            .write_page(
-                &space.slug,
-                "wiki",
-                "page",
-                "---\ntype: Future\n---\nchanged"
-            )
+            .write_page(&space.slug, "page", "---\ntype: Future\n---\nchanged")
             .is_err());
         assert!(engine
             .rename_path(&space.slug, "page.md", "renamed.md")

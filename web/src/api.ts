@@ -319,7 +319,7 @@ export async function listMembers(workspaceSlug: string): Promise<MemberInfo[]> 
 // ── Pages ──
 
 export async function listPages(branch = 'main', workspaceSlug: string, dir = 'all'): Promise<PageMeta[]> {
-  if (isDesktopClient()) return localApi.listPages(workspaceSlug, dir);
+  if (isDesktopClient()) return localApi.listPages(workspaceSlug);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages?branch=${encodeURIComponent(branch)}&dir=${encodeURIComponent(dir)}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -329,7 +329,7 @@ export async function listPages(branch = 'main', workspaceSlug: string, dir = 'a
 }
 
 export async function getPage(conceptId: string, branch = 'main', workspaceSlug: string, dir = 'wiki'): Promise<PageFull> {
-  if (isDesktopClient()) return localApi.getPage(workspaceSlug, dir, conceptId);
+  if (isDesktopClient()) return localApi.getPage(workspaceSlug, conceptId);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages/${encodeURIComponent(conceptId)}?branch=${encodeURIComponent(branch)}&dir=${encodeURIComponent(dir)}`, { headers: h() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -347,7 +347,7 @@ export async function writePage(
   expectedBody?: string,
   createOnly = false,
 ): Promise<void> {
-  if (isDesktopClient()) return localApi.writePage(workspaceSlug, dir, conceptId, body, expectedBody, createOnly);
+  if (isDesktopClient()) return localApi.writePage(workspaceSlug, conceptId, body, expectedBody, createOnly);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/pages`, {
     method: 'POST',
     headers: h({ 'Content-Type': 'application/json' }),
