@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ingest } from '../api';
 import { isDesktopClient } from '../runtime';
 import { chooseSourceFiles, ingestFiles } from '../local-api';
+import { fileIngestResult } from '../lib/source-ingest';
 
 interface AddSourceDialogProps {
   open: boolean;
@@ -47,10 +48,14 @@ export function AddSourceDialog({
   };
 
   const handleChooseFiles = async () => {
-    const picked = await chooseSourceFiles();
-    if (picked.length === 0) return;
-    setSelectedFiles((current) => [...new Set([...current, ...picked])]);
-    setError('');
+    try {
+      const picked = await chooseSourceFiles();
+      if (picked.length === 0) return;
+      setSelectedFiles((current) => [...new Set([...current, ...picked])]);
+      setError('');
+    } catch (err) {
+      setError(`Failed to choose files: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
   };
 
   const fileName = (path: string) => path.split(/[\\/]/).pop() || path;
@@ -60,19 +65,15 @@ export function AddSourceDialog({
     setError('');
     try {
       const outcomes = await ingestFiles(workspaceSlug, selectedFiles);
-      const failed = outcomes.filter((outcome) => outcome.error);
-      if (failed.length === outcomes.length) {
-        setError(failed.map((outcome) => `${fileName(outcome.sourcePath)}: ${outcome.error}`).join('; '));
-        return;
+      const result = fileIngestResult(outcomes);
+      if (outcomes.some((outcome) => !outcome.error)) onDone();
+      if (result.shouldClose) {
+        reset();
+        onOpenChange(false);
+      } else {
+        setSelectedFiles(result.remainingFiles);
+        setError(result.error);
       }
-      if (failed.length > 0) {
-        setError(`${failed.length} of ${outcomes.length} file(s) failed: ${failed
-          .map((outcome) => `${fileName(outcome.sourcePath)} (${outcome.error})`)
-          .join(', ')}`);
-      }
-      reset();
-      onDone();
-      if (failed.length === 0) onOpenChange(false);
     } catch (err) {
       setError(`Failed to add sources: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {

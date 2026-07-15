@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "npm run test:auth-flow && npm run test:versioned-document && npm run test:local-space && npm run test:sidebar-layout && npm run test:page-frontmatter && npm run test:agent-terminal && npm run test:okf-pages",
+    "test": "npm run test:auth-flow && npm run test:versioned-document && npm run test:local-space && npm run test:sidebar-layout && npm run test:page-frontmatter && npm run test:agent-terminal && npm run test:okf-pages && npm run test:source-ingest",
     "test:auth-flow": "node --experimental-strip-types --test tests/auth-flow.test.ts",
     "test:versioned-document": "node --experimental-strip-types --test tests/versioned-document.test.ts",
     "test:local-space": "node --experimental-strip-types --test tests/local-space.test.ts",
@@ -16,6 +16,7 @@
     "test:page-frontmatter": "node --experimental-strip-types --test tests/page-frontmatter.test.ts",
     "test:agent-terminal": "node --experimental-strip-types --test tests/agent-terminal.test.ts",
     "test:okf-pages": "node --experimental-strip-types --test tests/okf-pages.test.ts",
+    "test:source-ingest": "node --experimental-strip-types --test tests/source-ingest.test.ts",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build"

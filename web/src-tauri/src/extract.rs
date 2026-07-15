@@ -13,6 +13,74 @@ use calamine::{open_workbook_auto, Data, Reader as _};
 use quick_xml::events::Event;
 use quick_xml::reader::Reader as XmlReader;
 
+const MAX_SOURCE_FILE_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_ARCHIVE_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_ARCHIVE_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_ARCHIVE_ENTRIES: usize = 20_000;
+const MAX_EXTRACTED_TEXT_BYTES: usize = 32 * 1024 * 1024;
+
+fn validate_file_size(path: &Path, max_bytes: u64) -> Result<(), String> {
+    let bytes = std::fs::metadata(path)
+        .map_err(|error| format!("cannot inspect source file: {error}"))?
+        .len();
+    if bytes > max_bytes {
+        return Err(format!(
+            "source file is too large ({bytes} bytes; maximum is {max_bytes})"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_archive_limits(
+    path: &Path,
+    max_entry_bytes: u64,
+    max_total_bytes: u64,
+    max_entries: usize,
+) -> Result<(), String> {
+    let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|error| format!("cannot open archive: {error}"))?;
+    if archive.len() > max_entries {
+        return Err(format!(
+            "archive has too many entries ({}; maximum is {max_entries})",
+            archive.len()
+        ));
+    }
+
+    let mut total_bytes = 0_u64;
+    for index in 0..archive.len() {
+        let entry = archive
+            .by_index(index)
+            .map_err(|error| format!("cannot inspect archive entry: {error}"))?;
+        let entry_bytes = entry.size();
+        if entry_bytes > max_entry_bytes {
+            return Err(format!(
+                "archive entry '{}' is too large ({entry_bytes} bytes; maximum is {max_entry_bytes})",
+                entry.name()
+            ));
+        }
+        total_bytes = total_bytes
+            .checked_add(entry_bytes)
+            .ok_or_else(|| "archive expanded size overflowed".to_string())?;
+        if total_bytes > max_total_bytes {
+            return Err(format!(
+                "archive expands to too much data ({total_bytes} bytes; maximum is {max_total_bytes})"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_extracted_text(text: &str, max_bytes: usize) -> Result<(), String> {
+    if text.len() > max_bytes {
+        return Err(format!(
+            "extracted text is too large ({} bytes; maximum is {max_bytes})",
+            text.len()
+        ));
+    }
+    Ok(())
+}
+
 /// Binary formats this module knows how to convert to text.
 pub const BINARY_EXTENSIONS: &[&str] = &["pdf", "docx", "xlsx", "xls", "ods", "pptx", "odt", "odp"];
 
@@ -44,6 +112,18 @@ pub fn is_supported(path: &Path) -> bool {
 pub fn read_source_file(path: &Path) -> Result<String, String> {
     let extension = extension_of(path)
         .ok_or_else(|| "file has no extension to identify its format".to_string())?;
+    validate_file_size(path, MAX_SOURCE_FILE_BYTES)?;
+    if matches!(
+        extension.as_str(),
+        "docx" | "xlsx" | "ods" | "pptx" | "odt" | "odp"
+    ) {
+        validate_archive_limits(
+            path,
+            MAX_ARCHIVE_ENTRY_BYTES,
+            MAX_ARCHIVE_TOTAL_BYTES,
+            MAX_ARCHIVE_ENTRIES,
+        )?;
+    }
     let text = if PLAIN_TEXT_EXTENSIONS.contains(&extension.as_str()) {
         std::fs::read_to_string(path).map_err(|error| format!("cannot read file: {error}"))?
     } else {
@@ -61,6 +141,7 @@ pub fn read_source_file(path: &Path) -> Result<String, String> {
             }
         }
     };
+    validate_extracted_text(&text, MAX_EXTRACTED_TEXT_BYTES)?;
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Err("no extractable text found in this file".to_string());
@@ -199,7 +280,11 @@ fn spreadsheet_row_to_markdown(row: &[Data]) -> String {
         .iter()
         .map(|cell| match cell {
             Data::Empty => String::new(),
-            other => other.to_string().replace('|', "\\|"),
+            other => other
+                .to_string()
+                .replace("\r\n", "<br>")
+                .replace(['\r', '\n'], "<br>")
+                .replace('|', "\\|"),
         })
         .collect::<Vec<_>>()
         .join(" | ");
@@ -353,6 +438,12 @@ mod tests {
     }
 
     #[test]
+    fn spreadsheet_cells_stay_inside_their_markdown_row() {
+        let row = spreadsheet_row_to_markdown(&[Data::String("line one\nline two | value".into())]);
+        assert_eq!(row, "| line one<br>line two \\| value |");
+    }
+
+    #[test]
     fn pptx_extracts_slide_text_in_order() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("deck.pptx");
@@ -378,6 +469,32 @@ mod tests {
         );
         let text = read_source_file(&path).unwrap();
         assert_eq!(text, "Hello from an ODF document.");
+    }
+
+    #[test]
+    fn rejects_input_larger_than_the_configured_limit() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("large.txt");
+        std::fs::write(&path, b"123456789").unwrap();
+
+        let error = validate_file_size(&path, 8).unwrap_err();
+        assert!(error.contains("too large"));
+    }
+
+    #[test]
+    fn rejects_archive_entries_that_expand_past_the_configured_limit() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("large.pptx");
+        write_minimal_pptx(&path, &["This slide expands beyond a tiny test limit"]);
+
+        let error = validate_archive_limits(&path, 8, 1_024, 10).unwrap_err();
+        assert!(error.contains("archive entry"));
+    }
+
+    #[test]
+    fn rejects_extracted_text_larger_than_the_configured_limit() {
+        let error = validate_extracted_text("123456789", 8).unwrap_err();
+        assert!(error.contains("extracted text"));
     }
 
     fn write_minimal_xlsx(path: &Path, sheet_name: &str, rows: &[[&str; 2]]) {

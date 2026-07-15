@@ -152,16 +152,15 @@ fn local_ingest(
 }
 
 #[tauri::command]
-fn local_ingest_files(
+async fn local_ingest_files(
     engine: State<'_, LocalEngine>,
     space_slug: String,
     source_paths: Vec<String>,
 ) -> Result<Vec<IngestFileOutcome>, String> {
-    // A plain (non-async) command: Tauri already dispatches these through
-    // its own blocking thread pool, same as local_search / local_working_diff
-    // elsewhere in this file — extraction (PDF/DOCX/spreadsheet parsing)
-    // can take real time but never blocks the UI's async runtime.
-    engine.ingest_files(&space_slug, &source_paths)
+    let engine = engine.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || engine.ingest_files(&space_slug, &source_paths))
+        .await
+        .map_err(|error| format!("local source import task failed: {error}"))?
 }
 
 #[tauri::command]

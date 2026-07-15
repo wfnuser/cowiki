@@ -4,8 +4,9 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use similar::{ChangeTag, TextDiff};
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::knowledge_index::{self, SearchHit};
 use crate::okf::{self, DocumentKind};
@@ -98,8 +99,9 @@ pub struct FileDiff {
     pub deletions: usize,
 }
 
+#[derive(Clone)]
 pub struct LocalEngine {
-    db: Mutex<Connection>,
+    db: Arc<Mutex<Connection>>,
 }
 
 impl LocalEngine {
@@ -120,7 +122,7 @@ impl LocalEngine {
             .map_err(|e| e.to_string())?;
         knowledge_index::initialize(&connection)?;
         let engine = Self {
-            db: Mutex::new(connection),
+            db: Arc::new(Mutex::new(connection)),
         };
         engine.rebuild_all_search_indexes()?;
         Ok(engine)
@@ -387,7 +389,9 @@ impl LocalEngine {
         } else {
             requested.trim()
         };
-        self.write_source_document(&space, requested, title, content.trim(), None)
+        let source = self.write_source_document(&space, requested, title, content.trim(), None)?;
+        self.refresh_source_views(&space)?;
+        Ok(source)
     }
 
     /// Import files from disk, extracting text from any binary format
@@ -401,7 +405,7 @@ impl LocalEngine {
     ) -> Result<Vec<IngestFileOutcome>, String> {
         let space = self.find_space(space_slug)?;
         okf::ensure_supported_for_write(&space.local_path)?;
-        Ok(source_paths
+        let outcomes = source_paths
             .iter()
             .map(
                 |source_path| match self.ingest_one_file(&space, source_path) {
@@ -417,7 +421,11 @@ impl LocalEngine {
                     },
                 },
             )
-            .collect())
+            .collect::<Vec<_>>();
+        if outcomes.iter().any(|outcome| outcome.source.is_some()) {
+            self.refresh_source_views(&space)?;
+        }
+        Ok(outcomes)
     }
 
     fn ingest_one_file(&self, space: &Space, source_path: &str) -> Result<SourceItem, String> {
@@ -430,10 +438,8 @@ impl LocalEngine {
                 crate::extract::all_supported_extensions().join(", ")
             ));
         }
-        let bytes =
-            std::fs::read(path).map_err(|error| format!("cannot read {source_path}: {error}"))?;
-        let content_hash = format!("{:x}", Sha256::digest(&bytes));
         let text = crate::extract::read_source_file(path)?;
+        let content_hash = sha256_file(path)?;
         let original_name = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -451,10 +457,11 @@ impl LocalEngine {
     /// A file re-imported under its original name is common (re-syncing a
     /// folder, clicking Import twice by accident) and should update the
     /// same Source rather than pile up copies — so when `content_hash` is
-    /// given and matches what's already on disk, this overwrites in
-    /// place. A name collision with genuinely different content gets a
-    /// hash-derived (not random) suffix, so re-importing *that* file is
-    /// still idempotent instead of spawning a new copy every time. Pasted
+    /// given and matches what's already on disk, this returns the existing
+    /// Source without writing so human or Agent annotations survive. A name
+    /// collision with genuinely different content gets a hash-derived (not
+    /// random) suffix, so re-importing *that* file is still idempotent instead
+    /// of spawning a new copy every time. Pasted
     /// text/URLs (`content_hash: None`) keep the original never-clobber
     /// behavior, since two unrelated pastes can legitimately share a title.
     fn write_source_document(
@@ -468,18 +475,43 @@ impl LocalEngine {
         let relative = okf::source_storage_path(requested_filename)?;
         let mut candidate = checked_space_path(&space.local_path, &relative)?;
         if candidate.exists() {
-            let unchanged = content_hash.is_some_and(|hash| {
-                std::fs::read_to_string(&candidate)
-                    .ok()
-                    .and_then(|existing| frontmatter_field(&existing, "source_hash"))
-                    .is_some_and(|existing_hash| existing_hash == hash)
-            });
-            if !unchanged {
-                let stem = candidate.file_stem().unwrap_or_default().to_string_lossy();
-                let suffix = content_hash
-                    .map(|hash| hash[..8].to_string())
-                    .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string()[..8].to_string());
-                candidate.set_file_name(format!("{stem}-{suffix}.md"));
+            if content_hash.is_some_and(|hash| source_hash_matches(&candidate, hash)) {
+                return source_item_for_path(space, &candidate);
+            }
+
+            let stem = candidate
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            if let Some(hash) = content_hash {
+                let mut found = None;
+                for suffix_len in [8, 16, 32, hash.len()] {
+                    let suffix = hash.get(..suffix_len).unwrap_or(hash);
+                    let next = candidate.with_file_name(format!("{stem}-{suffix}.md"));
+                    if !next.exists() {
+                        found = Some(next);
+                        break;
+                    }
+                    if source_hash_matches(&next, hash) {
+                        return source_item_for_path(space, &next);
+                    }
+                }
+                candidate = found.unwrap_or_else(|| loop {
+                    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+                    let next = candidate.with_file_name(format!("{stem}-{hash}-{suffix}.md"));
+                    if !next.exists() {
+                        break next;
+                    }
+                });
+            } else {
+                candidate = loop {
+                    let id = uuid::Uuid::new_v4().simple().to_string();
+                    let next = candidate.with_file_name(format!("{stem}-{}.md", &id[..8]));
+                    if !next.exists() {
+                        break next;
+                    }
+                };
             }
         }
         ensure_inside(&space.local_path, &candidate)?;
@@ -493,18 +525,16 @@ impl LocalEngine {
         }
         let body = format!("---\n{frontmatter}---\n\n{}\n", body_text.trim());
         std::fs::write(&candidate, body).map_err(|error| error.to_string())?;
+        source_item_for_path(space, &candidate)
+    }
+
+    fn refresh_source_views(&self, space: &Space) -> Result<(), String> {
         okf::refresh_progressive_indexes(&space.local_path)?;
         let mut db = self
             .db
             .lock()
             .map_err(|_| "local database lock poisoned".to_string())?;
-        knowledge_index::rebuild_space(&mut db, &space.id, &space.local_path)?;
-        Ok(SourceItem {
-            filename: candidate
-                .strip_prefix(space.local_path.join(okf::RAW_SOURCES_DIR))
-                .map(normalize_path)
-                .map_err(|error| error.to_string())?,
-        })
+        knowledge_index::refresh_space(&mut db, &space.id, &space.local_path)
     }
 
     pub fn rename_path(&self, space_slug: &str, from: &str, to: &str) -> Result<(), String> {
@@ -1487,6 +1517,39 @@ fn yaml_string(value: &str) -> String {
     )
 }
 
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let mut file = std::fs::File::open(path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let bytes_read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn source_hash_matches(path: &Path, expected_hash: &str) -> bool {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|existing| frontmatter_field(&existing, "source_hash"))
+        .is_some_and(|existing_hash| existing_hash == expected_hash)
+}
+
+fn source_item_for_path(space: &Space, path: &Path) -> Result<SourceItem, String> {
+    Ok(SourceItem {
+        filename: path
+            .strip_prefix(space.local_path.join(okf::RAW_SOURCES_DIR))
+            .map(normalize_path)
+            .map_err(|error| error.to_string())?,
+    })
+}
+
 fn read_page_tree(root: &Path, current: &Path) -> Result<Vec<PageMeta>, String> {
     if !current.is_dir() {
         return Ok(vec![]);
@@ -1642,7 +1705,7 @@ pub(crate) fn markdown_title(body: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::LocalEngine;
+    use super::{sha256_file, LocalEngine};
 
     #[test]
     fn fresh_local_engine_waits_for_a_folder() {
@@ -2564,7 +2627,7 @@ mod tests {
     }
 
     #[test]
-    fn reimporting_the_same_file_updates_the_same_source_instead_of_duplicating() {
+    fn reimporting_same_content_reuses_source_and_different_content_stays_separate() {
         let temp = tempfile::tempdir().unwrap();
         let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
         let folder = temp.path().join("knowledge");
@@ -2611,6 +2674,75 @@ mod tests {
             "re-importing the same colliding file must converge on the same suffixed path"
         );
         assert_eq!(engine.list_sources(&space.slug).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn reimporting_identical_file_does_not_overwrite_source_edits() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+
+        let source_path = temp.path().join("report.txt");
+        std::fs::write(&source_path, "Original report text.").unwrap();
+        let first = engine
+            .ingest_files(&space.slug, &[source_path.to_string_lossy().into_owned()])
+            .unwrap();
+        let source = first[0].source.as_ref().unwrap();
+        let stored_path = folder.join(".cowiki/sources").join(&source.filename);
+        let mut annotated = std::fs::read_to_string(&stored_path).unwrap();
+        annotated.push_str("\nHuman annotation that must survive re-import.\n");
+        std::fs::write(&stored_path, &annotated).unwrap();
+
+        engine
+            .ingest_files(&space.slug, &[source_path.to_string_lossy().into_owned()])
+            .unwrap();
+
+        assert_eq!(std::fs::read_to_string(stored_path).unwrap(), annotated);
+    }
+
+    #[test]
+    fn reimporting_a_colliding_file_does_not_overwrite_source_edits() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+
+        let source_path = temp.path().join("report.txt");
+        std::fs::write(&source_path, "First report.").unwrap();
+        engine
+            .ingest_files(&space.slug, &[source_path.to_string_lossy().into_owned()])
+            .unwrap();
+
+        std::fs::write(&source_path, "Second report with the same file name.").unwrap();
+        let collision = engine
+            .ingest_files(&space.slug, &[source_path.to_string_lossy().into_owned()])
+            .unwrap();
+        let collision = collision[0].source.as_ref().unwrap();
+        let stored_path = folder.join(".cowiki/sources").join(&collision.filename);
+        let mut annotated = std::fs::read_to_string(&stored_path).unwrap();
+        annotated.push_str("\nAnnotation on the colliding Source.\n");
+        std::fs::write(&stored_path, &annotated).unwrap();
+
+        engine
+            .ingest_files(&space.slug, &[source_path.to_string_lossy().into_owned()])
+            .unwrap();
+
+        assert_eq!(std::fs::read_to_string(stored_path).unwrap(), annotated);
+    }
+
+    #[test]
+    fn source_hashing_streams_the_complete_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("source.txt");
+        std::fs::write(&path, "abc").unwrap();
+
+        assert_eq!(
+            sha256_file(&path).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     #[test]
