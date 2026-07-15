@@ -5,9 +5,11 @@ import type {
   PageMeta,
   FileDiff,
   IngestFileOutcome,
+  Checkpoint,
   SearchResponse,
   SourceContent,
   SourceItem,
+  SpaceHistory,
   Workspace,
 } from './api';
 
@@ -77,6 +79,14 @@ export function workingDiff(spaceSlug: string): Promise<FileDiff[]> {
 
 export function keepWorkingDiff(spaceSlug: string, expected: FileDiff[]): Promise<unknown> {
   return invoke('local_keep_working_diff', { spaceSlug, expected });
+}
+
+export function history(spaceSlug: string): Promise<SpaceHistory> {
+  return invoke('local_history', { spaceSlug });
+}
+
+export function createCheckpoint(spaceSlug: string, name?: string): Promise<Checkpoint> {
+  return invoke('local_create_checkpoint', { spaceSlug, name });
 }
 
 export function createAgentChange(spaceSlug: string, agentName: string): Promise<AgentChange> {

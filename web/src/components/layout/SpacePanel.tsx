@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import {
   ChevronRight, FileText, Folder, Upload,
-  MoreHorizontal, Plus, FolderPlus, Settings, BookOpen, GitPullRequest, Users, Activity,
+  MoreHorizontal, Plus, FolderPlus, Settings, BookOpen, GitPullRequest, Users, History,
   FileCode, Pencil, Trash2, Search,
   PanelLeft,
 } from 'lucide-react';
@@ -13,7 +13,7 @@ import {
 import { C, spaceTileColors } from '@/lib/design';
 import { conceptIdFromPath, visiblePageTree } from '@/lib/okf-pages';
 
-export type NavTab = 'wiki' | 'reviews' | 'members' | 'activity';
+export type NavTab = 'wiki' | 'reviews' | 'members' | 'history';
 
 interface SpacePanelProps {
   workspace: Workspace | null;
@@ -93,7 +93,7 @@ export function SpacePanel({
     { tab: 'wiki', icon: <BookOpen size={16} />, label: 'Wiki' },
     { tab: 'reviews', icon: <GitPullRequest size={16} />, label: 'Reviews', badge: reviewCount || undefined, hide: !showReviews },
     { tab: 'members', icon: <Users size={16} />, label: 'Members & roles', hide: isPersonal },
-    { tab: 'activity', icon: <Activity size={16} />, label: 'Activity' },
+    { tab: 'history', icon: <History size={16} />, label: 'History' },
   ];
 
   const wikiActive = activeTab === 'wiki';
