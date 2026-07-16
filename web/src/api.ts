@@ -121,6 +121,12 @@ export interface SearchResponse {
   semantic: SemanticHit[];
 }
 
+export interface BrokenLink {
+  source_path: string;
+  source_title: string;
+  target: string;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -557,6 +563,11 @@ export async function searchWorkspace(
     throw new Error(err.error || `Request failed: ${res.status}`);
   }
   return res.json();
+}
+
+export async function listBrokenLinks(workspaceSlug: string): Promise<BrokenLink[]> {
+  if (!isDesktopClient()) return [];
+  return localApi.listBrokenLinks(workspaceSlug);
 }
 
 // ── API Keys ──

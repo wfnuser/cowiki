@@ -6,8 +6,8 @@ mod okf;
 mod terminal;
 
 use local_engine::{
-    AgentChange, Checkpoint, FileDiff, IngestFileOutcome, LocalEngine, PageFull, PageMeta,
-    SearchResponse, SourceContent, SourceItem, Space, SpaceHistory, SubmitResult,
+    AgentChange, BrokenLink, Checkpoint, FileDiff, IngestFileOutcome, LocalEngine, PageFull,
+    PageMeta, SearchResponse, SourceContent, SourceItem, Space, SpaceHistory, SubmitResult,
 };
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -202,6 +202,14 @@ fn local_search(
 }
 
 #[tauri::command]
+fn local_list_broken_links(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<Vec<BrokenLink>, String> {
+    engine.list_broken_links(&space_slug)
+}
+
+#[tauri::command]
 fn local_submit(
     engine: State<'_, LocalEngine>,
     space_slug: String,
@@ -313,6 +321,7 @@ pub fn run() {
             local_rename_path,
             local_delete_path,
             local_search,
+            local_list_broken_links,
             local_submit,
             local_working_diff,
             local_keep_working_diff,

@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import {
   ChevronRight, FileText, Folder, Upload,
   MoreHorizontal, Plus, FolderPlus, Settings, BookOpen, GitPullRequest, Users, History,
-  FileCode, Pencil, Trash2, Search,
+  FileCode, Pencil, Trash2, Search, Unlink,
   PanelLeft,
 } from 'lucide-react';
 import type { Workspace, PageMeta, SourceItem } from '../../api';
@@ -13,7 +13,7 @@ import {
 import { C, spaceTileColors } from '@/lib/design';
 import { conceptIdFromPath, visiblePageTree } from '@/lib/okf-pages';
 
-export type NavTab = 'wiki' | 'reviews' | 'members' | 'history';
+export type NavTab = 'wiki' | 'reviews' | 'members' | 'history' | 'links';
 
 interface SpacePanelProps {
   workspace: Workspace | null;
@@ -26,6 +26,7 @@ interface SpacePanelProps {
   reviewCount: number;
   isPersonal: boolean;
   showReviews?: boolean;
+  showLinkDiagnostics?: boolean;
   isOwner: boolean;
   onSelectPage: (slug: string, path?: string) => void;
   onSelectSource: (filename: string) => void;
@@ -52,6 +53,7 @@ export function SpacePanel({
   reviewCount,
   isPersonal,
   showReviews = !isPersonal,
+  showLinkDiagnostics = false,
   isOwner,
   onSelectPage,
   onSelectSource,
@@ -94,6 +96,7 @@ export function SpacePanel({
     { tab: 'reviews', icon: <GitPullRequest size={16} />, label: 'Reviews', badge: reviewCount || undefined, hide: !showReviews },
     { tab: 'members', icon: <Users size={16} />, label: 'Members & roles', hide: isPersonal },
     { tab: 'history', icon: <History size={16} />, label: 'History' },
+    { tab: 'links', icon: <Unlink size={16} />, label: 'Links', hide: !showLinkDiagnostics },
   ];
 
   const wikiActive = activeTab === 'wiki';

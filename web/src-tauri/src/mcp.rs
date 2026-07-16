@@ -118,6 +118,9 @@ fn handle_tool_call(
                 .list_backlinks(space_slug, path)
                 .map(|results| json!({"results": results}))
         }
+        "list_broken_links" => engine
+            .list_broken_links(space_slug)
+            .map(|results| json!({"results": results})),
         _ => Err(format!("unknown or unavailable read-only tool: {name}")),
     })();
 
@@ -214,6 +217,15 @@ fn tool_definitions() -> Vec<Value> {
                 "additionalProperties": false
             }
         }),
+        json!({
+            "name": "list_broken_links",
+            "description": "List unresolved internal Markdown links in the current Space. Results are read-only diagnostics derived from refreshed Markdown files.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }
+        }),
     ]
 }
 
@@ -253,7 +265,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
             root.join("local-first.md"),
-            "# Local-first\n\nThe network is optional. See [[sync]].",
+            "# Local-first\n\nThe network is optional. See [[sync]] and [missing](missing.md).",
         )
         .unwrap();
         std::fs::write(root.join("sync.md"), "# Sync\n\nReplication notes.").unwrap();
@@ -281,7 +293,8 @@ mod tests {
                 "get_space_context",
                 "search_pages",
                 "get_page",
-                "list_backlinks"
+                "list_backlinks",
+                "list_broken_links",
             ]
         );
         assert!(!names
@@ -348,6 +361,40 @@ mod tests {
             }),
         );
         assert_eq!(write["result"]["isError"], true);
+    }
+
+    #[test]
+    fn mcp_reports_broken_links_from_refreshed_markdown() {
+        let (temp, engine, slug) = setup();
+        let response = super::handle_request(
+            &engine,
+            &slug,
+            json!({
+                "jsonrpc":"2.0","id":6,"method":"tools/call",
+                "params":{"name":"list_broken_links","arguments":{}}
+            }),
+        );
+        assert_eq!(response["result"]["isError"], false);
+        let results = response["result"]["structuredContent"]["results"]
+            .as_array()
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0]["source_path"], "local-first.md");
+        assert_eq!(results[0]["target"], "missing.md");
+
+        std::fs::write(temp.path().join("space/missing.md"), "# Found\n").unwrap();
+        let refreshed = super::handle_request(
+            &engine,
+            &slug,
+            json!({
+                "jsonrpc":"2.0","id":7,"method":"tools/call",
+                "params":{"name":"list_broken_links","arguments":{}}
+            }),
+        );
+        assert!(refreshed["result"]["structuredContent"]["results"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
