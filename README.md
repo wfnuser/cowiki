@@ -1,74 +1,107 @@
-# CoWiki Client
+<p align="center">
+  <img src="web/public/cowiki-logo.svg" width="88" alt="CoWiki logo" />
+</p>
 
-CoWiki is moving to a split architecture:
+<h1 align="center">CoWiki: An LLM Wiki, but multiplayer.</h1>
 
-- `wfnuser/cowiki` — client surfaces: Web, desktop, CLI, and MCP client/server tooling.
-- `wfnuser/cowiki-backend` — centralized Rust API service, database migrations, git-backed workspace storage, and deployment files.
+<p align="center">
+  <a href="https://github.com/wfnuser/cowiki/actions/workflows/macos-desktop.yml"><img src="https://img.shields.io/github/actions/workflow/status/wfnuser/cowiki/macos-desktop.yml?branch=dev&label=macOS%20build" alt="macOS build" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-EF5A29" alt="Apache 2.0 license" /></a>
+  <a href="docs/okf-v0.1.md"><img src="https://img.shields.io/badge/OKF-v0.1-EF5A29" alt="Open Knowledge Format v0.1" /></a>
+  <a href="https://github.com/wfnuser/cowiki"><img src="https://img.shields.io/github/stars/wfnuser/cowiki?style=flat&color=EF5A29" alt="GitHub stars" /></a>
+  <a href="https://github.com/wfnuser/cowiki/issues"><img src="https://img.shields.io/github/issues/wfnuser/cowiki?color=6B625C" alt="Open issues" /></a>
+  <a href="https://github.com/wfnuser/cowiki/graphs/contributors"><img src="https://img.shields.io/github/contributors/wfnuser/cowiki?color=6B625C" alt="Contributors" /></a>
+</p>
 
-The product direction is local-first for individual work and cloud-backed for
-collaboration. The desktop client runs its local engine in-process; local
-coding agents and the open editor operate on the same versioned document.
-Shared team spaces use the hosted backend only when cloud capabilities are
-enabled.
+<p align="center">
+  <img src="docs/assets/cowiki-desktop.png" alt="CoWiki reviewing local Markdown changes beside an embedded Claude Code terminal" />
+</p>
 
-## Web Client
+<p align="center">
+  <strong>A local-first, Git-based workspace where teams and their agents compile sources into a portable, reviewable, and shareable LLM Wiki.</strong>
+  <br />
+  <sub>Bring your own agents. Turn files and URLs into linked OKF knowledge, review every diff, and keep only what you trust.</sub>
+</p>
 
-```bash
-cd web
-npm install
-npm run dev
+> **macOS-first alpha:** local Spaces work today. Cloud collaboration comes next.
+
+## Features
+
+| Feature | What it means |
+| --- | --- |
+| **Local Spaces** | A Space is an ordinary folder. No account, server, or external database is required. |
+| **Agent-compiled Wiki** | Add URLs, PDFs, documents, spreadsheets, or slides. Agents compile them into structured, linked knowledge. |
+| **Bring your own agents** | Use the built-in Codex and Claude terminals, or let Grok, Antigravity, and other file/MCP-capable agents work on the same Space. |
+| **Git-based review** | Inspect human and agent edits as diffs, then merge, discard, commit, or checkpoint them. |
+| **OKF-native** | CoWiki follows [Google's Open Knowledge Format v0.1](docs/okf-v0.1.md), keeping knowledge readable, linked, and portable. |
+| **Collaboration-ready** | The same local Space can later gain cloud publishing, permissions, and team review. |
+
+## Ingest. Compile. Review.
+
+<p align="center">
+  <img src="docs/assets/compilation-pipeline.svg" alt="Ingest, compile, lint, and review pipeline" width="100%" />
+</p>
+
+Drop source material into a Space. Your agents compile it into linked OKF
+knowledge, check its structure, and return a Git diff for human review. Keep
+the result, continue editing it, or discard the change as a unit.
+
+## Your Space is a folder
+
+```text
+research-space/
+├── index.md
+├── architecture.md
+├── projects/
+│   └── cowiki.md
+├── .cowiki/
+│   └── sources/
+└── .git/
 ```
 
-Open <http://localhost:5173>. During Vite development, `/api` proxies to `http://localhost:3000`.
+Markdown and Git are the source of truth. SQLite only stores a rebuildable
+local search and backlink index. You can open the same files in another
+editor, use normal Git tools, or leave CoWiki without exporting anything.
 
-For hosted deployments, set `VITE_API_BASE`:
+CoWiki aligns Spaces with [Open Knowledge Format v0.1](docs/okf-v0.1.md) and
+preserves frontmatter fields it does not understand.
+
+## Local-first, collaboration-ready
+
+CoWiki is local-first, not local-only. Today the desktop app keeps a complete
+offline Space and supports local human–agent review. The next layer will let
+you publish that same Space for team permissions, browser access, asynchronous
+review, and reusable remote MCP—without changing its portable source format.
+
+## Run from source
+
+Requires macOS, Xcode Command Line Tools, [Node.js 24+](https://nodejs.org/),
+and [Rust stable](https://rustup.rs/). Install Codex CLI and/or Claude Code to
+use the embedded Agent panel.
 
 ```bash
-VITE_API_BASE=https://api-test.cowiki.app npm run build
-```
-
-## Desktop Client
-
-The desktop app uses Tauri 2 and owns its complete local runtime. It starts a
-private loopback API on an OS-assigned port, stores metadata in SQLite at
-`~/cowiki/.cowiki/metadata.db`, and keeps each Space as a local Git repository
-under `~/cowiki`. It does not require a separately running server or Postgres.
-
-```bash
-cd web
-npm install
+git clone https://github.com/wfnuser/cowiki.git
+cd cowiki/web
+npm ci
 npm run desktop:dev
 ```
 
-The desktop window receives the private local origin directly from Tauri. It
-never probes port 3000 and never silently reuses a running `cowiki-backend`.
-The Web build continues to use `VITE_API_BASE` for cloud spaces.
+Create a Space with an empty local folder, or import an existing folder of
+Markdown files. The desktop app runs as a complete standalone workspace.
 
-## CLI
+## Roadmap
 
-```bash
-cd cli
-npm install
-npm run build
-npm link
-```
+- Make the macOS alpha easier to install and trust.
+- Improve local review and conflict resolution for many agents.
+- Publish local Spaces for team permissions, sync, and browser review.
+- Offer compatible remote MCP and expand desktop platform support.
 
-## MCP
+## Contributing
 
-```bash
-cd cowiki-mcp-server
-cargo run
-```
+CoWiki is early, and the collaboration model is still an open design problem.
+Issues, product criticism, experiments, and code are welcome. See
+[CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
-The MCP package is intentionally independent from backend internals and talks to CoWiki over HTTP.
+## License
 
-## Backend
-
-Run the backend from the sibling repository:
-
-```bash
-cd ../cowiki-backend
-cargo run
-```
-
-See `../cowiki-backend/DEPLOY.md` for server deployment.
+CoWiki is licensed under the [Apache License 2.0](LICENSE).
