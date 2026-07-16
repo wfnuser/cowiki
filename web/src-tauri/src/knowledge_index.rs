@@ -10,6 +10,50 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+const SCHEMA_VERSION: i64 = 1;
+
+const CREATE_SCHEMA: &str = "CREATE TABLE knowledge_index_metadata (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        schema_version INTEGER NOT NULL
+    );
+    CREATE TABLE indexed_pages (
+        id INTEGER PRIMARY KEY,
+        space_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        modified_ns INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(space_id, path)
+    );
+    CREATE VIRTUAL TABLE indexed_pages_fts USING fts5(
+        title,
+        body,
+        content='indexed_pages',
+        content_rowid='id',
+        tokenize='unicode61 remove_diacritics 2'
+    );
+    CREATE TRIGGER indexed_pages_insert AFTER INSERT ON indexed_pages BEGIN
+        INSERT INTO indexed_pages_fts(rowid, title, body)
+        VALUES (new.id, new.title, new.body);
+    END;
+    CREATE TRIGGER indexed_pages_delete AFTER DELETE ON indexed_pages BEGIN
+        INSERT INTO indexed_pages_fts(indexed_pages_fts, rowid, title, body)
+        VALUES ('delete', old.id, old.title, old.body);
+    END;
+    CREATE TRIGGER indexed_pages_update AFTER UPDATE ON indexed_pages BEGIN
+        INSERT INTO indexed_pages_fts(indexed_pages_fts, rowid, title, body)
+        VALUES ('delete', old.id, old.title, old.body);
+        INSERT INTO indexed_pages_fts(rowid, title, body)
+        VALUES (new.id, new.title, new.body);
+    END;
+    CREATE TABLE page_links (
+        space_id TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        target TEXT NOT NULL,
+        UNIQUE(space_id, source_path, target)
+    );
+    CREATE INDEX page_links_target ON page_links(space_id, target);";
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SearchHit {
     pub slug: String,
@@ -19,48 +63,103 @@ pub struct SearchHit {
     pub title_match: bool,
 }
 
-pub fn initialize(connection: &Connection) -> Result<(), String> {
-    connection
-        .execute_batch(
-            "CREATE TABLE IF NOT EXISTS indexed_pages (
-                id INTEGER PRIMARY KEY,
-                space_id TEXT NOT NULL,
-                path TEXT NOT NULL,
-                title TEXT NOT NULL,
-                body TEXT NOT NULL,
-                modified_ns INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(space_id, path)
-            );
-            CREATE VIRTUAL TABLE IF NOT EXISTS indexed_pages_fts USING fts5(
-                title,
-                body,
-                content='indexed_pages',
-                content_rowid='id',
-                tokenize='unicode61 remove_diacritics 2'
-            );
-            CREATE TRIGGER IF NOT EXISTS indexed_pages_insert AFTER INSERT ON indexed_pages BEGIN
-                INSERT INTO indexed_pages_fts(rowid, title, body)
-                VALUES (new.id, new.title, new.body);
-            END;
-            CREATE TRIGGER IF NOT EXISTS indexed_pages_delete AFTER DELETE ON indexed_pages BEGIN
-                INSERT INTO indexed_pages_fts(indexed_pages_fts, rowid, title, body)
-                VALUES ('delete', old.id, old.title, old.body);
-            END;
-            CREATE TRIGGER IF NOT EXISTS indexed_pages_update AFTER UPDATE ON indexed_pages BEGIN
-                INSERT INTO indexed_pages_fts(indexed_pages_fts, rowid, title, body)
-                VALUES ('delete', old.id, old.title, old.body);
-                INSERT INTO indexed_pages_fts(rowid, title, body)
-                VALUES (new.id, new.title, new.body);
-            END;
-            CREATE TABLE IF NOT EXISTS page_links (
-                space_id TEXT NOT NULL,
-                source_path TEXT NOT NULL,
-                target TEXT NOT NULL,
-                UNIQUE(space_id, source_path, target)
-            );
-            CREATE INDEX IF NOT EXISTS page_links_target
-                ON page_links(space_id, target);",
+/// Keep only a compatible derived schema at startup.
+/// Page rows are deliberately left empty after a reset; the selected Space is
+/// repopulated by `refresh_space` when search, backlinks, or MCP context needs it.
+pub fn initialize(connection: &mut Connection) -> Result<(), String> {
+    let version = connection
+        .query_row(
+            "SELECT schema_version FROM knowledge_index_metadata WHERE singleton = 1",
+            [],
+            |row| row.get::<_, i64>(0),
         )
+        .ok();
+    let healthy = version == Some(SCHEMA_VERSION) && schema_is_structurally_healthy(connection);
+    if healthy {
+        return Ok(());
+    }
+    reset_schema(connection)
+}
+
+fn schema_is_structurally_healthy(connection: &Connection) -> bool {
+    let required_objects = [
+        ("table", "indexed_pages"),
+        ("table", "indexed_pages_fts"),
+        ("table", "page_links"),
+        ("trigger", "indexed_pages_insert"),
+        ("trigger", "indexed_pages_delete"),
+        ("trigger", "indexed_pages_update"),
+        ("index", "page_links_target"),
+    ];
+    if required_objects.iter().any(|(kind, name)| {
+        !connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM sqlite_schema WHERE type = ?1 AND name = ?2
+                )",
+                params![kind, name],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap_or(false)
+    }) {
+        return false;
+    }
+    if connection
+        .prepare(
+            "SELECT id, space_id, path, title, body, modified_ns
+             FROM indexed_pages LIMIT 0",
+        )
+        .is_err()
+        || connection
+            .prepare("SELECT space_id, source_path, target FROM page_links LIMIT 0")
+            .is_err()
+    {
+        return false;
+    }
+    true
+}
+
+/// FTS5's external-content integrity check is proportional to indexed content,
+/// so run it lazily on first index access instead of on every application open.
+pub fn repair_if_corrupt(connection: &mut Connection) -> Result<(), String> {
+    if connection
+        .execute(
+            "INSERT INTO indexed_pages_fts(indexed_pages_fts, rank)
+             VALUES ('integrity-check', 1)",
+            [],
+        )
+        .is_ok()
+    {
+        Ok(())
+    } else {
+        reset_schema(connection)
+    }
+}
+
+fn reset_schema(connection: &mut Connection) -> Result<(), String> {
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("cannot reset the disposable local search index: {error}"))?;
+    transaction
+        .execute_batch(
+            "DROP TRIGGER IF EXISTS indexed_pages_insert;
+             DROP TRIGGER IF EXISTS indexed_pages_delete;
+             DROP TRIGGER IF EXISTS indexed_pages_update;
+             DROP TABLE IF EXISTS indexed_pages_fts;
+             DROP TABLE IF EXISTS page_links;
+             DROP TABLE IF EXISTS indexed_pages;
+             DROP TABLE IF EXISTS knowledge_index_metadata;",
+        )
+        .and_then(|_| transaction.execute_batch(CREATE_SCHEMA))
+        .map_err(|error| format!("cannot reset the disposable local search index: {error}"))?;
+    transaction
+        .execute(
+            "INSERT INTO knowledge_index_metadata (singleton, schema_version) VALUES (1, ?1)",
+            [SCHEMA_VERSION],
+        )
+        .map_err(|error| format!("cannot version the local search index: {error}"))?;
+    transaction
+        .commit()
         .map_err(|error| format!("cannot initialize local search index: {error}"))
 }
 
@@ -148,6 +247,40 @@ pub fn refresh_space(
                 params![space_id, deleted],
             )
             .map_err(|e| e.to_string())?;
+    }
+    transaction.commit().map_err(|e| e.to_string())
+}
+
+/// Re-derive one Space's relationship graph after its Markdown rows have been
+/// refreshed. This runs lazily before the first backlinks query in a process,
+/// so corrupt link rows cannot make SQLite authoritative at startup.
+pub fn rebuild_links(connection: &mut Connection, space_id: &str) -> Result<(), String> {
+    let transaction = connection.transaction().map_err(|e| e.to_string())?;
+    let pages = {
+        let mut statement = transaction
+            .prepare("SELECT path, body FROM indexed_pages WHERE space_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let rows = statement
+            .query_map([space_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    };
+    transaction
+        .execute("DELETE FROM page_links WHERE space_id = ?1", [space_id])
+        .map_err(|e| e.to_string())?;
+    for (source_path, body) in pages {
+        for target in extract_links(&body, &source_path) {
+            transaction
+                .execute(
+                    "INSERT INTO page_links (space_id, source_path, target)
+                     VALUES (?1, ?2, ?3)",
+                    params![space_id, source_path, target],
+                )
+                .map_err(|e| e.to_string())?;
+        }
     }
     transaction.commit().map_err(|e| e.to_string())
 }
