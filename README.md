@@ -89,6 +89,12 @@ npm run desktop:dev
 Create a Space with an empty local folder, or import an existing folder of
 Markdown files. The desktop app runs as a complete standalone workspace.
 
+Agents launched by the app receive CoWiki's read-only local MCP for retrieval
+and edit the Space's Markdown files directly. The
+[`cowiki-space` skill](skills/cowiki-space/SKILL.md) defines the same contract
+for external Agents; local work never requires a CoWiki account, API key, or
+backend.
+
 ## Roadmap
 
 - Make the macOS alpha easier to install and trust.

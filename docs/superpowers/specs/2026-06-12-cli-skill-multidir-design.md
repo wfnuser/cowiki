@@ -1,5 +1,9 @@
 # CLI Skill Decoupling, Dual-Path Workflow & Multi-Directory Wiki
 
+> **Historical document — superseded.** CoWiki now preserves an arbitrary OKF
+> hierarchy and Agents edit local Markdown directly. See the current
+> [`cowiki-space` skill](../../../skills/cowiki-space/SKILL.md).
+
 **Date:** 2026-06-12
 **Status:** design complete
 

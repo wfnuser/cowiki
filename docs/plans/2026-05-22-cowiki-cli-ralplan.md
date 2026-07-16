@@ -1,5 +1,9 @@
 # RALPLAN-DR: cowiki CLI Tool — Consensus Planning
 
+> **Historical document — superseded.** The standalone CLI described here was
+> retired by issue #74. Local Agents use read-only MCP for retrieval and edit
+> Space Markdown directly; see [`cowiki-space`](../../skills/cowiki-space/SKILL.md).
+
 **Date:** 2026-05-22  
 **Mode:** SHORT  
 **Plan saved to:** `docs/plans/2026-05-22-cowiki-cli-ralplan.md`
