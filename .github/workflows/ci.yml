@@ -46,28 +46,6 @@ jobs:
       - name: Test Tauri shell
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
-  cli:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: cli
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-          cache-dependency-path: cli/pnpm-lock.yaml
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Typecheck
-        run: pnpm run typecheck
-      - name: Build
-        run: pnpm run build
-
   mcp:
     runs-on: ubuntu-latest
     defaults:

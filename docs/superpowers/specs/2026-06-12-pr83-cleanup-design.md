@@ -1,5 +1,9 @@
 # PR #83 Cleanup Design
 
+> **Historical document — superseded.** This cleanup targeted the retired
+> standalone CLI. Current local Agent behavior is defined by the
+> [`cowiki-space` skill](../../../skills/cowiki-space/SKILL.md).
+
 ## Context
 
 PR #83 is a TypeScript CLI rewrite with multi-directory wiki support. The owner's review
