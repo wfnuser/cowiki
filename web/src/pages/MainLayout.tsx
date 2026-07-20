@@ -38,7 +38,7 @@ import { TransferDialog } from '../components/TransferDialog';
 import { NotificationsPage } from '../components/notifications/NotificationsPage';
 import { notificationUnreadCount } from '../api';
 import { CommentsProvider, CommentsPanel, CommentsHeaderToggle, commentMarkdownComponents } from '../components/PageCommentsLayer';
-import { C } from '@/lib/design';
+import { APP_HEADER_HEIGHT, C } from '@/lib/design';
 import { isDesktopClient } from '@/runtime';
 import { chooseLocalSpaceDirectory, localSpaceIdentityFromPath } from '@/local-space';
 import { AgentTerminalPanel } from '@/components/terminal/AgentTerminalPanel';
@@ -910,7 +910,7 @@ export function MainLayout() {
               position: 'sticky', top: 0, zIndex: 10,
               background: C.panel, borderBottom: `1px solid ${C.line}`,
               padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              height: 52, minHeight: 52,
+              height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT,
             }}>
               {/* Left: breadcrumb */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: C.muted, minWidth: 0, overflow: 'hidden' }}>

@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 import { SUPPORTED_AGENTS } from '@/lib/agents';
 import { createLocalAgentChange } from '@/api';
+import { APP_HEADER_HEIGHT } from '@/lib/design';
 
 import {
   agentDisplayName,
@@ -85,7 +86,10 @@ export function AgentTerminalPanel({
 
   return (
     <aside className={cn('flex h-full min-w-0 flex-col border-l border-border bg-[#faf9f7]', className)}>
-      <header className="flex h-11 shrink-0 items-end border-b border-border bg-[#f5f4f1] pl-1.5 pr-1">
+      <header
+        className="flex shrink-0 items-end border-b border-border bg-[#f5f4f1] pl-1.5 pr-1"
+        style={{ height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT }}
+      >
         <div className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto">
           {tabState.tabs.map((tab) => {
             const active = tab.id === tabState.activeTabId;

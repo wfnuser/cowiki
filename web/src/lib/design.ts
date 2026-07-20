@@ -50,6 +50,8 @@ export const shadows = {
   subtle: '0 1px 2px rgba(29, 28, 26, 0.06)',
 } as const;
 
+export const APP_HEADER_HEIGHT = 44;
+
 export const spaceTileColors = [
   '#3f6c8c',
   '#5d8a6c',
