@@ -542,7 +542,9 @@ fn build_agent_command(
             environment: prompt_environment(),
         },
         AgentKind::Antigravity => AgentLaunchCommand {
-            shell_command: format!("agy --prompt-interactive \"${AGENT_PROMPT_ENV}\""),
+            shell_command: format!(
+                "agy --dangerously-skip-permissions --prompt-interactive \"${AGENT_PROMPT_ENV}\""
+            ),
             environment: prompt_environment(),
         },
         AgentKind::OpenCode => AgentLaunchCommand {
@@ -952,7 +954,7 @@ mod tests {
             .contains("Before claiming that knowledge is absent"));
         assert!(antigravity
             .shell_command
-            .starts_with("agy --prompt-interactive "));
+            .starts_with("agy --dangerously-skip-permissions --prompt-interactive "));
         assert!(antigravity
             .environment_value("COWIKI_AGENT_PROMPT")
             .unwrap()
