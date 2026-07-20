@@ -10,7 +10,7 @@ import { SearchModal } from '../SearchModal';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { C, spaceTileColors } from '@/lib/design';
+import { APP_HEADER_HEIGHT, C, spaceTileColors } from '@/lib/design';
 import { conceptIdFromPath, visiblePageTree } from '@/lib/okf-pages';
 
 export type NavTab = 'wiki' | 'reviews' | 'members' | 'history';
@@ -81,7 +81,12 @@ export function SpacePanel({
   if (!workspace) {
     return (
       <aside style={panelStyle}>
-        <div style={{ padding: '12px 10px 12px 16px', color: C.muted, fontSize: 13, display: 'flex', alignItems: 'center' }}>
+        <div style={{
+          padding: '0 10px 0 16px', color: C.muted, fontSize: 13,
+          display: 'flex', alignItems: 'center',
+          borderBottom: `1px solid ${C.line}`,
+          height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT,
+        }}>
           <span style={{ flex: 1 }}>Select a space</span>
           <CollapseButton onClick={onCollapse} />
         </div>
@@ -106,7 +111,8 @@ export function SpacePanel({
       {/* Space name header */}
       <div style={{
         padding: '0 16px', display: 'flex', alignItems: 'center', gap: 9,
-        borderBottom: `1px solid ${C.line}`, height: 52, minHeight: 52,
+        borderBottom: `1px solid ${C.line}`,
+        height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT,
       }}>
         <div style={{
           width: 26, height: 26, borderRadius: 8,

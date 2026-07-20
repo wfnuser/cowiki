@@ -87,17 +87,17 @@ export function AgentTerminalPanel({
   return (
     <aside className={cn('flex h-full min-w-0 flex-col border-l border-border bg-[#faf9f7]', className)}>
       <header
-        className="flex shrink-0 items-end border-b border-border bg-[#f5f4f1] pl-1.5 pr-1"
+        className="flex shrink-0 items-center border-b border-border bg-[#f5f4f1] pl-1.5 pr-1"
         style={{ height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT }}
       >
-        <div className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto">
+        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
           {tabState.tabs.map((tab) => {
             const active = tab.id === tabState.activeTabId;
             return (
               <div
                 key={tab.id}
                 className={cn(
-                  'group flex h-9 min-w-0 max-w-40 shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-2 text-xs',
+                  'group flex h-9 min-w-0 max-w-40 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs',
                   active
                     ? 'border-border bg-[#1d1c1a] text-white'
                     : 'border-transparent text-text-tertiary hover:bg-white/65 hover:text-text',
@@ -132,7 +132,7 @@ export function AgentTerminalPanel({
             type="button"
             variant="ghost"
             size="icon-xs"
-            className="mb-1.5 ml-1 text-text-tertiary"
+            className="ml-1 text-text-tertiary"
             aria-label="Collapse agent panel"
             onClick={onClose}
           >
@@ -244,7 +244,7 @@ function NewViewMenu({
           type="button"
           variant="ghost"
           size="icon-xs"
-          className="mb-1.5 shrink-0 text-text-tertiary"
+          className="shrink-0 text-text-tertiary"
           aria-label="Open agent or view"
         >
           <Plus />
