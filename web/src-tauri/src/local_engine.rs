@@ -4,6 +4,7 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use similar::{ChangeTag, TextDiff};
+use std::collections::HashSet;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -130,6 +131,8 @@ pub struct FileDiff {
 pub struct LocalEngine {
     db: Arc<Mutex<Connection>>,
     metadata_dir: PathBuf,
+    search_index_checked: Arc<Mutex<bool>>,
+    backlinks_checked: Arc<Mutex<HashSet<String>>>,
     // Product-owned Draft writers serialize here. External filesystem writers
     // cannot join this protocol, so merge still performs its final no-follow
     // content CAS immediately before each replacement.
@@ -139,7 +142,7 @@ pub struct LocalEngine {
 impl LocalEngine {
     pub fn open(metadata_dir: &Path) -> Result<Self, String> {
         std::fs::create_dir_all(metadata_dir).map_err(|e| e.to_string())?;
-        let connection =
+        let mut connection =
             Connection::open(metadata_dir.join("local.db")).map_err(|e| e.to_string())?;
         connection
             .execute_batch(
@@ -152,13 +155,15 @@ impl LocalEngine {
                 );",
             )
             .map_err(|e| e.to_string())?;
-        knowledge_index::initialize(&connection)?;
+        knowledge_index::initialize(&mut connection)?;
         let engine = Self {
             db: Arc::new(Mutex::new(connection)),
             metadata_dir: metadata_dir.to_path_buf(),
+            search_index_checked: Arc::new(Mutex::new(false)),
+            backlinks_checked: Arc::new(Mutex::new(HashSet::new())),
             mutation_lock: Arc::new(Mutex::new(())),
         };
-        engine.rebuild_all_search_indexes()?;
+        engine.prepare_registered_spaces()?;
         Ok(engine)
     }
 
@@ -701,7 +706,9 @@ impl LocalEngine {
         knowledge_index::rebuild_space(&mut db, &space.id, &space.local_path)
     }
 
-    pub fn rebuild_all_search_indexes(&self) -> Result<(), String> {
+    /// Preserve OKF preparation/migration on startup without populating the
+    /// disposable search index for every registered Space.
+    fn prepare_registered_spaces(&self) -> Result<(), String> {
         for space in self.list_spaces()? {
             if space.local_path.is_dir() {
                 match Repository::open(&space.local_path) {
@@ -720,19 +727,31 @@ impl LocalEngine {
                         );
                     }
                 }
-                let mut db = self
-                    .db
-                    .lock()
-                    .map_err(|_| "local database lock poisoned".to_string())?;
-                if let Err(error) =
-                    knowledge_index::rebuild_space(&mut db, &space.id, &space.local_path)
-                {
-                    eprintln!(
-                        "CoWiki skipped startup indexing for Space '{}': {error}",
-                        space.slug
-                    );
-                }
             }
+        }
+        Ok(())
+    }
+
+    fn refresh_search_index(&self, db: &mut Connection, space: &Space) -> Result<(), String> {
+        let mut checked = self
+            .search_index_checked
+            .lock()
+            .map_err(|_| "search index health lock poisoned".to_string())?;
+        if !*checked {
+            knowledge_index::repair_if_corrupt(db)?;
+            *checked = true;
+        }
+        knowledge_index::refresh_space(db, &space.id, &space.local_path)
+    }
+
+    fn prepare_backlinks(&self, db: &mut Connection, space_id: &str) -> Result<(), String> {
+        let mut checked = self
+            .backlinks_checked
+            .lock()
+            .map_err(|_| "backlink index health lock poisoned".to_string())?;
+        if !checked.contains(space_id) {
+            knowledge_index::rebuild_links(db, space_id)?;
+            checked.insert(space_id.to_string());
         }
         Ok(())
     }
@@ -748,7 +767,7 @@ impl LocalEngine {
             .db
             .lock()
             .map_err(|_| "local database lock poisoned".to_string())?;
-        knowledge_index::refresh_space(&mut db, &space.id, &space.local_path)?;
+        self.refresh_search_index(&mut db, &space)?;
         knowledge_index::search(&db, &space.id, query, limit)
     }
 
@@ -780,16 +799,18 @@ impl LocalEngine {
             .db
             .lock()
             .map_err(|_| "local database lock poisoned".to_string())?;
-        knowledge_index::refresh_space(&mut db, &space.id, &space.local_path)?;
+        self.refresh_search_index(&mut db, &space)?;
+        self.prepare_backlinks(&mut db, &space.id)?;
         knowledge_index::backlinks(&db, &space.id, target_path)
     }
 
     pub fn indexed_page_count(&self, space_slug: &str) -> Result<usize, String> {
         let space = self.find_space(space_slug)?;
-        let db = self
+        let mut db = self
             .db
             .lock()
             .map_err(|_| "local database lock poisoned".to_string())?;
+        self.refresh_search_index(&mut db, &space)?;
         knowledge_index::page_count(&db, &space.id)
     }
 
@@ -2058,6 +2079,180 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(statuses_after, statuses_before);
+    }
+
+    #[test]
+    fn reopening_does_not_rebuild_a_healthy_search_index() {
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join("metadata");
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        let engine = LocalEngine::open(&metadata).unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+        engine
+            .write_page(
+                &space.slug,
+                "stable",
+                "---\ntype: Note\n---\n\nHealthy search evidence.\n",
+            )
+            .unwrap();
+        drop(engine);
+
+        let database = rusqlite::Connection::open(metadata.join("local.db")).unwrap();
+        database
+            .execute_batch(
+                "CREATE TABLE index_deletions (path TEXT NOT NULL);
+                 CREATE TRIGGER audit_index_deletions
+                 AFTER DELETE ON indexed_pages BEGIN
+                     INSERT INTO index_deletions(path) VALUES (old.path);
+                 END;",
+            )
+            .unwrap();
+        drop(database);
+
+        let reopened = LocalEngine::open(&metadata).unwrap();
+        let database = reopened.db.lock().unwrap();
+        let deletions = database
+            .query_row("SELECT COUNT(*) FROM index_deletions", [], |row| {
+                row.get::<_, usize>(0)
+            })
+            .unwrap();
+        drop(database);
+
+        assert_eq!(deletions, 0, "startup must not rebuild an unchanged index");
+        assert_eq!(
+            reopened
+                .search_pages(&space.slug, "healthy search", 10)
+                .unwrap()[0]
+                .path,
+            "stable.md"
+        );
+    }
+
+    #[test]
+    fn search_lazily_repairs_missing_full_text_index_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join("metadata");
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        let engine = LocalEngine::open(&metadata).unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+        engine
+            .write_page(
+                &space.slug,
+                "repairable",
+                "---\ntype: Note\n---\n\nDisposable index evidence.\n",
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .search_pages(&space.slug, "disposable index", 10)
+                .unwrap()
+                .len(),
+            1
+        );
+        let expected_page_count = engine.indexed_page_count(&space.slug).unwrap();
+        drop(engine);
+
+        let database = rusqlite::Connection::open(metadata.join("local.db")).unwrap();
+        database
+            .execute_batch("DROP TABLE indexed_pages_fts;")
+            .unwrap();
+        drop(database);
+
+        let reopened = LocalEngine::open(&metadata).unwrap();
+        assert_eq!(
+            reopened.indexed_page_count(&space.slug).unwrap(),
+            expected_page_count
+        );
+        let hits = reopened
+            .search_pages(&space.slug, "disposable index", 10)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, "repairable.md");
+    }
+
+    #[test]
+    fn search_lazily_repairs_corrupt_full_text_index_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join("metadata");
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        let engine = LocalEngine::open(&metadata).unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+        engine
+            .write_page(
+                &space.slug,
+                "recoverable",
+                "---\ntype: Note\n---\n\nCorrupt cache evidence.\n",
+            )
+            .unwrap();
+        drop(engine);
+
+        let database = rusqlite::Connection::open(metadata.join("local.db")).unwrap();
+        database
+            .execute(
+                "INSERT INTO indexed_pages_fts(indexed_pages_fts) VALUES ('delete-all')",
+                [],
+            )
+            .unwrap();
+        drop(database);
+
+        let reopened = LocalEngine::open(&metadata).unwrap();
+        let indexed_rows = reopened
+            .db
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM indexed_pages", [], |row| {
+                row.get::<_, usize>(0)
+            })
+            .unwrap();
+        assert!(
+            indexed_rows > 0,
+            "startup must defer the full-text integrity scan until index access"
+        );
+        let hits = reopened
+            .search_pages(&space.slug, "corrupt cache", 10)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, "recoverable.md");
+    }
+
+    #[test]
+    fn backlinks_lazily_repair_corrupt_link_index_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join("metadata");
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        let engine = LocalEngine::open(&metadata).unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+        engine
+            .write_page(&space.slug, "target", "---\ntype: Note\n---\n\nTarget.\n")
+            .unwrap();
+        engine
+            .write_page(
+                &space.slug,
+                "source",
+                "---\ntype: Note\n---\n\nSee [[target]].\n",
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .list_backlinks(&space.slug, "target.md")
+                .unwrap()
+                .len(),
+            1
+        );
+        drop(engine);
+
+        let database = rusqlite::Connection::open(metadata.join("local.db")).unwrap();
+        database.execute("DELETE FROM page_links", []).unwrap();
+        drop(database);
+
+        let reopened = LocalEngine::open(&metadata).unwrap();
+        let links = reopened.list_backlinks(&space.slug, "target.md").unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].path, "source.md");
     }
 
     #[test]
@@ -3783,7 +3978,7 @@ mod tests {
     }
 
     #[test]
-    fn search_refreshes_files_changed_directly_by_an_agent() {
+    fn search_refreshes_files_changed_or_deleted_directly_by_an_agent() {
         let temp = tempfile::tempdir().unwrap();
         let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
         let folder = temp.path().join("agent-space");
@@ -3798,6 +3993,26 @@ mod tests {
 
         let hits = engine.search_pages(&space.slug, "capybara", 5).unwrap();
         assert_eq!(hits[0].path, "agent-note.md");
+
+        std::fs::write(
+            folder.join("agent-note.md"),
+            "# Agent note\n\nA revised quokka fact.",
+        )
+        .unwrap();
+        assert!(engine
+            .search_pages(&space.slug, "capybara", 5)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            engine.search_pages(&space.slug, "quokka", 5).unwrap()[0].path,
+            "agent-note.md"
+        );
+
+        std::fs::remove_file(folder.join("agent-note.md")).unwrap();
+        assert!(engine
+            .search_pages(&space.slug, "quokka", 5)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
