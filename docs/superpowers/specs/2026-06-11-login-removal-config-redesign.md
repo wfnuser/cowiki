@@ -1,5 +1,9 @@
 # Remove `cowiki login`, Redesign Config & Test Flow
 
+> **Historical document — superseded.** Local Spaces no longer use this CLI,
+> login, or API-key flow. See the current
+> [`cowiki-space` skill](../../../skills/cowiki-space/SKILL.md).
+
 **Date:** 2026-06-11
 **Status:** design complete
 **Depends on:** [CLI & SKILL.md Redesign](./2026-06-11-cli-skill-redesign.md), [Skill Flow Testing Design](./2026-06-11-skill-flow-testing-design.md)

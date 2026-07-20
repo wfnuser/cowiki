@@ -447,7 +447,7 @@ fn validate_session_id(value: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
-const SPACE_PROTOCOL: &str = "You are maintaining a CoWiki knowledge Space. Markdown files are the source of truth. Follow the Open Knowledge Format and the Space's own rules. Before answering about the Space, use the cowiki MCP search tools and read the relevant pages; cite their relative paths. Before claiming that knowledge is absent, search and list evidence first. Raw sources are immutable. Integrate durable knowledge into the maintained wiki, reconcile contradictions, keep links/index/log consistent, and make every change reversible. Re-read a file immediately before editing it; never silently overwrite concurrent human changes. Do not commit, checkout, merge, push, or edit CoWiki SQLite metadata unless the user explicitly asks.";
+const SPACE_PROTOCOL: &str = "You are maintaining a CoWiki knowledge Space. Markdown files are the source of truth. Follow the Open Knowledge Format, the Space's own rules, and its arbitrary OKF hierarchy; never invent fixed wiki, entities, or concepts directories. Local maintenance never requires a CoWiki API key or server. Before answering about the Space, search and read the relevant pages, then cite their relative paths. When the cowiki MCP tools are available, use them for retrieval; otherwise use normal file and text-search tools. Before claiming that knowledge is absent, search and list evidence first. Raw sources are immutable. Integrate durable knowledge into the maintained wiki, reconcile contradictions, keep links/index/log consistent, and make every change reversible. Re-read a file immediately before editing it; never silently overwrite concurrent human changes. Do not commit, checkout, merge, push, or edit CoWiki SQLite metadata.";
 
 fn build_agent_command(
     agent: AgentKind,
@@ -497,9 +497,13 @@ fn build_agent_command(
         AgentKind::OpenCode => {
             format!("opencode --prompt {}", shell_quote(&prompt))
         }
-        // Hermes discovers the Space's AGENTS.md and skills from its working
-        // directory. Its interactive command has no system-prompt override.
-        AgentKind::Hermes => "hermes chat".to_string(),
+        // Hermes supports an ephemeral, session-only system prompt through
+        // this environment variable. It avoids mutating the user's global
+        // skills or writing Agent instructions into their Space.
+        AgentKind::Hermes => format!(
+            "HERMES_EPHEMERAL_SYSTEM_PROMPT={} hermes chat",
+            shell_quote(&prompt),
+        ),
     }
 }
 
@@ -807,12 +811,14 @@ mod tests {
         );
 
         assert!(grok.starts_with("grok --rules "));
-        assert!(grok.contains("Before claiming that knowledge is absent"));
+        assert!(grok.contains("otherwise use normal file and text-search tools"));
         assert!(gemini.starts_with("gemini --prompt-interactive "));
-        assert!(gemini.contains("Before claiming that knowledge is absent"));
+        assert!(gemini.contains("otherwise use normal file and text-search tools"));
         assert!(opencode.starts_with("opencode --prompt "));
-        assert!(opencode.contains("Before claiming that knowledge is absent"));
-        assert_eq!(hermes, "hermes chat");
+        assert!(opencode.contains("otherwise use normal file and text-search tools"));
+        assert!(hermes.starts_with("HERMES_EPHEMERAL_SYSTEM_PROMPT="));
+        assert!(hermes.contains("otherwise use normal file and text-search tools"));
+        assert!(hermes.ends_with(" hermes chat"));
     }
 
     #[test]
