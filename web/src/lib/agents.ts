@@ -1,4 +1,4 @@
-export type AgentKind = 'codex' | 'claude' | 'grok' | 'gemini' | 'opencode' | 'hermes';
+export type AgentKind = 'codex' | 'claude' | 'grok' | 'antigravity' | 'opencode' | 'hermes';
 
 type AgentDefinition = {
   displayName: string;
@@ -9,7 +9,7 @@ type AgentDefinition = {
 export const SUPPORTED_AGENTS: readonly AgentKind[] = [
   'codex',
   'claude',
-  'gemini',
+  'antigravity',
   'grok',
   'opencode',
   'hermes',
@@ -18,7 +18,7 @@ export const SUPPORTED_AGENTS: readonly AgentKind[] = [
 const AGENT_DEFINITIONS: Record<AgentKind, AgentDefinition> = {
   codex: { displayName: 'Codex', providerName: 'OpenAI', command: 'codex' },
   claude: { displayName: 'Claude Code', providerName: 'Anthropic', command: 'claude' },
-  gemini: { displayName: 'Gemini CLI', providerName: 'Google', command: 'gemini' },
+  antigravity: { displayName: 'Antigravity CLI', providerName: 'Google', command: 'agy' },
   grok: { displayName: 'Grok', providerName: 'xAI', command: 'grok' },
   opencode: { displayName: 'OpenCode', providerName: 'Open source', command: 'opencode' },
   hermes: { displayName: 'Hermes Agent', providerName: 'Nous Research', command: 'hermes' },

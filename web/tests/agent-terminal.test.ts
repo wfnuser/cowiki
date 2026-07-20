@@ -22,7 +22,7 @@ test('maps the supported agents to their local CLI command', () => {
   assert.equal(agentInitialCommand('codex'), 'codex');
   assert.equal(agentInitialCommand('claude'), 'claude');
   assert.equal(agentInitialCommand('grok'), 'grok');
-  assert.equal(agentInitialCommand('gemini'), 'gemini');
+  assert.equal(agentInitialCommand('antigravity'), 'agy');
   assert.equal(agentInitialCommand('opencode'), 'opencode');
   assert.equal(agentInitialCommand('hermes'), 'hermes');
 });
@@ -31,7 +31,7 @@ test('uses human-readable names for the selected default agent', () => {
   assert.equal(agentDisplayName('codex'), 'Codex');
   assert.equal(agentDisplayName('claude'), 'Claude Code');
   assert.equal(agentDisplayName('grok'), 'Grok');
-  assert.equal(agentDisplayName('gemini'), 'Gemini CLI');
+  assert.equal(agentDisplayName('antigravity'), 'Antigravity CLI');
   assert.equal(agentDisplayName('opencode'), 'OpenCode');
   assert.equal(agentDisplayName('hermes'), 'Hermes Agent');
 });

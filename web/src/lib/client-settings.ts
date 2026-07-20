@@ -23,9 +23,14 @@ export function loadClientSettings(storage: ClientSettingsStorage): ClientSettin
     if (
       value
       && typeof value === 'object'
-      && isAgentKind((value as Partial<ClientSettings>).defaultAgent)
     ) {
-      return { defaultAgent: (value as ClientSettings).defaultAgent };
+      const defaultAgent = (value as Record<string, unknown>).defaultAgent;
+      if (defaultAgent === 'gemini') {
+        return { defaultAgent: 'antigravity' };
+      }
+      if (isAgentKind(defaultAgent)) {
+        return { defaultAgent };
+      }
     }
   } catch {
     // Ignore malformed local settings and keep the client usable.

@@ -9,6 +9,7 @@ use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, Pt
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -27,7 +28,7 @@ pub enum AgentKind {
     Codex,
     Claude,
     Grok,
-    Gemini,
+    Antigravity,
     OpenCode,
     Hermes,
 }
@@ -54,7 +55,7 @@ impl AgentKind {
             Self::Codex => "codex",
             Self::Claude => "claude",
             Self::Grok => "grok",
-            Self::Gemini => "gemini",
+            Self::Antigravity => "agy",
             Self::OpenCode => "opencode",
             Self::Hermes => "hermes",
         }
@@ -394,6 +395,15 @@ pub fn terminal_create(
     let mut command = CommandBuilder::new(&shell);
     add_shell_args(&mut command, &shell);
     command.cwd(&cwd);
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("cannot locate CoWiki MCP executable: {error}"))?;
+    if matches!(request.agent, AgentKind::Antigravity) {
+        ensure_antigravity_mcp_config(&cwd, &executable, &space.slug)?;
+    }
+    let agent_launch = build_agent_command(request.agent, request.mode, &space.slug, &executable);
+    for (key, value) in &agent_launch.environment {
+        command.env(key, value);
+    }
 
     let child = pair
         .slave
@@ -410,15 +420,13 @@ pub fn terminal_create(
         .take_writer()
         .map_err(|error| format!("failed to open terminal input: {error}"))?;
     let killer = child.clone_killer();
-    // Queue a fully controlled command in the login shell. Codex and Claude
-    // receive CoWiki's read-only MCP tools directly; every CLI that supports
-    // an initial instruction also receives the maintenance protocol. The
-    // renderer cannot provide arbitrary flags or commands.
-    let executable = std::env::current_exe()
-        .map_err(|error| format!("cannot locate CoWiki MCP executable: {error}"))?;
-    let agent_command = build_agent_command(request.agent, request.mode, &space.slug, &executable);
+    // Queue a short, fully controlled command in the login shell. Long MCP
+    // configuration and maintenance prompts travel through inherited
+    // environment values because macOS truncates canonical PTY input at 1024
+    // bytes. The values contain no credentials and the renderer cannot supply
+    // arbitrary flags, commands, or environment entries.
     writer
-        .write_all(format!("{agent_command}\r").as_bytes())
+        .write_all(format!("{}\r", agent_launch.shell_command).as_bytes())
         .and_then(|_| writer.flush())
         .map_err(|error| format!("failed to start {}: {error}", request.agent.command()))?;
 
@@ -449,15 +457,36 @@ fn validate_session_id(value: &str) -> Result<String, String> {
 
 const SPACE_PROTOCOL: &str = "You are maintaining a CoWiki knowledge Space. Markdown files are the source of truth. Follow the Open Knowledge Format, the Space's own rules, and its arbitrary OKF hierarchy; never invent fixed wiki, entities, or concepts directories. Local maintenance never requires a CoWiki API key or server. Before answering about the Space, search and read the relevant pages, then cite their relative paths. When the cowiki MCP tools are available, use them for retrieval; otherwise use normal file and text-search tools. Before claiming that knowledge is absent, search and list evidence first. Raw sources are immutable. Integrate durable knowledge into the maintained wiki, reconcile contradictions, keep links/index/log consistent, and make every change reversible. Re-read a file immediately before editing it; never silently overwrite concurrent human changes. Do not commit, checkout, merge, push, or edit CoWiki SQLite metadata.";
 
+const AGENT_PROMPT_ENV: &str = "COWIKI_AGENT_PROMPT";
+const CLAUDE_MCP_CONFIG_ENV: &str = "COWIKI_CLAUDE_MCP_CONFIG";
+const CODEX_MCP_COMMAND_ENV: &str = "COWIKI_CODEX_MCP_COMMAND";
+const CODEX_MCP_ARGS_ENV: &str = "COWIKI_CODEX_MCP_ARGS";
+const HERMES_EPHEMERAL_SYSTEM_PROMPT_ENV: &str = "HERMES_EPHEMERAL_SYSTEM_PROMPT";
+
+struct AgentLaunchCommand {
+    shell_command: String,
+    environment: Vec<(&'static str, String)>,
+}
+
+#[cfg(test)]
+impl AgentLaunchCommand {
+    fn environment_value(&self, key: &str) -> Option<&str> {
+        self.environment
+            .iter()
+            .find_map(|(candidate, value)| (*candidate == key).then_some(value.as_str()))
+    }
+}
+
 fn build_agent_command(
     agent: AgentKind,
     mode: TerminalMode,
     space_slug: &str,
     executable: &Path,
-) -> String {
+) -> AgentLaunchCommand {
     let executable_text = executable.to_string_lossy();
     let mcp_args = vec!["--mcp", "--space", space_slug];
     let prompt = format!("{SPACE_PROTOCOL} {}", mode.prompt());
+    let prompt_environment = || vec![(AGENT_PROMPT_ENV, prompt.clone())];
     match agent {
         AgentKind::Claude => {
             let config = serde_json::json!({
@@ -469,11 +498,16 @@ fn build_agent_command(
                     }
                 }
             });
-            format!(
-                "claude --mcp-config {} --append-system-prompt {}",
-                shell_quote(&config.to_string()),
-                shell_quote(&prompt),
-            )
+            AgentLaunchCommand {
+                shell_command: format!(
+                    "claude --mcp-config \"${CLAUDE_MCP_CONFIG_ENV}\" \
+                     --append-system-prompt \"${AGENT_PROMPT_ENV}\""
+                ),
+                environment: vec![
+                    (AGENT_PROMPT_ENV, prompt),
+                    (CLAUDE_MCP_CONFIG_ENV, config.to_string()),
+                ],
+            }
         }
         AgentKind::Codex => {
             let command_toml = toml_string(&executable_text);
@@ -485,30 +519,109 @@ fn build_agent_command(
                     .collect::<Vec<_>>()
                     .join(",")
             );
-            format!(
-                "codex -c {} -c {} {}",
-                shell_quote(&format!("mcp_servers.cowiki.command={command_toml}")),
-                shell_quote(&format!("mcp_servers.cowiki.args={args_toml}")),
-                shell_quote(&prompt),
-            )
+            AgentLaunchCommand {
+                shell_command: format!(
+                    "codex -c \"${CODEX_MCP_COMMAND_ENV}\" \
+                     -c \"${CODEX_MCP_ARGS_ENV}\" \"${AGENT_PROMPT_ENV}\""
+                ),
+                environment: vec![
+                    (AGENT_PROMPT_ENV, prompt),
+                    (
+                        CODEX_MCP_COMMAND_ENV,
+                        format!("mcp_servers.cowiki.command={command_toml}"),
+                    ),
+                    (
+                        CODEX_MCP_ARGS_ENV,
+                        format!("mcp_servers.cowiki.args={args_toml}"),
+                    ),
+                ],
+            }
         }
-        AgentKind::Grok => format!("grok --rules {}", shell_quote(&prompt)),
-        AgentKind::Gemini => format!("gemini --prompt-interactive {}", shell_quote(&prompt)),
-        AgentKind::OpenCode => {
-            format!("opencode --prompt {}", shell_quote(&prompt))
-        }
+        AgentKind::Grok => AgentLaunchCommand {
+            shell_command: format!("grok --rules \"${AGENT_PROMPT_ENV}\""),
+            environment: prompt_environment(),
+        },
+        AgentKind::Antigravity => AgentLaunchCommand {
+            shell_command: format!("agy --prompt-interactive \"${AGENT_PROMPT_ENV}\""),
+            environment: prompt_environment(),
+        },
+        AgentKind::OpenCode => AgentLaunchCommand {
+            shell_command: format!("opencode --prompt \"${AGENT_PROMPT_ENV}\""),
+            environment: prompt_environment(),
+        },
         // Hermes supports an ephemeral, session-only system prompt through
         // this environment variable. It avoids mutating the user's global
         // skills or writing Agent instructions into their Space.
-        AgentKind::Hermes => format!(
-            "HERMES_EPHEMERAL_SYSTEM_PROMPT={} hermes chat",
-            shell_quote(&prompt),
-        ),
+        AgentKind::Hermes => AgentLaunchCommand {
+            shell_command: "hermes chat".to_string(),
+            environment: vec![(HERMES_EPHEMERAL_SYSTEM_PROMPT_ENV, prompt)],
+        },
     }
 }
 
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
+fn ensure_antigravity_mcp_config(
+    cwd: &Path,
+    executable: &Path,
+    space_slug: &str,
+) -> Result<(), String> {
+    let agents_dir = cwd.join(".agents");
+    let config_path = agents_dir.join("mcp_config.json");
+    fs::create_dir_all(&agents_dir).map_err(|error| {
+        format!(
+            "failed to create Antigravity configuration directory {}: {error}",
+            agents_dir.display()
+        )
+    })?;
+
+    let mut config = if config_path.exists() {
+        let bytes = fs::read(&config_path).map_err(|error| {
+            format!(
+                "failed to read Antigravity MCP configuration {}: {error}",
+                config_path.display()
+            )
+        })?;
+        serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|error| {
+            format!(
+                "Antigravity MCP configuration {} is invalid JSON: {error}",
+                config_path.display()
+            )
+        })?
+    } else {
+        serde_json::json!({})
+    };
+
+    let root = config.as_object_mut().ok_or_else(|| {
+        format!(
+            "Antigravity MCP configuration {} must contain a JSON object",
+            config_path.display()
+        )
+    })?;
+    let servers = root
+        .entry("mcpServers")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .ok_or_else(|| {
+            format!(
+                "Antigravity MCP configuration {} must contain an mcpServers object",
+                config_path.display()
+            )
+        })?;
+    servers.insert(
+        "cowiki".to_string(),
+        serde_json::json!({
+            "command": executable.to_string_lossy(),
+            "args": ["--mcp", "--space", space_slug],
+        }),
+    );
+
+    let serialized = serde_json::to_vec_pretty(&config)
+        .map_err(|error| format!("failed to serialize Antigravity MCP configuration: {error}"))?;
+    fs::write(&config_path, serialized).map_err(|error| {
+        format!(
+            "failed to write Antigravity MCP configuration {}: {error}",
+            config_path.display()
+        )
+    })
 }
 
 fn toml_string(value: &str) -> String {
@@ -724,8 +837,9 @@ fn add_shell_args(command: &mut CommandBuilder, shell: &Path) {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_agent_command, normalized_pty_size, resolve_terminal_cwd, validate_initial_command,
-        validate_session_id, AgentKind, TerminalIdentity, TerminalMode, TerminalState,
+        build_agent_command, ensure_antigravity_mcp_config, normalized_pty_size,
+        resolve_terminal_cwd, validate_initial_command, validate_session_id, AgentKind,
+        TerminalIdentity, TerminalMode, TerminalState,
     };
     #[cfg(unix)]
     use super::{TerminalPhase, TerminalSession};
@@ -744,7 +858,7 @@ mod tests {
         assert!(validate_initial_command(AgentKind::Codex, Some("codex")).is_ok());
         assert!(validate_initial_command(AgentKind::Claude, Some("claude")).is_ok());
         assert!(validate_initial_command(AgentKind::Grok, Some("grok")).is_ok());
-        assert!(validate_initial_command(AgentKind::Gemini, Some("gemini")).is_ok());
+        assert!(validate_initial_command(AgentKind::Antigravity, Some("agy")).is_ok());
         assert!(validate_initial_command(AgentKind::OpenCode, Some("opencode")).is_ok());
         assert!(validate_initial_command(AgentKind::Hermes, Some("hermes")).is_ok());
         assert!(validate_initial_command(AgentKind::Codex, Some("rm -rf ~")).is_err());
@@ -774,16 +888,37 @@ mod tests {
             executable,
         );
 
-        assert!(codex.contains("mcp_servers.cowiki.command"));
-        assert!(codex.contains("--space"));
-        assert!(codex.contains("research-space"));
-        assert!(codex.contains("Before claiming that knowledge is absent"));
-        assert!(codex.contains("current Draft working tree"));
-        assert!(claude.contains("--mcp-config"));
-        assert!(claude.contains("cowiki"));
-        assert!(claude.contains("--append-system-prompt"));
-        assert!(claude.contains("managed background worktree"));
-        assert!(claude.contains("Do not checkout, merge, commit, or push"));
+        assert!(codex.shell_command.starts_with("codex -c "));
+        assert!(codex
+            .environment_value("COWIKI_CODEX_MCP_COMMAND")
+            .unwrap()
+            .contains("mcp_servers.cowiki.command"));
+        assert!(codex
+            .environment_value("COWIKI_CODEX_MCP_ARGS")
+            .unwrap()
+            .contains("research-space"));
+        assert!(codex
+            .environment_value("COWIKI_AGENT_PROMPT")
+            .unwrap()
+            .contains("Before claiming that knowledge is absent"));
+        assert!(codex
+            .environment_value("COWIKI_AGENT_PROMPT")
+            .unwrap()
+            .contains("current Draft working tree"));
+        assert!(claude.shell_command.contains("--mcp-config"));
+        assert!(claude.shell_command.contains("--append-system-prompt"));
+        assert!(claude
+            .environment_value("COWIKI_CLAUDE_MCP_CONFIG")
+            .unwrap()
+            .contains("cowiki"));
+        assert!(claude
+            .environment_value("COWIKI_AGENT_PROMPT")
+            .unwrap()
+            .contains("managed background worktree"));
+        assert!(claude
+            .environment_value("COWIKI_AGENT_PROMPT")
+            .unwrap()
+            .contains("Do not checkout, merge, commit, or push"));
 
         let grok = build_agent_command(
             AgentKind::Grok,
@@ -791,8 +926,8 @@ mod tests {
             "research-space",
             executable,
         );
-        let gemini = build_agent_command(
-            AgentKind::Gemini,
+        let antigravity = build_agent_command(
+            AgentKind::Antigravity,
             TerminalMode::Live,
             "research-space",
             executable,
@@ -810,15 +945,75 @@ mod tests {
             executable,
         );
 
-        assert!(grok.starts_with("grok --rules "));
-        assert!(grok.contains("otherwise use normal file and text-search tools"));
-        assert!(gemini.starts_with("gemini --prompt-interactive "));
-        assert!(gemini.contains("otherwise use normal file and text-search tools"));
-        assert!(opencode.starts_with("opencode --prompt "));
-        assert!(opencode.contains("otherwise use normal file and text-search tools"));
-        assert!(hermes.starts_with("HERMES_EPHEMERAL_SYSTEM_PROMPT="));
-        assert!(hermes.contains("otherwise use normal file and text-search tools"));
-        assert!(hermes.ends_with(" hermes chat"));
+        assert!(grok.shell_command.starts_with("grok --rules "));
+        assert!(grok
+            .environment_value("COWIKI_AGENT_PROMPT")
+            .unwrap()
+            .contains("Before claiming that knowledge is absent"));
+        assert!(antigravity
+            .shell_command
+            .starts_with("agy --prompt-interactive "));
+        assert!(antigravity
+            .environment_value("COWIKI_AGENT_PROMPT")
+            .unwrap()
+            .contains("Before claiming that knowledge is absent"));
+        assert!(opencode.shell_command.starts_with("opencode --prompt "));
+        assert!(opencode
+            .environment_value("COWIKI_AGENT_PROMPT")
+            .unwrap()
+            .contains("Before claiming that knowledge is absent"));
+        assert_eq!(hermes.shell_command, "hermes chat");
+        assert!(hermes
+            .environment_value("HERMES_EPHEMERAL_SYSTEM_PROMPT")
+            .unwrap()
+            .contains("otherwise use normal file and text-search tools"));
+    }
+
+    #[test]
+    fn antigravity_workspace_config_preserves_other_mcp_servers() {
+        let temp = tempfile::tempdir().unwrap();
+        let agents_dir = temp.path().join(".agents");
+        std::fs::create_dir_all(&agents_dir).unwrap();
+        std::fs::write(
+            agents_dir.join("mcp_config.json"),
+            r#"{"mcpServers":{"existing":{"command":"existing-mcp","args":["serve"]}}}"#,
+        )
+        .unwrap();
+        let executable = Path::new("/Applications/CoWiki.app/Contents/MacOS/cowiki-desktop");
+
+        ensure_antigravity_mcp_config(temp.path(), executable, "research-space").unwrap();
+
+        let config: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(agents_dir.join("mcp_config.json")).unwrap())
+                .unwrap();
+        assert_eq!(config["mcpServers"]["existing"]["command"], "existing-mcp");
+        assert_eq!(
+            config["mcpServers"]["cowiki"]["command"],
+            executable.to_string_lossy().as_ref()
+        );
+        assert_eq!(
+            config["mcpServers"]["cowiki"]["args"],
+            serde_json::json!(["--mcp", "--space", "research-space"])
+        );
+    }
+
+    #[test]
+    fn agent_launch_command_fits_macos_canonical_terminal_input() {
+        let executable = Path::new(
+            "/Users/huangqinghao/Workspace/ClaudeSpace/Workspace/cowiki/.worktrees/local-agent-change-reviews/web/src-tauri/target/debug/cowiki-desktop",
+        );
+        let claude = build_agent_command(
+            AgentKind::Claude,
+            TerminalMode::Background,
+            "general-5371996c",
+            executable,
+        );
+
+        assert!(
+            claude.shell_command.len() < 1024,
+            "Agent command is {} bytes and will be truncated by macOS MAX_CANON",
+            claude.shell_command.len(),
+        );
     }
 
     #[test]
