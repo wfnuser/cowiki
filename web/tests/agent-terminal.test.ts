@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -10,13 +11,20 @@ import {
 import {
   addAgentTab,
   closeAgentTab,
+  openOrActivateAgentChangeTab,
   terminalTabLabel,
   type AgentTerminalTabsState,
 } from '../src/components/terminal/terminal-tabs.ts';
 import {
+  agentMergeResult,
   localReviewActionRefreshesDraft,
+  localReviewSelectionForRow,
   orderedLocalReviewRows,
 } from '../src/components/review/local-review-model.ts';
+import {
+  parseReviewRoute,
+  reviewRoute,
+} from '../src/components/review/review-navigation.ts';
 
 test('maps the supported agents to their local CLI command', () => {
   assert.equal(agentInitialCommand('codex'), 'codex');
@@ -115,6 +123,30 @@ test('agent tabs keep live and background execution identities separate', () => 
   assert.equal(terminalTabLabel(background.tabs, background.tabs[1]), 'Codex 2 · Background');
 });
 
+test('continuing an Agent Change activates its existing tab instead of duplicating it', () => {
+  const initial: AgentTerminalTabsState = {
+    activeTabId: 'live-1',
+    tabs: [
+      { id: 'live-1', agent: 'codex', mode: 'live' },
+      {
+        id: 'change-tab',
+        agent: 'claude',
+        mode: 'background',
+        changeId: 'change-1',
+        worktreePath: '/managed/change-1',
+      },
+    ],
+  };
+
+  assert.deepEqual(
+    openOrActivateAgentChangeTab(initial, 'codex', 'new-tab', {
+      changeId: 'change-1',
+      worktreePath: '/managed/change-1',
+    }),
+    { ...initial, activeTabId: 'change-tab' },
+  );
+});
+
 test('local Reviews always order Current Draft before Agent Changes', () => {
   assert.deepEqual(orderedLocalReviewRows([]), [{ kind: 'draft', id: 'current-draft' }]);
   assert.deepEqual(
@@ -134,4 +166,67 @@ test('only merging an Agent Change refreshes the Draft navigation trees', () => 
   assert.equal(localReviewActionRefreshesDraft('merge'), true);
   assert.equal(localReviewActionRefreshesDraft('discard'), false);
   assert.equal(localReviewActionRefreshesDraft('commit'), false);
+});
+
+test('local Review rows navigate to dedicated Draft and Agent Change details', () => {
+  assert.deepEqual(
+    localReviewSelectionForRow({ kind: 'draft', id: 'current-draft' }),
+    { kind: 'local-draft' },
+  );
+  assert.deepEqual(
+    localReviewSelectionForRow({
+      kind: 'agent',
+      id: 'change-1',
+      change: { id: 'change-1', createdAt: 20 },
+    }),
+    { kind: 'local-agent', changeId: 'change-1' },
+  );
+});
+
+test('Review routes round-trip draft, Agent Change, and cloud detail targets', () => {
+  const workspaces = ['general'];
+  const targets = [
+    { kind: 'local-draft' as const },
+    { kind: 'local-agent' as const, changeId: 'change/with spaces' },
+    { kind: 'cloud' as const, submissionId: 'submission-1' },
+  ];
+
+  for (const target of targets) {
+    const path = reviewRoute('qinghao', 'general', target);
+    assert.deepEqual(parseReviewRoute(path, workspaces), {
+      workspaceSlug: 'general',
+      target,
+    });
+  }
+  assert.deepEqual(parseReviewRoute('/qinghao/general/reviews', workspaces), {
+    workspaceSlug: 'general',
+    target: null,
+  });
+  assert.equal(parseReviewRoute('/general/concepts/test', workspaces), null);
+});
+
+test('Agent merge feedback distinguishes a merged Draft from a conflict', () => {
+  assert.deepEqual(agentMergeResult('merged'), {
+    draftChanged: true,
+    message: null,
+  });
+  assert.deepEqual(agentMergeResult('needsResolution'), {
+    draftChanged: false,
+    message: 'Merge needs resolution. Current Draft was left unchanged. Continue with Agent to resolve it.',
+  });
+});
+
+test('the local Review inbox stays a list and renders diffs only in detail', () => {
+  const inbox = readFileSync(
+    new URL('../src/components/review/LocalReviewInbox.tsx', import.meta.url),
+    'utf8',
+  );
+  const detail = readFileSync(
+    new URL('../src/components/review/LocalReviewDetail.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.equal(inbox.includes("from './DiffView'"), false);
+  assert.match(detail, /<DiffView diffs=\{diffs\}/);
+  assert.match(detail, /Create Checkpoint/);
 });

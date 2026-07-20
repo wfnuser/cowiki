@@ -1,14 +1,22 @@
 import { useState } from 'react';
-import { Type, Link2, FileUp, X } from 'lucide-react';
+import { CheckCircle2, Sparkles, Type, Link2, FileUp, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ingest } from '../api';
+import type { SourceItem } from '../api';
 import { isDesktopClient } from '../runtime';
 import { chooseSourceFiles, ingestFiles } from '../local-api';
-import { fileIngestResult } from '../lib/source-ingest';
+import {
+  fileIngestResult,
+  mergeImportedSources,
+  sourceImportStorageLabel,
+  sourceImportProgressLabel,
+  sourceReadyLabel,
+} from '../lib/source-ingest';
+import { agentDisplayName, type AgentKind } from './terminal/terminal-contract';
 
 interface AddSourceDialogProps {
   open: boolean;
@@ -16,7 +24,9 @@ interface AddSourceDialogProps {
   branch: string;
   workspaceName: string;
   workspaceSlug: string;
-  onDone: () => void;
+  defaultAgent: AgentKind;
+  onImported: () => void;
+  onOrganize?: (sources: SourceItem[]) => void;
 }
 
 type SourceTab = 'text' | 'url' | 'file';
@@ -27,7 +37,9 @@ export function AddSourceDialog({
   branch,
   workspaceName,
   workspaceSlug,
-  onDone,
+  defaultAgent,
+  onImported,
+  onOrganize,
 }: AddSourceDialogProps) {
   const desktop = isDesktopClient();
   const [activeTab, setActiveTab] = useState<SourceTab>('url');
@@ -35,11 +47,13 @@ export function AddSourceDialog({
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [importedSources, setImportedSources] = useState<SourceItem[]>([]);
 
   const reset = () => {
     setContent('');
     setSelectedFiles([]);
     setError('');
+    setImportedSources([]);
   };
 
   const handleOpenChange = (isOpen: boolean) => {
@@ -66,10 +80,13 @@ export function AddSourceDialog({
     try {
       const outcomes = await ingestFiles(workspaceSlug, selectedFiles);
       const result = fileIngestResult(outcomes);
-      if (outcomes.some((outcome) => !outcome.error)) onDone();
+      const imported = outcomes.flatMap((outcome) => outcome.source ? [outcome.source] : []);
+      if (imported.length) {
+        setImportedSources((current) => mergeImportedSources(current, imported));
+        onImported();
+      }
       if (result.shouldClose) {
-        reset();
-        onOpenChange(false);
+        setSelectedFiles([]);
       } else {
         setSelectedFiles(result.remainingFiles);
         setError(result.error);
@@ -93,10 +110,10 @@ export function AddSourceDialog({
     setLoading(true);
     setError('');
     try {
-      await ingest(activeTab, content, branch, undefined, workspaceSlug);
-      reset();
-      onDone();
-      onOpenChange(false);
+      const source = await ingest(activeTab, content, branch, undefined, workspaceSlug) as SourceItem;
+      setImportedSources((current) => mergeImportedSources(current, [source]));
+      setContent('');
+      onImported();
     } catch (err) {
       setError(`Failed to add source: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
@@ -105,6 +122,7 @@ export function AddSourceDialog({
   };
 
   const canSubmit = activeTab === 'file' ? selectedFiles.length > 0 : !!content.trim();
+  const defaultAgentName = agentDisplayName(defaultAgent);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -116,6 +134,64 @@ export function AddSourceDialog({
           </DialogTitle>
         </DialogHeader>
 
+        {importedSources.length > 0 ? (
+          <div className="space-y-5 py-2">
+            <div className="flex items-start gap-3 rounded-lg border bg-muted/35 p-4">
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
+              <div className="min-w-0">
+                <p className="font-medium">
+                  {importedSources.length} source{importedSources.length === 1 ? '' : 's'} imported
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {sourceImportStorageLabel(desktop)}
+                </p>
+              </div>
+            </div>
+            {error && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                <p className="font-medium">Some files still need attention</p>
+                <p className="mt-1 text-xs leading-relaxed">{error}</p>
+              </div>
+            )}
+            {desktop && onOrganize && (
+              <div>
+                <p className="text-sm font-medium">{sourceReadyLabel(defaultAgentName)}</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  This opens an isolated Agent Change. You can review its knowledge edits before merging them into the Current Draft.
+                </p>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {error && selectedFiles.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={loading}
+                  onClick={() => { void handleSubmitFiles(); }}
+                >
+                  {loading
+                    ? sourceImportProgressLabel('file', selectedFiles.length)
+                    : `Retry ${selectedFiles.length} failed file${selectedFiles.length === 1 ? '' : 's'}`}
+                </Button>
+              )}
+              {desktop && onOrganize && (
+                <Button
+                  type="button"
+                  onClick={() => {
+                    onOrganize(importedSources);
+                    handleOpenChange(false);
+                  }}
+                >
+                  <Sparkles className="h-4 w-4" />
+                  Open {defaultAgentName} to organize
+                </Button>
+              )}
+              <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
+                Done
+              </Button>
+            </div>
+          </div>
+        ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
           <Tabs
             value={activeTab}
@@ -196,12 +272,13 @@ export function AddSourceDialog({
 
           <Button type="submit" disabled={!canSubmit || loading}>
             {loading
-              ? 'Adding...'
+              ? sourceImportProgressLabel(activeTab, selectedFiles.length)
               : activeTab === 'file' && selectedFiles.length > 1
                 ? `Add ${selectedFiles.length} Sources`
                 : 'Add Source'}
           </Button>
         </form>
+        )}
       </DialogContent>
     </Dialog>
   );

@@ -19,7 +19,7 @@ import {
   deleteWorkspace,
   listPublicWorkspaces, joinWorkspace,
   listSources, getSource, listReviews, renamePath, deletePath,
-  type Workspace, type PageMeta, type PageFull, type SourceItem, type SourceContent,
+  type Workspace, type PageMeta, type PageFull, type SourceItem, type SourceContent, type AgentChange,
 } from '../api';
 import { AddSourceDialog } from '@/components/AddSourceDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
@@ -29,6 +29,12 @@ import { SpacePanel, type NavTab } from '../components/layout/SpacePanel';
 type CreateSpaceMode = 'choose' | 'local' | 'import';
 import { ReviewList } from '../components/review/ReviewList';
 import { ReviewDetail } from '../components/review/ReviewDetail';
+import { LocalReviewDetail } from '../components/review/LocalReviewDetail';
+import {
+  parseReviewRoute,
+  reviewRoute,
+  type ReviewTarget,
+} from '../components/review/review-navigation';
 import { MembersView } from '../components/views/MembersView';
 import { HistoryView } from '../components/views/HistoryView';
 import { InviteDialog } from '../components/InviteDialog';
@@ -41,7 +47,10 @@ import { CommentsProvider, CommentsPanel, CommentsHeaderToggle, commentMarkdownC
 import { APP_HEADER_HEIGHT, C } from '@/lib/design';
 import { isDesktopClient } from '@/runtime';
 import { chooseLocalSpaceDirectory, localSpaceIdentityFromPath } from '@/local-space';
-import { AgentTerminalPanel } from '@/components/terminal/AgentTerminalPanel';
+import {
+  AgentTerminalPanel,
+  type AgentPanelOpenRequest,
+} from '@/components/terminal/AgentTerminalPanel';
 import {
   conceptIdFromPath,
   conceptPath,
@@ -60,12 +69,14 @@ import {
   saveClientSettings,
   type DefaultAgent,
 } from '@/lib/client-settings';
+import { splitSystemFrontmatter } from '@/lib/page-frontmatter';
+import { sourceOrganizationTask } from '@/lib/source-ingest';
 
 type ActiveView =
   | { kind: 'page'; slug: string; path?: string; content: PageFull | null }
   | { kind: 'source'; filename: string; content: SourceContent | null }
   | { kind: 'review-list'; workspaceSlug: string }
-  | { kind: 'review-detail'; workspaceSlug: string; submissionId: string }
+  | { kind: 'review-detail'; workspaceSlug: string; target: ReviewTarget }
   | { kind: 'members'; workspaceSlug: string }
   | { kind: 'history'; workspaceSlug: string }
   | { kind: 'notifications' }
@@ -101,6 +112,7 @@ export function MainLayout() {
   const [resizingSidebar, setResizingSidebar] = useState(false);
   const sidebarResizeStart = useRef({ pointerX: 0, width: sidebarLayout.width });
   const [agentPanelOpen, setAgentPanelOpen] = useState(false);
+  const [agentOpenRequest, setAgentOpenRequest] = useState<AgentPanelOpenRequest | null>(null);
   const [clientSettings, setClientSettings] = useState(() => (
     loadClientSettings(window.localStorage)
   ));
@@ -233,6 +245,21 @@ export function MainLayout() {
     setWorkspaces(ws);
     setWorkspacesLoaded(true);
 
+    const reviewLocation = parseReviewRoute(location.pathname, ws.map((workspace) => workspace.slug));
+    if (reviewLocation) {
+      const targetWs = ws.find((workspace) => workspace.slug === reviewLocation.workspaceSlug);
+      if (targetWs) {
+        setActiveWorkspace(targetWs);
+        setActiveTab('reviews');
+        setActiveView(reviewLocation.target
+          ? { kind: 'review-detail', workspaceSlug: targetWs.slug, target: reviewLocation.target }
+          : { kind: 'review-list', workspaceSlug: targetWs.slug });
+        await loadSpacePages(targetWs);
+        await loadSpaceSources(targetWs);
+        return;
+      }
+    }
+
     // Auto-expand personal space and load its pages
     const personal = ws.find((w) => w.visibility === 'private' && w.role === 'owner');
     if (personal) {
@@ -280,7 +307,7 @@ export function MainLayout() {
         }
       }
     }
-  }, [auth?.id, desktop]);
+  }, [auth?.id, desktop, location.pathname]);
 
   useEffect(() => {
     if (!auth) return;
@@ -574,7 +601,7 @@ export function MainLayout() {
       }
       case 'reviews':
         setActiveView({ kind: 'review-list', workspaceSlug: activeWorkspace.slug });
-        navigate(`/${owner}/${activeWorkspace.slug}/reviews`);
+        navigate(reviewRoute(owner, activeWorkspace.slug));
         break;
       case 'members':
         setActiveView({ kind: 'members', workspaceSlug: activeWorkspace.slug });
@@ -587,16 +614,15 @@ export function MainLayout() {
     }
   };
 
-  const openReviewDetail = (submissionId: string) => {
+  const openReviewDetail = (target: ReviewTarget) => {
     if (!activeWorkspace) return;
     const owner = auth?.name || 'user';
-    setActiveView({ kind: 'review-detail', workspaceSlug: activeWorkspace.slug, submissionId });
-    navigate(`/${owner}/${activeWorkspace.slug}/reviews/${submissionId}`);
+    setActiveView({ kind: 'review-detail', workspaceSlug: activeWorkspace.slug, target });
+    navigate(reviewRoute(owner, activeWorkspace.slug, target));
   };
 
-  // Handle ingest completion
-  const handleIngestDone = () => {
-    setShowIngest(false);
+  // Deterministic local import finishes before optional Agent organization.
+  const handleSourcesImported = () => {
     if (activeWorkspace) {
       loadSpacePages(activeWorkspace);
       loadSpaceSources(activeWorkspace);
@@ -913,7 +939,7 @@ export function MainLayout() {
               height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT,
             }}>
               {/* Left: breadcrumb */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: C.muted, minWidth: 0, overflow: 'hidden' }}>
+              <div className="app-breadcrumb" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: C.muted, minWidth: 0, overflow: 'hidden' }}>
                 {sidebarLayout.collapsed && (
                   <button
                     type="button"
@@ -946,7 +972,9 @@ export function MainLayout() {
                     <span style={{ color: C.faint }}>/</span>
                     <span style={{ color: C.faint }}>sources</span>
                     <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeView.filename}</span>
+                    <span style={{ color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {activeView.content?.title || activeView.filename}
+                    </span>
                   </>
                 )}
                 {activeView?.kind === 'review-list' && (
@@ -960,7 +988,13 @@ export function MainLayout() {
                     <span style={{ color: C.faint }}>/</span>
                     <span style={{ color: C.ink }}>Reviews</span>
                     <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>#{activeView.submissionId.slice(0, 6)}</span>
+                    <span style={{ color: C.ink }}>
+                      {activeView.target.kind === 'local-draft'
+                        ? 'Current Draft'
+                        : activeView.target.kind === 'local-agent'
+                          ? `Agent #${activeView.target.changeId.slice(0, 6)}`
+                          : `#${activeView.target.submissionId.slice(0, 6)}`}
+                    </span>
                   </>
                 )}
                 {activeView?.kind === 'members' && (
@@ -981,7 +1015,7 @@ export function MainLayout() {
               </div>
 
               {/* Right: actions */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <div className="app-header-actions" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
 
                 {desktop && activeWorkspace?.localPath && (
                   <button
@@ -1043,7 +1077,20 @@ export function MainLayout() {
               branch={userBranch}
               workspaceName={activeWorkspace?.name || ''}
               workspaceSlug={activeWorkspace?.slug || ''}
-              onDone={handleIngestDone}
+              defaultAgent={clientSettings.defaultAgent}
+              onImported={handleSourcesImported}
+              onOrganize={(sources) => {
+                setAgentPanelOpen(true);
+                setAgentOpenRequest({
+                  requestId: crypto.randomUUID(),
+                  kind: 'new-change',
+                  agent: clientSettings.defaultAgent,
+                  title: sources.length === 1
+                    ? `Organize Source: ${sources[0].title || sources[0].filename}`
+                    : `Organize ${sources.length} Sources`,
+                  initialTask: sourceOrganizationTask(sources),
+                });
+              }}
             />
 
             {/* Content */}
@@ -1054,23 +1101,42 @@ export function MainLayout() {
 
               /* Review detail */
               ) : activeView?.kind === 'review-detail' ? (
-                <ReviewDetail
-                  workspaceSlug={activeView.workspaceSlug}
-                  submissionId={activeView.submissionId}
-                  onBack={() => handleTabChange('reviews')}
-                  onActioned={() => setReviewRefreshKey((k) => k + 1)}
-                />
+                activeView.target.kind === 'cloud' ? (
+                  <ReviewDetail
+                    workspaceSlug={activeView.workspaceSlug}
+                    submissionId={activeView.target.submissionId}
+                    onBack={() => handleTabChange('reviews')}
+                    onActioned={() => setReviewRefreshKey((k) => k + 1)}
+                  />
+                ) : (
+                  <LocalReviewDetail
+                    workspaceSlug={activeView.workspaceSlug}
+                    target={activeView.target}
+                    onBack={() => handleTabChange('reviews')}
+                    onDraftChanged={() => {
+                      setReviewRefreshKey((key) => key + 1);
+                      if (!activeWorkspace || activeWorkspace.slug !== activeView.workspaceSlug) return;
+                      void loadSpacePages(activeWorkspace);
+                      void loadSpaceSources(activeWorkspace);
+                    }}
+                    onContinueAgent={(change: AgentChange) => {
+                      setAgentPanelOpen(true);
+                      setAgentOpenRequest({
+                        requestId: crypto.randomUUID(),
+                        kind: 'existing-change',
+                        agent: clientSettings.defaultAgent,
+                        changeId: change.id,
+                        worktreePath: change.worktreePath,
+                      });
+                    }}
+                  />
+                )
 
               /* Review list */
               ) : activeView?.kind === 'review-list' ? (
                 <ReviewList
                   workspaceSlug={activeView.workspaceSlug}
                   onOpen={openReviewDetail}
-                  onLocalDraftChanged={() => {
-                    if (!activeWorkspace || activeWorkspace.slug !== activeView.workspaceSlug) return;
-                    void loadSpacePages(activeWorkspace);
-                    void loadSpaceSources(activeWorkspace);
-                  }}
                   refreshKey={reviewRefreshKey}
                 />
 
@@ -1105,11 +1171,13 @@ export function MainLayout() {
                     </span>
                   </div>
                   <article>
-                    <h1 className="page-title page-title--compact">
-                      {activeView.content.filename}
+                    <h1 className="page-title page-title--compact source-title">
+                      {activeView.content.title || activeView.content.filename}
                     </h1>
-                    <div className="prose">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeView.content.content}</ReactMarkdown>
+                    <div className="prose source-body">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {splitSystemFrontmatter(activeView.content.content).body}
+                      </ReactMarkdown>
                     </div>
                   </article>
                 </div>
@@ -1209,6 +1277,12 @@ export function MainLayout() {
                 spacePath={activeWorkspace.localPath}
                 spaceSlug={activeWorkspace.slug}
                 defaultAgent={clientSettings.defaultAgent}
+                openRequest={agentOpenRequest}
+                onOpenRequestHandled={(requestId) => {
+                  setAgentOpenRequest((current) => (
+                    current?.requestId === requestId ? null : current
+                  ));
+                }}
                 onClose={() => setAgentPanelOpen(false)}
               />
             </div>

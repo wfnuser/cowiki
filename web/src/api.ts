@@ -166,10 +166,14 @@ export interface PendingInvitation {
 
 export interface SourceItem {
   filename: string;
+  /** Human-readable OKF title. filename remains the stable storage identity. */
+  title?: string;
 }
 
 export interface SourceContent {
   filename: string;
+  /** Human-readable OKF title. */
+  title?: string;
   content: string;
 }
 

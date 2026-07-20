@@ -14,3 +14,11 @@ test('system frontmatter is hidden from the editable document and restored exact
 test('plain Markdown remains fully editable', () => {
   assert.deepEqual(splitSystemFrontmatter('# Hello'), { systemFrontmatter: '', body: '# Hello' });
 });
+
+test('read-only Source rendering hides OKF frontmatter', () => {
+  const source = splitSystemFrontmatter(
+    '---\ntitle: "https://example.com"\ntype: Source\n---\n\nhttps://example.com',
+  );
+
+  assert.equal(source.body, 'https://example.com');
+});

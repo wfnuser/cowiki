@@ -26,6 +26,7 @@ import {
 import {
   addAgentTab,
   closeAgentTab,
+  openOrActivateAgentChangeTab,
   terminalTabLabel,
   type AgentTerminalTab,
   type AgentTerminalTabsState,
@@ -36,9 +37,27 @@ type AgentTerminalPanelProps = {
   spacePath: string;
   spaceSlug: string;
   defaultAgent: AgentKind;
+  openRequest?: AgentPanelOpenRequest | null;
+  onOpenRequestHandled?: (requestId: string) => void;
   onClose?: () => void;
   className?: string;
 };
+
+export type AgentPanelOpenRequest =
+  | {
+    requestId: string;
+    kind: 'new-change';
+    agent: AgentKind;
+    title: string;
+    initialTask?: string;
+  }
+  | {
+    requestId: string;
+    kind: 'existing-change';
+    agent: AgentKind;
+    changeId: string;
+    worktreePath: string;
+  };
 
 let terminalTabSequence = 0;
 
@@ -51,6 +70,8 @@ export function AgentTerminalPanel({
   spacePath,
   spaceSlug,
   defaultAgent,
+  openRequest,
+  onOpenRequestHandled,
   onClose,
   className,
 }: AgentTerminalPanelProps) {
@@ -59,26 +80,61 @@ export function AgentTerminalPanel({
     tabs: [],
   });
   const [launchError, setLaunchError] = useState<string | null>(null);
+  const handledOpenRequestRef = useRef<string | null>(null);
 
-  const openAgent = async (agent: AgentKind, mode: AgentTerminalMode = 'live') => {
+  const openAgent = useCallback(async (
+    agent: AgentKind,
+    mode: AgentTerminalMode = 'live',
+    title?: string,
+    initialTask?: string,
+  ) => {
     setLaunchError(null);
     try {
       if (mode === 'live') {
         setTabState((state) => addAgentTab(state, agent, nextTerminalTabId(agent), mode));
         return;
       }
-      const change = await createLocalAgentChange(spaceSlug, agentDisplayName(agent));
+      const change = await createLocalAgentChange(spaceSlug, title || agentDisplayName(agent));
       setTabState((state) => addAgentTab(
         state,
         agent,
         nextTerminalTabId(agent),
         mode,
-        { changeId: change.id, worktreePath: change.worktreePath },
+        { changeId: change.id, worktreePath: change.worktreePath, initialTask },
       ));
     } catch (cause) {
       setLaunchError(cause instanceof Error ? cause.message : String(cause));
     }
-  };
+  }, [spaceSlug]);
+
+  useEffect(() => {
+    if (!openRequest) return;
+    if (handledOpenRequestRef.current === openRequest.requestId) return;
+    if (openRequest.kind === 'existing-change') {
+      const task = window.setTimeout(() => {
+        if (handledOpenRequestRef.current === openRequest.requestId) return;
+        handledOpenRequestRef.current = openRequest.requestId;
+        setTabState((state) => openOrActivateAgentChangeTab(
+          state,
+          openRequest.agent,
+          nextTerminalTabId(openRequest.agent),
+          {
+            changeId: openRequest.changeId,
+            worktreePath: openRequest.worktreePath,
+          },
+        ));
+        onOpenRequestHandled?.(openRequest.requestId);
+      }, 0);
+      return () => window.clearTimeout(task);
+    }
+    const task = window.setTimeout(() => {
+      if (handledOpenRequestRef.current === openRequest.requestId) return;
+      handledOpenRequestRef.current = openRequest.requestId;
+      void openAgent(openRequest.agent, 'background', openRequest.title, openRequest.initialTask)
+        .finally(() => onOpenRequestHandled?.(openRequest.requestId));
+    }, 0);
+    return () => window.clearTimeout(task);
+  }, [onOpenRequestHandled, openAgent, openRequest]);
 
   const closeTab = (tabId: string) => {
     setTabState((state) => closeAgentTab(state, tabId));
@@ -179,17 +235,10 @@ function AgentLaunchPage({
       </div>
       <h2 className="text-base font-semibold text-text">Work with an agent</h2>
       <p className="mt-1.5 max-w-64 text-xs leading-relaxed text-text-tertiary">
-        Work live in the Current Draft, or isolate a background Agent Change for review.
+        The Agent works live in your Current Draft. Start an isolated Agent Change from + when you want review.
       </p>
       <Button className="mt-5 min-w-44 bg-[#e2590b] text-white hover:bg-[#c94b08]" onClick={() => onOpenAgent(defaultAgent, 'live')}>
-        Start {agentDisplayName(defaultAgent)} live
-      </Button>
-      <Button
-        variant="outline"
-        className="mt-2 min-w-44"
-        onClick={() => onOpenAgent(defaultAgent, 'background')}
-      >
-        Run in background
+        Start {agentDisplayName(defaultAgent)}
       </Button>
       <AgentPicker defaultAgent={defaultAgent} onOpenAgent={onOpenAgent} />
     </div>
@@ -214,17 +263,10 @@ function AgentPicker({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="center" className="w-52">
-        <DropdownMenuLabel className="text-xs text-text-tertiary">Live in Current Draft</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-xs text-text-tertiary">Current Draft</DropdownMenuLabel>
         {SUPPORTED_AGENTS.filter((agent) => agent !== defaultAgent).map((agent) => (
           <DropdownMenuItem key={`live-${agent}`} onSelect={() => onOpenAgent(agent, 'live')}>
             <Bot /> {agentDisplayName(agent)}
-          </DropdownMenuItem>
-        ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-xs text-text-tertiary">Run in background</DropdownMenuLabel>
-        {SUPPORTED_AGENTS.filter((agent) => agent !== defaultAgent).map((agent) => (
-          <DropdownMenuItem key={`background-${agent}`} onSelect={() => onOpenAgent(agent, 'background')}>
-            <GitBranch /> {agentDisplayName(agent)}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -251,14 +293,14 @@ function NewViewMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-48">
-        <DropdownMenuLabel className="text-xs text-text-tertiary">Live in Current Draft</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-xs text-text-tertiary">Current Draft</DropdownMenuLabel>
         {SUPPORTED_AGENTS.map((agent) => (
           <DropdownMenuItem key={`live-${agent}`} onSelect={() => onOpenAgent(agent, 'live')}>
             <Bot /> {agentDisplayName(agent)}
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-xs text-text-tertiary">Run in background</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-xs text-text-tertiary">New Agent Change</DropdownMenuLabel>
         {SUPPORTED_AGENTS.map((agent) => (
           <DropdownMenuItem key={`background-${agent}`} onSelect={() => onOpenAgent(agent, 'background')}>
             <GitBranch /> {agentDisplayName(agent)}
@@ -305,6 +347,7 @@ function AgentTerminalInstance({
     spaceSlug,
     changeId: tab.changeId,
     agent: tab.agent,
+    initialTask: tab.initialTask,
     onData: handleData,
     onExit: (exitCode) => {
       terminalRef.current?.writeln(

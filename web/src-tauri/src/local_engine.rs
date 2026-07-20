@@ -75,6 +75,7 @@ pub struct PageFull {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SourceItem {
     pub filename: String,
+    pub title: String,
 }
 
 /// One file's result from a batch `ingest_files` call. A batch import keeps
@@ -91,6 +92,7 @@ pub struct IngestFileOutcome {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SourceContent {
     pub filename: String,
+    pub title: String,
     pub content: String,
 }
 
@@ -672,12 +674,14 @@ impl LocalEngine {
                     .extension()
                     .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
             {
+                let filename = entry
+                    .path()
+                    .strip_prefix(&root)
+                    .map(normalize_path)
+                    .unwrap_or_default();
                 sources.push(SourceItem {
-                    filename: entry
-                        .path()
-                        .strip_prefix(&root)
-                        .map(normalize_path)
-                        .unwrap_or_default(),
+                    title: source_display_title(entry.path(), &filename),
+                    filename,
                 });
             }
         }
@@ -691,9 +695,13 @@ impl LocalEngine {
             &space.local_path,
             &Path::new(okf::RAW_SOURCES_DIR).join(relative),
         )?;
+        let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
         Ok(SourceContent {
             filename: filename.to_string(),
-            content: std::fs::read_to_string(path).map_err(|e| e.to_string())?,
+            title: okf::display_metadata(&content)
+                .0
+                .unwrap_or_else(|| filename.to_string()),
+            content,
         })
     }
 
@@ -1806,12 +1814,27 @@ fn source_hash_matches(path: &Path, expected_hash: &str) -> bool {
 }
 
 fn source_item_for_path(space: &Space, path: &Path) -> Result<SourceItem, String> {
+    let filename = path
+        .strip_prefix(space.local_path.join(okf::RAW_SOURCES_DIR))
+        .map(normalize_path)
+        .map_err(|error| error.to_string())?;
     Ok(SourceItem {
-        filename: path
-            .strip_prefix(space.local_path.join(okf::RAW_SOURCES_DIR))
-            .map(normalize_path)
-            .map_err(|error| error.to_string())?,
+        title: source_display_title(path, &filename),
+        filename,
     })
+}
+
+fn source_display_title(path: &Path, fallback: &str) -> String {
+    const METADATA_PREVIEW_BYTES: u64 = 64 * 1024;
+    let mut preview = Vec::new();
+    let content = std::fs::File::open(path)
+        .and_then(|file| file.take(METADATA_PREVIEW_BYTES).read_to_end(&mut preview))
+        .ok()
+        .map(|_| String::from_utf8_lossy(&preview).into_owned())
+        .unwrap_or_default();
+    okf::display_metadata(&content)
+        .0
+        .unwrap_or_else(|| fallback.to_string())
 }
 
 fn read_page_tree(root: &Path, current: &Path) -> Result<Vec<PageMeta>, String> {
@@ -3645,8 +3668,11 @@ mod tests {
                 Some("Research Note"),
             )
             .unwrap();
+        assert_eq!(item.title, "Research Note");
         assert!(item.filename.starts_with("_encoded/"));
         assert!(item.filename.ends_with(".md"));
+        let source = engine.get_source(&space.slug, &item.filename).unwrap();
+        assert_eq!(source.title, "Research Note");
         let body =
             std::fs::read_to_string(folder.join(".cowiki/sources").join(&item.filename)).unwrap();
         assert!(body.contains("type: Source"));

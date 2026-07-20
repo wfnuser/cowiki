@@ -115,6 +115,30 @@ body {
   font-size: 1.75rem;
 }
 
+.app-breadcrumb {
+  flex: 1 1 auto;
+}
+
+.app-header-actions {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.app-header-actions button {
+  white-space: nowrap;
+}
+
+.source-title {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.source-body {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }

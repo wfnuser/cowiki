@@ -56,7 +56,7 @@ export function ingest(
   sourceType: string,
   content: string,
   filename?: string,
-): Promise<unknown> {
+): Promise<SourceItem> {
   return invoke('local_ingest', { spaceSlug, sourceType, content, filename });
 }
 

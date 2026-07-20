@@ -45,3 +45,12 @@ test('Agent tabs and header actions share the centered control line', () => {
   assert.equal(agentTerminalPanel.includes('className="mb-1.5 shrink-0'), false);
   assert.equal(agentTerminalPanel.includes('className="mb-1.5 ml-1'), false);
 });
+
+test('long breadcrumbs cannot shrink or wrap the header actions', () => {
+  assert.match(mainLayout, /className="app-breadcrumb"/);
+  assert.match(mainLayout, /className="app-header-actions"/);
+});
+
+test('Source titles use a dedicated overflow-safe presentation class', () => {
+  assert.match(mainLayout, /className="page-title page-title--compact source-title"/);
+});
