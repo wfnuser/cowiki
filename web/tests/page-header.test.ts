@@ -18,7 +18,7 @@ test('the page header has no unused overflow actions menu', () => {
 });
 
 test('the page, Space, and Agent panel headers share one visual baseline', () => {
-  assert.match(design, /export const APP_HEADER_HEIGHT = 44/);
+  assert.match(design, /export const APP_HEADER_HEIGHT = 48/);
   assert.match(
     mainLayout,
     /height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT/,
