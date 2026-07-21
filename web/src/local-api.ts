@@ -163,7 +163,7 @@ export interface CloudLinkOptions {
 }
 
 export function linkCloudSpace(options: CloudLinkOptions): Promise<CloudSyncResult> {
-  return invoke<CloudSyncResult>('cloud_link_space', options);
+  return invoke<CloudSyncResult>('cloud_link_space', { ...options });
 }
 
 export function getCloudStatus(spaceSlug: string): Promise<CloudSyncResult> {
@@ -182,7 +182,7 @@ export function submitCloud(options: {
   pullRequestTitle?: string;
   pullRequestBody?: string;
 }): Promise<CloudSyncResult> {
-  return invoke<CloudSyncResult>('cloud_submit', options);
+  return invoke<CloudSyncResult>('cloud_submit', { ...options });
 }
 
 export function continueCloudRebase(spaceSlug: string): Promise<CloudSyncResult> {
