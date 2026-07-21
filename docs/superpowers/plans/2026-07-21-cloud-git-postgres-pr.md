@@ -46,25 +46,25 @@
 - Create: `cloud/migrations/001_control_plane.sql`
 - Test: `cloud/tests/foundation.rs`
 
-- [ ] **Step 1: Write failing foundation tests**
+- [x] **Step 1: Write failing foundation tests**
 
 Test that missing `DATABASE_URL`, a relative repository root, malformed public origin, and a too-short secret are rejected, and assert the migration contains the four role values plus the partial unique open-PR index.
 
-- [ ] **Step 2: Run the focused test and observe failure**
+- [x] **Step 2: Run the focused test and observe failure**
 
 Run: `cargo test --manifest-path cloud/Cargo.toml --test foundation`
 Expected: FAIL because the `cowiki_cloud` crate and configuration types do not exist.
 
-- [ ] **Step 3: Implement the minimal Cloud crate and schema**
+- [x] **Step 3: Implement the minimal Cloud crate and schema**
 
 Define `Config::from_iter`, `AppError`, shared DTOs, `db::connect_and_migrate`, and an Axum `/healthz` router. Use SQLx `migrate!()` and PostgreSQL enums/check constraints for `owner`, `manager`, `editor`, and `viewer`. Add `UNIQUE (space_id, head_ref) WHERE status = 'open'`.
 
-- [ ] **Step 4: Run foundation tests**
+- [x] **Step 4: Run foundation tests**
 
 Run: `cargo test --manifest-path cloud/Cargo.toml --test foundation`
 Expected: PASS.
 
-- [ ] **Step 5: Commit foundation**
+- [x] **Step 5: Commit foundation**
 
 ```bash
 git add cloud
@@ -79,20 +79,20 @@ git commit -m "feat(cloud): add PostgreSQL control plane foundation"
 - Modify: `cloud/src/lib.rs`
 - Test: `cloud/tests/auth.rs`
 
-- [ ] **Step 1: Write failing auth tests**
+- [x] **Step 1: Write failing auth tests**
 
 Cover SHA-256 API-key hashing, constant-time verification, 10-minute OAuth state expiry, 60-second one-time desktop exchange, replay rejection, and rejection of unallowlisted callback origins.
 
-- [ ] **Step 2: Run the auth tests and observe failure**
+- [x] **Step 2: Run the auth tests and observe failure**
 
 Run: `cargo test --manifest-path cloud/Cargo.toml --test auth`
 Expected: FAIL because authentication handlers and stores are absent.
 
-- [ ] **Step 3: Implement authentication**
+- [x] **Step 3: Implement authentication**
 
 Add GitHub authorize/callback handlers, one-time code exchange, Bearer extraction, revocation-aware API-key lookup, and an `AuthenticatedUser` Axum extractor. Return the existing desktop shape `{ apiKey, userName, userId }`.
 
-- [ ] **Step 4: Run auth tests**
+- [x] **Step 4: Run auth tests**
 
 Run: `cargo test --manifest-path cloud/Cargo.toml --test auth`
 Expected: PASS.

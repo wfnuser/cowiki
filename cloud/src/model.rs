@@ -1,4 +1,15 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct User {
+    pub id: Uuid,
+    pub github_id: i64,
+    pub handle: String,
+    pub display_name: String,
+    pub avatar_url: Option<String>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "lowercase")]

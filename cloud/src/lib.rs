@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod config;
 pub mod db;
 pub mod error;
@@ -23,6 +24,7 @@ pub fn build_router(config: Config, pool: PgPool) -> Router {
     };
     Router::new()
         .route("/healthz", get(healthz))
+        .merge(auth::routes())
         .with_state(state)
 }
 
