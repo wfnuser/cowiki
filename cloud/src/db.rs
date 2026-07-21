@@ -568,11 +568,19 @@ pub async fn reconcile_pull_request_head(
     Ok(record)
 }
 
-pub async fn approval_count(pool: &PgPool, pull_request_id: Uuid) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar("SELECT COUNT(*) FROM pull_request_approvals WHERE pull_request_id = $1")
-        .bind(pull_request_id)
-        .fetch_one(pool)
-        .await
+pub async fn approval_count(
+    pool: &PgPool,
+    pull_request_id: Uuid,
+    head_oid: &str,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM pull_request_approvals
+         WHERE pull_request_id = $1 AND head_oid = $2",
+    )
+    .bind(pull_request_id)
+    .bind(head_oid)
+    .fetch_one(pool)
+    .await
 }
 
 pub async fn approve_pull_request(

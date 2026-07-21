@@ -5,6 +5,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header}
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use std::process::Stdio;
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
@@ -16,6 +17,7 @@ use crate::git_repo::{GitRepoError, GitRepoStore};
 use crate::model::MemberRole;
 
 const MAX_GIT_REQUEST_BYTES: usize = 256 * 1024 * 1024;
+const GIT_CHILD_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GitService {
@@ -66,21 +68,21 @@ async fn git_http_handler(
         return Err(AppError::BadRequest("Git request is too large".into()));
     }
     state.repos.ensure_space(space_id).map_err(git_internal)?;
-    let bootstrap = service == GitService::ReceivePack
-        && role == MemberRole::Owner
-        && !state.repos.main_exists(space_id).map_err(git_internal)?;
     let request = GitHttpRequest {
         method,
         path,
         query,
         headers,
         body: body.to_vec(),
-        bootstrap,
+        bootstrap: false,
     };
 
     let response = if service == GitService::ReceivePack {
         let lock = state.repos.space_lock(space_id).map_err(git_internal)?;
         let _guard = lock.lock().await;
+        let mut request = request;
+        request.bootstrap = role == MemberRole::Owner
+            && !state.repos.main_exists(space_id).map_err(git_internal)?;
         run_git_http_backend(&state.repos, space_id, user.user.id, role, request)
             .await
             .map_err(git_internal)?
@@ -190,7 +192,8 @@ pub async fn run_git_http_backend(
         .env("CONTENT_LENGTH", request.body.len().to_string())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
     if let Some(content_type) = request
         .headers
         .get(header::CONTENT_TYPE)
@@ -205,11 +208,15 @@ pub async fn run_git_http_backend(
     {
         command.env("HTTP_GIT_PROTOCOL", protocol);
     }
-    let mut child = command.spawn()?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(&request.body).await?;
-    }
-    let output = child.wait_with_output().await?;
+    let output = tokio::time::timeout(GIT_CHILD_TIMEOUT, async move {
+        let mut child = command.spawn()?;
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(&request.body).await?;
+        }
+        child.wait_with_output().await
+    })
+    .await
+    .map_err(|_| GitRepoError::Git("Git service timed out".into()))??;
     if !output.status.success() && output.stdout.is_empty() {
         return Err(GitRepoError::Git(
             String::from_utf8_lossy(&output.stderr).trim().to_string(),
@@ -240,7 +247,6 @@ pub fn parse_cgi_response(output: Vec<u8>) -> Result<GitHttpResponse, GitRepoErr
             .ok_or_else(|| GitRepoError::Git("invalid Git CGI header".into()))?;
         if name.eq_ignore_ascii_case("status") {
             let code = value
-                .trim()
                 .split_whitespace()
                 .next()
                 .and_then(|value| value.parse::<u16>().ok())

@@ -86,6 +86,19 @@ async fn live_user_branch_invalidates_approval_and_merges_with_expected_head() {
         .unwrap();
     assert_eq!(approved.status(), StatusCode::OK);
     assert_eq!(response_json(approved).await["approvalCount"], 1);
+    let parsed_pr_id = Uuid::parse_str(pr_id).unwrap();
+    assert_eq!(
+        db::approval_count(&database.pool, parsed_pr_id, &second_oid)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        db::approval_count(&database.pool, parsed_pr_id, &"f".repeat(40))
+            .await
+            .unwrap(),
+        0
+    );
 
     std::fs::write(working.path().join("index.md"), "# Three\n").unwrap();
     run(working.path(), &["commit", "-am", "three"]);
@@ -271,7 +284,7 @@ fn rev(directory: &std::path::Path, revision: &str) -> String {
 }
 
 fn test_config(repo_root: &str) -> Config {
-    Config::from_iter(HashMap::from([
+    Config::from_values(HashMap::from([
         (
             "DATABASE_URL".into(),
             "postgres://postgres:cowiki@127.0.0.1:55432/postgres".into(),

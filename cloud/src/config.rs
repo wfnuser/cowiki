@@ -24,10 +24,10 @@ pub enum ConfigError {
 
 impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
-        Self::from_iter(std::env::vars())
+        Self::from_values(std::env::vars())
     }
 
-    pub fn from_iter<I>(values: I) -> Result<Self, ConfigError>
+    pub fn from_values<I>(values: I) -> Result<Self, ConfigError>
     where
         I: IntoIterator<Item = (String, String)>,
     {
@@ -73,7 +73,7 @@ impl Config {
         }
 
         let token_pepper = required("COWIKI_TOKEN_PEPPER")?;
-        if token_pepper.as_bytes().len() < 32 {
+        if token_pepper.len() < 32 {
             return Err(ConfigError::Invalid {
                 name: "COWIKI_TOKEN_PEPPER",
                 reason: "value must be at least 32 bytes".to_string(),

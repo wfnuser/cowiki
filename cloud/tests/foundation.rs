@@ -28,7 +28,7 @@ fn valid_environment(repo_root: &str) -> HashMap<String, String> {
 fn production_configuration_is_strict_and_normalized() {
     let temp = tempfile::tempdir().unwrap();
     let environment = valid_environment(temp.path().to_str().unwrap());
-    let config = Config::from_iter(environment).unwrap();
+    let config = Config::from_values(environment).unwrap();
 
     assert_eq!(config.database_url.scheme(), "postgres");
     assert_eq!(config.repo_root, temp.path());
@@ -42,7 +42,7 @@ fn missing_database_url_is_rejected() {
     let mut environment = valid_environment(temp.path().to_str().unwrap());
     environment.remove("DATABASE_URL");
 
-    let error = Config::from_iter(environment).unwrap_err();
+    let error = Config::from_values(environment).unwrap_err();
     assert!(error.to_string().contains("DATABASE_URL"));
 }
 
@@ -52,7 +52,7 @@ fn sqlite_and_relative_repository_roots_are_rejected() {
     let mut sqlite = valid_environment(temp.path().to_str().unwrap());
     sqlite.insert("DATABASE_URL".into(), "sqlite://cloud.db".into());
     assert!(
-        Config::from_iter(sqlite)
+        Config::from_values(sqlite)
             .unwrap_err()
             .to_string()
             .contains("PostgreSQL")
@@ -60,7 +60,7 @@ fn sqlite_and_relative_repository_roots_are_rejected() {
 
     let relative = valid_environment("var/lib/cowiki");
     assert!(
-        Config::from_iter(relative)
+        Config::from_values(relative)
             .unwrap_err()
             .to_string()
             .contains("absolute")
@@ -73,7 +73,7 @@ fn malformed_origin_and_short_pepper_are_rejected() {
     let mut origin = valid_environment(temp.path().to_str().unwrap());
     origin.insert("COWIKI_PUBLIC_ORIGIN".into(), "file:///tmp/cloud".into());
     assert!(
-        Config::from_iter(origin)
+        Config::from_values(origin)
             .unwrap_err()
             .to_string()
             .contains("http")
@@ -87,7 +87,7 @@ fn malformed_origin_and_short_pepper_are_rejected() {
         let mut origin = valid_environment(temp.path().to_str().unwrap());
         origin.insert("COWIKI_PUBLIC_ORIGIN".into(), value.into());
         assert!(
-            Config::from_iter(origin).is_err(),
+            Config::from_values(origin).is_err(),
             "accepted origin {value}"
         );
     }
@@ -95,7 +95,7 @@ fn malformed_origin_and_short_pepper_are_rejected() {
     let mut pepper = valid_environment(temp.path().to_str().unwrap());
     pepper.insert("COWIKI_TOKEN_PEPPER".into(), "short".into());
     assert!(
-        Config::from_iter(pepper)
+        Config::from_values(pepper)
             .unwrap_err()
             .to_string()
             .contains("32 bytes")

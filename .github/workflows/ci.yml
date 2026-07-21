@@ -94,5 +94,7 @@ jobs:
         run: cargo fmt --all --manifest-path cloud/Cargo.toml -- --check
       - name: Test PostgreSQL and Git control plane
         run: cargo test --locked --manifest-path cloud/Cargo.toml
+      - name: Verify publish and permission workflow
+        run: ./scripts/cloud-e2e.sh
       - name: Check deployment contract
         run: bash cloud/tests/container_contract.sh

@@ -16,6 +16,48 @@ CoWiki Cloud is one PostgreSQL control plane plus one persistent bare-Git reposi
 
 The service applies embedded SQL migrations before listening. Startup fails if PostgreSQL is unavailable or `/var/lib/cowiki/repos` is not writable. Logs are structured JSON on stdout.
 
+The browser application and API are expected to share `COWIKI_PUBLIC_ORIGIN`. API CORS responses allow that exact origin, REST request bodies are limited to 1 MiB, REST requests time out after 30 seconds, and Git service children are terminated after 120 seconds. Keep a reverse-proxy request limit at least as large as the Cloud Git limit (256 MiB) on `/git/*`, while using a smaller limit for `/api/*`.
+
+## Publish and review workflow
+
+The desktop app exposes one Space-scoped Cloud action. It never publishes a local Space in the background:
+
+1. **Publish Space** creates the PostgreSQL control-plane record and bare Git repository. The local `main` commit initializes both Cloud `main` and `user/<owner-id>` at the same OID.
+2. **Sync** fetches Cloud `main`. A clean local `main` is rebased automatically; a conflict stops without silently choosing either side.
+3. **Submit** commits dirty local Markdown after the user confirms a commit message, syncs Cloud `main`, pushes local `main` to `user/<user-id>` with `--force-with-lease`, and creates or updates the open pull request for that live user branch.
+4. An Owner or Manager merges the exact reviewed `head_oid` into Cloud `main`. The browser Wiki reads only that merged bare-Git main; local drafts and unmerged user branches are not shown as published knowledge.
+
+Pull requests follow subsequent pushes to `user/<user-id>`. An approval is counted only for the PR's current head. A changed head therefore requires a fresh approval in the UI, even if a stale approval row still exists temporarily.
+
+### Role matrix
+
+| Capability | Owner | Manager | Editor | Viewer |
+| --- | --- | --- | --- | --- |
+| Read Cloud Wiki, members, and PRs | Yes | Yes | Yes | Yes |
+| Push `user/<own-id>` and create/approve PRs | Yes | Yes | Yes | No |
+| Merge PRs | Yes | Yes | No | No |
+| Add, change, or remove non-owner members | Yes | Yes | No | No |
+| Bootstrap a new Space | Yes | No | No | No |
+
+All members authenticate for Git Smart HTTP with the same bearer credential used by the REST API. The live pre-receive hook rejects direct pushes to `main`, pushes to another user's branch, user-branch deletion, unauthorized bootstrap, and unequal bootstrap refs.
+
+## Development session injection
+
+OAuth is the production session source. Tests and local previews may inject an already-issued development session without adding an API-key form to the product UI. In browser DevTools on the preview origin:
+
+```js
+localStorage.setItem('cowiki_api_key', '<development API key>');
+localStorage.setItem('cowiki_user', JSON.stringify({
+  id: '<user UUID>',
+  name: 'Development User',
+  mode: 'remote',
+}));
+localStorage.setItem('cowiki.apiOrigin', 'http://127.0.0.1:8787');
+location.assign('/cloud');
+```
+
+The React `CloudApp` also accepts an explicit `CloudSession` prop for component tests and preview harnesses. Never ship a hard-coded API key or expose the injection seam as an end-user credential field.
+
 ## Storage and backup
 
 Back up the PostgreSQL database and `cloud-repositories` volume as one coordinated recovery point. Pause writes (or stop the Cloud container), record the checkpoint time, run `pg_dump --format=custom`, and archive the repository volume before resuming writes. Encrypt both backups and test restores regularly.

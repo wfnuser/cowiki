@@ -266,7 +266,7 @@ async fn insert_api_key(pool: &sqlx::PgPool, user_id: Uuid) -> String {
 }
 
 fn test_config(repo_root: &str) -> Config {
-    Config::from_iter(HashMap::from([
+    Config::from_values(HashMap::from([
         (
             "DATABASE_URL".into(),
             "postgres://postgres:cowiki@127.0.0.1:55432/postgres".into(),

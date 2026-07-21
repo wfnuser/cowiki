@@ -184,7 +184,7 @@ async fn github_callback(
         db::create_desktop_exchange_code(&state.pool, user.id, &state.config.token_pepper).await?;
 
     let mut target = if let Some(ref callback) = callback {
-        Url::parse(&callback).map_err(|error| AppError::Internal(error.to_string()))?
+        Url::parse(callback).map_err(|error| AppError::Internal(error.to_string()))?
     } else {
         state
             .config

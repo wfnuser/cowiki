@@ -146,6 +146,8 @@ async fn approve_pull_request(
     if !role.can_push() {
         return Err(AppError::Forbidden);
     }
+    let lock = state.repos.space_lock(space_id).map_err(git_error)?;
+    let _guard = lock.lock().await;
     let record = db::get_pull_request(&state.pool, space_id, pull_request_id)
         .await?
         .ok_or(AppError::NotFound)?;
@@ -249,7 +251,7 @@ async fn reconcile_live_head(
 }
 
 async fn response(state: &AppState, record: PullRequestRecord) -> AppResult<PullRequestResponse> {
-    let approval_count = db::approval_count(&state.pool, record.id).await?;
+    let approval_count = db::approval_count(&state.pool, record.id, &record.head_oid).await?;
     Ok(PullRequestResponse {
         id: record.id,
         space_id: record.space_id,

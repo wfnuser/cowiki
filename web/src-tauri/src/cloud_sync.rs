@@ -393,12 +393,6 @@ fn sync_if_clean_path(path: &Path, token: &str) -> Result<CloudSyncResult, Strin
 fn push_user_branch(path: &Path, token: &str, user_id: Uuid) -> Result<CloudSyncResult, String> {
     let tracking = format!("refs/remotes/cowiki/user/{user_id}");
     let lease_oid = git_stdout(path, &["rev-parse", "--verify", &tracking], None).ok();
-    if lease_oid.is_some() && !is_ancestor(path, &tracking, "HEAD")? {
-        return Ok(CloudSyncResult::new(
-            SyncState::LeaseRejected,
-            "The Cloud user branch contains work not present locally; review that device's changes before retrying.",
-        ));
-    }
     let lease = format!(
         "--force-with-lease=refs/heads/user/{user_id}:{}",
         lease_oid.as_deref().unwrap_or("")
@@ -433,19 +427,6 @@ fn push_user_branch(path: &Path, token: &str, user_id: Uuid) -> Result<CloudSync
         ))
     } else {
         Err(failure)
-    }
-}
-
-fn is_ancestor(path: &Path, ancestor: &str, descendant: &str) -> Result<bool, String> {
-    let output = git_command(
-        path,
-        &["merge-base", "--is-ancestor", ancestor, descendant],
-        None,
-    )?;
-    match output.status.code() {
-        Some(0) => Ok(true),
-        Some(1) => Ok(false),
-        _ => Err(git_failure(&output)),
     }
 }
 
@@ -818,6 +799,7 @@ mod tests {
         let user = Uuid::new_v4();
         configure_cowiki_remote(local.path(), remote.path().to_str().unwrap(), user).unwrap();
         bootstrap_remote(local.path(), "fixture-token", user).unwrap();
+        fetch(local.path(), "fixture-token").unwrap();
 
         run(
             collaborator.path(),
@@ -838,8 +820,6 @@ mod tests {
             collaborator.path(),
             &["push", "origin", &format!("main:refs/heads/user/{user}")],
         );
-        fetch(local.path(), "fixture-token").unwrap();
-
         std::fs::write(local.path().join("local.md"), "# Local device\n").unwrap();
         run(local.path(), &["add", "local.md"]);
         run(local.path(), &["commit", "-m", "local device"]);
@@ -850,6 +830,63 @@ mod tests {
         assert_eq!(
             output(remote.path(), &["show", &format!("user/{user}:other.md")]),
             "# Other device"
+        );
+    }
+
+    #[test]
+    fn rebased_main_can_replace_the_same_users_previous_head() {
+        let local = tempfile::tempdir().unwrap();
+        let remote = tempfile::tempdir().unwrap();
+        let collaborator = tempfile::tempdir().unwrap();
+        init_repo(local.path(), "# Initial\n");
+        run(remote.path(), &["init", "--bare", "--initial-branch=main"]);
+        let user = Uuid::new_v4();
+        configure_cowiki_remote(local.path(), remote.path().to_str().unwrap(), user).unwrap();
+        bootstrap_remote(local.path(), "fixture-token", user).unwrap();
+
+        std::fs::write(local.path().join("local.md"), "# Local knowledge\n").unwrap();
+        run(local.path(), &["add", "local.md"]);
+        run(local.path(), &["commit", "-m", "local knowledge"]);
+        assert_eq!(
+            push_user_branch(local.path(), "fixture-token", user)
+                .unwrap()
+                .state,
+            SyncState::Submitted
+        );
+        let previous_user_head = output(
+            remote.path(),
+            &["rev-parse", &format!("refs/heads/user/{user}")],
+        );
+
+        run(
+            collaborator.path(),
+            &["clone", remote.path().to_str().unwrap(), "."],
+        );
+        run(collaborator.path(), &["config", "user.name", "Cloud"]);
+        run(
+            collaborator.path(),
+            &["config", "user.email", "cloud@cowiki.local"],
+        );
+        std::fs::write(collaborator.path().join("cloud.md"), "# Cloud main\n").unwrap();
+        run(collaborator.path(), &["add", "cloud.md"]);
+        run(collaborator.path(), &["commit", "-m", "advance Cloud main"]);
+        run(collaborator.path(), &["push", "origin", "main"]);
+
+        let synced = sync_if_clean_path(local.path(), "fixture-token").unwrap();
+        assert_eq!(synced.state, SyncState::Synced);
+        assert_ne!(
+            output(local.path(), &["rev-parse", "HEAD"]),
+            previous_user_head
+        );
+
+        let pushed = push_user_branch(local.path(), "fixture-token", user).unwrap();
+        assert_eq!(pushed.state, SyncState::Submitted);
+        assert_eq!(
+            output(
+                remote.path(),
+                &["rev-parse", &format!("refs/heads/user/{user}")]
+            ),
+            output(local.path(), &["rev-parse", "HEAD"])
         );
     }
 
