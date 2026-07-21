@@ -137,6 +137,25 @@ fn fast_forward_main_uses_expected_head_and_compare_and_swap() {
     assert_eq!(merged.main_oid, head);
     let retried = store.fast_forward_main(space, &user_branch, &head).unwrap();
     assert!(retried.already_merged);
+
+    run(working.path(), &["checkout", "--orphan", "divergent"]);
+    std::fs::write(working.path().join("index.md"), "# Divergent\n").unwrap();
+    run(working.path(), &["add", "index.md"]);
+    run(working.path(), &["commit", "-m", "divergent"]);
+    let divergent = rev(working.path(), "HEAD");
+    run(
+        working.path(),
+        &[
+            "push",
+            "--force",
+            "cloud",
+            &format!("HEAD:refs/heads/{user_branch}"),
+        ],
+    );
+    let error = store
+        .fast_forward_main(space, &user_branch, &divergent)
+        .unwrap_err();
+    assert!(error.to_string().contains("not based"));
 }
 
 fn run(directory: &std::path::Path, arguments: &[&str]) {

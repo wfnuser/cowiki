@@ -5,6 +5,7 @@ pub mod error;
 pub mod git_http;
 pub mod git_repo;
 pub mod model;
+pub mod pull_requests;
 pub mod spaces;
 
 use axum::Router;
@@ -33,6 +34,7 @@ pub fn build_router(config: Config, pool: PgPool) -> Result<Router, git_repo::Gi
         .route("/healthz", get(healthz))
         .merge(auth::routes())
         .merge(spaces::routes())
+        .merge(pull_requests::routes())
         .merge(git_http::routes())
         .with_state(state))
 }

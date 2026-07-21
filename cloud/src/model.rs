@@ -21,6 +21,15 @@ pub enum MemberRole {
     Viewer,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[serde(rename_all = "lowercase")]
+#[sqlx(type_name = "pull_request_status", rename_all = "lowercase")]
+pub enum PullRequestStatus {
+    Open,
+    Merged,
+    Closed,
+}
+
 impl MemberRole {
     pub fn can_push(self) -> bool {
         matches!(self, Self::Owner | Self::Manager | Self::Editor)

@@ -5,8 +5,7 @@ use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
 use crate::auth::{api_key_hash, random_secret};
-use crate::model::MemberRole;
-use crate::model::User;
+use crate::model::{MemberRole, PullRequestStatus, User};
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct SpaceMembership {
@@ -14,6 +13,22 @@ pub struct SpaceMembership {
     pub name: String,
     pub slug: String,
     pub role: MemberRole,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct PullRequestRecord {
+    pub id: Uuid,
+    pub space_id: Uuid,
+    pub number: i64,
+    pub author_id: Uuid,
+    pub title: String,
+    pub body: String,
+    pub base_ref: String,
+    pub head_ref: String,
+    pub base_oid: String,
+    pub head_oid: String,
+    pub status: PullRequestStatus,
+    pub merged_by: Option<Uuid>,
 }
 
 #[derive(Debug, Clone)]
@@ -296,4 +311,245 @@ pub async fn get_space_for_user(
     .bind(user_id)
     .fetch_optional(pool)
     .await
+}
+
+const PR_COLUMNS: &str = "id, space_id, number, author_id, title, body, base_ref, head_ref,
+     base_oid, head_oid, status, merged_by";
+
+pub async fn create_or_update_pull_request(
+    pool: &PgPool,
+    space_id: Uuid,
+    author_id: Uuid,
+    title: &str,
+    body: &str,
+    base_oid: &str,
+    head_oid: &str,
+) -> Result<(PullRequestRecord, bool), sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    sqlx::query("SELECT id FROM spaces WHERE id = $1 FOR UPDATE")
+        .bind(space_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+    let head_ref = format!("user/{author_id}");
+    let existing = sqlx::query_as::<_, PullRequestRecord>(&format!(
+        "SELECT {PR_COLUMNS} FROM pull_requests
+         WHERE space_id = $1 AND head_ref = $2 AND status = 'open'"
+    ))
+    .bind(space_id)
+    .bind(&head_ref)
+    .fetch_optional(&mut *transaction)
+    .await?;
+
+    let (record, created) = if let Some(existing) = existing {
+        if existing.head_oid != head_oid {
+            sqlx::query("DELETE FROM pull_request_approvals WHERE pull_request_id = $1")
+                .bind(existing.id)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        let record = sqlx::query_as::<_, PullRequestRecord>(&format!(
+            "UPDATE pull_requests SET
+                title = $2, body = $3, base_oid = $4, head_oid = $5, updated_at = now()
+             WHERE id = $1 RETURNING {PR_COLUMNS}"
+        ))
+        .bind(existing.id)
+        .bind(title)
+        .bind(body)
+        .bind(base_oid)
+        .bind(head_oid)
+        .fetch_one(&mut *transaction)
+        .await?;
+        (record, false)
+    } else {
+        let number = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(MAX(number), 0) + 1 FROM pull_requests WHERE space_id = $1",
+        )
+        .bind(space_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let id = Uuid::new_v4();
+        let record = sqlx::query_as::<_, PullRequestRecord>(&format!(
+            "INSERT INTO pull_requests
+                (id, space_id, number, author_id, title, body, base_ref, head_ref,
+                 base_oid, head_oid)
+             VALUES ($1, $2, $3, $4, $5, $6, 'main', $7, $8, $9)
+             RETURNING {PR_COLUMNS}"
+        ))
+        .bind(id)
+        .bind(space_id)
+        .bind(number)
+        .bind(author_id)
+        .bind(title)
+        .bind(body)
+        .bind(&head_ref)
+        .bind(base_oid)
+        .bind(head_oid)
+        .fetch_one(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "INSERT INTO audit_events
+                (space_id, actor_id, action, subject_type, subject_id, metadata)
+             VALUES ($1, $2, 'pull_request.created', 'pull_request', $3,
+                     jsonb_build_object('number', $4::bigint, 'head_ref', $5::text))",
+        )
+        .bind(space_id)
+        .bind(author_id)
+        .bind(id.to_string())
+        .bind(number)
+        .bind(&head_ref)
+        .execute(&mut *transaction)
+        .await?;
+        (record, true)
+    };
+    transaction.commit().await?;
+    Ok((record, created))
+}
+
+pub async fn list_pull_requests(
+    pool: &PgPool,
+    space_id: Uuid,
+) -> Result<Vec<PullRequestRecord>, sqlx::Error> {
+    sqlx::query_as::<_, PullRequestRecord>(&format!(
+        "SELECT {PR_COLUMNS} FROM pull_requests
+         WHERE space_id = $1 ORDER BY number DESC"
+    ))
+    .bind(space_id)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn get_pull_request(
+    pool: &PgPool,
+    space_id: Uuid,
+    pull_request_id: Uuid,
+) -> Result<Option<PullRequestRecord>, sqlx::Error> {
+    sqlx::query_as::<_, PullRequestRecord>(&format!(
+        "SELECT {PR_COLUMNS} FROM pull_requests WHERE id = $1 AND space_id = $2"
+    ))
+    .bind(pull_request_id)
+    .bind(space_id)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn reconcile_pull_request_head(
+    pool: &PgPool,
+    record: PullRequestRecord,
+    base_oid: &str,
+    head_oid: &str,
+) -> Result<PullRequestRecord, sqlx::Error> {
+    if record.base_oid == base_oid && record.head_oid == head_oid {
+        return Ok(record);
+    }
+    let mut transaction = pool.begin().await?;
+    sqlx::query("DELETE FROM pull_request_approvals WHERE pull_request_id = $1")
+        .bind(record.id)
+        .execute(&mut *transaction)
+        .await?;
+    let record = sqlx::query_as::<_, PullRequestRecord>(&format!(
+        "UPDATE pull_requests SET base_oid = $2, head_oid = $3, updated_at = now()
+         WHERE id = $1 AND status = 'open' RETURNING {PR_COLUMNS}"
+    ))
+    .bind(record.id)
+    .bind(base_oid)
+    .bind(head_oid)
+    .fetch_one(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(record)
+}
+
+pub async fn approval_count(pool: &PgPool, pull_request_id: Uuid) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM pull_request_approvals WHERE pull_request_id = $1")
+        .bind(pull_request_id)
+        .fetch_one(pool)
+        .await
+}
+
+pub async fn approve_pull_request(
+    pool: &PgPool,
+    record: &PullRequestRecord,
+    user_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO pull_request_approvals (pull_request_id, user_id, head_oid)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (pull_request_id, user_id) DO UPDATE SET
+             head_oid = EXCLUDED.head_oid, created_at = now()",
+    )
+    .bind(record.id)
+    .bind(user_id)
+    .bind(&record.head_oid)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn lock_pull_request_for_merge(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    space_id: Uuid,
+    pull_request_id: Uuid,
+) -> Result<Option<PullRequestRecord>, sqlx::Error> {
+    sqlx::query_as::<_, PullRequestRecord>(&format!(
+        "SELECT {PR_COLUMNS} FROM pull_requests
+         WHERE id = $1 AND space_id = $2 FOR UPDATE"
+    ))
+    .bind(pull_request_id)
+    .bind(space_id)
+    .fetch_optional(&mut **transaction)
+    .await
+}
+
+pub async fn reconcile_pull_request_head_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    record: &PullRequestRecord,
+    base_oid: &str,
+    head_oid: &str,
+) -> Result<PullRequestRecord, sqlx::Error> {
+    if record.base_oid == base_oid && record.head_oid == head_oid {
+        return Ok(record.clone());
+    }
+    sqlx::query("DELETE FROM pull_request_approvals WHERE pull_request_id = $1")
+        .bind(record.id)
+        .execute(&mut **transaction)
+        .await?;
+    sqlx::query_as::<_, PullRequestRecord>(&format!(
+        "UPDATE pull_requests SET base_oid = $2, head_oid = $3, updated_at = now()
+         WHERE id = $1 RETURNING {PR_COLUMNS}"
+    ))
+    .bind(record.id)
+    .bind(base_oid)
+    .bind(head_oid)
+    .fetch_one(&mut **transaction)
+    .await
+}
+
+pub async fn mark_pull_request_merged(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    record: &PullRequestRecord,
+    merged_by: Uuid,
+) -> Result<PullRequestRecord, sqlx::Error> {
+    let merged = sqlx::query_as::<_, PullRequestRecord>(&format!(
+        "UPDATE pull_requests SET status = 'merged', merged_by = $2,
+             merged_at = COALESCE(merged_at, now()), updated_at = now()
+         WHERE id = $1 RETURNING {PR_COLUMNS}"
+    ))
+    .bind(record.id)
+    .bind(merged_by)
+    .fetch_one(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "INSERT INTO audit_events
+            (space_id, actor_id, action, subject_type, subject_id, metadata)
+         VALUES ($1, $2, 'pull_request.merged', 'pull_request', $3,
+                 jsonb_build_object('number', $4::bigint, 'head_oid', $5::text))",
+    )
+    .bind(record.space_id)
+    .bind(merged_by)
+    .bind(record.id.to_string())
+    .bind(record.number)
+    .bind(&record.head_oid)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(merged)
 }

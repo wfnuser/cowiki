@@ -194,7 +194,7 @@ Create the database record transactionally, initialize the bare repo, compensate
 Run: `cargo test --manifest-path cloud/Cargo.toml --test spaces`
 Expected: PASS.
 
-- [ ] **Step 5: Commit Space API**
+- [x] **Step 5: Commit Space API**
 
 ```bash
 git add cloud/src/spaces.rs cloud/src/db.rs cloud/src/lib.rs cloud/tests/spaces.rs
@@ -209,20 +209,20 @@ git commit -m "feat(cloud): add Git-backed Space membership API"
 - Modify: `cloud/src/lib.rs`
 - Test: `cloud/tests/pull_requests.rs`
 
-- [ ] **Step 1: Write failing PR tests**
+- [x] **Step 1: Write failing PR tests**
 
 Cover one open PR per user branch, later branch pushes updating `head_oid`, approval invalidation on head change, Editor merge denial, Owner/Manager merge permission, stale `expected_head_oid`, non-fast-forward denial, compare-and-swap main advancement, and retry after main already equals the expected head.
 
-- [ ] **Step 2: Run PR tests and observe failure**
+- [x] **Step 2: Run PR tests and observe failure**
 
 Run: `cargo test --manifest-path cloud/Cargo.toml --test pull_requests`
 Expected: FAIL because PR endpoints are absent.
 
-- [ ] **Step 3: Implement PR reconciliation and merge**
+- [x] **Step 3: Implement PR reconciliation and merge**
 
 Use `SELECT ... FOR UPDATE` during merge, reconcile Git before returning every PR, delete approvals when the live head changes, store approvals against the current OID, and update `main` only through `GitRepoStore::fast_forward_main(expected_head_oid)`.
 
-- [ ] **Step 4: Run PR tests**
+- [x] **Step 4: Run PR tests**
 
 Run: `cargo test --manifest-path cloud/Cargo.toml --test pull_requests`
 Expected: PASS.
