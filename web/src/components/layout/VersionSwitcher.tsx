@@ -37,12 +37,6 @@ export function VersionSwitcher({
     : selection.kind === 'upstream'
       ? 'main'
       : selectedAgent?.title ?? 'Agent Change';
-  const dot = selection.kind === 'working'
-    ? C.accent
-    : selection.kind === 'upstream'
-      ? C.purple
-      : C.blue;
-
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -53,7 +47,6 @@ export function VersionSwitcher({
           style={triggerStyle}
         >
           <GitBranch size={14} />
-          <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: dot }} />
           <span style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
           <ChevronDown
             aria-hidden

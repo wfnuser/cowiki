@@ -74,3 +74,8 @@ test('the version switcher centers a real chevron icon instead of a text glyph',
   assert.match(versionSwitcher, /<ChevronDown[^>]*aria-hidden[^>]*\/>/);
   assert.doesNotMatch(versionSwitcher, />⌄</);
 });
+
+test('the persistent version trigger does not use a high-attention status dot', () => {
+  assert.doesNotMatch(versionSwitcher, /const dot =/);
+  assert.doesNotMatch(versionSwitcher, /background: dot/);
+});
