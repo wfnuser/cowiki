@@ -300,7 +300,7 @@ Expose `cloud_link_space`, `cloud_get_status`, `cloud_sync_if_clean`, `cloud_sub
 Run: `cargo test --manifest-path web/src-tauri/Cargo.toml cloud_sync` and `node --experimental-strip-types --test web/tests/cloud-sync-contract.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Commit desktop sync**
+- [x] **Step 6: Commit desktop sync**
 
 ```bash
 git add web/src-tauri/src/cloud_sync.rs web/src-tauri/src/local_engine.rs web/src-tauri/src/lib.rs web/src/local-api.ts web/tests/cloud-sync-contract.test.ts
@@ -319,25 +319,25 @@ git commit -m "feat(desktop): sync local main through Cloud pull requests"
 - Modify: `.github/workflows/ci.yml`
 - Test: `cloud/tests/container_contract.sh`
 
-- [ ] **Step 1: Write failing container contract test**
+- [x] **Step 1: Write failing container contract test**
 
 Assert the image runs as non-root, declares a writable repository volume, requires `DATABASE_URL`, has `git http-backend`, and Compose includes PostgreSQL health checks plus Cloud dependency ordering.
 
-- [ ] **Step 2: Run the contract and observe failure**
+- [x] **Step 2: Run the contract and observe failure**
 
 Run: `bash cloud/tests/container_contract.sh`
 Expected: FAIL because deployment files do not exist.
 
-- [ ] **Step 3: Implement deployment artifacts and runbook**
+- [x] **Step 3: Implement deployment artifacts and runbook**
 
 Use a multi-stage Rust build, a non-root runtime user, `tini`, Git, CA certificates, a persistent `/var/lib/cowiki/repos` volume, PostgreSQL 17, startup migration, structured logs, and documented coordinated backup/restore procedures.
 
-- [ ] **Step 4: Implement and run real E2E**
+- [x] **Step 4: Implement and run real E2E**
 
 Run: `bash scripts/cloud-e2e.sh`
 Expected: PASS after creating PostgreSQL, starting Cloud, authenticating fixture users, bootstrapping a repository, submitting, approving, merging, syncing a second clone, and rejecting a stale merge.
 
-- [ ] **Step 5: Run the complete regression suite**
+- [x] **Step 5: Run the complete regression suite**
 
 Run:
 

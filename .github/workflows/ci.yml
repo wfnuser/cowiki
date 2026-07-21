@@ -63,3 +63,34 @@ jobs:
         run: cargo build --locked
       - name: Test
         run: cargo test --locked
+
+  cloud:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: cowiki
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+        ports:
+          - 5432:5432
+    env:
+      TEST_DATABASE_URL: postgres://postgres:cowiki@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cloud -> target
+      - name: Check Rust formatting
+        run: cargo fmt --all --manifest-path cloud/Cargo.toml -- --check
+      - name: Test PostgreSQL and Git control plane
+        run: cargo test --locked --manifest-path cloud/Cargo.toml
+      - name: Check deployment contract
+        run: bash cloud/tests/container_contract.sh
