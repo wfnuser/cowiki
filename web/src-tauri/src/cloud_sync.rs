@@ -40,6 +40,8 @@ pub struct CloudSyncResult {
     pub committed: bool,
     pub message: String,
     pub pull_request: Option<CloudPullRequest>,
+    pub cloud_space_id: Option<String>,
+    pub cloud_base_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +60,8 @@ impl CloudSyncResult {
             committed: false,
             message: message.into(),
             pull_request: None,
+            cloud_space_id: None,
+            cloud_base_url: None,
         }
     }
 
@@ -68,7 +72,15 @@ impl CloudSyncResult {
             committed: false,
             message: "Rebase stopped for manual conflict resolution.".into(),
             pull_request: None,
+            cloud_space_id: None,
+            cloud_base_url: None,
         })
+    }
+
+    fn with_link(mut self, link: &CloudLink) -> Self {
+        self.cloud_space_id = Some(link.cloud_space_id.clone());
+        self.cloud_base_url = Some(link.base_url.clone());
+        self
     }
 }
 
@@ -151,18 +163,18 @@ pub fn link_space(
         CloudSyncResult::new(SyncState::UpToDate, "Cloud Space linked and initialized.")
     };
     result.committed = committed;
-    Ok(result)
+    Ok(result.with_link(&link))
 }
 
 pub fn get_status(engine: &LocalEngine, space_slug: &str) -> Result<CloudSyncResult, String> {
-    let Some(_) = engine.cloud_link(space_slug)? else {
+    let Some(link) = engine.cloud_link(space_slug)? else {
         return Ok(CloudSyncResult::new(
             SyncState::Unlinked,
             "This Space is local only.",
         ));
     };
     let space = engine.find_space(space_slug)?;
-    status_path(&space.local_path)
+    status_path(&space.local_path).map(|result| result.with_link(&link))
 }
 
 pub fn sync_if_clean(
@@ -170,10 +182,10 @@ pub fn sync_if_clean(
     space_slug: &str,
     token: &str,
 ) -> Result<CloudSyncResult, String> {
-    let _link = required_link(engine, space_slug)?;
+    let link = required_link(engine, space_slug)?;
     ensure_token(token)?;
     let space = engine.find_space(space_slug)?;
-    sync_if_clean_path(&space.local_path, token)
+    sync_if_clean_path(&space.local_path, token).map(|result| result.with_link(&link))
 }
 
 pub fn submit(
@@ -193,7 +205,8 @@ pub fn submit(
         .map_err(|_| "stored Cloud Space id is invalid".to_string())?;
     let space = engine.find_space(space_slug)?;
     if is_rebase_in_progress(&space.local_path)? {
-        return CloudSyncResult::conflicted(&space.local_path);
+        return CloudSyncResult::conflicted(&space.local_path)
+            .map(|result| result.with_link(&link));
     }
     ensure_local_main(&space.local_path)?;
 
@@ -217,7 +230,7 @@ pub fn submit(
         }
     }
 
-    let mut synced = sync_if_clean_path(&space.local_path, token)?;
+    let mut synced = sync_if_clean_path(&space.local_path, token)?.with_link(&link);
     synced.committed = committed;
     if synced.state == SyncState::Conflicted {
         return Ok(synced);
@@ -226,6 +239,8 @@ pub fn submit(
     if pushed.state == SyncState::LeaseRejected {
         return Ok(CloudSyncResult {
             committed,
+            cloud_space_id: Some(link.cloud_space_id.clone()),
+            cloud_base_url: Some(link.base_url.clone()),
             ..pushed
         });
     }
@@ -254,19 +269,21 @@ pub fn submit(
         committed,
         message: format!("Submitted Cloud pull request #{}.", pull_request.number),
         pull_request: Some(pull_request),
+        cloud_space_id: Some(link.cloud_space_id),
+        cloud_base_url: Some(link.base_url),
     })
 }
 
 pub fn rebase_continue(engine: &LocalEngine, space_slug: &str) -> Result<CloudSyncResult, String> {
-    let _link = required_link(engine, space_slug)?;
+    let link = required_link(engine, space_slug)?;
     let space = engine.find_space(space_slug)?;
-    rebase_continue_path(&space.local_path)
+    rebase_continue_path(&space.local_path).map(|result| result.with_link(&link))
 }
 
 pub fn rebase_abort(engine: &LocalEngine, space_slug: &str) -> Result<CloudSyncResult, String> {
-    let _link = required_link(engine, space_slug)?;
+    let link = required_link(engine, space_slug)?;
     let space = engine.find_space(space_slug)?;
-    rebase_abort_path(&space.local_path)
+    rebase_abort_path(&space.local_path).map(|result| result.with_link(&link))
 }
 
 fn required_link(engine: &LocalEngine, space_slug: &str) -> Result<CloudLink, String> {

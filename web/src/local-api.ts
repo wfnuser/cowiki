@@ -147,6 +147,8 @@ export interface CloudSyncResult {
   committed: boolean;
   message: string;
   pullRequest: CloudPullRequest | null;
+  cloudSpaceId: string | null;
+  cloudBaseUrl: string | null;
 }
 
 export interface CloudLinkOptions {
