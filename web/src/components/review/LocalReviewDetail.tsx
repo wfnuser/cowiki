@@ -19,12 +19,14 @@ export function LocalReviewDetail({
   target,
   onBack,
   onDraftChanged,
+  onReviewsChanged,
   onContinueAgent,
 }: {
   workspaceSlug: string;
   target: LocalReviewSelection;
   onBack: () => void;
   onDraftChanged?: () => void;
+  onReviewsChanged?: () => void;
   onContinueAgent?: (change: AgentChange) => void;
 }) {
   const [draftDiffs, setDraftDiffs] = useState<FileDiff[] | null>(null);
@@ -69,6 +71,7 @@ export function LocalReviewDetail({
     try {
       const result = await operation();
       await reload();
+      onReviewsChanged?.();
       if (action === 'merge') {
         const merge = agentMergeResult(
           (result as AgentChange).status === 'needsResolution' ? 'needsResolution' : 'merged',

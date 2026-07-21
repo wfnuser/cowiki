@@ -10,6 +10,7 @@ import {
 
 const mainLayout = readFileSync(new URL('../src/pages/MainLayout.tsx', import.meta.url), 'utf8');
 const spacePanel = readFileSync(new URL('../src/components/layout/SpacePanel.tsx', import.meta.url), 'utf8');
+const historyView = readFileSync(new URL('../src/components/views/HistoryView.tsx', import.meta.url), 'utf8');
 
 test('checkpoint names use the user local date and time', () => {
   const localTime = new Date(2026, 6, 15, 23, 5);
@@ -35,4 +36,9 @@ test('space navigation replaces Activity with History', () => {
   assert.match(spacePanel, /label: 'History'/);
   assert.doesNotMatch(mainLayout, /kind: 'activity'/);
   assert.match(mainLayout, /kind: 'history'/);
+});
+
+test('History shares the left-aligned content grid', () => {
+  assert.match(historyView, /width: 'min\(860px, 100%\)'/);
+  assert.doesNotMatch(historyView, /margin: '0 auto'/);
 });
