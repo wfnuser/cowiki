@@ -31,6 +31,7 @@ import { ReviewList } from '../components/review/ReviewList';
 import { ReviewDetail } from '../components/review/ReviewDetail';
 import { MembersView } from '../components/views/MembersView';
 import { HistoryView } from '../components/views/HistoryView';
+import { LinksView } from '../components/views/LinksView';
 import { InviteDialog } from '../components/InviteDialog';
 import { PageEditor, type PageEditorHandle } from '../components/PageEditor';
 import { PageByline } from '../components/PageByline';
@@ -68,6 +69,7 @@ type ActiveView =
   | { kind: 'review-detail'; workspaceSlug: string; submissionId: string }
   | { kind: 'members'; workspaceSlug: string }
   | { kind: 'history'; workspaceSlug: string }
+  | { kind: 'links'; workspaceSlug: string }
   | { kind: 'notifications' }
   | null;
 
@@ -584,6 +586,10 @@ export function MainLayout() {
         setActiveView({ kind: 'history', workspaceSlug: activeWorkspace.slug });
         navigate(`/${owner}/${activeWorkspace.slug}/history`);
         break;
+      case 'links':
+        setActiveView({ kind: 'links', workspaceSlug: activeWorkspace.slug });
+        navigate('/', { replace: true });
+        break;
     }
   };
 
@@ -850,6 +856,7 @@ export function MainLayout() {
                 reviewCount={reviewCount}
                 isPersonal={personal}
                 showReviews={desktop || !personal}
+                showLinkDiagnostics={desktop && !!activeWorkspace?.localPath}
                 isOwner={isOwner}
                 onSelectPage={(slug, path) => activeWorkspace && selectPage(activeWorkspace, slug, path)}
                 onSelectSource={(filename) => activeWorkspace && selectSource(activeWorkspace, filename)}
@@ -975,6 +982,12 @@ export function MainLayout() {
                     <span style={{ color: C.ink }}>History</span>
                   </>
                 )}
+                {activeView?.kind === 'links' && (
+                  <>
+                    <span style={{ color: C.faint }}>/</span>
+                    <span style={{ color: C.ink }}>Links</span>
+                  </>
+                )}
                 {activeView?.kind === 'notifications' && (
                   <span style={{ color: C.ink }}>Notifications</span>
                 )}
@@ -1091,6 +1104,13 @@ export function MainLayout() {
                 <HistoryView
                   workspaceSlug={activeWorkspace.slug}
                   local={desktop && !!activeWorkspace.localPath}
+                />
+
+              /* Link diagnostics */
+              ) : activeView?.kind === 'links' && activeWorkspace ? (
+                <LinksView
+                  workspaceSlug={activeWorkspace.slug}
+                  onOpenPage={(path) => selectPage(activeWorkspace, conceptIdFromPath(path), path)}
                 />
 
               /* Source view */

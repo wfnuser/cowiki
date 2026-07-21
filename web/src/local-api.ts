@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   AgentChange,
+  BrokenLink,
   PageFull,
   PageMeta,
   FileDiff,
@@ -107,6 +108,10 @@ export function discardAgentChange(spaceSlug: string, changeId: string): Promise
 
 export function search(spaceSlug: string, query: string, limit: number): Promise<SearchResponse> {
   return invoke('local_search', { spaceSlug, query, limit });
+}
+
+export function listBrokenLinks(spaceSlug: string): Promise<BrokenLink[]> {
+  return invoke('local_list_broken_links', { spaceSlug });
 }
 
 export function renamePath(spaceSlug: string, from: string, to: string): Promise<void> {

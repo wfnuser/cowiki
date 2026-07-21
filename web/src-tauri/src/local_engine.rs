@@ -13,6 +13,7 @@ use crate::knowledge_index::{self, SearchHit};
 use crate::okf::{self, DocumentKind};
 
 mod agent_changes;
+pub use crate::knowledge_index::BrokenLink;
 pub use agent_changes::AgentChange;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -802,6 +803,17 @@ impl LocalEngine {
         self.refresh_search_index(&mut db, &space)?;
         self.prepare_backlinks(&mut db, &space.id)?;
         knowledge_index::backlinks(&db, &space.id, target_path)
+    }
+
+    pub fn list_broken_links(&self, space_slug: &str) -> Result<Vec<BrokenLink>, String> {
+        let space = self.find_space(space_slug)?;
+        let mut db = self
+            .db
+            .lock()
+            .map_err(|_| "local database lock poisoned".to_string())?;
+        self.refresh_search_index(&mut db, &space)?;
+        self.prepare_backlinks(&mut db, &space.id)?;
+        knowledge_index::broken_links(&db, &space.id, &space.local_path)
     }
 
     pub fn indexed_page_count(&self, space_slug: &str) -> Result<usize, String> {
@@ -2253,6 +2265,35 @@ mod tests {
         let links = reopened.list_backlinks(&space.slug, "target.md").unwrap();
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].path, "source.md");
+    }
+
+    #[test]
+    fn broken_links_lazily_repair_deleted_link_index_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join("metadata");
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        let engine = LocalEngine::open(&metadata).unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+        engine
+            .write_page(
+                &space.slug,
+                "source",
+                "---\ntype: Note\n---\n\nSee [missing](missing.md).\n",
+            )
+            .unwrap();
+        assert_eq!(engine.list_broken_links(&space.slug).unwrap().len(), 1);
+        drop(engine);
+
+        let database = rusqlite::Connection::open(metadata.join("local.db")).unwrap();
+        database.execute("DELETE FROM page_links", []).unwrap();
+        drop(database);
+
+        let reopened = LocalEngine::open(&metadata).unwrap();
+        let broken = reopened.list_broken_links(&space.slug).unwrap();
+        assert_eq!(broken.len(), 1);
+        assert_eq!(broken[0].source_path, "source.md");
+        assert_eq!(broken[0].target, "missing.md");
     }
 
     #[test]
@@ -3975,6 +4016,134 @@ mod tests {
             .list_backlinks(&space.slug, "target.md")
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn broken_links_validate_exact_paths_and_ignore_non_document_syntax() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(folder.join("notes/deep")).unwrap();
+        std::fs::create_dir_all(folder.join("assets")).unwrap();
+        std::fs::write(folder.join("Target.md"), "# Exact target\n").unwrap();
+        std::fs::write(folder.join("My Doc.md"), "# Encoded target\n").unwrap();
+        std::fs::write(folder.join("x.md"), "# Markdown target\n").unwrap();
+        std::fs::write(folder.join("attachment.pdf"), b"attachment").unwrap();
+        std::fs::write(
+            folder.join("notes/deep/source.md"),
+            "# Source\n\n[exact](../../Target.md), [encoded](../../My%20Doc.md), \
+             [wrong case](../../target.md), [missing](../../missing.md#details), \
+             [attachment](../../attachment.pdf), [attachment wrong case](../../Attachment.pdf), \
+             [directory](../../assets/), [extensionless](../../x), \
+             and [raw source](../../.cowiki/sources/paper.pdf).\n\n\
+             [external](https://example.com/missing.md) \
+             [protocol relative](//example.com/missing.md) \
+             [email](mailto:docs@example.com) [anchor](#local) \
+             [hidden state](../../.cowiki/cache/session.md) \
+             [hidden source runtime](../../.cowiki/sources/.runtime/missing.json).\n\n\
+             [[Target]], [[Target.md]], and [[Missing Wiki|missing]].\n\n\
+             `[[inline-code]]`\n\n```md\n[[fenced-wiki]]\n[fenced](../../fenced.md)\n```\n",
+        )
+        .unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+
+        std::fs::create_dir_all(folder.join(".cowiki/sources")).unwrap();
+        std::fs::write(folder.join(".cowiki/sources/paper.pdf"), b"paper").unwrap();
+        std::fs::write(
+            folder.join(".cowiki/sources/raw.md"),
+            "# Hidden source\n\n[[hidden-missing]]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(folder.join(".cowiki/sources/.runtime")).unwrap();
+        std::fs::write(
+            folder.join(".cowiki/sources/.runtime/hidden.md"),
+            "# Hidden runtime\n\nruntime-only-sentinel\n",
+        )
+        .unwrap();
+        std::fs::write(
+            folder.join("index.md"),
+            "# Knowledge\n\n[[reserved-missing]]\n",
+        )
+        .unwrap();
+
+        assert!(engine
+            .search_pages(&space.slug, "runtime-only-sentinel", 10)
+            .unwrap()
+            .is_empty());
+        let broken = engine.list_broken_links(&space.slug).unwrap();
+        assert_eq!(
+            broken
+                .iter()
+                .map(|link| (
+                    link.source_path.as_str(),
+                    link.source_title.as_str(),
+                    link.target.as_str(),
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("notes/deep/source.md", "Source", "Attachment.pdf"),
+                ("notes/deep/source.md", "Source", "Missing Wiki.md"),
+                ("notes/deep/source.md", "Source", "missing.md"),
+                ("notes/deep/source.md", "Source", "target.md"),
+                ("notes/deep/source.md", "Source", "x"),
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn broken_links_count_symlinks_without_following_them_outside_the_space() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("paper.pdf"), b"paper").unwrap();
+        std::fs::write(outside.join("secret.md"), "# Secret\n").unwrap();
+        symlink(outside.join("paper.pdf"), folder.join("linked.pdf")).unwrap();
+        symlink(&outside, folder.join("linked-directory")).unwrap();
+        std::fs::write(
+            folder.join("source.md"),
+            "# Source\n\n[linked file](linked.pdf)\n\n[escaped child](linked-directory/secret.md)\n",
+        )
+        .unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+
+        let broken = engine.list_broken_links(&space.slug).unwrap();
+        assert_eq!(
+            broken
+                .iter()
+                .map(|link| link.target.as_str())
+                .collect::<Vec<_>>(),
+            vec!["linked-directory/secret.md"]
+        );
+    }
+
+    #[test]
+    fn broken_links_refresh_after_external_editor_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("agent-space");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(
+            folder.join("source.md"),
+            "# Source\n\n[Future](future.md)\n",
+        )
+        .unwrap();
+        let space = engine.add_space("Agent", "agent", &folder).unwrap();
+
+        assert_eq!(engine.list_broken_links(&space.slug).unwrap().len(), 1);
+
+        std::fs::write(folder.join("future.md"), "# Future\n").unwrap();
+        assert!(engine.list_broken_links(&space.slug).unwrap().is_empty());
+
+        std::fs::write(folder.join("source.md"), "# Source\n\n[Later](later.md)\n").unwrap();
+        let refreshed = engine.list_broken_links(&space.slug).unwrap();
+        assert_eq!(refreshed.len(), 1);
+        assert_eq!(refreshed[0].target, "later.md");
     }
 
     #[test]

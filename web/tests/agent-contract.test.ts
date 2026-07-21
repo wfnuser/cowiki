@@ -42,7 +42,13 @@ test('embedded MCP remains retrieval-only', () => {
   const toolDefinitions = mcp.slice(mcp.indexOf('fn tool_definitions()'), mcp.indexOf('pub fn run_stdio'));
 
   const tools = [...toolDefinitions.matchAll(/"name": "([^"]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(tools, ['get_space_context', 'search_pages', 'get_page', 'list_backlinks']);
+  assert.deepEqual(tools, [
+    'get_space_context',
+    'search_pages',
+    'get_page',
+    'list_backlinks',
+    'list_broken_links',
+  ]);
 });
 
 test('MCP documentation makes the embedded desktop server authoritative', () => {
