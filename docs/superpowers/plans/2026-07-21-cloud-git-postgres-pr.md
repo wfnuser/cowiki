@@ -261,7 +261,7 @@ Set `init.defaultBranch=main` through git2 repository initialization options, cr
 Run: `cargo test --manifest-path web/src-tauri/Cargo.toml local_engine` and `npm --prefix web run test:agent-terminal`
 Expected: PASS.
 
-- [ ] **Step 5: Commit local branch semantics**
+- [x] **Step 5: Commit local branch semantics**
 
 ```bash
 git add web/src-tauri/src/local_engine.rs web/src-tauri/src/local_engine/agent_changes.rs web/src/api.ts web/tests/agent-terminal.test.ts
@@ -278,24 +278,24 @@ git commit -m "refactor(desktop): make main the local Space draft branch"
 - Test: Rust tests in `web/src-tauri/src/cloud_sync.rs`
 - Test: `web/tests/cloud-sync-contract.test.ts`
 
-- [ ] **Step 1: Write failing sync state-machine tests**
+- [x] **Step 1: Write failing sync state-machine tests**
 
 Use local temporary remotes to assert link preserves `origin`, adds `cowiki`, atomically bootstraps both refs, dirty auto-sync is a no-op, clean sync rebases, submit commits a dirty tree, push targets only `user/<id>`, force-with-lease rejects a concurrent device, conflicts return paths while leaving rebase state, and continue/abort work.
 
-- [ ] **Step 2: Run focused tests and observe failure**
+- [x] **Step 2: Run focused tests and observe failure**
 
 Run: `cargo test --manifest-path web/src-tauri/Cargo.toml cloud_sync` and `node --experimental-strip-types --test web/tests/cloud-sync-contract.test.ts`
 Expected: FAIL because the module and commands do not exist.
 
-- [ ] **Step 3: Implement Cloud sync**
+- [x] **Step 3: Implement Cloud sync**
 
 Persist only `{space_id, base_url, git_url, user_id}` in local SQLite. Pass Bearer credentials to Git through `GIT_CONFIG_COUNT/GIT_CONFIG_KEY_0/GIT_CONFIG_VALUE_0`, never through remote URLs. Implement explicit command outputs with states `unlinked`, `dirty`, `up_to_date`, `synced`, `conflicted`, `submitted`, and `lease_rejected`.
 
-- [ ] **Step 4: Wire Tauri and TypeScript contracts**
+- [x] **Step 4: Wire Tauri and TypeScript contracts**
 
 Expose `cloud_link_space`, `cloud_get_status`, `cloud_sync_if_clean`, `cloud_submit`, `cloud_rebase_continue`, and `cloud_rebase_abort`. Keep all rendering and controls out of this PR.
 
-- [ ] **Step 5: Run desktop sync tests**
+- [x] **Step 5: Run desktop sync tests**
 
 Run: `cargo test --manifest-path web/src-tauri/Cargo.toml cloud_sync` and `node --experimental-strip-types --test web/tests/cloud-sync-contract.test.ts`
 Expected: PASS.

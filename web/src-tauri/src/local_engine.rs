@@ -35,6 +35,15 @@ pub struct SubmitResult {
     pub committed: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CloudLink {
+    pub cloud_space_id: String,
+    pub base_url: String,
+    pub git_url: String,
+    pub user_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Checkpoint {
@@ -158,6 +167,15 @@ impl LocalEngine {
                     slug TEXT NOT NULL UNIQUE,
                     local_path TEXT NOT NULL UNIQUE,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS cloud_links (
+                    local_space_id TEXT PRIMARY KEY REFERENCES spaces(id) ON DELETE CASCADE,
+                    cloud_space_id TEXT NOT NULL,
+                    base_url TEXT NOT NULL,
+                    git_url TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    linked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );",
             )
             .map_err(|e| e.to_string())?;
@@ -331,6 +349,59 @@ impl LocalEngine {
             .into_iter()
             .find(|space| space.slug == slug)
             .ok_or_else(|| format!("Space '{slug}' is not registered on this device"))
+    }
+
+    pub(crate) fn cloud_link(&self, space_slug: &str) -> Result<Option<CloudLink>, String> {
+        let space = self.find_space(space_slug)?;
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| "local database lock poisoned".to_string())?;
+        match db.query_row(
+            "SELECT cloud_space_id, base_url, git_url, user_id
+             FROM cloud_links WHERE local_space_id = ?1",
+            [&space.id],
+            |row| {
+                Ok(CloudLink {
+                    cloud_space_id: row.get(0)?,
+                    base_url: row.get(1)?,
+                    git_url: row.get(2)?,
+                    user_id: row.get(3)?,
+                })
+            },
+        ) {
+            Ok(link) => Ok(Some(link)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    pub(crate) fn save_cloud_link(&self, space_slug: &str, link: &CloudLink) -> Result<(), String> {
+        let space = self.find_space(space_slug)?;
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| "local database lock poisoned".to_string())?;
+        db.execute(
+            "INSERT INTO cloud_links
+                (local_space_id, cloud_space_id, base_url, git_url, user_id)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(local_space_id) DO UPDATE SET
+                cloud_space_id = excluded.cloud_space_id,
+                base_url = excluded.base_url,
+                git_url = excluded.git_url,
+                user_id = excluded.user_id,
+                updated_at = CURRENT_TIMESTAMP",
+            params![
+                space.id,
+                link.cloud_space_id,
+                link.base_url,
+                link.git_url,
+                link.user_id
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -1004,6 +1075,27 @@ impl LocalEngine {
     }
 
     pub fn submit(&self, space_slug: &str, paths: &[String]) -> Result<SubmitResult, String> {
+        self.submit_with_message(
+            space_slug,
+            paths,
+            "Update local Space",
+            "CoWiki Local",
+            "local@cowiki.app",
+        )
+    }
+
+    pub(crate) fn submit_with_message(
+        &self,
+        space_slug: &str,
+        paths: &[String],
+        message: &str,
+        author_name: &str,
+        author_email: &str,
+    ) -> Result<SubmitResult, String> {
+        let message = message.trim();
+        if message.is_empty() {
+            return Err("Commit message is required for a Cloud submission".to_string());
+        }
         let repo = self.repo(space_slug)?;
         let root = repo
             .workdir()
@@ -1043,14 +1135,14 @@ impl LocalEngine {
         }
 
         let tree = repo.find_tree(tree_id).map_err(|e| e.to_string())?;
-        let signature =
-            Signature::now("CoWiki Local", "local@cowiki.app").map_err(|e| e.to_string())?;
+        let signature = Signature::now(author_name.trim(), author_email.trim())
+            .map_err(|e| format!("invalid commit identity: {e}"))?;
         let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
         if let Err(error) = repo.commit(
             Some("HEAD"),
             &signature,
             &signature,
-            "Update local Space",
+            message,
             &tree,
             &parents,
         ) {
