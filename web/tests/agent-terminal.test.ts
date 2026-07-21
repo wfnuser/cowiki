@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -203,6 +204,12 @@ test('Review routes round-trip draft, Agent Change, and cloud detail targets', (
     target: null,
   });
   assert.equal(parseReviewRoute('/general/concepts/test', workspaces), null);
+});
+
+test('desktop review source branches use the public agent namespace', () => {
+  const api = readFileSync(resolve(import.meta.dirname, '../src/api.ts'), 'utf8');
+  assert.match(api, /source_branch: `agent\/\$\{change\.id\}`/);
+  assert.doesNotMatch(api, /source_branch: `cowiki\/agent\//);
 });
 
 test('Agent merge feedback distinguishes a merged Draft from a conflict', () => {

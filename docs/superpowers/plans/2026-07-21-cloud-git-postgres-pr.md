@@ -227,7 +227,7 @@ Use `SELECT ... FOR UPDATE` during merge, reconcile Git before returning every P
 Run: `cargo test --manifest-path cloud/Cargo.toml --test pull_requests`
 Expected: PASS.
 
-- [ ] **Step 5: Commit PR workflow**
+- [x] **Step 5: Commit PR workflow**
 
 ```bash
 git add cloud/src/pull_requests.rs cloud/src/db.rs cloud/src/lib.rs cloud/tests/pull_requests.rs
@@ -243,20 +243,20 @@ git commit -m "feat(cloud): add live-branch pull request workflow"
 - Test: Rust tests in the same modules
 - Test: `web/tests/agent-terminal.test.ts`
 
-- [ ] **Step 1: Add failing local Git tests**
+- [x] **Step 1: Add failing local Git tests**
 
 Assert new Spaces start on `main`, a clean imported non-main repository gains and checks out `main`, a dirty conversion is rejected without mutation, existing remotes remain untouched, and background refs are exactly `refs/heads/agent/<change-id>`.
 
-- [ ] **Step 2: Run focused tests and observe failure**
+- [x] **Step 2: Run focused tests and observe failure**
 
 Run: `cargo test --manifest-path web/src-tauri/Cargo.toml local_engine::tests::new_space_uses_main` and `npm --prefix web run test:agent-terminal`
 Expected: at least one assertion fails on the legacy branch name.
 
-- [ ] **Step 3: Implement branch normalization**
+- [x] **Step 3: Implement branch normalization**
 
 Set `init.defaultBranch=main` through git2 repository initialization options, create/check out local `main` only under the clean/import rules, change `BRANCH_REF_PREFIX` to `refs/heads/agent/`, and update serialized source-branch labels.
 
-- [ ] **Step 4: Run local tests**
+- [x] **Step 4: Run local tests**
 
 Run: `cargo test --manifest-path web/src-tauri/Cargo.toml local_engine` and `npm --prefix web run test:agent-terminal`
 Expected: PASS.

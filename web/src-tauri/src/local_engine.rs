@@ -1,5 +1,8 @@
 use git2::build::CheckoutBuilder;
-use git2::{DiffOptions, IndexEntry, IndexTime, Oid, Repository, Signature, StatusOptions};
+use git2::{
+    DiffOptions, IndexEntry, IndexTime, Oid, Repository, RepositoryInitOptions, Signature,
+    StatusOptions,
+};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -245,6 +248,7 @@ impl LocalEngine {
             .to_string_lossy()
             .to_string();
         let git = Repository::open(&repo).map_err(|error| error.to_string())?;
+        ensure_local_main(&git)?;
         prepare_okf_repository(&git, &repo)?;
         let name = if slug.starts_with("personal-") {
             "My Space".to_string()
@@ -272,9 +276,16 @@ impl LocalEngine {
         if let Some(existing) = self.space_by_path(&local_path)? {
             return Ok(existing);
         }
-        let repo = Repository::open(&local_path)
-            .or_else(|_| Repository::init(&local_path))
-            .map_err(|e| format!("cannot initialize local Git repository: {e}"))?;
+        let repo = match Repository::open(&local_path) {
+            Ok(repo) => repo,
+            Err(_) => {
+                let mut options = RepositoryInitOptions::new();
+                options.initial_head("main");
+                Repository::init_opts(&local_path, &options)
+                    .map_err(|e| format!("cannot initialize local Git repository: {e}"))?
+            }
+        };
+        ensure_local_main(&repo)?;
         prepare_okf_repository(&repo, &local_path)?;
 
         let space = self.insert_space(name, slug, &local_path)?;
@@ -722,7 +733,9 @@ impl LocalEngine {
             if space.local_path.is_dir() {
                 match Repository::open(&space.local_path) {
                     Ok(repo) => {
-                        if let Err(error) = prepare_okf_repository(&repo, &space.local_path) {
+                        if let Err(error) = ensure_local_main(&repo)
+                            .and_then(|_| prepare_okf_repository(&repo, &space.local_path))
+                        {
                             eprintln!(
                                 "CoWiki skipped startup migration for Space '{}': {error}",
                                 space.slug
@@ -1396,6 +1409,54 @@ fn commit_initial_okf_indexes(repo: &Repository, root: &Path) -> Result<(), Stri
     Ok(())
 }
 
+fn ensure_local_main(repo: &Repository) -> Result<(), String> {
+    let current_branch = repo
+        .head()
+        .ok()
+        .filter(|head| head.is_branch())
+        .and_then(|head| head.shorthand().map(str::to_string));
+    if current_branch.as_deref() == Some("main") {
+        return Ok(());
+    }
+
+    let has_commit = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
+    if has_commit.is_some() && !repository_worktree_is_clean(repo)? {
+        return Err(
+            "This imported repository is not on main and has uncommitted files. Commit or discard them before CoWiki switches the editable Draft to main."
+                .to_string(),
+        );
+    }
+
+    if repo.find_branch("main", git2::BranchType::Local).is_err() {
+        if let Some(commit) = has_commit.as_ref() {
+            repo.branch("main", commit, false)
+                .map_err(|error| format!("cannot create local main branch: {error}"))?;
+        } else {
+            repo.set_head("refs/heads/main")
+                .map_err(|error| format!("cannot initialize local main branch: {error}"))?;
+            return Ok(());
+        }
+    }
+
+    repo.set_head("refs/heads/main")
+        .map_err(|error| format!("cannot switch the local Draft to main: {error}"))?;
+    repo.checkout_head(Some(CheckoutBuilder::new().safe()))
+        .map_err(|error| format!("cannot check out local main branch: {error}"))?;
+    Ok(())
+}
+
+fn repository_worktree_is_clean(repo: &Repository) -> Result<bool, String> {
+    let mut options = StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false);
+    Ok(repo
+        .statuses(Some(&mut options))
+        .map_err(|error| error.to_string())?
+        .is_empty())
+}
+
 fn prepare_okf_repository(repo: &Repository, root: &Path) -> Result<(), String> {
     if !okf::needs_migration(root)? {
         return Ok(());
@@ -2015,6 +2076,98 @@ mod tests {
         let engine = LocalEngine::open(temp.path()).unwrap();
 
         assert!(engine.list_spaces().unwrap().is_empty());
+    }
+
+    #[test]
+    fn new_space_uses_main_as_its_editable_branch() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("new-space");
+        std::fs::create_dir_all(&folder).unwrap();
+
+        engine.add_space("New Space", "new-space", &folder).unwrap();
+
+        let repo = Repository::open(&folder).unwrap();
+        assert_eq!(repo.head().unwrap().shorthand(), Some("main"));
+    }
+
+    #[test]
+    fn clean_existing_branch_becomes_main_without_changing_existing_remotes() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("imported");
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut options = git2::RepositoryInitOptions::new();
+        options.initial_head("topic");
+        let repo = Repository::init_opts(&folder, &options).unwrap();
+        std::fs::write(
+            folder.join("index.md"),
+            "---\nokf_version: \"0.1\"\n---\n\n# Imported\n",
+        )
+        .unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("index.md")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let signature = git2::Signature::now("author", "author@example.com").unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+            .unwrap();
+        repo.remote("origin", "https://example.com/team/imported.git")
+            .unwrap();
+        drop(tree);
+        drop(repo);
+
+        engine.add_space("Imported", "imported", &folder).unwrap();
+
+        let repo = Repository::open(&folder).unwrap();
+        assert_eq!(repo.head().unwrap().shorthand(), Some("main"));
+        assert!(repo.find_branch("topic", git2::BranchType::Local).is_ok());
+        assert_eq!(
+            repo.find_remote("origin").unwrap().url(),
+            Some("https://example.com/team/imported.git")
+        );
+    }
+
+    #[test]
+    fn dirty_existing_non_main_branch_is_rejected_without_mutation() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("dirty-import");
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut options = git2::RepositoryInitOptions::new();
+        options.initial_head("topic");
+        let repo = Repository::init_opts(&folder, &options).unwrap();
+        std::fs::write(
+            folder.join("index.md"),
+            "---\nokf_version: \"0.1\"\n---\n\n# Imported\n",
+        )
+        .unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("index.md")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let signature = git2::Signature::now("author", "author@example.com").unwrap();
+        let original = repo
+            .commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+            .unwrap();
+        drop(tree);
+        drop(repo);
+        std::fs::write(folder.join("draft.md"), "# Unsaved\n").unwrap();
+
+        let error = engine
+            .add_space("Dirty", "dirty-import", &folder)
+            .unwrap_err();
+        assert!(error.contains("main"));
+        let repo = Repository::open(&folder).unwrap();
+        assert_eq!(repo.head().unwrap().shorthand(), Some("topic"));
+        assert_eq!(repo.head().unwrap().target(), Some(original));
+        assert!(repo.find_branch("main", git2::BranchType::Local).is_err());
+        assert_eq!(
+            std::fs::read_to_string(folder.join("draft.md")).unwrap(),
+            "# Unsaved\n"
+        );
     }
 
     #[test]
@@ -2932,7 +3085,9 @@ mod tests {
     #[test]
     fn dirty_conforming_bundles_open_without_optional_indexes_or_version() {
         fn commit_all(folder: &std::path::Path, paths: &[&str]) {
-            let repo = git2::Repository::init(folder).unwrap();
+            let mut options = git2::RepositoryInitOptions::new();
+            options.initial_head("main");
+            let repo = git2::Repository::init_opts(folder, &options).unwrap();
             let mut index = repo.index().unwrap();
             for path in paths {
                 index.add_path(std::path::Path::new(path)).unwrap();
@@ -3175,6 +3330,14 @@ mod tests {
         let index_before = std::fs::read(folder.join(".git/index")).unwrap();
 
         let change = engine.create_agent_change(&space.slug, "Codex").unwrap();
+        let repo = Repository::open(&folder).unwrap();
+        assert!(repo
+            .find_reference(&format!("refs/heads/agent/{}", change.id))
+            .is_ok());
+        assert!(repo
+            .find_reference(&format!("refs/heads/cowiki/agent/{}", change.id))
+            .is_err());
+        drop(repo);
         assert_eq!(
             std::fs::read(folder.join(".git/index")).unwrap(),
             index_before
