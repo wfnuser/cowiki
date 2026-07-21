@@ -73,6 +73,10 @@ impl GitRepoStore {
         self.root.join(format!("{space_id}.git"))
     }
 
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     pub fn space_lock(&self, space_id: Uuid) -> Result<Arc<AsyncMutex<()>>, GitRepoError> {
         let mut locks = self.locks.lock().map_err(|_| GitRepoError::LockPoisoned)?;
         Ok(locks

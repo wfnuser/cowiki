@@ -5,6 +5,7 @@ use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
 use crate::auth::{api_key_hash, random_secret};
+use crate::model::MemberRole;
 use crate::model::User;
 
 #[derive(Debug, Clone)]
@@ -190,4 +191,18 @@ pub async fn revoke_api_key(
     .execute(pool)
     .await?;
     Ok(result.rows_affected() == 1)
+}
+
+pub async fn member_role(
+    pool: &PgPool,
+    space_id: Uuid,
+    user_id: Uuid,
+) -> Result<Option<MemberRole>, sqlx::Error> {
+    sqlx::query_scalar::<_, MemberRole>(
+        "SELECT role FROM space_members WHERE space_id = $1 AND user_id = $2",
+    )
+    .bind(space_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
 }

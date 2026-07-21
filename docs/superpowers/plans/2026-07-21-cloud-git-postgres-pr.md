@@ -129,7 +129,7 @@ Use `git init --bare --initial-branch=main`, configure `http.receivepack=true`, 
 Run: `cargo test --manifest-path cloud/Cargo.toml --test git_repo`
 Expected: PASS.
 
-- [ ] **Step 5: Commit repositories**
+- [x] **Step 5: Commit repositories**
 
 ```bash
 git add cloud/src/git_repo.rs cloud/src/lib.rs cloud/tests/git_repo.rs
@@ -143,20 +143,20 @@ git commit -m "feat(cloud): store Spaces as protected bare Git repositories"
 - Modify: `cloud/src/lib.rs`
 - Test: `cloud/tests/git_http.rs`
 
-- [ ] **Step 1: Write failing protocol tests**
+- [x] **Step 1: Write failing protocol tests**
 
 Assert upload-pack works for Viewer, receive-pack rejects Viewer, unauthorized requests return a Git-compatible 401, route paths cannot escape the repository root, and authenticated Editor can bootstrap then push only their own user ref.
 
-- [ ] **Step 2: Run the Git HTTP tests and observe failure**
+- [x] **Step 2: Run the Git HTTP tests and observe failure**
 
 Run: `cargo test --manifest-path cloud/Cargo.toml --test git_http`
 Expected: FAIL because no Git routes exist.
 
-- [ ] **Step 3: Implement the CGI adapter**
+- [x] **Step 3: Implement the CGI adapter**
 
 Translate Axum method/query/headers/body into `git http-backend` CGI variables, pass authenticated `COWIKI_USER_ID`, `COWIKI_ROLE`, and bootstrap state through the child environment, parse `Status` and response headers, and stream the bounded response body back to Axum.
 
-- [ ] **Step 4: Run Git HTTP tests**
+- [x] **Step 4: Run Git HTTP tests**
 
 Run: `cargo test --manifest-path cloud/Cargo.toml --test git_http`
 Expected: PASS.

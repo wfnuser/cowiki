@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let pool = cowiki_cloud::db::connect_and_migrate(config.database_url.as_str()).await?;
     let bind_addr = config.bind_addr;
-    let app = cowiki_cloud::build_router(config, pool);
+    let app = cowiki_cloud::build_router(config, pool)?;
     let listener = tokio::net::TcpListener::bind(bind_addr).await?;
     tracing::info!(%bind_addr, "CoWiki Cloud listening");
     axum::serve(listener, app)

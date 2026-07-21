@@ -34,7 +34,14 @@ impl IntoResponse for AppError {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal service error")
             }
         };
-        (status, Json(json!({ "error": public_message }))).into_response()
+        let mut response = (status, Json(json!({ "error": public_message }))).into_response();
+        if status == StatusCode::UNAUTHORIZED {
+            response.headers_mut().insert(
+                axum::http::header::WWW_AUTHENTICATE,
+                axum::http::HeaderValue::from_static("Bearer realm=\"cowiki\""),
+            );
+        }
+        response
     }
 }
 
