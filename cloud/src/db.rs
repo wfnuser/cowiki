@@ -8,6 +8,14 @@ use crate::auth::{api_key_hash, random_secret};
 use crate::model::MemberRole;
 use crate::model::User;
 
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct SpaceMembership {
+    pub id: Uuid,
+    pub name: String,
+    pub slug: String,
+    pub role: MemberRole,
+}
+
 #[derive(Debug, Clone)]
 pub struct IssuedApiKey {
     pub api_key: String,
@@ -200,6 +208,89 @@ pub async fn member_role(
 ) -> Result<Option<MemberRole>, sqlx::Error> {
     sqlx::query_scalar::<_, MemberRole>(
         "SELECT role FROM space_members WHERE space_id = $1 AND user_id = $2",
+    )
+    .bind(space_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn create_space(
+    pool: &PgPool,
+    space_id: Uuid,
+    creator_id: Uuid,
+    name: &str,
+    slug: &str,
+) -> Result<SpaceMembership, sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    sqlx::query("INSERT INTO spaces (id, slug, name, created_by) VALUES ($1, $2, $3, $4)")
+        .bind(space_id)
+        .bind(slug)
+        .bind(name)
+        .bind(creator_id)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("INSERT INTO space_members (space_id, user_id, role) VALUES ($1, $2, 'owner')")
+        .bind(space_id)
+        .bind(creator_id)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query(
+        "INSERT INTO audit_events
+            (space_id, actor_id, action, subject_type, subject_id, metadata)
+         VALUES ($1, $2, 'space.created', 'space', $1::text, jsonb_build_object('slug', $3::text))",
+    )
+    .bind(space_id)
+    .bind(creator_id)
+    .bind(slug)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(SpaceMembership {
+        id: space_id,
+        name: name.to_string(),
+        slug: slug.to_string(),
+        role: MemberRole::Owner,
+    })
+}
+
+pub async fn delete_space_after_repository_failure(
+    pool: &PgPool,
+    space_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM spaces WHERE id = $1")
+        .bind(space_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn list_spaces_for_user(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<Vec<SpaceMembership>, sqlx::Error> {
+    sqlx::query_as::<_, SpaceMembership>(
+        "SELECT spaces.id, spaces.name, spaces.slug, space_members.role
+         FROM space_members
+         JOIN spaces ON spaces.id = space_members.space_id
+         WHERE space_members.user_id = $1
+         ORDER BY spaces.created_at, spaces.name",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn get_space_for_user(
+    pool: &PgPool,
+    space_id: Uuid,
+    user_id: Uuid,
+) -> Result<Option<SpaceMembership>, sqlx::Error> {
+    sqlx::query_as::<_, SpaceMembership>(
+        "SELECT spaces.id, spaces.name, spaces.slug, space_members.role
+         FROM space_members
+         JOIN spaces ON spaces.id = space_members.space_id
+         WHERE spaces.id = $1 AND space_members.user_id = $2",
     )
     .bind(space_id)
     .bind(user_id)

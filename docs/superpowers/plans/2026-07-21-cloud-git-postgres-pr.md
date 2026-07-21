@@ -161,7 +161,7 @@ Translate Axum method/query/headers/body into `git http-backend` CGI variables, 
 Run: `cargo test --manifest-path cloud/Cargo.toml --test git_http`
 Expected: PASS.
 
-- [ ] **Step 5: Commit Smart HTTP**
+- [x] **Step 5: Commit Smart HTTP**
 
 ```bash
 git add cloud/src/git_http.rs cloud/src/lib.rs cloud/tests/git_http.rs
@@ -176,20 +176,20 @@ git commit -m "feat(cloud): serve authenticated Git Smart HTTP"
 - Modify: `cloud/src/lib.rs`
 - Test: `cloud/tests/spaces.rs`
 
-- [ ] **Step 1: Write failing Space API tests**
+- [x] **Step 1: Write failing Space API tests**
 
 Assert creation gives the caller Owner membership, list/get reveal only memberships, slug conflicts return 409, role order is enforced, and repository URLs use the immutable Space UUID.
 
-- [ ] **Step 2: Run Space tests and observe failure**
+- [x] **Step 2: Run Space tests and observe failure**
 
 Run: `cargo test --manifest-path cloud/Cargo.toml --test spaces`
 Expected: FAIL because Space handlers are absent.
 
-- [ ] **Step 3: Implement Space and membership queries/handlers**
+- [x] **Step 3: Implement Space and membership queries/handlers**
 
 Create the database record transactionally, initialize the bare repo, compensate the database insert if repo creation fails, return `gitUrl`, `mainRef`, and `userRef`, and use the existing four-role authorization matrix.
 
-- [ ] **Step 4: Run Space tests**
+- [x] **Step 4: Run Space tests**
 
 Run: `cargo test --manifest-path cloud/Cargo.toml --test spaces`
 Expected: PASS.
