@@ -5,6 +5,14 @@
 <h1 align="center">CoWiki: An LLM Wiki, but multiplayer.</h1>
 
 <p align="center">
+  <strong>Product philosophy / 产品理念</strong>
+  <br />
+  <a href="https://x.com/weiraolilun/status/2078748340813189471">Read the original thread on X</a>
+  ·
+  <a href="https://www.xiaohongshu.com/explore/6a57ae3100000000070229aa?xsec_token=AB3r79vLLhY9g4EOR2V9GfBSUNgWPYIsJJYs7GQ4DsmaI=&amp;xsec_source=pc_user">阅读小红书原文</a>
+</p>
+
+<p align="center">
   <a href="https://github.com/wfnuser/cowiki/actions/workflows/macos-desktop.yml"><img src="https://img.shields.io/github/actions/workflow/status/wfnuser/cowiki/macos-desktop.yml?branch=dev&label=macOS%20build" alt="macOS build" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-EF5A29" alt="Apache 2.0 license" /></a>
   <a href="docs/okf-v0.1.md"><img src="https://img.shields.io/badge/OKF-v0.1-EF5A29" alt="Open Knowledge Format v0.1" /></a>
