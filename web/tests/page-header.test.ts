@@ -12,6 +12,10 @@ const spacePanel = readFileSync(
   new URL('../src/components/layout/SpacePanel.tsx', import.meta.url),
   'utf8',
 );
+const versionSwitcher = readFileSync(
+  new URL('../src/components/layout/VersionSwitcher.tsx', import.meta.url),
+  'utf8',
+);
 
 test('the page header has no unused overflow actions menu', () => {
   assert.equal(mainLayout.includes('aria-label="More actions"'), false);
@@ -53,4 +57,14 @@ test('long breadcrumbs cannot shrink or wrap the header actions', () => {
 
 test('Source titles use a dedicated overflow-safe presentation class', () => {
   assert.match(mainLayout, /className="page-title page-title--compact source-title"/);
+});
+
+test('the desktop header exposes the focused local version switcher', () => {
+  assert.match(mainLayout, /desktop && activeWorkspace\?\.localPath/);
+  assert.match(mainLayout, /change\.status === 'open'/);
+  assert.match(versionSwitcher, />\s*WORKING\s*</);
+  assert.match(versionSwitcher, />\s*UPSTREAM\s*</);
+  assert.match(versionSwitcher, />\s*AGENT CHANGES\s*</);
+  assert.match(versionSwitcher, /See All in Reviews/);
+  assert.doesNotMatch(versionSwitcher, /CHECKPOINTS|Discarded|Merged/);
 });

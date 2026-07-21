@@ -19,13 +19,16 @@ import {
   deleteWorkspace,
   listPublicWorkspaces, joinWorkspace,
   listSources, getSource, listReviews, renamePath, deletePath,
-  type Workspace, type PageMeta, type PageFull, type SourceItem, type SourceContent, type AgentChange,
+  getLocalWorkingDiff, listLocalAgentChanges,
+  type Workspace, type PageMeta, type PageFull, type SourceItem, type SourceContent,
+  type AgentChange, type FileDiff,
 } from '../api';
 import { AddSourceDialog } from '@/components/AddSourceDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { getCurrentAuth, clearAuth, isRemoteAuth, hasAuth } from '../auth';
 import { SpaceRail } from '../components/layout/SpaceRail';
 import { SpacePanel, type NavTab } from '../components/layout/SpacePanel';
+import { VersionSwitcher, type VersionSelection } from '../components/layout/VersionSwitcher';
 type CreateSpaceMode = 'choose' | 'local' | 'import';
 import { ReviewList } from '../components/review/ReviewList';
 import { ReviewDetail } from '../components/review/ReviewDetail';
@@ -108,6 +111,9 @@ export function MainLayout() {
   const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<NavTab>('wiki');
   const [reviewCount, setReviewCount] = useState(0);
+  const [versionSelection, setVersionSelection] = useState<VersionSelection>({ kind: 'working' });
+  const [openAgentChanges, setOpenAgentChanges] = useState<AgentChange[]>([]);
+  const [workingDiffs, setWorkingDiffs] = useState<FileDiff[]>([]);
   const [sidebarLayout, setSidebarLayout] = useState(() => loadSidebarLayout(window.localStorage));
   const [resizingSidebar, setResizingSidebar] = useState(false);
   const sidebarResizeStart = useRef({ pointerX: 0, width: sidebarLayout.width });
@@ -328,6 +334,40 @@ export function MainLayout() {
       .catch(() => !cancelled && setReviewCount(0));
     return () => { cancelled = true; };
   }, [activeWorkspace, reviewRefreshKey]);
+
+  // The desktop version switcher is a local Git view: Working, HEAD
+  // (Upstream), and currently-open isolated Agent Changes only.
+  useEffect(() => {
+    if (!desktop || !activeWorkspace?.localPath) {
+      const task = window.setTimeout(() => {
+        setOpenAgentChanges([]);
+        setWorkingDiffs([]);
+        setVersionSelection({ kind: 'working' });
+      }, 0);
+      return () => window.clearTimeout(task);
+    }
+    let cancelled = false;
+    Promise.all([
+      listLocalAgentChanges(activeWorkspace.slug),
+      getLocalWorkingDiff(activeWorkspace.slug),
+    ]).then(([changes, diffs]) => {
+      if (cancelled) return;
+      const openChanges = changes.filter((change) => change.status === 'open');
+      setOpenAgentChanges(openChanges);
+      setWorkingDiffs(diffs);
+      setVersionSelection((current) => (
+        current.kind === 'agent' && !openChanges.some((change) => change.id === current.changeId)
+          ? { kind: 'working' }
+          : current
+      ));
+    }).catch(() => {
+      if (cancelled) return;
+      setOpenAgentChanges([]);
+      setWorkingDiffs([]);
+      setVersionSelection({ kind: 'working' });
+    });
+    return () => { cancelled = true; };
+  }, [activeWorkspace?.localPath, activeWorkspace?.slug, desktop, reviewRefreshKey]);
 
   function isPersonalSpace(ws: Workspace): boolean {
     return ws.visibility === 'private' && ws.role === 'owner';
@@ -802,6 +842,33 @@ export function MainLayout() {
   // Determine active page/source for panel highlight
   const currentActivePage = activeView?.kind === 'page' ? activeView.slug : null;
   const currentActiveSource = activeView?.kind === 'source' ? activeView.filename : null;
+  const selectedAgentChange = versionSelection.kind === 'agent'
+    ? openAgentChanges.find((change) => change.id === versionSelection.changeId)
+    : undefined;
+  const activePagePath = activeView?.kind === 'page'
+    ? (activeView.path || conceptPath(activeView.slug))
+    : null;
+  const workingPageDiff = activePagePath ? findDiffForPath(workingDiffs, activePagePath) : undefined;
+  const agentPageDiff = activePagePath && selectedAgentChange
+    ? findDiffForPath(selectedAgentChange.diffs, activePagePath)
+    : undefined;
+  const viewedPageBody = activeView?.kind === 'page' && activeView.content
+    ? versionSelection.kind === 'upstream'
+      ? (workingPageDiff?.old_content ?? activeView.content.body)
+      : versionSelection.kind === 'agent'
+        ? (agentPageDiff?.new_content ?? activeView.content.body)
+        : activeView.content.body
+    : '';
+  const viewedPageMissing = versionSelection.kind === 'upstream'
+    ? workingPageDiff?.old_content === null
+    : versionSelection.kind === 'agent'
+      ? agentPageDiff?.new_content === null
+      : false;
+  const readonlyVersionLabel = versionSelection.kind === 'upstream'
+    ? 'Viewing upstream “main”'
+    : versionSelection.kind === 'agent'
+      ? `Viewing ${selectedAgentChange?.title ?? 'Agent Change'} changes`
+      : '';
 
   if (desktop && workspacesLoaded && workspaces.length === 0) {
     return (
@@ -1017,6 +1084,15 @@ export function MainLayout() {
               {/* Right: actions */}
               <div className="app-header-actions" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
 
+                {desktop && activeWorkspace?.localPath && !editingPage && (
+                  <VersionSwitcher
+                    selection={versionSelection}
+                    agentChanges={openAgentChanges}
+                    onSelect={setVersionSelection}
+                    onSeeReviews={() => handleTabChange('reviews')}
+                  />
+                )}
+
                 {desktop && activeWorkspace?.localPath && (
                   <button
                     type="button"
@@ -1033,7 +1109,7 @@ export function MainLayout() {
                 )}
 
                 {/* Wiki-specific actions */}
-                {activeTab === 'wiki' && (activeView?.kind === 'page' || activeView?.kind === 'source') && (
+                {versionSelection.kind === 'working' && activeTab === 'wiki' && (activeView?.kind === 'page' || activeView?.kind === 'source') && (
                   <>
                     {activeView?.kind === 'page' && activeView.content && !editingPage && (
                       <button
@@ -1114,11 +1190,11 @@ export function MainLayout() {
                     target={activeView.target}
                     onBack={() => handleTabChange('reviews')}
                     onDraftChanged={() => {
-                      setReviewRefreshKey((key) => key + 1);
                       if (!activeWorkspace || activeWorkspace.slug !== activeView.workspaceSlug) return;
                       void loadSpacePages(activeWorkspace);
                       void loadSpaceSources(activeWorkspace);
                     }}
+                    onReviewsChanged={() => setReviewRefreshKey((key) => key + 1)}
                     onContinueAgent={(change: AgentChange) => {
                       setAgentPanelOpen(true);
                       setAgentOpenRequest({
@@ -1215,10 +1291,30 @@ export function MainLayout() {
                   // scroll. Opening it shrinks the doc from the right only.
                   <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'stretch' }}>
                     <article ref={articleRef} className="prose" style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '36px 48px 56px 56px' }}>
-                      <PageByline name={activeView.content.edited_by} editedAt={activeView.content.edited_at} />
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={commentMarkdownComponents}>
-                        {renderBody(activeView.content.body)}
-                      </ReactMarkdown>
+                      {versionSelection.kind !== 'working' && (
+                        <div style={readonlyVersionBannerStyle}>
+                          <span aria-hidden style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: '50%',
+                            background: versionSelection.kind === 'upstream' ? C.purple : C.blue,
+                            flexShrink: 0,
+                          }} />
+                          <span>{readonlyVersionLabel} · <span style={{ color: C.muted }}>read-only</span></span>
+                        </div>
+                      )}
+                      {viewedPageMissing ? (
+                        <div style={missingVersionStyle}>This page does not exist in the selected version.</div>
+                      ) : (
+                        <>
+                          {versionSelection.kind === 'working' && (
+                            <PageByline name={activeView.content.edited_by} editedAt={activeView.content.edited_at} />
+                          )}
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={commentMarkdownComponents}>
+                            {renderBody(viewedPageBody)}
+                          </ReactMarkdown>
+                        </>
+                      )}
                     </article>
                     <CommentsPanel />
                   </div>
@@ -1626,6 +1722,34 @@ const headerBtnStyle: React.CSSProperties = {
   background: 'transparent', color: C.muted, fontSize: 12,
   transition: 'background 0.1s',
 };
+
+const readonlyVersionBannerStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 9,
+  marginBottom: 24,
+  padding: '10px 14px',
+  border: `1px solid ${C.line}`,
+  borderRadius: 9,
+  background: C.sidebar,
+  color: C.ink2,
+  fontSize: 12.5,
+};
+
+const missingVersionStyle: React.CSSProperties = {
+  padding: '34px 18px',
+  border: `1px dashed ${C.line}`,
+  borderRadius: 10,
+  background: C.panel,
+  color: C.muted,
+  textAlign: 'center',
+  fontSize: 13,
+};
+
+function findDiffForPath(diffs: FileDiff[], path: string): FileDiff | undefined {
+  const normalized = path.replace(/^\.\//, '');
+  return diffs.find((diff) => diff.path.replace(/^\.\//, '') === normalized);
+}
 
 function isMissingLocalPageError(error: unknown): boolean {
   const message = String(error).toLowerCase();

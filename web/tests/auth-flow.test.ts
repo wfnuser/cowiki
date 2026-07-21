@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -6,6 +7,9 @@ import {
   buildWebGithubLoginUrl,
   parseDesktopOAuthCallback,
 } from '../src/auth-flow.ts';
+
+const loginPage = readFileSync(new URL('../src/pages/LoginPage.tsx', import.meta.url), 'utf8');
+const spaceRail = readFileSync(new URL('../src/components/layout/SpaceRail.tsx', import.meta.url), 'utf8');
 
 test('web GitHub login keeps the existing browser URL', () => {
   assert.equal(
@@ -31,4 +35,12 @@ test('desktop callback accepts credential query params from the loopback listene
     ),
     { apiKey: 'cw_123', userName: 'octo-cat', userId: 'user-1' },
   );
+});
+
+test('desktop sign in follows the local-first shell design', () => {
+  assert.match(loginPage, /LOCAL FIRST/);
+  assert.match(loginPage, /Continue locally/);
+  assert.match(loginPage, /Signing in does not upload a local Space/);
+  assert.match(spaceRail, /Not signed in/);
+  assert.match(spaceRail, />\s*Sign in\s*</);
 });
