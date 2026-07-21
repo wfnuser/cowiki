@@ -46,4 +46,3 @@ export function canMerge(role: CloudRole): boolean {
 export function canManageMembers(role: CloudRole): boolean {
   return canMerge(role);
 }
-

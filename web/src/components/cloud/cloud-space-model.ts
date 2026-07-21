@@ -66,4 +66,3 @@ export function cloudSpaceUrl(status: CloudSyncResult): string | null {
   if (!status.cloudBaseUrl || !status.cloudSpaceId) return null;
   return `${status.cloudBaseUrl.replace(/\/$/, '')}/cloud/spaces/${encodeURIComponent(status.cloudSpaceId)}/wiki`;
 }
-

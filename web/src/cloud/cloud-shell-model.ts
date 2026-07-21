@@ -33,4 +33,3 @@ export function resolveInitialCloudPage(entries: CloudTreeEntry[]): string | nul
     ?? pages[0]?.path
     ?? null;
 }
-

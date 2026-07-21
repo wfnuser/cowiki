@@ -87,4 +87,3 @@ export function CloudSpaceView({ client, session, route, onSignOut }: CloudSpace
     </div>
   );
 }
-

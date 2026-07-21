@@ -118,4 +118,3 @@ export function CloudNotice({ children, tone = 'neutral' }: { children: React.Re
       : 'border-border bg-secondary text-text-secondary';
   return <div className={`mb-5 rounded-lg border px-4 py-3 text-sm ${styles}`}>{children}</div>;
 }
-

@@ -101,4 +101,3 @@ export function CloudWikiView({
 function pageLabel(path: string): string {
   return path.split('/').at(-1)?.replace(/\.md$/i, '').replace(/[-_]/g, ' ') || path;
 }
-

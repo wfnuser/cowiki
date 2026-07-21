@@ -60,4 +60,3 @@ function storedCloudSession(): CloudSession | null {
     return null;
   }
 }
-
