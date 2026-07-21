@@ -97,7 +97,7 @@ Add GitHub authorize/callback handlers, one-time code exchange, Bearer extractio
 Run: `cargo test --manifest-path cloud/Cargo.toml --test auth`
 Expected: PASS.
 
-- [ ] **Step 5: Commit authentication**
+- [x] **Step 5: Commit authentication**
 
 ```bash
 git add cloud/src cloud/tests/auth.rs
@@ -111,20 +111,20 @@ git commit -m "feat(cloud): add revocable desktop authentication"
 - Modify: `cloud/src/lib.rs`
 - Test: `cloud/tests/git_repo.rs`
 
-- [ ] **Step 1: Write failing repository tests**
+- [x] **Step 1: Write failing repository tests**
 
 Create temporary bare repos and assert path derivation uses UUIDs, initialization is idempotent, bootstrap accepts only equal `main` and `user/<owner>` OIDs, normal validation permits only `user/<authenticated-id>`, and compare-and-swap fast-forward rejects stale or non-descendant heads.
 
-- [ ] **Step 2: Run the repository tests and observe failure**
+- [x] **Step 2: Run the repository tests and observe failure**
 
 Run: `cargo test --manifest-path cloud/Cargo.toml --test git_repo`
 Expected: FAIL because `GitRepoStore` does not exist.
 
-- [ ] **Step 3: Implement repository lifecycle and policy**
+- [x] **Step 3: Implement repository lifecycle and policy**
 
 Use `git init --bare --initial-branch=main`, configure `http.receivepack=true`, install a generated executable `pre-receive` hook, expose OID/ancestor/ref-update helpers, and serialize mutations with per-Space Tokio mutexes.
 
-- [ ] **Step 4: Run repository tests**
+- [x] **Step 4: Run repository tests**
 
 Run: `cargo test --manifest-path cloud/Cargo.toml --test git_repo`
 Expected: PASS.
