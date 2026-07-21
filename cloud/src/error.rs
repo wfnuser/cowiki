@@ -15,6 +15,8 @@ pub enum AppError {
     NotFound,
     #[error("{0}")]
     Conflict(String),
+    #[error("unsupported media type")]
+    UnsupportedMediaType,
     #[error("database operation failed")]
     Database(#[from] sqlx::Error),
     #[error("internal service error: {0}")]
@@ -29,6 +31,10 @@ impl IntoResponse for AppError {
             Self::Forbidden => (StatusCode::FORBIDDEN, "permission denied"),
             Self::NotFound => (StatusCode::NOT_FOUND, "resource not found"),
             Self::Conflict(message) => (StatusCode::CONFLICT, message.as_str()),
+            Self::UnsupportedMediaType => (
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "only UTF-8 Markdown content can be read",
+            ),
             Self::Database(_) | Self::Internal(_) => {
                 tracing::error!(error = %self, "request failed");
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal service error")

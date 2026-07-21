@@ -26,6 +26,10 @@ pub enum GitRepoError {
     NotFastForward,
     #[error("required Git ref {0} does not exist")]
     MissingRef(String),
+    #[error("repository path is invalid: {0}")]
+    InvalidPath(String),
+    #[error("repository object does not exist: {0}")]
+    ObjectNotFound(String),
     #[error("repository lock registry is unavailable")]
     LockPoisoned,
 }
@@ -48,6 +52,25 @@ pub struct FastForwardResult {
     pub old_main_oid: String,
     pub main_oid: String,
     pub already_merged: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkdownTreeEntry {
+    pub path: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkdownTreeSnapshot {
+    pub oid: String,
+    pub entries: Vec<MarkdownTreeEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContentBlob {
+    pub oid: String,
+    pub path: String,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Clone)]
@@ -132,6 +155,90 @@ impl GitRepoStore {
         } else {
             Ok(None)
         }
+    }
+
+    pub fn read_markdown_tree(
+        &self,
+        space_id: Uuid,
+        branch: &str,
+    ) -> Result<MarkdownTreeSnapshot, GitRepoError> {
+        validate_branch_name(branch)?;
+        let oid = self
+            .ref_oid(space_id, branch)?
+            .ok_or_else(|| GitRepoError::MissingRef(branch.to_owned()))?;
+        let path = self.repo_path(space_id);
+        let output = self.git_output(&path, &["ls-tree", "-r", "-z", "--name-only", &oid])?;
+        let mut entries = Vec::new();
+        let mut folders = std::collections::BTreeSet::new();
+
+        for raw_path in output.stdout.split(|byte| *byte == 0) {
+            if raw_path.is_empty() {
+                continue;
+            }
+            let Ok(file_path) = std::str::from_utf8(raw_path) else {
+                continue;
+            };
+            if !is_visible_path(file_path) || !has_markdown_extension(file_path) {
+                continue;
+            }
+            let mut parent = Path::new(file_path).parent();
+            while let Some(folder) = parent {
+                if folder.as_os_str().is_empty() {
+                    break;
+                }
+                folders.insert(folder.to_string_lossy().replace('\\', "/"));
+                parent = folder.parent();
+            }
+            entries.push(MarkdownTreeEntry {
+                path: file_path.to_owned(),
+                kind: "page".into(),
+            });
+        }
+        entries.extend(folders.into_iter().map(|path| MarkdownTreeEntry {
+            path,
+            kind: "folder".into(),
+        }));
+        entries.sort_by(|left, right| {
+            left.path
+                .cmp(&right.path)
+                .then_with(|| left.kind.cmp(&right.kind))
+        });
+        Ok(MarkdownTreeSnapshot { oid, entries })
+    }
+
+    pub fn read_content_blob(
+        &self,
+        space_id: Uuid,
+        branch: &str,
+        requested_path: &str,
+    ) -> Result<ContentBlob, GitRepoError> {
+        validate_branch_name(branch)?;
+        let normalized_path = validate_repository_path(requested_path)?;
+        if !is_visible_path(&normalized_path) {
+            return Err(GitRepoError::ObjectNotFound(normalized_path));
+        }
+        let oid = self
+            .ref_oid(space_id, branch)?
+            .ok_or_else(|| GitRepoError::MissingRef(branch.to_owned()))?;
+        let repository = self.repo_path(space_id);
+        let object = format!("{oid}:{normalized_path}");
+        let object_type = Command::new("git")
+            .args(["--git-dir"])
+            .arg(&repository)
+            .args(["cat-file", "-t", &object])
+            .stdin(Stdio::null())
+            .output()?;
+        if !object_type.status.success()
+            || String::from_utf8_lossy(&object_type.stdout).trim() != "blob"
+        {
+            return Err(GitRepoError::ObjectNotFound(normalized_path));
+        }
+        let output = self.git_output(&repository, &["cat-file", "blob", &object])?;
+        Ok(ContentBlob {
+            oid,
+            path: normalized_path,
+            bytes: output.stdout,
+        })
     }
 
     pub fn fast_forward_main(
@@ -287,6 +394,43 @@ fn validate_branch_name(branch: &str) -> Result<(), GitRepoError> {
             "unsupported branch name".into(),
         ))
     }
+}
+
+fn validate_repository_path(value: &str) -> Result<String, GitRepoError> {
+    if value.is_empty()
+        || value.starts_with('/')
+        || value.contains('\\')
+        || value.contains('\0')
+        || value
+            .split('/')
+            .any(|component| component.is_empty() || matches!(component, "." | ".."))
+    {
+        return Err(GitRepoError::InvalidPath(value.to_owned()));
+    }
+    let path = Path::new(value);
+    if path
+        .components()
+        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(GitRepoError::InvalidPath(value.to_owned()));
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
+fn is_visible_path(value: &str) -> bool {
+    Path::new(value)
+        .components()
+        .all(|component| match component {
+            std::path::Component::Normal(name) => !name.to_string_lossy().starts_with('.'),
+            _ => false,
+        })
+}
+
+fn has_markdown_extension(value: &str) -> bool {
+    Path::new(value)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
 }
 
 fn ensure_success(output: Output) -> Result<Output, GitRepoError> {

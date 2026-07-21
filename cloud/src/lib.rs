@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod config;
+pub mod content;
 pub mod db;
 pub mod error;
 pub mod git_http;
@@ -34,6 +35,7 @@ pub fn build_router(config: Config, pool: PgPool) -> Result<Router, git_repo::Gi
         .route("/healthz", get(healthz))
         .merge(auth::routes())
         .merge(spaces::routes())
+        .merge(content::routes())
         .merge(pull_requests::routes())
         .merge(git_http::routes())
         .with_state(state))
