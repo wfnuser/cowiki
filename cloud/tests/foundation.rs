@@ -79,6 +79,19 @@ fn malformed_origin_and_short_pepper_are_rejected() {
             .contains("http")
     );
 
+    for value in [
+        "https://user:secret@cloud.cowiki.app",
+        "https://cloud.cowiki.app/prefix",
+        "https://cloud.cowiki.app?tenant=one",
+    ] {
+        let mut origin = valid_environment(temp.path().to_str().unwrap());
+        origin.insert("COWIKI_PUBLIC_ORIGIN".into(), value.into());
+        assert!(
+            Config::from_iter(origin).is_err(),
+            "accepted origin {value}"
+        );
+    }
+
     let mut pepper = valid_environment(temp.path().to_str().unwrap());
     pepper.insert("COWIKI_TOKEN_PEPPER".into(), "short".into());
     assert!(

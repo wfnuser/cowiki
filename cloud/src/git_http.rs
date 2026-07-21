@@ -1,6 +1,6 @@
 use axum::Router;
 use axum::body::Bytes;
-use axum::extract::{Path, RawQuery, State};
+use axum::extract::{DefaultBodyLimit, Path, RawQuery, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
@@ -41,7 +41,9 @@ pub struct GitHttpResponse {
 }
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/git/{repository}/{*path}", any(git_http_handler))
+    Router::new()
+        .route("/git/{repository}/{*path}", any(git_http_handler))
+        .layer(DefaultBodyLimit::max(MAX_GIT_REQUEST_BYTES))
 }
 
 async fn git_http_handler(

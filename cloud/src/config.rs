@@ -57,10 +57,18 @@ impl Config {
         }
 
         let public_origin = parse_url("COWIKI_PUBLIC_ORIGIN", &required("COWIKI_PUBLIC_ORIGIN")?)?;
-        if !matches!(public_origin.scheme(), "http" | "https") || public_origin.host().is_none() {
+        if !matches!(public_origin.scheme(), "http" | "https")
+            || public_origin.host().is_none()
+            || !public_origin.username().is_empty()
+            || public_origin.password().is_some()
+            || !matches!(public_origin.path(), "" | "/")
+            || public_origin.query().is_some()
+            || public_origin.fragment().is_some()
+        {
             return Err(ConfigError::Invalid {
                 name: "COWIKI_PUBLIC_ORIGIN",
-                reason: "origin must be an http or https URL with a host".to_string(),
+                reason: "origin must be a root http(s) URL without credentials, query, or fragment"
+                    .to_string(),
             });
         }
 

@@ -31,6 +31,15 @@ pub enum PullRequestStatus {
 }
 
 impl MemberRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+            Self::Manager => "manager",
+            Self::Editor => "editor",
+            Self::Viewer => "viewer",
+        }
+    }
+
     pub fn can_push(self) -> bool {
         matches!(self, Self::Owner | Self::Manager | Self::Editor)
     }

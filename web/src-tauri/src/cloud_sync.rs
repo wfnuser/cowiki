@@ -90,6 +90,7 @@ pub fn link_space(
     if is_rebase_in_progress(&space.local_path)? {
         return CloudSyncResult::conflicted(&space.local_path);
     }
+    ensure_local_main(&space.local_path)?;
     let mut committed = false;
     if is_dirty(&space.local_path)? {
         let message = required_commit_message(commit_message)?;
@@ -194,6 +195,7 @@ pub fn submit(
     if is_rebase_in_progress(&space.local_path)? {
         return CloudSyncResult::conflicted(&space.local_path);
     }
+    ensure_local_main(&space.local_path)?;
 
     let mut committed = false;
     if is_dirty(&space.local_path)? {
@@ -339,6 +341,7 @@ fn sync_if_clean_path(path: &Path, token: &str) -> Result<CloudSyncResult, Strin
     if is_rebase_in_progress(path)? {
         return CloudSyncResult::conflicted(path);
     }
+    ensure_local_main(path)?;
     if is_dirty(path)? {
         return Ok(CloudSyncResult::new(
             SyncState::Dirty,
@@ -373,6 +376,12 @@ fn sync_if_clean_path(path: &Path, token: &str) -> Result<CloudSyncResult, Strin
 fn push_user_branch(path: &Path, token: &str, user_id: Uuid) -> Result<CloudSyncResult, String> {
     let tracking = format!("refs/remotes/cowiki/user/{user_id}");
     let lease_oid = git_stdout(path, &["rev-parse", "--verify", &tracking], None).ok();
+    if lease_oid.is_some() && !is_ancestor(path, &tracking, "HEAD")? {
+        return Ok(CloudSyncResult::new(
+            SyncState::LeaseRejected,
+            "The Cloud user branch contains work not present locally; review that device's changes before retrying.",
+        ));
+    }
     let lease = format!(
         "--force-with-lease=refs/heads/user/{user_id}:{}",
         lease_oid.as_deref().unwrap_or("")
@@ -407,6 +416,19 @@ fn push_user_branch(path: &Path, token: &str, user_id: Uuid) -> Result<CloudSync
         ))
     } else {
         Err(failure)
+    }
+}
+
+fn is_ancestor(path: &Path, ancestor: &str, descendant: &str) -> Result<bool, String> {
+    let output = git_command(
+        path,
+        &["merge-base", "--is-ancestor", ancestor, descendant],
+        None,
+    )?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(git_failure(&output)),
     }
 }
 
@@ -446,6 +468,7 @@ fn status_path(path: &Path) -> Result<CloudSyncResult, String> {
     if is_rebase_in_progress(path)? {
         return CloudSyncResult::conflicted(path);
     }
+    ensure_local_main(path)?;
     if is_dirty(path)? {
         return Ok(CloudSyncResult::new(
             SyncState::Dirty,
@@ -487,6 +510,15 @@ fn is_dirty(path: &Path) -> Result<bool, String> {
         None,
     )?
     .is_empty())
+}
+
+fn ensure_local_main(path: &Path) -> Result<(), String> {
+    let branch = git_stdout(path, &["branch", "--show-current"], None)?;
+    if branch == "main" {
+        Ok(())
+    } else {
+        Err("Cloud sync only operates on the editable local main branch; switch back to main before retrying".into())
+    }
 }
 
 fn is_rebase_in_progress(path: &Path) -> Result<bool, String> {
@@ -677,7 +709,7 @@ fn git_failure(output: &Output) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        bootstrap_remote, configure_cowiki_remote, push_user_branch, rebase_abort_path,
+        bootstrap_remote, configure_cowiki_remote, fetch, push_user_branch, rebase_abort_path,
         sync_if_clean_path, SyncState,
     };
     use std::path::Path;
@@ -740,6 +772,26 @@ mod tests {
     }
 
     #[test]
+    fn sync_refuses_to_mutate_a_manually_selected_local_branch() {
+        let local = tempfile::tempdir().unwrap();
+        let remote = tempfile::tempdir().unwrap();
+        init_repo(local.path(), "# Initial\n");
+        run(remote.path(), &["init", "--bare", "--initial-branch=main"]);
+        let user = Uuid::new_v4();
+        configure_cowiki_remote(local.path(), remote.path().to_str().unwrap(), user).unwrap();
+        bootstrap_remote(local.path(), "fixture-token", user).unwrap();
+        run(local.path(), &["switch", "-c", "manual-topic"]);
+
+        let error = sync_if_clean_path(local.path(), "fixture-token").unwrap_err();
+
+        assert!(error.contains("local main"));
+        assert_eq!(
+            output(local.path(), &["branch", "--show-current"]),
+            "manual-topic"
+        );
+    }
+
+    #[test]
     fn user_branch_push_rejects_a_stale_force_with_lease() {
         let local = tempfile::tempdir().unwrap();
         let remote = tempfile::tempdir().unwrap();
@@ -769,6 +821,7 @@ mod tests {
             collaborator.path(),
             &["push", "origin", &format!("main:refs/heads/user/{user}")],
         );
+        fetch(local.path(), "fixture-token").unwrap();
 
         std::fs::write(local.path().join("local.md"), "# Local device\n").unwrap();
         run(local.path(), &["add", "local.md"]);

@@ -169,6 +169,9 @@ REST endpoints:
 - `POST /api/spaces`
 - `GET /api/spaces`
 - `GET /api/spaces/:space_id`
+- `GET /api/spaces/:space_id/members`
+- `POST /api/spaces/:space_id/members`
+- `DELETE /api/spaces/:space_id/members/:member_id`
 - `POST /api/spaces/:space_id/pull-requests`
 - `GET /api/spaces/:space_id/pull-requests`
 - `GET /api/spaces/:space_id/pull-requests/:pr_id`

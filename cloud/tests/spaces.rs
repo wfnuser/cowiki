@@ -91,6 +91,116 @@ async fn creating_a_space_grants_owner_and_hides_it_from_non_members() {
     database.finish().await;
 }
 
+#[tokio::test]
+async fn owner_and_manager_can_manage_members_but_cannot_replace_the_owner() {
+    let Some(database) = TestDatabase::create().await else {
+        eprintln!("TEST_DATABASE_URL is not set; PostgreSQL integration assertion skipped");
+        return;
+    };
+    let owner = insert_user(&database.pool, "owner-members").await;
+    let manager = insert_user(&database.pool, "manager-members").await;
+    let editor = insert_user(&database.pool, "editor-members").await;
+    let owner_key = insert_api_key(&database.pool, owner).await;
+    let manager_key = insert_api_key(&database.pool, manager).await;
+    let editor_key = insert_api_key(&database.pool, editor).await;
+    let space = Uuid::new_v4();
+    cowiki_cloud::db::create_space(&database.pool, space, owner, "Member Space", "member-space")
+        .await
+        .unwrap();
+    let repos = tempfile::tempdir().unwrap();
+    let app = cowiki_cloud::build_router(
+        test_config(repos.path().to_str().unwrap()),
+        database.pool.clone(),
+    )
+    .unwrap();
+
+    let added_manager = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/spaces/{space}/members"),
+            &owner_key,
+            json!({ "handle": "manager-members", "role": "manager" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(added_manager.status(), StatusCode::OK);
+    assert_eq!(response_json(added_manager).await["role"], "manager");
+
+    let added_editor = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/spaces/{space}/members"),
+            &manager_key,
+            json!({ "handle": "editor-members", "role": "editor" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(added_editor.status(), StatusCode::OK);
+
+    let listed = app
+        .clone()
+        .oneshot(auth_request(
+            "GET",
+            &format!("/api/spaces/{space}/members"),
+            &editor_key,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(listed.status(), StatusCode::OK);
+    let listed = response_json(listed).await;
+    assert_eq!(listed.as_array().unwrap().len(), 3);
+    assert_eq!(listed[0]["role"], "owner");
+
+    let replace_owner = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/spaces/{space}/members"),
+            &manager_key,
+            json!({ "handle": "owner-members", "role": "viewer" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(replace_owner.status(), StatusCode::FORBIDDEN);
+
+    let editor_manage = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/spaces/{space}/members"),
+            &editor_key,
+            json!({ "handle": "manager-members", "role": "viewer" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(editor_manage.status(), StatusCode::FORBIDDEN);
+
+    let removed = app
+        .clone()
+        .oneshot(auth_request(
+            "DELETE",
+            &format!("/api/spaces/{space}/members/{editor}"),
+            &manager_key,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(removed.status(), StatusCode::NO_CONTENT);
+
+    let removed_access = app
+        .oneshot(auth_request(
+            "GET",
+            &format!("/api/spaces/{space}"),
+            &editor_key,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(removed_access.status(), StatusCode::NOT_FOUND);
+
+    database.finish().await;
+}
+
 async fn insert_user(pool: &sqlx::PgPool, handle: &str) -> Uuid {
     let id = Uuid::new_v4();
     sqlx::query("INSERT INTO users (id, github_id, handle, display_name) VALUES ($1, $2, $3, $3)")

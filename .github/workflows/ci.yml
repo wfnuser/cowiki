@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-    branches: [dev, main]
+    branches: [dev, main, feat/review-source-flow]
   push:
     branches: [dev, main]
 
@@ -39,6 +39,8 @@ jobs:
         run: npm run test:desktop-workflow
       - name: Test auth flow
         run: npm run test:auth-flow
+      - name: Test Cloud desktop contract
+        run: npm run test:cloud-sync
       - name: Build frontend
         run: npm run build
       - name: Check Rust formatting

@@ -16,6 +16,15 @@ pub struct SpaceMembership {
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
+pub struct SpaceMemberRecord {
+    pub user_id: Uuid,
+    pub handle: String,
+    pub display_name: String,
+    pub avatar_url: Option<String>,
+    pub role: MemberRole,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct PullRequestRecord {
     pub id: Uuid,
     pub space_id: Uuid,
@@ -228,6 +237,106 @@ pub async fn member_role(
     .bind(user_id)
     .fetch_optional(pool)
     .await
+}
+
+pub async fn list_space_members(
+    pool: &PgPool,
+    space_id: Uuid,
+) -> Result<Vec<SpaceMemberRecord>, sqlx::Error> {
+    sqlx::query_as::<_, SpaceMemberRecord>(
+        "SELECT users.id AS user_id, users.handle, users.display_name, users.avatar_url,
+                space_members.role
+         FROM space_members
+         JOIN users ON users.id = space_members.user_id
+         WHERE space_members.space_id = $1
+         ORDER BY CASE space_members.role
+                    WHEN 'owner' THEN 0 WHEN 'manager' THEN 1
+                    WHEN 'editor' THEN 2 ELSE 3
+                  END,
+                  lower(users.display_name), users.id",
+    )
+    .bind(space_id)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn user_by_handle(pool: &PgPool, handle: &str) -> Result<Option<User>, sqlx::Error> {
+    sqlx::query_as::<_, User>(
+        "SELECT id, github_id, handle, display_name, avatar_url
+         FROM users WHERE lower(handle) = lower($1)",
+    )
+    .bind(handle)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn set_space_member(
+    pool: &PgPool,
+    space_id: Uuid,
+    actor_id: Uuid,
+    member: &User,
+    role: MemberRole,
+) -> Result<SpaceMemberRecord, sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO space_members (space_id, user_id, role)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (space_id, user_id) DO UPDATE SET
+             role = EXCLUDED.role, updated_at = now()",
+    )
+    .bind(space_id)
+    .bind(member.id)
+    .bind(role)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "INSERT INTO audit_events
+            (space_id, actor_id, action, subject_type, subject_id, metadata)
+         VALUES ($1, $2, 'space_member.updated', 'user', $3,
+                 jsonb_build_object('role', $4::text))",
+    )
+    .bind(space_id)
+    .bind(actor_id)
+    .bind(member.id.to_string())
+    .bind(role.as_str())
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(SpaceMemberRecord {
+        user_id: member.id,
+        handle: member.handle.clone(),
+        display_name: member.display_name.clone(),
+        avatar_url: member.avatar_url.clone(),
+        role,
+    })
+}
+
+pub async fn remove_space_member(
+    pool: &PgPool,
+    space_id: Uuid,
+    actor_id: Uuid,
+    member_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    let result = sqlx::query("DELETE FROM space_members WHERE space_id = $1 AND user_id = $2")
+        .bind(space_id)
+        .bind(member_id)
+        .execute(&mut *transaction)
+        .await?;
+    if result.rows_affected() == 1 {
+        sqlx::query(
+            "INSERT INTO audit_events
+                (space_id, actor_id, action, subject_type, subject_id)
+             VALUES ($1, $2, 'space_member.removed', 'user', $3)",
+        )
+        .bind(space_id)
+        .bind(actor_id)
+        .bind(member_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+    }
+    transaction.commit().await?;
+    Ok(result.rows_affected() == 1)
 }
 
 pub async fn create_space(

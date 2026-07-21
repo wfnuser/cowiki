@@ -83,6 +83,11 @@ async fn create_pull_request(
     let head_ref = format!("user/{}", user.user.id);
     let base_oid = required_ref(&state, space_id, "main")?;
     let head_oid = required_ref(&state, space_id, &head_ref)?;
+    if base_oid == head_oid {
+        return Err(AppError::Conflict(
+            "the user branch has no changes relative to Cloud main".into(),
+        ));
+    }
     let (record, created) = db::create_or_update_pull_request(
         &state.pool,
         space_id,

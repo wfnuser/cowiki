@@ -100,10 +100,12 @@ space_json="$(curl --fail --silent \
 space_id="$(jq -er '.id' <<<"$space_json")"
 git_url="$(jq -er '.gitUrl' <<<"$space_json")"
 
-docker exec -i "$postgres_name" psql -v ON_ERROR_STOP=1 -U postgres -d postgres >/dev/null <<SQL
-INSERT INTO space_members (space_id, user_id, role)
-VALUES ('$space_id', '$manager_id', 'manager');
-SQL
+member_json="$(curl --fail --silent \
+  -H "Authorization: Bearer $owner_token" \
+  -H 'Content-Type: application/json' \
+  -d '{"handle":"e2e-manager","role":"manager"}' \
+  "$origin/api/spaces/$space_id/members")"
+test "$(jq -er '.role' <<<"$member_json")" = "manager"
 
 git_with_token() {
   local token="$1"
@@ -125,6 +127,13 @@ git_with_token "$owner_token" -C "$local_repo" push --atomic cowiki \
   "main:refs/heads/user/$owner_id" >/dev/null
 
 printf '\nShared through CoWiki Cloud.\n' >>"$local_repo/index.md"
+python3 - "$local_repo/source.bin" <<'PY'
+import os
+import sys
+with open(sys.argv[1], "wb") as output:
+    output.write(os.urandom(3 * 1024 * 1024))
+PY
+git -C "$local_repo" add source.bin
 git -C "$local_repo" commit -am 'share Cloud update' >/dev/null
 git_with_token "$owner_token" -C "$local_repo" push cowiki \
   "main:refs/heads/user/$owner_id" >/dev/null

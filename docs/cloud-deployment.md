@@ -4,7 +4,7 @@ CoWiki Cloud is one PostgreSQL control plane plus one persistent bare-Git reposi
 
 ## First deployment
 
-1. Copy `.env.cloud.example` to `.env.cloud` and replace every `change-me` value. Generate `COWIKI_TOKEN_PEPPER` with at least 32 random bytes and keep it stable; changing it revokes every API key and outstanding OAuth code.
+1. Copy `.env.cloud.example` to `.env.cloud` and replace every `change-me` value. Keep `POSTGRES_PASSWORD` and the password embedded in `DATABASE_URL` in sync; URL-encode reserved URL characters in `DATABASE_URL`. Generate `COWIKI_TOKEN_PEPPER` with at least 32 random bytes and keep it stable; changing it revokes every API key and outstanding OAuth code.
 2. Register a GitHub OAuth application. Set its callback to `${COWIKI_PUBLIC_ORIGIN}/api/auth/github/callback`.
 3. Put an HTTPS reverse proxy in front of port 8787 and preserve request bodies, `Authorization`, `Content-Type`, and Git's query string. The public origin must be the externally visible HTTPS origin.
 4. Start with one application replica:
@@ -36,3 +36,4 @@ Never restore only PostgreSQL or only Git. If the two backups cannot be matched,
 - Alert on failed migrations, PostgreSQL errors, an unwritable repository root, Git hook rejection spikes, and health-check failures.
 - Keep the first production version at one Cloud application replica. PostgreSQL row locks and Git compare-and-swap protect merge correctness, but bootstrap/merge serialization is process-local; horizontal replicas require a distributed per-Space lock or stable per-Space routing.
 - The container runs as UID 10001. Bind-mounted repository directories must be writable by that UID.
+- Members must sign in once before an Owner or Manager can add their GitHub handle. Ownership transfer is intentionally unavailable in this version; Owners cannot be demoted or removed through the member API.

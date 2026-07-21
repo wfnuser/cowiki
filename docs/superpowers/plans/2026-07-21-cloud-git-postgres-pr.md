@@ -351,7 +351,7 @@ bash cloud/tests/container_contract.sh
 
 Expected: all commands exit 0; frontend build may retain the pre-existing chunk-size warning.
 
-- [ ] **Step 6: Commit operations support**
+- [x] **Step 6: Commit operations support**
 
 ```bash
 git add .env.cloud.example cloud/Dockerfile cloud/entrypoint.sh docker-compose.cloud.yml scripts/cloud-e2e.sh docs/cloud-deployment.md .github/workflows/ci.yml cloud/tests/container_contract.sh
@@ -363,12 +363,12 @@ git commit -m "ops(cloud): package PostgreSQL and Git service for production"
 **Files:**
 - Modify only files required by audit findings.
 
-- [ ] **Step 1: Review the complete diff against the design**
+- [x] **Step 1: Review the complete diff against the design**
 
 Run: `git diff --check && git diff --stat origin/feat/review-source-flow...HEAD && git log --oneline origin/feat/review-source-flow..HEAD`
 Expected: no whitespace errors, no UI component changes, and focused commits matching Tasks 1-9.
 
-- [ ] **Step 2: Verify security-sensitive invariants**
+- [x] **Step 2: Verify security-sensitive invariants**
 
 Search for plaintext token persistence, remote URLs containing credentials, direct main pushes, unchecked repository paths, SQLite usage inside `cloud/`, and missing expected-head comparisons. Fix any match that violates the design and rerun the relevant focused test.
 

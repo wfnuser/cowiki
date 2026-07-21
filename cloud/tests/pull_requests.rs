@@ -149,6 +149,7 @@ async fn live_user_branch_invalidates_approval_and_merges_with_expected_head() {
     assert_eq!(store.ref_oid(space, "main").unwrap().unwrap(), third_oid);
 
     let retried = app
+        .clone()
         .oneshot(json_request(
             "POST",
             &format!("/api/spaces/{space}/pull-requests/{pr_id}/merge"),
@@ -159,6 +160,17 @@ async fn live_user_branch_invalidates_approval_and_merges_with_expected_head() {
         .unwrap();
     assert_eq!(retried.status(), StatusCode::OK);
     assert_eq!(response_json(retried).await["status"], "merged");
+
+    let empty = app
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/spaces/{space}/pull-requests"),
+            &editor_key,
+            json!({ "title": "Nothing new" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(empty.status(), StatusCode::CONFLICT);
 
     database.finish().await;
 }
