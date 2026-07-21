@@ -12,9 +12,9 @@ export function LoginPage() {
 
   useEffect(() => {
     if (getStoredAuth()) {
-      navigate('/', { replace: true });
+      navigate(desktop ? '/' : '/cloud', { replace: true });
     }
-  }, [navigate]);
+  }, [desktop, navigate]);
 
   const signInWithGitHub = async (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (!desktop) return;
