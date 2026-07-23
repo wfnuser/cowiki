@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import {
-  ChevronRight, FileText, Folder, Upload,
+  ChevronRight, FileText, Folder,
   MoreHorizontal, Plus, FolderPlus, Settings, BookOpen, GitPullRequest, Users, History,
   FileCode, Pencil, Trash2, Search, Unlink,
   PanelLeft,
@@ -112,10 +112,10 @@ export function SpacePanel({
   return (
     <aside style={panelStyle}>
       {/* Space name header */}
-      <div style={{
+      <div data-tauri-drag-region="deep" style={{
         padding: '0 16px', display: 'flex', alignItems: 'center', gap: 9,
         borderBottom: `1px solid ${C.line}`,
-        height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT,
+        height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT, userSelect: 'none',
       }}>
         <div style={{
           width: 26, height: 26, borderRadius: 8,
@@ -217,17 +217,18 @@ export function SpacePanel({
             />
           )}
           menuItems={
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: C.faint, display: 'flex' }}
-                  onClick={(e) => e.stopPropagation()}>
-                  <MoreHorizontal size={13} />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-36">
-                <DropdownMenuItem onClick={onShowIngest}><Upload size={14} className="mr-2" /> Add Source</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <button
+              type="button"
+              aria-label="Add Source"
+              title="Add Source"
+              onClick={onShowIngest}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: 2,
+                borderRadius: 4, color: C.faint, display: 'flex',
+              }}
+            >
+              <Plus size={13} />
+            </button>
           }
         />
 

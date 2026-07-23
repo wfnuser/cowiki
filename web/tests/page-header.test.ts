@@ -55,13 +55,19 @@ test('long breadcrumbs cannot shrink or wrap the header actions', () => {
   assert.match(mainLayout, /className="app-header-actions"/);
 });
 
-test('source ingestion lives in the Sources menu instead of the page header', () => {
+test('source ingestion uses a direct accessible plus action beside Sources', () => {
   const headerActions = mainLayout
     .split('{/* Right: actions */}')[1]
     .split('{/* User menu moved to Rail bottom avatar */}')[0];
+  const sourcesSection = spacePanel
+    .split('{/* Section 1: Sources */}')[1]
+    .split('{/* OKF concepts form one arbitrary bundle-relative hierarchy. */}')[0];
   assert.doesNotMatch(headerActions, /Add Source/);
-  assert.match(spacePanel, /<DropdownMenuItem onClick=\{onShowIngest\}>/);
-  assert.match(spacePanel, /> Add Source<\/DropdownMenuItem>/);
+  assert.match(sourcesSection, /aria-label="Add Source"/);
+  assert.match(sourcesSection, /title="Add Source"/);
+  assert.match(sourcesSection, /onClick=\{onShowIngest\}/);
+  assert.match(sourcesSection, /<Plus size=\{13\}/);
+  assert.doesNotMatch(sourcesSection, /DropdownMenu|MoreHorizontal/);
 });
 
 test('Source titles use a dedicated overflow-safe presentation class', () => {
