@@ -21,6 +21,7 @@ const MIN_COLS: u16 = 20;
 const MAX_COLS: u16 = 500;
 const MIN_ROWS: u16 = 5;
 const MAX_ROWS: u16 = 200;
+const MAX_TASK_PROMPT_BYTES: usize = 8 * 1024;
 
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -72,6 +73,7 @@ pub struct TerminalCreateRequest {
     change_id: Option<String>,
     agent: AgentKind,
     initial_command: Option<String>,
+    task_prompt: Option<String>,
     cols: Option<u16>,
     rows: Option<u16>,
 }
@@ -400,7 +402,14 @@ pub fn terminal_create(
     if matches!(request.agent, AgentKind::Antigravity) {
         ensure_antigravity_mcp_config(&cwd, &executable, &space.slug)?;
     }
-    let agent_launch = build_agent_command(request.agent, request.mode, &space.slug, &executable);
+    let task_prompt = validate_task_prompt(request.task_prompt.as_deref())?;
+    let agent_launch = build_agent_command(
+        request.agent,
+        request.mode,
+        &space.slug,
+        &executable,
+        task_prompt.as_deref(),
+    );
     for (key, value) in &agent_launch.environment {
         command.env(key, value);
     }
@@ -455,6 +464,21 @@ fn validate_session_id(value: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
+fn validate_task_prompt(value: Option<&str>) -> Result<Option<String>, String> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if value.len() > MAX_TASK_PROMPT_BYTES {
+        return Err(format!(
+            "Agent task is too long (maximum {MAX_TASK_PROMPT_BYTES} bytes)"
+        ));
+    }
+    if value.contains('\0') {
+        return Err("Agent task contains an invalid null byte".to_string());
+    }
+    Ok(Some(value.to_string()))
+}
+
 const SPACE_PROTOCOL: &str = "You are maintaining a CoWiki knowledge Space. Markdown files are the source of truth. Follow the Open Knowledge Format, the Space's own rules, and its arbitrary OKF hierarchy; never invent fixed wiki, entities, or concepts directories. Local maintenance never requires a CoWiki API key or server. Before answering about the Space, search and read the relevant pages, then cite their relative paths. When the cowiki MCP tools are available, use them for retrieval; otherwise use normal file and text-search tools. Before claiming that knowledge is absent, search and list evidence first. Raw sources are immutable. Integrate durable knowledge into the maintained wiki, reconcile contradictions, keep links/index/log consistent, and make every change reversible. Re-read a file immediately before editing it; never silently overwrite concurrent human changes. Do not commit, checkout, merge, push, or edit CoWiki SQLite metadata.";
 
 const AGENT_PROMPT_ENV: &str = "COWIKI_AGENT_PROMPT";
@@ -482,10 +506,17 @@ fn build_agent_command(
     mode: TerminalMode,
     space_slug: &str,
     executable: &Path,
+    task_prompt: Option<&str>,
 ) -> AgentLaunchCommand {
     let executable_text = executable.to_string_lossy();
     let mcp_args = vec!["--mcp", "--space", space_slug];
-    let prompt = format!("{SPACE_PROTOCOL} {}", mode.prompt());
+    let prompt = match task_prompt {
+        Some(task) => format!(
+            "{SPACE_PROTOCOL} {} The app assigned this current task; begin with it now:\n{task}",
+            mode.prompt()
+        ),
+        None => format!("{SPACE_PROTOCOL} {}", mode.prompt()),
+    };
     let prompt_environment = || vec![(AGENT_PROMPT_ENV, prompt.clone())];
     match agent {
         AgentKind::Claude => {
@@ -840,8 +871,8 @@ fn add_shell_args(command: &mut CommandBuilder, shell: &Path) {
 mod tests {
     use super::{
         build_agent_command, ensure_antigravity_mcp_config, normalized_pty_size,
-        resolve_terminal_cwd, validate_initial_command, validate_session_id, AgentKind,
-        TerminalIdentity, TerminalMode, TerminalState,
+        resolve_terminal_cwd, validate_initial_command, validate_session_id, validate_task_prompt,
+        AgentKind, TerminalIdentity, TerminalMode, TerminalState, MAX_TASK_PROMPT_BYTES,
     };
     #[cfg(unix)]
     use super::{TerminalPhase, TerminalSession};
@@ -882,12 +913,14 @@ mod tests {
             TerminalMode::Live,
             "research-space",
             executable,
+            Some("Organize sources/_encoded/example.md"),
         );
         let claude = build_agent_command(
             AgentKind::Claude,
             TerminalMode::Background,
             "research-space",
             executable,
+            None,
         );
 
         assert!(codex.shell_command.starts_with("codex -c "));
@@ -907,6 +940,10 @@ mod tests {
             .environment_value("COWIKI_AGENT_PROMPT")
             .unwrap()
             .contains("current Draft working tree"));
+        assert!(codex
+            .environment_value("COWIKI_AGENT_PROMPT")
+            .unwrap()
+            .contains("Organize sources/_encoded/example.md"));
         assert!(claude.shell_command.contains("--mcp-config"));
         assert!(claude.shell_command.contains("--append-system-prompt"));
         assert!(claude
@@ -927,24 +964,28 @@ mod tests {
             TerminalMode::Live,
             "research-space",
             executable,
+            None,
         );
         let antigravity = build_agent_command(
             AgentKind::Antigravity,
             TerminalMode::Live,
             "research-space",
             executable,
+            None,
         );
         let opencode = build_agent_command(
             AgentKind::OpenCode,
             TerminalMode::Live,
             "research-space",
             executable,
+            None,
         );
         let hermes = build_agent_command(
             AgentKind::Hermes,
             TerminalMode::Live,
             "research-space",
             executable,
+            None,
         );
 
         assert!(grok.shell_command.starts_with("grok --rules "));
@@ -1009,6 +1050,7 @@ mod tests {
             TerminalMode::Background,
             "general-5371996c",
             executable,
+            None,
         );
 
         assert!(
@@ -1016,6 +1058,16 @@ mod tests {
             "Agent command is {} bytes and will be truncated by macOS MAX_CANON",
             claude.shell_command.len(),
         );
+    }
+
+    #[test]
+    fn validates_renderer_supplied_agent_tasks() {
+        assert_eq!(
+            validate_task_prompt(Some("  Organize sources/example.md  ")).unwrap(),
+            Some("Organize sources/example.md".to_string())
+        );
+        assert!(validate_task_prompt(Some("bad\0task")).is_err());
+        assert!(validate_task_prompt(Some(&"x".repeat(MAX_TASK_PROMPT_BYTES + 1))).is_err());
     }
 
     #[test]

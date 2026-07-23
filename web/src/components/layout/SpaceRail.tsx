@@ -111,15 +111,15 @@ export function SpaceRail({
       {/* Notification bell */}
       {showBell && <NotificationBell unread={notifUnread} onOpen={onShowNotifications} />}
 
-      {/* User avatar + menu. The trigger carries the Cloud accent while the
-          menu itself stays neutral so it does not resemble selected state. */}
+      {/* Account menu follows the desktop shell: a compact rounded-square
+          trigger, explicit connection status, then the available actions. */}
       <DropdownMenu>
         <Tooltip>
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
               <button
                 style={{
-                  width: 34, height: 34, borderRadius: '50%',
+                  width: 34, height: 34, borderRadius: 10,
                   background: showCloudActions ? C.sidebar : C.accentSoft,
                   border: showCloudActions ? `1px solid ${C.line}` : '1px solid rgba(226, 89, 11, 0.25)',
                   cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -143,7 +143,7 @@ export function SpaceRail({
           </TooltipTrigger>
           {!showCloudActions && <TooltipContent side="right">Sign up / Sign in</TooltipContent>}
         </Tooltip>
-        <DropdownMenuContent side="right" align="end" className="w-48">
+        <DropdownMenuContent side="right" align="end" sideOffset={10} className="w-[210px] rounded-xl p-1.5">
           {showCloudActions ? (
             <>
               <div className="px-2 py-1.5 text-xs text-gray-500">{userName}</div>
@@ -151,17 +151,22 @@ export function SpaceRail({
             </>
           ) : (
             <>
+              <div className="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground">
+                <span
+                  aria-hidden
+                  style={{ width: 8, height: 8, borderRadius: '50%', background: C.amber, boxShadow: `0 0 0 3px ${C.amberSoft}` }}
+                />
+                Not signed in
+              </div>
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={onConnectCloud}
-                className="mx-1 my-1 w-[calc(100%-8px)] items-start gap-2.5 rounded-md py-2.5 focus:bg-[#f5f4f1] focus:text-inherit"
+                className="rounded-lg px-2.5 py-2 font-semibold focus:bg-[#fbeadd] focus:text-[#e2590b]"
+                style={{ color: C.accent }}
               >
-                <Cloud size={16} className="mt-0.5 shrink-0" style={{ color: C.accent }} />
-                <span>
-                  <span className="block font-medium" style={{ color: C.accent }}>Sign up / Sign in</span>
-                  <span className="block text-xs text-muted-foreground">Connect to CoWiki Cloud</span>
-                </span>
+                <Cloud size={16} />
+                Sign in
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
             </>
           )}
           {/* Settings is not a Cloud feature — local-only Spaces need it too.

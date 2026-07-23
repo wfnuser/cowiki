@@ -12,13 +12,17 @@ const spacePanel = readFileSync(
   new URL('../src/components/layout/SpacePanel.tsx', import.meta.url),
   'utf8',
 );
+const versionSwitcher = readFileSync(
+  new URL('../src/components/layout/VersionSwitcher.tsx', import.meta.url),
+  'utf8',
+);
 
 test('the page header has no unused overflow actions menu', () => {
   assert.equal(mainLayout.includes('aria-label="More actions"'), false);
 });
 
 test('the page, Space, and Agent panel headers share one visual baseline', () => {
-  assert.match(design, /export const APP_HEADER_HEIGHT = 44/);
+  assert.match(design, /export const APP_HEADER_HEIGHT = 48/);
   assert.match(
     mainLayout,
     /height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT/,
@@ -44,4 +48,23 @@ test('Agent tabs and header actions share the centered control line', () => {
   );
   assert.equal(agentTerminalPanel.includes('className="mb-1.5 shrink-0'), false);
   assert.equal(agentTerminalPanel.includes('className="mb-1.5 ml-1'), false);
+});
+
+test('long breadcrumbs cannot shrink or wrap the header actions', () => {
+  assert.match(mainLayout, /className="app-breadcrumb"/);
+  assert.match(mainLayout, /className="app-header-actions"/);
+});
+
+test('Source titles use a dedicated overflow-safe presentation class', () => {
+  assert.match(mainLayout, /className="page-title page-title--compact source-title"/);
+});
+
+test('the desktop header exposes the focused local version switcher', () => {
+  assert.match(mainLayout, /desktop && activeWorkspace\?\.localPath/);
+  assert.match(mainLayout, /change\.status === 'open'/);
+  assert.match(versionSwitcher, />\s*WORKING\s*</);
+  assert.match(versionSwitcher, />\s*UPSTREAM\s*</);
+  assert.match(versionSwitcher, />\s*AGENT CHANGES\s*</);
+  assert.match(versionSwitcher, /See All in Reviews/);
+  assert.doesNotMatch(versionSwitcher, /CHECKPOINTS|Discarded|Merged/);
 });
