@@ -68,3 +68,14 @@ test('the desktop header exposes the focused local version switcher', () => {
   assert.match(versionSwitcher, /See All in Reviews/);
   assert.doesNotMatch(versionSwitcher, /CHECKPOINTS|Discarded|Merged/);
 });
+
+test('the version switcher centers a real chevron icon instead of a text glyph', () => {
+  assert.match(versionSwitcher, /import \{[^}]*ChevronDown[^}]*\} from 'lucide-react'/);
+  assert.match(versionSwitcher, /<ChevronDown[^>]*aria-hidden[^>]*\/>/);
+  assert.doesNotMatch(versionSwitcher, />⌄</);
+});
+
+test('the persistent version trigger does not use a high-attention status dot', () => {
+  assert.doesNotMatch(versionSwitcher, /const dot =/);
+  assert.doesNotMatch(versionSwitcher, /background: dot/);
+});

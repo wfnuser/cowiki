@@ -444,7 +444,7 @@ export async function listReviews(workspaceSlug: string): Promise<Submission[]> 
       status: change.status === 'merged' ? 'merged' : change.status === 'discarded' ? 'rejected' : 'pending',
       summary: change.title,
       paths: change.diffs.map((diff) => diff.path),
-      source_branch: `cowiki/agent/${change.id}`,
+      source_branch: `agent/${change.id}`,
       created_at: new Date(change.createdAt * 1000).toISOString(),
       reviewed_by: null,
       reviewed_at: null,

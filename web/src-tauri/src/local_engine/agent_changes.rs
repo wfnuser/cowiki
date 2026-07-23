@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 const BASE_REF_PREFIX: &str = "refs/cowiki/agent-bases/";
-const BRANCH_REF_PREFIX: &str = "refs/heads/cowiki/agent/";
+const BRANCH_REF_PREFIX: &str = "refs/heads/agent/";
 const CONFLICT_REF_PREFIX: &str = "refs/cowiki/agent-conflicts/";
 const MERGED_REF_PREFIX: &str = "refs/cowiki/agent-merged/";
 const DISCARDED_REF_PREFIX: &str = "refs/cowiki/agent-discarded/";

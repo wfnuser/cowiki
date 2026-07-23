@@ -4,6 +4,7 @@ import { MainLayout } from './pages/MainLayout';
 import { LoginPage } from './pages/LoginPage';
 import { authHeaders, clearAuth, getCurrentAuth, getStoredAuth, storeAuth, tryLocalLogin } from './auth';
 import { apiBase, isDesktopClient } from './runtime';
+import { CloudApp } from './cloud/CloudApp';
 
 /** OAuth hands the credential over in the URL *fragment* (never sent to servers,
  *  logs, or Referer). Parse #api_key=...&user_name=...&user_id=..., store, then
@@ -72,6 +73,10 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/cloud/*" element={<CloudApp />} />
+        <Route path="/" element={isDesktopClient()
+          ? <ProtectedRoute><MainLayout /></ProtectedRoute>
+          : <Navigate to="/cloud" replace />} />
         {/* All content in one layout — no page transitions */}
         <Route path="/*" element={<ProtectedRoute><MainLayout /></ProtectedRoute>} />
       </Routes>
