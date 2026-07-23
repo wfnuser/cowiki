@@ -421,10 +421,19 @@ async fn cloud_rebase_abort(
     .map_err(|error| format!("Cloud rebase task failed: {error}"))?
 }
 
+#[tauri::command]
+async fn open_external_url(url: String) -> Result<(), String> {
+    let url = validate_external_url(&url)?.to_string();
+    tauri::async_runtime::spawn_blocking(move || open_system_browser(&url))
+        .await
+        .map_err(|error| format!("browser opener task failed: {error}"))?
+}
+
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             start_desktop_oauth,
+            open_external_url,
             choose_local_space_directory,
             choose_source_files,
             local_list_spaces,
@@ -614,5 +623,26 @@ fn open_system_browser(url: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("browser opener exited with {status}"))
+    }
+}
+
+fn validate_external_url(url: &str) -> Result<url::Url, String> {
+    let parsed = url::Url::parse(url).map_err(|error| format!("invalid external URL: {error}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host().is_none() {
+        return Err("external URL must be HTTP(S) and include a host".to_string());
+    }
+    Ok(parsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn external_browser_urls_accept_only_http_and_https() {
+        assert!(validate_external_url("https://cloud.cowiki.app/cloud").is_ok());
+        assert!(validate_external_url("http://localhost:8787/cloud").is_ok());
+        assert!(validate_external_url("file:///tmp/private").is_err());
+        assert!(validate_external_url("javascript:alert(1)").is_err());
     }
 }

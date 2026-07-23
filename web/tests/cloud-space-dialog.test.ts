@@ -70,6 +70,11 @@ test('submitted pull requests link to the browser review', () => {
   );
 });
 
+test('Open in browser delegates to the desktop external URL boundary', () => {
+  assert.match(dialog, /openExternalUrl/);
+  assert.doesNotMatch(dialog, /window\.open/);
+});
+
 test('conflicts stop safely without exposing Git recovery jargon', () => {
   const model = cloudDialogModel(result('conflicted', { conflicts: ['wiki/intro.md'] }), false);
   assert.equal(model.kind, 'attention');
