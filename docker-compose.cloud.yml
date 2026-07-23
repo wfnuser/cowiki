@@ -1,0 +1,50 @@
+name: cowiki-cloud
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    volumes:
+      - cloud-postgres:/var/lib/postgresql/data
+
+  cloud:
+    build:
+      context: .
+      dockerfile: cloud/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      COWIKI_REPO_ROOT: /var/lib/cowiki/repos
+      COWIKI_PUBLIC_ORIGIN: ${COWIKI_PUBLIC_ORIGIN:?set COWIKI_PUBLIC_ORIGIN}
+      COWIKI_BIND_ADDR: ${COWIKI_BIND_ADDR:-0.0.0.0:8787}
+      COWIKI_TOKEN_PEPPER: ${COWIKI_TOKEN_PEPPER:?set COWIKI_TOKEN_PEPPER}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?set GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:?set GITHUB_CLIENT_SECRET}
+      RUST_LOG: ${RUST_LOG:-cowiki_cloud=info,tower_http=info}
+    ports:
+      - "8787:8787"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8787/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    volumes:
+      - cloud-repositories:/var/lib/cowiki/repos
+
+volumes:
+  cloud-postgres:
+  cloud-repositories:

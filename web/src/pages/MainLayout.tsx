@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Compass,
@@ -49,7 +49,9 @@ import { NotificationsPage } from '../components/notifications/NotificationsPage
 import { notificationUnreadCount } from '../api';
 import { CommentsProvider, CommentsPanel, CommentsHeaderToggle, commentMarkdownComponents } from '../components/PageCommentsLayer';
 import { APP_HEADER_HEIGHT, C } from '@/lib/design';
-import { isDesktopClient } from '@/runtime';
+import { apiOrigin, isDesktopClient } from '@/runtime';
+import { normalizeCloudSession } from '@/cloud/session';
+import { CloudSpaceDialog } from '@/components/cloud/CloudSpaceDialog';
 import { chooseLocalSpaceDirectory, localSpaceIdentityFromPath } from '@/local-space';
 import {
   AgentTerminalPanel,
@@ -222,6 +224,7 @@ export function MainLayout() {
     return () => clearTimeout(t);
   }, [message]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [cloudDialogOpen, setCloudDialogOpen] = useState(false);
   const [editingPage, setEditingPage] = useState(false);
   // Tree path ops (rename/delete of pages & folders on the draft branch)
   const [pathOp, setPathOp] = useState<
@@ -236,6 +239,19 @@ export function MainLayout() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<Workspace | null>(null);
 
   const userBranch = `user/${auth?.id}`;
+  const cloudSession = useMemo(() => {
+    if (!isRemoteAuth(auth) || !auth?.api_key) return null;
+    try {
+      return normalizeCloudSession({
+        baseUrl: apiOrigin(),
+        apiKey: auth.api_key,
+        userId: auth.id,
+        userName: auth.name,
+      });
+    } catch {
+      return null;
+    }
+  }, [auth?.api_key, auth?.id, auth?.mode, auth?.name]);
 
   // Load workspaces + restore state from URL
   const loadWorkspaces = useCallback(async () => {
@@ -1097,6 +1113,23 @@ export function MainLayout() {
               {/* Right: actions */}
               <div className="app-header-actions" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
 
+                {desktop && activeWorkspace?.localPath && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!cloudSession) {
+                        navigate('/login');
+                        return;
+                      }
+                      setCloudDialogOpen(true);
+                    }}
+                    style={headerBtnStyle}
+                    title={cloudSession ? 'Publish, sync, or submit this Space' : 'Publish to Cloud'}
+                  >
+                    <Cloud size={14} /> {cloudSession ? 'Cloud' : 'Publish to Cloud'}
+                  </button>
+                )}
+
                 {desktop && activeWorkspace?.localPath && !editingPage && (
                   <VersionSwitcher
                     selection={versionSelection}
@@ -1565,6 +1598,17 @@ export function MainLayout() {
         onDefaultAgentChange={handleDefaultAgentChange}
         onConnectCloud={() => navigate('/login')}
       />
+
+      {cloudSession && (
+        <CloudSpaceDialog
+          open={cloudDialogOpen}
+          onOpenChange={setCloudDialogOpen}
+          space={activeWorkspace ? { name: activeWorkspace.name, slug: activeWorkspace.slug } : null}
+          session={cloudSession}
+          hasLocalChanges={workingDiffs.length > 0}
+          onChanged={() => setReviewRefreshKey((key) => key + 1)}
+        />
+      )}
     </>
   );
 }

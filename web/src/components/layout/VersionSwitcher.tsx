@@ -1,4 +1,4 @@
-import { Check, GitBranch, Rows3 } from 'lucide-react';
+import { Check, ChevronDown, GitBranch, Rows3 } from 'lucide-react';
 
 import type { AgentChange } from '@/api';
 import {
@@ -37,12 +37,6 @@ export function VersionSwitcher({
     : selection.kind === 'upstream'
       ? 'main'
       : selectedAgent?.title ?? 'Agent Change';
-  const dot = selection.kind === 'working'
-    ? C.accent
-    : selection.kind === 'upstream'
-      ? C.purple
-      : C.blue;
-
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -53,9 +47,13 @@ export function VersionSwitcher({
           style={triggerStyle}
         >
           <GitBranch size={14} />
-          <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: dot }} />
           <span style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-          <span aria-hidden style={{ color: C.faint, fontSize: 10 }}>⌄</span>
+          <ChevronDown
+            aria-hidden
+            size={13}
+            strokeWidth={1.75}
+            style={{ color: C.faint, flexShrink: 0 }}
+          />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-72" sideOffset={6}>
