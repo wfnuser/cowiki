@@ -55,6 +55,15 @@ test('long breadcrumbs cannot shrink or wrap the header actions', () => {
   assert.match(mainLayout, /className="app-header-actions"/);
 });
 
+test('source ingestion lives in the Sources menu instead of the page header', () => {
+  const headerActions = mainLayout
+    .split('{/* Right: actions */}')[1]
+    .split('{/* User menu moved to Rail bottom avatar */}')[0];
+  assert.doesNotMatch(headerActions, /Add Source/);
+  assert.match(spacePanel, /<DropdownMenuItem onClick=\{onShowIngest\}>/);
+  assert.match(spacePanel, /> Add Source<\/DropdownMenuItem>/);
+});
+
 test('Source titles use a dedicated overflow-safe presentation class', () => {
   assert.match(mainLayout, /className="page-title page-title--compact source-title"/);
 });

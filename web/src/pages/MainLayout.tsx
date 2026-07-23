@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Compass,
-  Upload,
   Pencil, FolderOpen, PanelLeft, Bot, HardDrive, FolderInput, Cloud, UserPlus, ChevronLeft,
 } from 'lucide-react';
 import {
@@ -1166,13 +1165,6 @@ export function MainLayout() {
                         <Pencil size={13} /> Edit
                       </button>
                     )}
-                    <button
-                      onClick={() => setShowIngest(true)}
-                      style={headerBtnStyle}
-                      title="Add Source"
-                    >
-                      <Upload size={13} /> Add Source
-                    </button>
                     <CommentsHeaderToggle style={{ ...headerBtnStyle, marginLeft: 2 }} />
                   </>
                 )}

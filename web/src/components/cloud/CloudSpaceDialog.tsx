@@ -20,6 +20,7 @@ import {
 } from '../../local-api';
 import { createCloudClient } from '../../cloud/client';
 import type { CloudSession } from '../../cloud/session';
+import { openExternalUrl } from '../../external-links';
 import {
   cloudDialogModel,
   cloudPullRequestUrl,
@@ -147,6 +148,16 @@ export function CloudSpaceDialog({
     void run(() => syncCloudIfClean(space.slug, session.apiKey));
   };
 
+  const openInBrowser = async () => {
+    if (!openUrl) return;
+    setError('');
+    try {
+      await openExternalUrl(openUrl);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    }
+  };
+
   const primaryDisabled = loading
     || !model?.primaryLabel
     || (model.kind === 'publish' && (!cloudName.trim() || !cloudSlug.trim()))
@@ -214,7 +225,7 @@ export function CloudSpaceDialog({
 
         <DialogFooter className="items-center sm:justify-between">
           <div className="flex gap-2">
-            {openUrl && <Button variant="ghost" onClick={() => window.open(openUrl, '_blank', 'noopener')}><ExternalLink /> Open in browser</Button>}
+            {openUrl && <Button variant="ghost" onClick={() => void openInBrowser()}><ExternalLink /> Open in browser</Button>}
             {status && status.state !== 'unlinked' && !model?.safeStop && <Button variant="outline" disabled={loading || status.state === 'dirty'} onClick={sync}><RefreshCw /> Sync</Button>}
           </div>
           {model?.primaryLabel && (
