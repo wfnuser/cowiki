@@ -1382,8 +1382,8 @@ export function MainLayout() {
             </CommentsProvider>
           </main>
 
-          {desktop && agentPanelOpen && activeWorkspace?.localPath && (
-            <div style={{
+          {desktop && activeWorkspace?.localPath && (
+            <div hidden={!agentPanelOpen} style={{
               width: agentPanelWidth, minWidth: agentPanelWidth, height: '100vh',
               position: 'relative', flexShrink: 0,
             }}>
