@@ -1,3 +1,4 @@
+use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -32,6 +33,8 @@ pub enum GitRepoError {
     ObjectNotFound(String),
     #[error("repository lock registry is unavailable")]
     LockPoisoned,
+    #[error("pull request diff exceeds the {0} byte size limit")]
+    DiffTooLarge(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +74,24 @@ pub struct ContentBlob {
     pub oid: String,
     pub path: String,
     pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedMarkdownFile {
+    pub path: String,
+    pub status: String,
+    pub additions: u64,
+    pub deletions: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestDiff {
+    pub base_oid: String,
+    pub head_oid: String,
+    pub files: Vec<ChangedMarkdownFile>,
+    pub patch: String,
 }
 
 #[derive(Clone)]
@@ -241,6 +262,108 @@ impl GitRepoStore {
         })
     }
 
+    pub fn markdown_diff(
+        &self,
+        space_id: Uuid,
+        base_oid: &str,
+        head_oid: &str,
+        max_bytes: usize,
+    ) -> Result<PullRequestDiff, GitRepoError> {
+        validate_oid(base_oid)?;
+        validate_oid(head_oid)?;
+        let repository = self.repo_path(space_id);
+        let status_output = self.git_output(
+            &repository,
+            &[
+                "diff",
+                "--name-status",
+                "--no-renames",
+                "-z",
+                base_oid,
+                head_oid,
+                "--",
+                ":(glob)**/*.md",
+            ],
+        )?;
+        let mut statuses = HashMap::new();
+        let status_parts = status_output
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        for pair in status_parts.chunks_exact(2) {
+            let status = std::str::from_utf8(pair[0])
+                .map_err(|_| GitRepoError::Git("diff status is not UTF-8".into()))?;
+            let path = std::str::from_utf8(pair[1])
+                .map_err(|_| GitRepoError::Git("diff path is not UTF-8".into()))?;
+            statuses.insert(path.to_string(), diff_status_label(status).to_string());
+        }
+
+        let stat_output = self.git_output(
+            &repository,
+            &[
+                "diff",
+                "--numstat",
+                "--no-renames",
+                "-z",
+                base_oid,
+                head_oid,
+                "--",
+                ":(glob)**/*.md",
+            ],
+        )?;
+        let mut files = Vec::new();
+        for entry in stat_output
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|part| !part.is_empty())
+        {
+            let entry = std::str::from_utf8(entry)
+                .map_err(|_| GitRepoError::Git("diff statistics are not UTF-8".into()))?;
+            let mut fields = entry.splitn(3, '\t');
+            let additions = parse_diff_count(fields.next())?;
+            let deletions = parse_diff_count(fields.next())?;
+            let path = fields
+                .next()
+                .ok_or_else(|| GitRepoError::Git("invalid diff statistics".into()))?;
+            files.push(ChangedMarkdownFile {
+                path: path.to_string(),
+                status: statuses
+                    .remove(path)
+                    .unwrap_or_else(|| "modified".to_string()),
+                additions,
+                deletions,
+            });
+        }
+
+        let patch_output = self.git_output(
+            &repository,
+            &[
+                "diff",
+                "--patch",
+                "--no-ext-diff",
+                "--no-color",
+                "--no-renames",
+                "--unified=3",
+                base_oid,
+                head_oid,
+                "--",
+                ":(glob)**/*.md",
+            ],
+        )?;
+        if patch_output.stdout.len() > max_bytes {
+            return Err(GitRepoError::DiffTooLarge(max_bytes));
+        }
+        let patch = String::from_utf8(patch_output.stdout)
+            .map_err(|_| GitRepoError::Git("Markdown diff is not UTF-8".into()))?;
+        Ok(PullRequestDiff {
+            base_oid: base_oid.to_string(),
+            head_oid: head_oid.to_string(),
+            files,
+            patch,
+        })
+    }
+
     pub fn fast_forward_main(
         &self,
         space_id: Uuid,
@@ -310,6 +433,25 @@ impl GitRepoStore {
             .stdin(Stdio::null())
             .output()?;
         ensure_success(output)
+    }
+}
+
+fn diff_status_label(value: &str) -> &'static str {
+    match value.chars().next() {
+        Some('A') => "added",
+        Some('D') => "deleted",
+        Some('T') => "type-changed",
+        _ => "modified",
+    }
+}
+
+fn parse_diff_count(value: Option<&str>) -> Result<u64, GitRepoError> {
+    match value {
+        Some("-") => Ok(0),
+        Some(value) => value
+            .parse()
+            .map_err(|_| GitRepoError::Git("invalid diff line count".into())),
+        None => Err(GitRepoError::Git("invalid diff statistics".into())),
     }
 }
 

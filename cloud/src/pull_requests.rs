@@ -9,7 +9,7 @@ use crate::AppState;
 use crate::auth::AuthenticatedUser;
 use crate::db::{self, PullRequestRecord};
 use crate::error::{AppError, AppResult};
-use crate::git_repo::GitRepoError;
+use crate::git_repo::{GitRepoError, PullRequestDiff};
 use crate::model::{MemberRole, PullRequestStatus};
 
 #[derive(Debug, Deserialize)]
@@ -42,7 +42,12 @@ pub struct PullRequestResponse {
     pub status: PullRequestStatus,
     pub merged_by: Option<Uuid>,
     pub approval_count: i64,
+    pub author_handle: String,
+    pub author_name: String,
+    pub author_avatar_url: Option<String>,
 }
+
+const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -53,6 +58,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/api/spaces/{space_id}/pull-requests/{pull_request_id}",
             get(get_pull_request),
+        )
+        .route(
+            "/api/spaces/{space_id}/pull-requests/{pull_request_id}/diff",
+            get(get_pull_request_diff),
         )
         .route(
             "/api/spaces/{space_id}/pull-requests/{pull_request_id}/approve",
@@ -143,7 +152,7 @@ async fn approve_pull_request(
     Path((space_id, pull_request_id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Json<PullRequestResponse>> {
     let role = require_member(&state, space_id, user.user.id).await?;
-    if !role.can_push() {
+    if !role.can_merge() {
         return Err(AppError::Forbidden);
     }
     let lock = state.repos.space_lock(space_id).map_err(git_error)?;
@@ -157,6 +166,23 @@ async fn approve_pull_request(
     }
     db::approve_pull_request(&state.pool, &record, user.user.id).await?;
     Ok(Json(response(&state, record).await?))
+}
+
+async fn get_pull_request_diff(
+    State(state): State<AppState>,
+    user: AuthenticatedUser,
+    Path((space_id, pull_request_id)): Path<(Uuid, Uuid)>,
+) -> AppResult<Json<PullRequestDiff>> {
+    require_member(&state, space_id, user.user.id).await?;
+    let record = db::get_pull_request(&state.pool, space_id, pull_request_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let record = reconcile_live_head(&state, record).await?;
+    let diff = state
+        .repos
+        .markdown_diff(space_id, &record.base_oid, &record.head_oid, MAX_DIFF_BYTES)
+        .map_err(git_error)?;
+    Ok(Json(diff))
 }
 
 async fn merge_pull_request(
@@ -252,6 +278,9 @@ async fn reconcile_live_head(
 
 async fn response(state: &AppState, record: PullRequestRecord) -> AppResult<PullRequestResponse> {
     let approval_count = db::approval_count(&state.pool, record.id, &record.head_oid).await?;
+    let author = db::user_by_id(&state.pool, record.author_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
     Ok(PullRequestResponse {
         id: record.id,
         space_id: record.space_id,
@@ -266,6 +295,9 @@ async fn response(state: &AppState, record: PullRequestRecord) -> AppResult<Pull
         status: record.status,
         merged_by: record.merged_by,
         approval_count,
+        author_handle: author.handle,
+        author_name: author.display_name,
+        author_avatar_url: author.avatar_url,
     })
 }
 
@@ -278,6 +310,7 @@ fn git_error(error: GitRepoError) -> AppError {
             AppError::Conflict(format!("Cloud ref {reference} is missing"))
         }
         GitRepoError::InvalidReceive(message) => AppError::BadRequest(message),
+        GitRepoError::DiffTooLarge(_) => AppError::BadRequest(error.to_string()),
         other => AppError::Internal(other.to_string()),
     }
 }

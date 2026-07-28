@@ -58,10 +58,7 @@ struct InvitationPreviewResponse {
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/invitations/{token}", get(preview_invitation))
-        .route(
-            "/api/invitations/{token}/accept",
-            post(accept_invitation),
-        )
+        .route("/api/invitations/{token}/accept", post(accept_invitation))
         .route(
             "/api/spaces/{space_id}/invitations",
             get(list_invitations).post(create_invitation),
@@ -126,8 +123,7 @@ async fn create_invitation(
     Json(input): Json<CreateInvitationRequest>,
 ) -> AppResult<(StatusCode, Json<CreatedInvitationResponse>)> {
     require_manager(&state, space_id, user.user.id).await?;
-    validate_invitation_input(input.role, input.expires_in_hours)
-        .map_err(AppError::BadRequest)?;
+    validate_invitation_input(input.role, input.expires_in_hours).map_err(AppError::BadRequest)?;
     let invitation_id = Uuid::new_v4();
     let token = random_secret("cw_invite_");
     let token_hash = api_key_hash(&token, &state.config.token_pepper);

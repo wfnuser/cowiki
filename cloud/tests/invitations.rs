@@ -36,15 +36,9 @@ async fn invitations_are_space_scoped_revocable_and_preserve_existing_roles() {
     let editor_key = insert_api_key(&database.pool, editor).await;
     let candidate_key = insert_api_key(&database.pool, candidate).await;
     let space = Uuid::new_v4();
-    cowiki_cloud::db::create_space(
-        &database.pool,
-        space,
-        owner,
-        "Competition",
-        "competition",
-    )
-    .await
-    .unwrap();
+    cowiki_cloud::db::create_space(&database.pool, space, owner, "Competition", "competition")
+        .await
+        .unwrap();
     insert_member(&database.pool, space, manager, MemberRole::Manager).await;
     insert_member(&database.pool, space, editor, MemberRole::Editor).await;
     let repos = tempfile::tempdir().unwrap();
@@ -101,10 +95,7 @@ async fn invitations_are_space_scoped_revocable_and_preserve_existing_roles() {
 
     let preview = app
         .clone()
-        .oneshot(public_request(
-            "GET",
-            &format!("/api/invitations/{token}"),
-        ))
+        .oneshot(public_request("GET", &format!("/api/invitations/{token}")))
         .await
         .unwrap();
     assert_eq!(preview.status(), StatusCode::OK);
@@ -195,10 +186,7 @@ async fn invitations_are_space_scoped_revocable_and_preserve_existing_roles() {
     assert_eq!(revoked.status(), StatusCode::NO_CONTENT);
     let after_revoke = app
         .clone()
-        .oneshot(public_request(
-            "GET",
-            &format!("/api/invitations/{token}"),
-        ))
+        .oneshot(public_request("GET", &format!("/api/invitations/{token}")))
         .await
         .unwrap();
     assert_eq!(after_revoke.status(), StatusCode::NOT_FOUND);

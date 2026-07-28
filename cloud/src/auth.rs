@@ -241,15 +241,14 @@ async fn exchange_request(
         "cli" => "CoWiki CLI",
         _ => return Err(AppError::BadRequest("unsupported OAuth client".into())),
     };
-    let issued =
-        db::exchange_code(
-            &state.pool,
-            request.code.trim(),
-            &state.config.token_pepper,
-            label,
-        )
-            .await?
-            .ok_or_else(|| AppError::BadRequest("OAuth code is invalid or expired".into()))?;
+    let issued = db::exchange_code(
+        &state.pool,
+        request.code.trim(),
+        &state.config.token_pepper,
+        label,
+    )
+    .await?
+    .ok_or_else(|| AppError::BadRequest("OAuth code is invalid or expired".into()))?;
     Ok(no_store_json(DesktopExchangeResponse {
         api_key: issued.api_key,
         user_name: issued.user.display_name,

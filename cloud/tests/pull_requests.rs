@@ -62,6 +62,33 @@ async fn live_user_branch_invalidates_approval_and_merges_with_expected_head() {
     assert_eq!(created["headOid"], second_oid);
     assert_eq!(created["approvalCount"], 0);
 
+    let editor_approval = app
+        .clone()
+        .oneshot(auth_request(
+            "POST",
+            &format!("/api/spaces/{space}/pull-requests/{pr_id}/approve"),
+            &editor_key,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(editor_approval.status(), StatusCode::FORBIDDEN);
+
+    let diff = app
+        .clone()
+        .oneshot(auth_request(
+            "GET",
+            &format!("/api/spaces/{space}/pull-requests/{pr_id}/diff"),
+            &editor_key,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(diff.status(), StatusCode::OK);
+    let diff = response_json(diff).await;
+    assert_eq!(diff["baseOid"], created["baseOid"]);
+    assert_eq!(diff["headOid"], created["headOid"]);
+    assert_eq!(diff["files"][0]["path"], "index.md");
+    assert!(diff["patch"].as_str().unwrap().contains("# Two"));
+
     let same = app
         .clone()
         .oneshot(json_request(

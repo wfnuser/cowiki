@@ -158,6 +158,58 @@ fn fast_forward_main_uses_expected_head_and_compare_and_swap() {
     assert!(error.to_string().contains("not based"));
 }
 
+#[test]
+fn markdown_diff_reports_only_markdown_changes_and_enforces_a_size_limit() {
+    let root = tempfile::tempdir().unwrap();
+    let working = tempfile::tempdir().unwrap();
+    let store = GitRepoStore::new(root.path()).unwrap();
+    let space = Uuid::new_v4();
+    store.ensure_space(space).unwrap();
+
+    run(working.path(), &["init", "-b", "main"]);
+    run(working.path(), &["config", "user.name", "Test"]);
+    run(
+        working.path(),
+        &["config", "user.email", "test@cowiki.local"],
+    );
+    std::fs::write(working.path().join("index.md"), "# One\n").unwrap();
+    std::fs::write(working.path().join("notes.txt"), "one\n").unwrap();
+    run(working.path(), &["add", "."]);
+    run(working.path(), &["commit", "-m", "one"]);
+    let base = rev(working.path(), "HEAD");
+
+    std::fs::write(working.path().join("index.md"), "# Two\n\nMore\n").unwrap();
+    std::fs::write(working.path().join("notes.txt"), "two\n").unwrap();
+    run(working.path(), &["commit", "-am", "two"]);
+    let head = rev(working.path(), "HEAD");
+    run(
+        working.path(),
+        &[
+            "remote",
+            "add",
+            "cloud",
+            store.repo_path(space).to_str().unwrap(),
+        ],
+    );
+    run(working.path(), &["push", "cloud", "main"]);
+
+    let diff = store
+        .markdown_diff(space, &base, &head, 1024 * 1024)
+        .unwrap();
+    assert_eq!(diff.base_oid, base);
+    assert_eq!(diff.head_oid, head);
+    assert_eq!(diff.files.len(), 1);
+    assert_eq!(diff.files[0].path, "index.md");
+    assert_eq!(diff.files[0].status, "modified");
+    assert_eq!(diff.files[0].additions, 3);
+    assert_eq!(diff.files[0].deletions, 1);
+    assert!(diff.patch.contains("diff --git a/index.md b/index.md"));
+    assert!(!diff.patch.contains("notes.txt"));
+
+    let error = store.markdown_diff(space, &base, &head, 16).unwrap_err();
+    assert!(error.to_string().contains("size limit"));
+}
+
 fn run(directory: &std::path::Path, arguments: &[&str]) {
     let output = Command::new("git")
         .args(arguments)

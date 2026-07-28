@@ -5,9 +5,7 @@ use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
 use crate::auth::{api_key_hash, random_secret};
-use crate::model::{
-    MemberRole, PullRequestStatus, SpaceInvitation, SpaceInvitationPreview, User,
-};
+use crate::model::{MemberRole, PullRequestStatus, SpaceInvitation, SpaceInvitationPreview, User};
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct SpaceMembership {
@@ -273,6 +271,16 @@ pub async fn user_by_handle(pool: &PgPool, handle: &str) -> Result<Option<User>,
          FROM users WHERE lower(handle) = lower($1)",
     )
     .bind(handle)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn user_by_id(pool: &PgPool, user_id: Uuid) -> Result<Option<User>, sqlx::Error> {
+    sqlx::query_as::<_, User>(
+        "SELECT id, github_id, handle, display_name, avatar_url
+         FROM users WHERE id = $1",
+    )
+    .bind(user_id)
     .fetch_optional(pool)
     .await
 }
@@ -774,6 +782,7 @@ pub async fn approve_pull_request(
     record: &PullRequestRecord,
     user_id: Uuid,
 ) -> Result<(), sqlx::Error> {
+    let mut transaction = pool.begin().await?;
     sqlx::query(
         "INSERT INTO pull_request_approvals (pull_request_id, user_id, head_oid)
          VALUES ($1, $2, $3)
@@ -783,8 +792,22 @@ pub async fn approve_pull_request(
     .bind(record.id)
     .bind(user_id)
     .bind(&record.head_oid)
-    .execute(pool)
+    .execute(&mut *transaction)
     .await?;
+    sqlx::query(
+        "INSERT INTO audit_events
+            (space_id, actor_id, action, subject_type, subject_id, metadata)
+         VALUES ($1, $2, 'pull_request.approved', 'pull_request', $3,
+                 jsonb_build_object('number', $4::bigint, 'head_oid', $5::text))",
+    )
+    .bind(record.space_id)
+    .bind(user_id)
+    .bind(record.id.to_string())
+    .bind(record.number)
+    .bind(&record.head_oid)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
     Ok(())
 }
 
