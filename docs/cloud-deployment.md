@@ -18,6 +18,23 @@ The service applies embedded SQL migrations before listening. Startup fails if P
 
 The browser application and API are expected to share `COWIKI_PUBLIC_ORIGIN`. API CORS responses allow that exact origin, REST request bodies are limited to 1 MiB, REST requests time out after 30 seconds, and Git service children are terminated after 120 seconds. Keep a reverse-proxy request limit at least as large as the Cloud Git limit (256 MiB) on `/git/*`, while using a smaller limit for `/api/*`.
 
+## Local Cloud and browser
+
+Register a development GitHub OAuth app with callback
+`http://localhost:5173/api/auth/github/callback`. Then:
+
+```bash
+cp .env.cloud.local.example .env.cloud.local
+# Fill GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, and a stable random
+# COWIKI_TOKEN_PEPPER in .env.cloud.local.
+scripts/dev-cloud.sh
+```
+
+The script starts PostgreSQL on `127.0.0.1:55432`, Cloud on
+`127.0.0.1:8787`, and Vite on `127.0.0.1:5173`. Vite proxies `/api`, `/git`,
+and `/healthz` so OAuth callbacks, browser requests, and Git URLs use the same
+public origin. Open `http://localhost:5173/cloud`.
+
 ## Publish and review workflow
 
 The desktop app exposes one Space-scoped Cloud action. It never publishes a local Space in the background:
