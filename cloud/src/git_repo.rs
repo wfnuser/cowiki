@@ -1,6 +1,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
@@ -336,7 +337,7 @@ impl GitRepoStore {
             });
         }
 
-        let patch_output = self.git_output(
+        let patch_output = self.git_output_limited(
             &repository,
             &[
                 "diff",
@@ -350,10 +351,8 @@ impl GitRepoStore {
                 "--",
                 ":(glob)**/*.md",
             ],
+            max_bytes,
         )?;
-        if patch_output.stdout.len() > max_bytes {
-            return Err(GitRepoError::DiffTooLarge(max_bytes));
-        }
         let patch = String::from_utf8(patch_output.stdout)
             .map_err(|_| GitRepoError::Git("Markdown diff is not UTF-8".into()))?;
         Ok(PullRequestDiff {
@@ -434,6 +433,71 @@ impl GitRepoStore {
             .output()?;
         ensure_success(output)
     }
+
+    fn git_output_limited(
+        &self,
+        path: &Path,
+        arguments: &[&str],
+        max_bytes: usize,
+    ) -> Result<Output, GitRepoError> {
+        let mut child = Command::new("git")
+            .args(["--git-dir"])
+            .arg(path)
+            .args(arguments)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let mut stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| GitRepoError::Git("Git stdout pipe is unavailable".into()))?;
+        let mut stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| GitRepoError::Git("Git stderr pipe is unavailable".into()))?;
+        let stderr_reader = std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            stderr.read_to_end(&mut bytes)?;
+            Ok::<_, std::io::Error>(bytes)
+        });
+
+        let stdout_result = read_limited_output(&mut stdout, max_bytes);
+        let too_large = stdout_result
+            .as_ref()
+            .is_ok_and(|bytes| bytes.len() > max_bytes);
+        if too_large || stdout_result.is_err() {
+            let _ = child.kill();
+        }
+        let status_result = child.wait();
+        let stderr_result = stderr_reader
+            .join()
+            .map_err(|_| GitRepoError::Git("Git stderr reader stopped unexpectedly".into()))?;
+
+        let status = status_result?;
+        let stderr = stderr_result?;
+        let stdout = stdout_result?;
+        if too_large {
+            return Err(GitRepoError::DiffTooLarge(max_bytes));
+        }
+        ensure_success(Output {
+            status,
+            stdout,
+            stderr,
+        })
+    }
+}
+
+fn read_limited_output(
+    reader: &mut impl Read,
+    max_bytes: usize,
+) -> Result<Vec<u8>, std::io::Error> {
+    let limit = u64::try_from(max_bytes)
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    let mut bytes = Vec::with_capacity(max_bytes.saturating_add(1).min(64 * 1024));
+    reader.take(limit).read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 fn diff_status_label(value: &str) -> &'static str {
@@ -648,3 +712,37 @@ while read -r _old new ref; do
   [ "$new" != "$zero" ] || { echo "CoWiki: user branches cannot be deleted" >&2; exit 1; }
 done < "$updates"
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::read_limited_output;
+    use std::io::{self, Read};
+
+    struct CountingReader {
+        remaining: usize,
+        bytes_read: usize,
+    }
+
+    impl Read for CountingReader {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            let count = buffer.len().min(self.remaining);
+            buffer[..count].fill(b'x');
+            self.remaining -= count;
+            self.bytes_read += count;
+            Ok(count)
+        }
+    }
+
+    #[test]
+    fn limited_output_reader_stops_after_the_sentinel_byte() {
+        let mut reader = CountingReader {
+            remaining: 4096,
+            bytes_read: 0,
+        };
+
+        let output = read_limited_output(&mut reader, 32).unwrap();
+
+        assert_eq!(output.len(), 33);
+        assert_eq!(reader.bytes_read, 33);
+    }
+}
