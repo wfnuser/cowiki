@@ -36,7 +36,17 @@ export function CloudMembersView({ client, space, currentUserId }: { client: Clo
       setNotice({ tone: 'error', message: cause instanceof Error ? cause.message : 'Could not load members.' });
     }
   }, [client, space.id]);
-  useEffect(() => { void loadMembers(); }, [loadMembers]);
+  useEffect(() => {
+    let active = true;
+    void client.listMembers(space.id)
+      .then((value) => { if (active) setMembers(value); })
+      .catch((cause) => {
+        if (active) {
+          setNotice({ tone: 'error', message: cause instanceof Error ? cause.message : 'Could not load members.' });
+        }
+      });
+    return () => { active = false; };
+  }, [client, space.id]);
 
   const loadInvitations = useCallback(async () => {
     if (mode !== 'manage') return;
@@ -46,7 +56,18 @@ export function CloudMembersView({ client, space, currentUserId }: { client: Clo
       setNotice({ tone: 'error', message: cause instanceof Error ? cause.message : 'Could not load invitations.' });
     }
   }, [client, mode, space.id]);
-  useEffect(() => { void loadInvitations(); }, [loadInvitations]);
+  useEffect(() => {
+    if (mode !== 'manage') return;
+    let active = true;
+    void client.listInvitations(space.id)
+      .then((value) => { if (active) setInvitations(value); })
+      .catch((cause) => {
+        if (active) {
+          setNotice({ tone: 'error', message: cause instanceof Error ? cause.message : 'Could not load invitations.' });
+        }
+      });
+    return () => { active = false; };
+  }, [client, mode, space.id]);
 
   const saveMember = async (memberHandle: string, nextRole: CloudRole) => {
     setPending(memberHandle);

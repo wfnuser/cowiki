@@ -19,8 +19,7 @@ export function CloudReviewsView({ client, space, pullRequestId }: { client: Clo
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState('');
   const [diff, setDiff] = useState<CloudPullRequestDiff | null>(null);
-  const [diffLoading, setDiffLoading] = useState(false);
-  const [diffError, setDiffError] = useState('');
+  const [diffError, setDiffError] = useState<{ pullRequestId: string; message: string } | null>(null);
   const [notice, setNotice] = useState<{ tone: 'error' | 'success'; message: string } | null>(null);
   const selected = useMemo(() => pullRequests.find((pullRequest) => pullRequest.id === pullRequestId) ?? null, [pullRequestId, pullRequests]);
 
@@ -34,25 +33,43 @@ export function CloudReviewsView({ client, space, pullRequestId }: { client: Clo
       setLoading(false);
     }
   }, [client, space.id]);
-  useEffect(() => { void loadPullRequests(); }, [loadPullRequests]);
   useEffect(() => {
-    if (!selected) {
-      setDiff(null);
-      setDiffError('');
-      return;
-    }
     let active = true;
-    setDiff(null);
-    setDiffError('');
-    setDiffLoading(true);
-    void client.getPullRequestDiff(space.id, selected.id)
-      .then((value) => { if (active) setDiff(value); })
+    void client.listPullRequests(space.id)
+      .then((value) => { if (active) setPullRequests(value); })
       .catch((cause) => {
-        if (active) setDiffError(cause instanceof Error ? cause.message : 'Could not load this diff.');
+        if (active) {
+          setNotice({ tone: 'error', message: cause instanceof Error ? cause.message : 'Could not load pull requests.' });
+        }
       })
-      .finally(() => { if (active) setDiffLoading(false); });
+      .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [client, selected?.headOid, selected?.id, space.id]);
+  }, [client, space.id]);
+
+  const selectedId = selected?.id;
+  const selectedHeadOid = selected?.headOid;
+  useEffect(() => {
+    if (!selectedId || !selectedHeadOid) return;
+    let active = true;
+    void client.getPullRequestDiff(space.id, selectedId)
+      .then((value) => {
+        if (!active) return;
+        setDiff(value);
+        setDiffError(null);
+      })
+      .catch((cause) => {
+        if (active) {
+          setDiffError({
+            pullRequestId: selectedId,
+            message: cause instanceof Error ? cause.message : 'Could not load this diff.',
+          });
+        }
+      });
+    return () => { active = false; };
+  }, [client, selectedHeadOid, selectedId, space.id]);
+
+  const currentDiff = selected && diff?.headOid === selected.headOid ? diff : null;
+  const currentDiffError = selected && diffError?.pullRequestId === selected.id ? diffError.message : '';
 
   const approve = async (pullRequest: CloudPullRequest) => {
     setPending('approve');
@@ -126,13 +143,13 @@ export function CloudReviewsView({ client, space, pullRequestId }: { client: Clo
               </dl>
               <div className="mt-6">
                 <h3 className="text-sm font-semibold">Changed files</h3>
-                {diffLoading && <p className="mt-3 text-xs text-text-tertiary">Loading current diff…</p>}
-                {diffError && <div className="mt-3"><CloudNotice tone="error">{diffError}</CloudNotice></div>}
-                {diff && (
+                {!currentDiff && !currentDiffError && <p className="mt-3 text-xs text-text-tertiary">Loading current diff…</p>}
+                {currentDiffError && <div className="mt-3"><CloudNotice tone="error">{currentDiffError}</CloudNotice></div>}
+                {currentDiff && (
                   <>
                     <div className="mt-3 overflow-hidden rounded-lg border">
-                      {diff.files.length === 0 && <p className="p-4 text-xs text-text-tertiary">No visible Markdown changes.</p>}
-                      {diff.files.map((file) => (
+                      {currentDiff.files.length === 0 && <p className="p-4 text-xs text-text-tertiary">No visible Markdown changes.</p>}
+                      {currentDiff.files.map((file) => (
                         <div key={`${file.status}:${file.path}`} className="flex items-center gap-3 border-b px-4 py-2.5 text-xs last:border-b-0">
                           <span className="w-16 capitalize text-text-tertiary">{file.status}</span>
                           <span className="min-w-0 flex-1 truncate font-mono">{file.path}</span>
@@ -141,9 +158,9 @@ export function CloudReviewsView({ client, space, pullRequestId }: { client: Clo
                         </div>
                       ))}
                     </div>
-                    {diff.patch && (
+                    {currentDiff.patch && (
                       <pre className="mt-4 max-h-[520px] overflow-auto rounded-lg border bg-bg-secondary p-0 text-[11px] leading-5">
-                        {diff.patch.split('\n').map((line, index) => (
+                        {currentDiff.patch.split('\n').map((line, index) => (
                           <div
                             key={`${index}:${line}`}
                             className={`min-w-max px-4 ${
@@ -166,8 +183,8 @@ export function CloudReviewsView({ client, space, pullRequestId }: { client: Clo
               </div>
               {selected.status === 'open' && (
                 <div className="mt-6 flex flex-wrap gap-2">
-                  {canMerge(space.role) && <Button variant="outline" disabled={!!pending || !diff || diff.headOid !== selected.headOid} onClick={() => void approve(selected)}><Check /> Approve current head</Button>}
-                  {mergeActionVisible(space.role) && <Button disabled={!!pending || !diff || diff.headOid !== selected.headOid} onClick={() => void merge(selected)}><GitMerge /> Merge into main</Button>}
+                  {canMerge(space.role) && <Button variant="outline" disabled={!!pending || !currentDiff} onClick={() => void approve(selected)}><Check /> Approve current head</Button>}
+                  {mergeActionVisible(space.role) && <Button disabled={!!pending || !currentDiff} onClick={() => void merge(selected)}><GitMerge /> Merge into main</Button>}
                 </div>
               )}
             </>

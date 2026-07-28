@@ -84,7 +84,7 @@ test('Owners and Managers administer Space-scoped invitation links', () => {
 test('Cloud review loads and renders the exact Markdown diff before merge', () => {
   assert.match(reviews, /getPullRequestDiff/);
   assert.match(reviews, /Changed files/);
-  assert.match(reviews, /diff\.patch\.split/);
+  assert.match(reviews, /currentDiff\.patch\.split/);
   assert.match(reviews, /authorName/);
   assert.match(reviews, /canMerge\(space\.role\)/);
   assert.doesNotMatch(reviews, /dangerouslySetInnerHTML/);

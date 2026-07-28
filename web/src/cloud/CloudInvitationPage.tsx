@@ -34,8 +34,6 @@ export function CloudInvitationPage() {
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setError('');
     void previewCloudInvitation(baseUrl, token)
       .then((value) => { if (active) setInvitation(value); })
       .catch((cause) => {
