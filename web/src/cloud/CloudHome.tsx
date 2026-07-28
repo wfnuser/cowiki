@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ArrowRight, Cloud, LogOut, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { ArrowRight, Cloud, LogOut, Plus, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { AvatarBadge } from '../components/ui/avatar-badge';
 import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
 import type { CloudClient, CloudSpace } from './client';
 import { cloudSpaceRoute } from './routes';
 import type { CloudSession } from './session';
@@ -17,6 +18,12 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
   const [spaces, setSpaces] = useState<CloudSpace[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
+  const [slug, setSlug] = useState('');
+  const [slugEdited, setSlugEdited] = useState(false);
+  const [createdSpace, setCreatedSpace] = useState<CloudSpace | null>(null);
   const loadSpaces = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -29,7 +36,42 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
     }
   }, [client]);
 
-  useEffect(() => { void loadSpaces(); }, [loadSpaces]);
+  useEffect(() => {
+    let active = true;
+    void client.listSpaces()
+      .then((value) => { if (active) setSpaces(value); })
+      .catch((cause) => {
+        if (active) {
+          setError(cause instanceof Error ? cause.message : 'Could not load Cloud Spaces.');
+        }
+      })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [client]);
+
+  const createSharedSpace = async (event: FormEvent) => {
+    event.preventDefault();
+    setCreating(true);
+    setError('');
+    try {
+      const created = await client.createSpace(name.trim(), slug.trim());
+      setCreatedSpace(created);
+      setName('');
+      setSlug('');
+      setSlugEdited(false);
+      setShowCreate(false);
+      await loadSpaces();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not create this shared Space.');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const changeName = (value: string) => {
+    setName(value);
+    if (!slugEdited) setSlug(spaceSlug(value));
+  };
 
   return (
     <div className="min-h-screen bg-bg text-text">
@@ -45,11 +87,45 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
               Browse knowledge that has reached Cloud main. Local drafts stay on their authors&apos; devices until submitted and merged.
             </p>
           </div>
-          <Button variant="outline" onClick={() => void loadSpaces()} disabled={loading}>
-            <RefreshCw className={loading ? 'animate-spin' : ''} /> Refresh
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => void loadSpaces()} disabled={loading}>
+              <RefreshCw className={loading ? 'animate-spin' : ''} /> Refresh
+            </Button>
+            <Button onClick={() => setShowCreate((value) => !value)}>
+              <Plus /> New shared Space
+            </Button>
+          </div>
         </div>
 
+        {showCreate && (
+          <form className="mb-6 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-3 rounded-xl border bg-panel p-5" onSubmit={(event) => void createSharedSpace(event)}>
+            <Input
+              aria-label="Shared Space name"
+              placeholder="Competition knowledge"
+              value={name}
+              onChange={(event) => changeName(event.target.value)}
+            />
+            <Input
+              aria-label="Shared Space slug"
+              placeholder="competition-knowledge"
+              value={slug}
+              onChange={(event) => {
+                setSlug(event.target.value);
+                setSlugEdited(true);
+              }}
+            />
+            <Button type="submit" disabled={creating || !name.trim() || !slug.trim()}>
+              {creating ? 'Creating…' : 'Create Space'}
+            </Button>
+          </form>
+        )}
+        {createdSpace && (
+          <CloudNotice tone="success">
+            <strong>{createdSpace.name}</strong> is ready. Ask your local Agent to connect the
+            repository to Space <code>{createdSpace.id}</code> on <code>{session.baseUrl}</code>;
+            an explicit Owner publish will create the first Cloud main revision.
+          </CloudNotice>
+        )}
         {error && <CloudNotice tone="error">{error}</CloudNotice>}
         {loading ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -60,7 +136,8 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
             <div className="mx-auto mb-5 grid size-12 place-items-center rounded-xl bg-accent-soft text-accent"><Cloud /></div>
             <h2 className="font-serif text-2xl font-semibold">No shared Space yet</h2>
             <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-text-tertiary">
-              Open a local Space in the CoWiki desktop app and choose Publish to Cloud. Publishing is explicit and never uploads a Space in the background.
+              Create one here, then ask your local Agent to connect and publish a repository.
+              Publishing remains explicit.
             </p>
           </section>
         ) : (
@@ -117,4 +194,13 @@ export function CloudNotice({ children, tone = 'neutral' }: { children: React.Re
       ? 'border-green/20 bg-green-soft text-green'
       : 'border-border bg-secondary text-text-secondary';
   return <div className={`mb-5 rounded-lg border px-4 py-3 text-sm ${styles}`}>{children}</div>;
+}
+
+function spaceSlug(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 63);
 }

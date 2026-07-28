@@ -25,12 +25,18 @@ export function CloudApp({ session: injectedSession }: CloudAppProps) {
   if (!session || !client) return <Navigate to="/login" replace />;
 
   const route = parseCloudRoute(location.pathname);
-  const signOut = () => {
-    clearAuth();
-    navigate('/login', { replace: true });
+  const signOut = async () => {
+    try {
+      await client.logout();
+    } catch {
+      // Local sign-out must still complete if the server is offline.
+    } finally {
+      clearAuth();
+      navigate('/login', { replace: true });
+    }
   };
   if (location.pathname === '/cloud' || location.pathname === '/cloud/') {
-    return <CloudHome client={client} session={session} onSignOut={signOut} />;
+    return <CloudHome client={client} session={session} onSignOut={() => void signOut()} />;
   }
   if (route) {
     return (
@@ -38,7 +44,7 @@ export function CloudApp({ session: injectedSession }: CloudAppProps) {
         client={client}
         session={session}
         route={route}
-        onSignOut={signOut}
+        onSignOut={() => void signOut()}
       />
     );
   }

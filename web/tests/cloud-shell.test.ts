@@ -15,6 +15,7 @@ const cloudHome = readFileSync(new URL('../src/cloud/CloudHome.tsx', import.meta
 const wiki = readFileSync(new URL('../src/cloud/CloudWikiView.tsx', import.meta.url), 'utf8');
 const reviews = readFileSync(new URL('../src/cloud/CloudReviewsView.tsx', import.meta.url), 'utf8');
 const members = readFileSync(new URL('../src/cloud/CloudMembersView.tsx', import.meta.url), 'utf8');
+const invitation = readFileSync(new URL('../src/cloud/CloudInvitationPage.tsx', import.meta.url), 'utf8');
 
 test('browser routing has a focused Cloud shell with no Tauri dependency', () => {
   assert.match(app, /path="\/cloud\/\*"/);
@@ -23,6 +24,10 @@ test('browser routing has a focused Cloud shell with no Tauri dependency', () =>
   for (const source of [cloudApp, cloudHome, wiki, reviews, members]) {
     assert.doesNotMatch(source, /@tauri-apps|local-api|invoke\(/);
   }
+  assert.match(cloudApp, /await client\.logout\(\)/);
+  assert.match(cloudHome, /New shared Space/);
+  assert.match(cloudHome, /createSpace/);
+  assert.match(cloudHome, /Owner publish/);
 });
 
 test('Cloud Space navigation exposes read surfaces to every member', () => {
@@ -59,4 +64,32 @@ test('member and PR mutations reload server-authoritative state', () => {
   assert.match(members, /await loadMembers\(\)/);
   assert.match(reviews, /await loadPullRequests\(\)/);
   assert.match(reviews, /expectedHeadOid|headOid/);
+});
+
+test('Space invitation route remains readable before sign in and accepts into one Space', () => {
+  assert.match(app, /path="\/invite\/:token"/);
+  assert.match(invitation, /previewCloudInvitation/);
+  assert.match(invitation, /Sign in with GitHub/);
+  assert.match(invitation, /acceptInvitation/);
+  assert.match(invitation, /cloudSpaceRoute/);
+  assert.doesNotMatch(invitation, /@tauri-apps|invoke\(/);
+});
+
+test('Owners and Managers administer Space-scoped invitation links', () => {
+  assert.match(members, /Invite link/);
+  assert.match(members, /createInvitation/);
+  assert.match(members, /listInvitations/);
+  assert.match(members, /revokeInvitation/);
+  assert.match(members, /Copy link/);
+  assert.match(members, /Seven days/);
+  assert.match(members, /mode === 'manage'/);
+});
+
+test('Cloud review loads and renders the exact Markdown diff before merge', () => {
+  assert.match(reviews, /getPullRequestDiff/);
+  assert.match(reviews, /Changed files/);
+  assert.match(reviews, /currentDiff\.patch\.split/);
+  assert.match(reviews, /authorName/);
+  assert.match(reviews, /canMerge\(space\.role\)/);
+  assert.doesNotMatch(reviews, /dangerouslySetInnerHTML/);
 });

@@ -1,6 +1,6 @@
 ---
 name: cowiki-space
-description: Use when searching, maintaining, or reviewing a local CoWiki knowledge Space.
+description: Use when searching, maintaining, reviewing, explicitly publishing, or submitting a local CoWiki knowledge Space.
 ---
 
 # Maintain a CoWiki Space
@@ -26,8 +26,8 @@ Edit the Markdown files directly. Preserve unknown frontmatter fields and the
 Space's established structure. Treat raw files under `.cowiki/sources/` as
 immutable evidence. Keep affected links, `index.md`, and `log.md` coherent.
 
-No local account, API key, or server is required. The retired standalone CLI
-and Cloud commands are not part of the local Space workflow.
+Local work requires no account, API key, or server. Connecting and submitting
+to a shared Space is a separate, explicit workflow.
 
 ## Respect the execution mode
 
@@ -40,5 +40,46 @@ checkout, merge, rebase, or push. CoWiki turns the resulting diff into an Agent
 Change; the user can continue editing, request another pass, merge it into the
 latest Draft, or discard it.
 
-In either mode, do not create Git history or operate CoWiki review state. The
-desktop app owns checkpoints, Agent Changes, merge, and discard.
+In Background mode, do not create Git history or operate CoWiki review state.
+The desktop app owns Agent Changes, merge, and discard.
+
+## Shared Space commands
+
+The installed skill carries a deterministic command at
+`scripts/cowiki.mjs`. Resolve that path relative to this `SKILL.md` and invoke
+it with Node 20 or newer. Do not reproduce its authentication, rebase, push,
+or Cloud API steps with raw shell commands.
+
+The command opens the system browser for GitHub sign-in and stores the
+credential outside the repository. Never handle an API key yourself.
+`.cowiki/cloud.json` contains only non-secret Space linkage.
+
+Use these commands only in Live mode:
+
+```text
+node <skill-dir>/scripts/cowiki.mjs login --server <Cloud origin>
+node <skill-dir>/scripts/cowiki.mjs clone --server <Cloud origin> --space <Space UUID> --directory <path>
+node <skill-dir>/scripts/cowiki.mjs setup --server <Cloud origin> --space <Space UUID> --cwd <existing repository>
+node <skill-dir>/scripts/cowiki.mjs status --cwd <repository>
+```
+
+When the user explicitly asks to turn a clean local repository into the first
+revision of a newly created shared Space, run:
+
+```text
+node <skill-dir>/scripts/cowiki.mjs publish --server <Cloud origin> --space <Space UUID> --cwd <repository>
+```
+
+This Owner-only command atomically creates Cloud `main` and the Owner branch.
+Do not use it for an initialized Space.
+
+Run `submit --message` only after an explicit user submit request:
+
+```text
+node <skill-dir>/scripts/cowiki.mjs submit --cwd <repository> --message "<summary>"
+```
+
+The command commits eligible Markdown, rebases on Cloud `main`, pushes only
+the signed-in user's branch with a lease, and creates or updates the pull
+request. If it reports a conflict, stop and report the conflicting paths; do
+not force, abort, or choose a side without the user.
