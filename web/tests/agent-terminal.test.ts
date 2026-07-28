@@ -57,6 +57,22 @@ test('routes terminal events only to their owning session', () => {
   assert.equal(belongsToTerminalSession(null, 'terminal-a'), false);
 });
 
+test('collapsing the Agent panel hides it without unmounting terminal sessions', () => {
+  const mainLayout = readFileSync(
+    new URL('../src/pages/MainLayout.tsx', import.meta.url),
+    'utf8',
+  );
+  assert.match(
+    mainLayout,
+    /\{desktop && activeWorkspace\?\.localPath && \(\s*<div hidden=\{!agentPanelOpen\}/,
+  );
+  assert.match(mainLayout, /hidden=\{!agentPanelOpen\}[\s\S]*<AgentTerminalPanel/);
+  assert.doesNotMatch(
+    mainLayout,
+    /desktop && agentPanelOpen && activeWorkspace\?\.localPath/,
+  );
+});
+
 test('opens multiple independent tabs for the same agent', () => {
   const empty: AgentTerminalTabsState = { activeTabId: null, tabs: [] };
   const first = addAgentTab(empty, 'codex', 'codex-1');
