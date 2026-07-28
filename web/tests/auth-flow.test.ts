@@ -4,8 +4,11 @@ import test from 'node:test';
 
 import {
   buildDesktopGithubLoginUrl,
+  buildLoopbackGithubLoginUrl,
   buildWebGithubLoginUrl,
+  parseWebOAuthFragment,
   parseDesktopOAuthCallback,
+  safeAuthReturnPath,
 } from '../src/auth-flow.ts';
 
 const loginPage = readFileSync(new URL('../src/pages/LoginPage.tsx', import.meta.url), 'utf8');
@@ -34,6 +37,25 @@ test('desktop callback accepts credential query params from the loopback listene
       'http://127.0.0.1:39281/auth/callback?api_key=cw_123&user_name=octo-cat&user_id=user-1',
     ),
     { apiKey: 'cw_123', userName: 'octo-cat', userId: 'user-1' },
+  );
+});
+
+test('browser OAuth exchanges a short-lived fragment code and accepts only local return paths', () => {
+  assert.equal(parseWebOAuthFragment('#auth_code=cw_once_test'), 'cw_once_test');
+  assert.equal(parseWebOAuthFragment('#api_key=cw_key_secret'), null);
+  assert.equal(safeAuthReturnPath('/invite/cw_invite_test'), '/invite/cw_invite_test');
+  assert.equal(safeAuthReturnPath('https://evil.example/invite/test'), '/cloud');
+  assert.equal(safeAuthReturnPath('//evil.example/invite/test'), '/cloud');
+});
+
+test('CLI OAuth uses the same exact loopback boundary as desktop', () => {
+  assert.equal(
+    buildLoopbackGithubLoginUrl(
+      'https://cloud.cowiki.test/api',
+      'cli',
+      'http://127.0.0.1:40821/auth/callback',
+    ),
+    'https://cloud.cowiki.test/api/auth/github?client=cli&callback=http%3A%2F%2F127.0.0.1%3A40821%2Fauth%2Fcallback',
   );
 });
 

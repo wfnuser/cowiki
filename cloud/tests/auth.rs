@@ -1,11 +1,11 @@
 use cowiki_cloud::auth::{
-    OAUTH_STATE_TTL, api_key_hash, random_secret, validate_desktop_callback, verify_api_key,
+    OAUTH_STATE_TTL, api_key_hash, random_secret, validate_loopback_callback, verify_api_key,
 };
 use std::time::{Duration, SystemTime};
 
 #[test]
 fn desktop_callback_accepts_only_an_exact_loopback_url() {
-    assert!(validate_desktop_callback("http://127.0.0.1:39281/auth/callback").is_ok());
+    assert!(validate_loopback_callback("http://127.0.0.1:39281/auth/callback").is_ok());
     for value in [
         "https://evil.example/auth/callback",
         "http://localhost:39281/auth/callback",
@@ -15,7 +15,7 @@ fn desktop_callback_accepts_only_an_exact_loopback_url() {
         "file:///tmp/callback",
     ] {
         assert!(
-            validate_desktop_callback(value).is_err(),
+            validate_loopback_callback(value).is_err(),
             "accepted {value}"
         );
     }

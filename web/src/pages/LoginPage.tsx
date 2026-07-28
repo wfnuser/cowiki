@@ -1,23 +1,32 @@
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { getStoredAuth, storeAuth } from '../auth';
-import { buildWebGithubLoginUrl } from '../auth-flow';
+import {
+  AUTH_RETURN_PATH_STORAGE,
+  buildWebGithubLoginUrl,
+  safeAuthReturnPath,
+} from '../auth-flow';
 import { startDesktopGithubOAuth } from '../desktop-auth';
 import { apiBase, isDesktopClient } from '../runtime';
 import { C } from '@/lib/design';
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const desktop = isDesktopClient();
+  const returnPath = safeAuthReturnPath(new URLSearchParams(location.search).get('returnTo'));
 
   useEffect(() => {
     if (getStoredAuth()) {
-      navigate(desktop ? '/' : '/cloud', { replace: true });
+      navigate(desktop ? '/' : returnPath, { replace: true });
     }
-  }, [desktop, navigate]);
+  }, [desktop, navigate, returnPath]);
 
   const signInWithGitHub = async (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (!desktop) return;
+    if (!desktop) {
+      window.sessionStorage.setItem(AUTH_RETURN_PATH_STORAGE, returnPath);
+      return;
+    }
     event.preventDefault();
     const credential = await startDesktopGithubOAuth();
     storeAuth(credential.apiKey, credential.userName, credential.userId);

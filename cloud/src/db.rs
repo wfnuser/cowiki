@@ -137,10 +137,11 @@ pub async fn create_desktop_exchange_code(
     Ok(code)
 }
 
-pub async fn exchange_desktop_code(
+pub async fn exchange_code(
     pool: &PgPool,
     raw_code: &str,
     pepper: &str,
+    label: &str,
 ) -> Result<Option<IssuedApiKey>, sqlx::Error> {
     let mut transaction = pool.begin().await?;
     let code_hash = api_key_hash(raw_code, pepper);
@@ -161,11 +162,12 @@ pub async fn exchange_desktop_code(
     let token_hash = api_key_hash(&api_key, pepper);
     sqlx::query(
         "INSERT INTO api_keys (id, user_id, token_hash, label)
-         VALUES ($1, $2, $3, 'CoWiki Desktop')",
+         VALUES ($1, $2, $3, $4)",
     )
     .bind(Uuid::new_v4())
     .bind(user_id)
     .bind(token_hash.as_slice())
+    .bind(label)
     .execute(&mut *transaction)
     .await?;
     let user = sqlx::query_as::<_, User>(

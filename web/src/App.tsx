@@ -5,21 +5,25 @@ import { LoginPage } from './pages/LoginPage';
 import { authHeaders, clearAuth, getCurrentAuth, getStoredAuth, storeAuth, tryLocalLogin } from './auth';
 import { apiBase, isDesktopClient } from './runtime';
 import { CloudApp } from './cloud/CloudApp';
+import {
+  AUTH_RETURN_PATH_STORAGE,
+  exchangeOAuthCode,
+  parseWebOAuthFragment,
+  safeAuthReturnPath,
+} from './auth-flow';
 
-/** OAuth hands the credential over in the URL *fragment* (never sent to servers,
- *  logs, or Referer). Parse #api_key=...&user_name=...&user_id=..., store, then
- *  scrub the fragment from the address bar/history. */
-function consumeOAuthFragment(): boolean {
-  const hash = window.location.hash.replace(/^#/, '');
-  if (!hash.includes('api_key=')) return false;
-  const params = new URLSearchParams(hash);
-  const apiKey = params.get('api_key');
-  const userName = params.get('user_name');
-  const userId = params.get('user_id');
-  if (!apiKey || !userName || !userId) return false;
-  storeAuth(apiKey, userName, userId);
-  // Scrub the fragment so the key doesn't linger in the URL/history entry.
-  window.history.replaceState(null, '', window.location.pathname);
+/** OAuth returns a short-lived one-time code in the fragment. Exchange it
+ * before routing, persist only the resulting credential, and scrub the URL. */
+async function consumeOAuthFragment(): Promise<boolean> {
+  const code = parseWebOAuthFragment(window.location.hash);
+  if (!code) return false;
+  const credential = await exchangeOAuthCode(apiBase(), code);
+  storeAuth(credential.apiKey, credential.userName, credential.userId);
+  const returnPath = safeAuthReturnPath(
+    window.sessionStorage.getItem(AUTH_RETURN_PATH_STORAGE),
+  );
+  window.sessionStorage.removeItem(AUTH_RETURN_PATH_STORAGE);
+  window.history.replaceState(null, '', returnPath);
   return true;
 }
 
@@ -37,7 +41,12 @@ export default function App() {
   const [ready, setReady] = useState(false);
   useEffect(() => {
     const bootstrap = async () => {
-      consumeOAuthFragment();
+      try {
+        await consumeOAuthFragment();
+      } catch {
+        clearAuth();
+        window.history.replaceState(null, '', '/login?error=oauth');
+      }
       // Desktop local mode talks straight to the Tauri local engine. It has no
       // account and must never wait for, or redirect through, a sign-in flow.
       if (isDesktopClient()) {

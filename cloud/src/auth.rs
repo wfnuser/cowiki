@@ -49,6 +49,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/auth/github", get(github_start))
         .route("/api/auth/github/callback", get(github_callback))
+        .route("/api/auth/exchange", post(exchange))
         .route("/api/auth/desktop/exchange", post(desktop_exchange))
         .route("/api/me", get(me))
         .route("/api/auth/logout", post(logout))
@@ -65,12 +66,12 @@ async fn github_start(
     Query(query): Query<GithubStartQuery>,
 ) -> AppResult<Redirect> {
     let callback = match query.client.as_deref() {
-        Some("desktop") => Some(
-            validate_desktop_callback(
+        Some("desktop" | "cli") => Some(
+            validate_loopback_callback(
                 query
                     .callback
                     .as_deref()
-                    .ok_or_else(|| AppError::BadRequest("desktop callback is required".into()))?,
+                    .ok_or_else(|| AppError::BadRequest("loopback callback is required".into()))?,
             )
             .map_err(AppError::BadRequest)?,
         ),
@@ -204,6 +205,7 @@ async fn github_callback(
 #[serde(rename_all = "camelCase")]
 struct DesktopExchangeRequest {
     code: String,
+    client: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -216,12 +218,38 @@ struct DesktopExchangeResponse {
 
 async fn desktop_exchange(
     State(state): State<AppState>,
+    Json(mut request): Json<DesktopExchangeRequest>,
+) -> AppResult<Response> {
+    request.client = Some("desktop".into());
+    exchange_request(&state, request).await
+}
+
+async fn exchange(
+    State(state): State<AppState>,
     Json(request): Json<DesktopExchangeRequest>,
 ) -> AppResult<Response> {
+    exchange_request(&state, request).await
+}
+
+async fn exchange_request(
+    state: &AppState,
+    request: DesktopExchangeRequest,
+) -> AppResult<Response> {
+    let label = match request.client.as_deref().unwrap_or("desktop") {
+        "web" => "CoWiki Web",
+        "desktop" => "CoWiki Desktop",
+        "cli" => "CoWiki CLI",
+        _ => return Err(AppError::BadRequest("unsupported OAuth client".into())),
+    };
     let issued =
-        db::exchange_desktop_code(&state.pool, request.code.trim(), &state.config.token_pepper)
+        db::exchange_code(
+            &state.pool,
+            request.code.trim(),
+            &state.config.token_pepper,
+            label,
+        )
             .await?
-            .ok_or_else(|| AppError::BadRequest("desktop code is invalid or expired".into()))?;
+            .ok_or_else(|| AppError::BadRequest("OAuth code is invalid or expired".into()))?;
     Ok(no_store_json(DesktopExchangeResponse {
         api_key: issued.api_key,
         user_name: issued.user.display_name,
@@ -258,8 +286,8 @@ fn bearer_token(headers: &HeaderMap) -> AppResult<&str> {
         .ok_or(AppError::Unauthorized)
 }
 
-pub fn validate_desktop_callback(value: &str) -> Result<Url, String> {
-    let url = Url::parse(value).map_err(|error| format!("invalid desktop callback: {error}"))?;
+pub fn validate_loopback_callback(value: &str) -> Result<Url, String> {
+    let url = Url::parse(value).map_err(|error| format!("invalid loopback callback: {error}"))?;
     let valid = url.scheme() == "http"
         && url.host_str() == Some("127.0.0.1")
         && url.port().is_some()
@@ -270,7 +298,11 @@ pub fn validate_desktop_callback(value: &str) -> Result<Url, String> {
         && url.fragment().is_none();
     valid
         .then_some(url)
-        .ok_or_else(|| "desktop callback must be http://127.0.0.1:<port>/auth/callback".into())
+        .ok_or_else(|| "callback must be http://127.0.0.1:<port>/auth/callback".into())
+}
+
+pub fn validate_desktop_callback(value: &str) -> Result<Url, String> {
+    validate_loopback_callback(value)
 }
 
 pub fn random_secret(prefix: &str) -> String {
