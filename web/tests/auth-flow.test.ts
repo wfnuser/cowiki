@@ -6,11 +6,14 @@ import {
   buildDesktopGithubLoginUrl,
   buildLoopbackGithubLoginUrl,
   buildWebGithubLoginUrl,
+  createWebAuthBootstrap,
   parseWebOAuthFragment,
   parseDesktopOAuthCallback,
   safeAuthReturnPath,
+  validateWebCredential,
 } from '../src/auth-flow.ts';
 
+const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 const loginPage = readFileSync(new URL('../src/pages/LoginPage.tsx', import.meta.url), 'utf8');
 const spaceRail = readFileSync(new URL('../src/components/layout/SpaceRail.tsx', import.meta.url), 'utf8');
 
@@ -46,6 +49,74 @@ test('browser OAuth exchanges a short-lived fragment code and accepts only local
   assert.equal(safeAuthReturnPath('/invite/cw_invite_test'), '/invite/cw_invite_test');
   assert.equal(safeAuthReturnPath('https://evil.example/invite/test'), '/cloud');
   assert.equal(safeAuthReturnPath('//evil.example/invite/test'), '/cloud');
+});
+
+test('web auth bootstrap is single-flight when React StrictMode starts it twice', async () => {
+  let exchanges = 0;
+  let stores = 0;
+  let clears = 0;
+  const run = createWebAuthBootstrap({
+    readOAuthCode: () => 'cw_once_test',
+    exchangeOAuthCode: async () => {
+      exchanges += 1;
+      return { apiKey: 'cw_key_test', userName: 'octo-cat', userId: 'user-1' };
+    },
+    storeCredential: () => { stores += 1; },
+    hasStoredCredential: () => true,
+    validateStoredCredential: async () => new Response(null, { status: 200 }),
+    clearCredential: () => { clears += 1; },
+    finishOAuth: () => {},
+    failOAuth: () => {},
+  });
+
+  const first = run();
+  const second = run();
+
+  assert.strictEqual(first, second);
+  await Promise.all([first, second]);
+  assert.equal(exchanges, 1);
+  assert.equal(stores, 1);
+  assert.equal(clears, 0);
+});
+
+test('web auth bootstrap does not probe desktop local login without a Cloud credential', async () => {
+  let validations = 0;
+  const run = createWebAuthBootstrap({
+    readOAuthCode: () => null,
+    exchangeOAuthCode: async () => {
+      throw new Error('OAuth exchange should not run');
+    },
+    storeCredential: () => {},
+    hasStoredCredential: () => false,
+    validateStoredCredential: async () => {
+      validations += 1;
+      return new Response(null, { status: 200 });
+    },
+    clearCredential: () => {},
+    finishOAuth: () => {},
+    failOAuth: () => {},
+  });
+
+  await run();
+
+  assert.equal(validations, 0);
+  assert.doesNotMatch(appSource, /tryLocalLogin/);
+});
+
+test('stored web credentials are validated against the Cloud /api/me endpoint', async () => {
+  const calls: string[] = [];
+  const response = await validateWebCredential(
+    'http://localhost:5173/api',
+    { Authorization: 'Bearer cw_key_test' },
+    async (input) => {
+      calls.push(String(input));
+      return new Response(null, { status: 200 });
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, ['http://localhost:5173/api/me']);
+  assert.doesNotMatch(appSource, /\/auth\/me/);
 });
 
 test('CLI OAuth uses the same exact loopback boundary as desktop', () => {

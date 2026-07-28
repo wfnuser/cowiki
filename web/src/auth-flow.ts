@@ -4,6 +4,17 @@ export interface OAuthCredential {
   userId: string;
 }
 
+export interface WebAuthBootstrapDependencies {
+  readOAuthCode(): string | null;
+  exchangeOAuthCode(code: string): Promise<OAuthCredential>;
+  storeCredential(credential: OAuthCredential): void;
+  hasStoredCredential(): boolean;
+  validateStoredCredential(): Promise<Response>;
+  clearCredential(): void;
+  finishOAuth(): void;
+  failOAuth(): void;
+}
+
 export const AUTH_RETURN_PATH_STORAGE = 'cowiki.authReturnPath';
 
 export function buildWebGithubLoginUrl(apiBase: string): string {
@@ -68,6 +79,46 @@ export async function exchangeOAuthCode(
     apiKey: payload.apiKey,
     userName: payload.userName,
     userId: payload.userId,
+  };
+}
+
+export function validateWebCredential(
+  apiBase: string,
+  headers: HeadersInit,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Response> {
+  return fetchImpl(`${apiBase.replace(/\/$/, '')}/me`, { headers });
+}
+
+export function createWebAuthBootstrap(dependencies: WebAuthBootstrapDependencies) {
+  let inFlight: Promise<void> | null = null;
+
+  const bootstrap = async () => {
+    const code = dependencies.readOAuthCode();
+    if (code) {
+      try {
+        const credential = await dependencies.exchangeOAuthCode(code);
+        dependencies.storeCredential(credential);
+        dependencies.finishOAuth();
+      } catch {
+        dependencies.clearCredential();
+        dependencies.failOAuth();
+        return;
+      }
+    }
+
+    if (!dependencies.hasStoredCredential()) return;
+    try {
+      const response = await dependencies.validateStoredCredential();
+      if (response.status === 401) dependencies.clearCredential();
+    } catch {
+      // Keep the stored session while offline.
+    }
+  };
+
+  return () => {
+    if (!inFlight) inFlight = bootstrap();
+    return inFlight;
   };
 }
 
