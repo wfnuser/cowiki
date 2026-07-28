@@ -70,3 +70,13 @@ test('Space invitation route remains readable before sign in and accepts into on
   assert.match(invitation, /cloudSpaceRoute/);
   assert.doesNotMatch(invitation, /@tauri-apps|invoke\(/);
 });
+
+test('Owners and Managers administer Space-scoped invitation links', () => {
+  assert.match(members, /Invite link/);
+  assert.match(members, /createInvitation/);
+  assert.match(members, /listInvitations/);
+  assert.match(members, /revokeInvitation/);
+  assert.match(members, /Copy link/);
+  assert.match(members, /Seven days/);
+  assert.match(members, /mode === 'manage'/);
+});
