@@ -73,6 +73,24 @@ test('typed Cloud requests always carry the injected bearer credential', async (
   }
 });
 
+test('Cloud logout revokes the server credential', async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const fakeFetch: CloudFetch = async (input, init) => {
+    calls.push({ url: String(input), init });
+    return new Response(null, { status: 204 });
+  };
+  const client = createCloudClient(
+    { baseUrl: 'https://cloud.cowiki.test', apiKey: 'cw_key_test', userId, userName: 'CoWiki' },
+    fakeFetch,
+  );
+
+  await client.logout();
+
+  assert.equal(calls[0].url, 'https://cloud.cowiki.test/api/auth/logout');
+  assert.equal(calls[0].init?.method, 'POST');
+  assert.equal(new Headers(calls[0].init?.headers).get('authorization'), 'Bearer cw_key_test');
+});
+
 test('Cloud mutations serialize the current contract and surface typed failures', async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const fakeFetch: CloudFetch = async (input, init) => {

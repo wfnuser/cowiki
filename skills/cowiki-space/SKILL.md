@@ -1,6 +1,6 @@
 ---
 name: cowiki-space
-description: Use when searching, maintaining, reviewing, or explicitly submitting a local CoWiki knowledge Space.
+description: Use when searching, maintaining, reviewing, explicitly publishing, or submitting a local CoWiki knowledge Space.
 ---
 
 # Maintain a CoWiki Space
@@ -62,6 +62,16 @@ node <skill-dir>/scripts/cowiki.mjs clone --server <Cloud origin> --space <Space
 node <skill-dir>/scripts/cowiki.mjs setup --server <Cloud origin> --space <Space UUID> --cwd <existing repository>
 node <skill-dir>/scripts/cowiki.mjs status --cwd <repository>
 ```
+
+When the user explicitly asks to turn a clean local repository into the first
+revision of a newly created shared Space, run:
+
+```text
+node <skill-dir>/scripts/cowiki.mjs publish --server <Cloud origin> --space <Space UUID> --cwd <repository>
+```
+
+This Owner-only command atomically creates Cloud `main` and the Owner branch.
+Do not use it for an initialized Space.
 
 Run `submit --message` only after an explicit user submit request:
 

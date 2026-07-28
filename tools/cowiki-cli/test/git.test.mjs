@@ -37,6 +37,21 @@ test('submission commits Markdown but refuses unsupported dirty files', async ()
   assert.equal(run(repo, ['show', '--format=', '--name-only', 'HEAD']).trim(), 'index.md');
 });
 
+test('a rename validates both the old and new path', async () => {
+  const repo = await mkdtemp(path.join(os.tmpdir(), 'cowiki-rename-'));
+  run(repo, ['init', '-b', 'main']);
+  run(repo, ['config', 'user.name', 'Test']);
+  run(repo, ['config', 'user.email', 'test@cowiki.local']);
+  await writeFile(path.join(repo, 'notes.txt'), 'not Markdown\n');
+  run(repo, ['add', 'notes.txt']);
+  run(repo, ['commit', '-m', 'initial']);
+
+  run(repo, ['mv', 'notes.txt', 'notes.md']);
+  const dirty = listDirtyPaths(repo);
+  assert.deepEqual(dirty.sort(), ['notes.md', 'notes.txt']);
+  assert.throws(() => assertMarkdownOnly(dirty), /notes\.txt/);
+});
+
 test('Git bearer credentials are passed through environment configuration, not arguments', () => {
   const env = gitAuthEnvironment('cw_key_secret', {});
   assert.equal(env.GIT_CONFIG_COUNT, '1');

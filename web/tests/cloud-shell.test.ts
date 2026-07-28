@@ -24,6 +24,10 @@ test('browser routing has a focused Cloud shell with no Tauri dependency', () =>
   for (const source of [cloudApp, cloudHome, wiki, reviews, members]) {
     assert.doesNotMatch(source, /@tauri-apps|local-api|invoke\(/);
   }
+  assert.match(cloudApp, /await client\.logout\(\)/);
+  assert.match(cloudHome, /New shared Space/);
+  assert.match(cloudHome, /createSpace/);
+  assert.match(cloudHome, /Owner publish/);
 });
 
 test('Cloud Space navigation exposes read surfaces to every member', () => {

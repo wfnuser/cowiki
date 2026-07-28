@@ -27,7 +27,7 @@ Opening the link requires GitHub sign-in. Accepting it creates or updates member
 | Merge PR | Yes | Yes | No | No |
 | Create/revoke invitations | Yes | Yes | No | No |
 | Manage non-owner members | Yes | Yes | No | No |
-| Change/remove Owner or delete Space | Yes | No | No | No |
+| Bootstrap the first Cloud revision | Yes | No | No | No |
 
 Every REST endpoint and Git operation enforces the same server-side role checks. Browser visibility is not treated as authorization.
 
@@ -50,13 +50,13 @@ Database changes that accompany Git operations use explicit states and reconcili
 
 ## Administrator flow
 
-Owners and Managers can see members, issue or revoke invitations, change non-owner roles, and remove non-owner members. The review screen shows the actual Markdown diff, changed files, submitter, current head, approval state, and merge readiness.
+Any signed-in user can create a shared Space and becomes its Owner. The Owner explicitly publishes the first revision from a clean local repository; the bootstrap atomically creates Cloud `main` and the Owner branch. Owners and Managers can then see members, issue or revoke invitations, change non-owner roles, and remove non-owner members. The review screen shows the actual Markdown diff, changed files, submitter, current head, approval state, and merge readiness.
 
 Approval is tied to the exact PR head and is invalidated by a new push. Merge requires the expected head, an open PR, a mergeable branch based on current Cloud `main`, and an authorized reviewer. All management, approval, and merge actions produce audit events.
 
 ## Failure and security handling
 
-- Invalid, expired, revoked, or exhausted invitations reveal no private Space content.
+- Invalid, expired, or revoked invitations reveal no private Space content.
 - Non-members receive the same not-found-style response for private Space resources.
 - Removed or downgraded members lose access immediately on the next request.
 - Git rejects direct pushes to `main`, pushes to another user's branch, and Viewer pushes.
@@ -69,4 +69,4 @@ A fresh Windows participant can install the prerequisites, join one invited Spac
 
 ## Deferred
 
-Browser editing, public self-join, desktop-client distribution, comments, advanced branch management, and organization-wide administration are not required for the competition path.
+Browser editing, public self-join, desktop-client distribution, comments, ownership transfer, Space deletion, advanced branch management, and organization-wide administration are not required for the competition path.

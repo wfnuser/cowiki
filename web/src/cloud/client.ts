@@ -117,6 +117,7 @@ export class CloudApiError extends Error {
 export interface CloudClient {
   readonly session: CloudSession;
   currentUser(): Promise<CloudUser>;
+  logout(): Promise<void>;
   listSpaces(): Promise<CloudSpace[]>;
   createSpace(name: string, slug: string): Promise<CloudSpace>;
   getSpace(spaceId: string): Promise<CloudSpace>;
@@ -171,6 +172,7 @@ export function createCloudClient(
       const response = await request<{ user: CloudUser }>('/api/me');
       return response.user;
     },
+    logout: () => request('/api/auth/logout', { method: 'POST' }),
     listSpaces: () => request('/api/spaces'),
     createSpace: (name, slug) => request('/api/spaces', {
       method: 'POST',

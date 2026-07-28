@@ -453,25 +453,18 @@ pub async fn accept_space_invitation(
         transaction.rollback().await?;
         return Ok(None);
     };
-    let existing = sqlx::query_scalar::<_, MemberRole>(
-        "SELECT role FROM space_members WHERE space_id = $1 AND user_id = $2",
+    let inserted_role = sqlx::query_scalar::<_, MemberRole>(
+        "INSERT INTO space_members (space_id, user_id, role)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (space_id, user_id) DO NOTHING
+         RETURNING role",
     )
     .bind(invitation.space_id)
     .bind(user_id)
+    .bind(invitation.role)
     .fetch_optional(&mut *transaction)
     .await?;
-    let role = if let Some(existing) = existing {
-        existing
-    } else {
-        sqlx::query(
-            "INSERT INTO space_members (space_id, user_id, role)
-             VALUES ($1, $2, $3)",
-        )
-        .bind(invitation.space_id)
-        .bind(user_id)
-        .bind(invitation.role)
-        .execute(&mut *transaction)
-        .await?;
+    let role = if let Some(role) = inserted_role {
         sqlx::query(
             "UPDATE space_invitations SET accepted_count = accepted_count + 1
              WHERE id = $1",
@@ -491,7 +484,15 @@ pub async fn accept_space_invitation(
         .bind(invitation.role.as_str())
         .execute(&mut *transaction)
         .await?;
-        invitation.role
+        role
+    } else {
+        sqlx::query_scalar::<_, MemberRole>(
+            "SELECT role FROM space_members WHERE space_id = $1 AND user_id = $2",
+        )
+        .bind(invitation.space_id)
+        .bind(user_id)
+        .fetch_one(&mut *transaction)
+        .await?
     };
     transaction.commit().await?;
     Ok(Some(SpaceMembership {

@@ -66,6 +66,40 @@ test('submit rebases, pushes only the user branch with a lease, and creates a PR
   assert.equal(run(root, ['--git-dir', remote, 'rev-parse', 'refs/heads/main']).trim() !== '', true);
 });
 
+test('owner publish bootstraps an empty shared Space from a clean local main', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cowiki-bootstrap-'));
+  const remote = path.join(root, 'remote.git');
+  const repo = path.join(root, 'work');
+  run(root, ['init', '--bare', '--initial-branch=main', remote]);
+  run(root, ['init', '-b', 'main', repo]);
+  run(repo, ['config', 'user.name', 'Test']);
+  run(repo, ['config', 'user.email', 'test@cowiki.local']);
+  await writeFile(path.join(repo, 'index.md'), '# Competition\n');
+  run(repo, ['add', 'index.md']);
+  run(repo, ['commit', '-m', 'initial']);
+  const credential = {
+    server: 'https://cloud.cowiki.test',
+    apiKey: 'cw_key_secret',
+    userId: '11111111-1111-4111-8111-111111111111',
+    userName: 'Ada',
+  };
+  const space = {
+    id: '22222222-2222-4222-8222-222222222222',
+    gitUrl: remote,
+    userRef: `user/${credential.userId}`,
+    role: 'owner',
+  };
+
+  setupCowikiRemote(repo, space, credential, { bootstrap: true });
+
+  const head = run(repo, ['rev-parse', 'HEAD']).trim();
+  assert.equal(run(root, ['--git-dir', remote, 'rev-parse', 'refs/heads/main']).trim(), head);
+  assert.equal(
+    run(root, ['--git-dir', remote, 'rev-parse', `refs/heads/${space.userRef}`]).trim(),
+    head,
+  );
+});
+
 function run(cwd, args) {
   const result = spawnSync('git', args, {
     cwd,

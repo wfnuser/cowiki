@@ -34,6 +34,9 @@ export async function main(argv = process.argv.slice(2)) {
     case 'setup':
       await setupCommand(options);
       return;
+    case 'publish':
+      await publishCommand(options);
+      return;
     case 'clone':
       await cloneCommand(options);
       return;
@@ -57,20 +60,32 @@ async function loginCommand(options) {
 }
 
 async function setupCommand(options) {
+  await linkCommand(options, false);
+}
+
+async function publishCommand(options) {
+  await linkCommand(options, true);
+}
+
+async function linkCommand(options, bootstrap) {
   const cwd = path.resolve(options.cwd || process.cwd());
   const server = serverOption(options);
   const spaceId = requiredOption(options, 'space');
   const credential = await credentialFor(server);
   const cloud = new CloudClient(credential);
   const remote = await cloud.getSpace(spaceId);
-  setupCowikiRemote(cwd, remote, credential);
+  setupCowikiRemote(cwd, remote, credential, { bootstrap });
   await writeSpaceConfig(cwd, {
     server,
     spaceId: remote.id,
     gitUrl: remote.gitUrl,
     userRef: remote.userRef,
   });
-  process.stdout.write(`Linked ${remote.name} to ${cwd}.\n`);
+  process.stdout.write(
+    bootstrap
+      ? `Published ${cwd} as the first revision of ${remote.name}.\n`
+      : `Linked ${remote.name} to ${cwd}.\n`,
+  );
 }
 
 async function cloneCommand(options) {
@@ -180,6 +195,7 @@ function printHelp() {
 Usage:
   cowiki login [--server URL]
   cowiki setup --space UUID [--server URL] [--cwd PATH]
+  cowiki publish --space UUID [--server URL] [--cwd PATH]
   cowiki clone --space UUID [--server URL] [--directory PATH]
   cowiki status [--cwd PATH]
   cowiki submit --message TEXT [--body TEXT] [--cwd PATH]

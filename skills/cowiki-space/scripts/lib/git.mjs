@@ -39,7 +39,10 @@ export function listDirtyPaths(cwd) {
     if (!record) continue;
     const status = record.slice(0, 2);
     paths.push(record.slice(3));
-    if (/[RC]/.test(status) && records[index + 1]) index += 1;
+    if (/[RC]/.test(status) && records[index + 1]) {
+      paths.push(records[index + 1]);
+      index += 1;
+    }
   }
   return [...new Set(paths)];
 }
@@ -72,7 +75,7 @@ export function commitMarkdown(cwd, message, credential) {
   return result.status === 0;
 }
 
-export function setupCowikiRemote(cwd, space, credential) {
+export function setupCowikiRemote(cwd, space, credential, { bootstrap = false } = {}) {
   if (space.userRef !== `user/${credential.userId}`) {
     throw new Error('Cloud returned a user branch for another account');
   }
@@ -89,6 +92,18 @@ export function setupCowikiRemote(cwd, space, credential) {
     'remote.cowiki.fetch',
     '+refs/heads/main:refs/remotes/cowiki/main',
   ]);
+  const main = runGit(cwd, ['ls-remote', '--exit-code', 'cowiki', 'refs/heads/main'], {
+    apiKey: credential.apiKey,
+    allowFailure: true,
+  });
+  if (main.status === 2) {
+    if (!bootstrap) {
+      throw new Error('Cloud main is empty; use cowiki publish to create its first revision');
+    }
+    bootstrapCloudSpace(cwd, space, credential);
+  } else if (main.status !== 0) {
+    throw new Error(main.stderr.trim() || 'Could not inspect Cloud main');
+  }
   fetchCloudRefs(cwd, space, credential);
 }
 
@@ -153,6 +168,30 @@ function fetchCloudRefs(cwd, space, credential) {
     'cowiki',
     `+refs/heads/${space.userRef}:refs/remotes/cowiki/${space.userRef}`,
   ], { apiKey: credential.apiKey, allowFailure: true });
+}
+
+function bootstrapCloudSpace(cwd, space, credential) {
+  if (space.role !== 'owner') {
+    throw new Error('Cloud main is empty; only the Space owner can publish the first revision');
+  }
+  ensureMain(cwd);
+  ensureNoRebase(cwd);
+  const dirty = listDirtyPaths(cwd);
+  if (dirty.length > 0) {
+    throw new Error('Commit or discard local changes before publishing the first Cloud revision');
+  }
+  const tracked = runGit(cwd, ['ls-tree', '-r', '--name-only', '-z', 'HEAD'])
+    .stdout
+    .split('\0')
+    .filter(Boolean);
+  assertMarkdownOnly(tracked);
+  runGit(cwd, [
+    'push',
+    '--atomic',
+    'cowiki',
+    'HEAD:refs/heads/main',
+    `HEAD:refs/heads/${space.userRef}`,
+  ], { apiKey: credential.apiKey });
 }
 
 export function repositoryStatus(cwd) {

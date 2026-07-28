@@ -37,7 +37,15 @@ public origin. Open `http://localhost:5173/cloud`.
 
 ## Publish and review workflow
 
-The desktop app exposes one Space-scoped Cloud action. It never publishes a local Space in the background:
+The competition path does not require the desktop app:
+
+1. Create a shared Space in the browser.
+2. Explicitly ask the local Agent to publish a clean Markdown repository to that Space. The bundled `cowiki publish` command initializes Cloud `main` and `user/<owner-id>` atomically at the local `main` commit.
+3. Create a Space-scoped invitation link in Members. Participants sign in, accept the invitation, and can read only merged Cloud `main` in the browser.
+4. Participants use the bundled skill to clone or set up the repository. `cowiki submit` commits eligible Markdown, rebases on Cloud `main`, pushes only `user/<user-id>` with a lease, and creates or updates the participant's pull request.
+5. An Owner or Manager reviews the exact Markdown diff, approves the current head, and merges it. The browser Wiki never displays local drafts or unmerged user branches as published knowledge.
+
+The desktop app exposes the same Space-scoped lifecycle as a convenience. It never publishes a local Space in the background:
 
 1. **Publish Space** creates the PostgreSQL control-plane record and bare Git repository. The local `main` commit initializes both Cloud `main` and `user/<owner-id>` at the same OID.
 2. **Sync** fetches Cloud `main`. A clean local `main` is rebased automatically; a conflict stops without silently choosing either side.
@@ -51,8 +59,9 @@ Pull requests follow subsequent pushes to `user/<user-id>`. An approval is count
 | Capability | Owner | Manager | Editor | Viewer |
 | --- | --- | --- | --- | --- |
 | Read Cloud Wiki, members, and PRs | Yes | Yes | Yes | Yes |
-| Push `user/<own-id>` and create/approve PRs | Yes | Yes | Yes | No |
-| Merge PRs | Yes | Yes | No | No |
+| Push `user/<own-id>` and create PRs | Yes | Yes | Yes | No |
+| Review, approve, and merge PRs | Yes | Yes | No | No |
+| Create and revoke Space invitations | Yes | Yes | No | No |
 | Add, change, or remove non-owner members | Yes | Yes | No | No |
 | Bootstrap a new Space | Yes | No | No | No |
 

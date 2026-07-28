@@ -9,6 +9,7 @@ use http::{Request, StatusCode};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use support::TestDatabase;
+use time::OffsetDateTime;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -215,6 +216,82 @@ async fn invitations_are_space_scoped_revocable_and_preserve_existing_roles() {
     assert!(audit_actions.contains(&"space_invitation.created".to_string()));
     assert!(audit_actions.contains(&"space_invitation.accepted".to_string()));
     assert!(audit_actions.contains(&"space_invitation.revoked".to_string()));
+
+    database.finish().await;
+}
+
+#[tokio::test]
+async fn concurrent_invitations_create_one_membership() {
+    let Some(database) = TestDatabase::create().await else {
+        eprintln!("TEST_DATABASE_URL is not set; PostgreSQL integration assertion skipped");
+        return;
+    };
+    let owner = insert_user(&database.pool, "concurrent-owner").await;
+    let candidate = insert_user(&database.pool, "concurrent-candidate").await;
+    let space = Uuid::new_v4();
+    cowiki_cloud::db::create_space(
+        &database.pool,
+        space,
+        owner,
+        "Concurrent Invitations",
+        "concurrent-invitations",
+    )
+    .await
+    .unwrap();
+    let first_hash = api_key_hash(
+        "cw_invite_concurrent_first",
+        "0123456789abcdef0123456789abcdef",
+    );
+    let second_hash = api_key_hash(
+        "cw_invite_concurrent_second",
+        "0123456789abcdef0123456789abcdef",
+    );
+    let expires_at = OffsetDateTime::now_utc() + time::Duration::hours(1);
+    cowiki_cloud::db::create_space_invitation(
+        &database.pool,
+        Uuid::new_v4(),
+        space,
+        owner,
+        MemberRole::Editor,
+        &first_hash,
+        expires_at,
+    )
+    .await
+    .unwrap();
+    cowiki_cloud::db::create_space_invitation(
+        &database.pool,
+        Uuid::new_v4(),
+        space,
+        owner,
+        MemberRole::Editor,
+        &second_hash,
+        expires_at,
+    )
+    .await
+    .unwrap();
+
+    let first = cowiki_cloud::db::accept_space_invitation(&database.pool, &first_hash, candidate);
+    let second = cowiki_cloud::db::accept_space_invitation(&database.pool, &second_hash, candidate);
+    let (first, second) = tokio::join!(first, second);
+    assert_eq!(first.unwrap().unwrap().role, MemberRole::Editor);
+    assert_eq!(second.unwrap().unwrap().role, MemberRole::Editor);
+    let membership_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM space_members WHERE space_id = $1 AND user_id = $2",
+    )
+    .bind(space)
+    .bind(candidate)
+    .fetch_one(&database.pool)
+    .await
+    .unwrap();
+    let accepted_count: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(accepted_count), 0) FROM space_invitations WHERE space_id = $1",
+    )
+    .bind(space)
+    .fetch_one(&database.pool)
+    .await
+    .unwrap();
+    assert_eq!(membership_count, 1);
+    assert_eq!(accepted_count, 1);
 
     database.finish().await;
 }
