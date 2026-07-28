@@ -16,9 +16,14 @@ test('the shipped Agent skill describes the local Space workflow', () => {
   assert.match(skill, /edit .*Markdown files directly/i);
   assert.match(skill, /Live mode/i);
   assert.match(skill, /Background mode/i);
-  assert.match(skill, /no .*API key.*server/i);
+  assert.match(skill, /local work requires no account.*server/i);
   assert.match(skill, /arbitrary (?:OKF )?hierarchy/i);
-  assert.doesNotMatch(skill, /cowiki (?:setup|compile|write|submit)\b/i);
+  assert.match(skill, /scripts\/cowiki\.mjs/);
+  assert.match(skill, /submit --message/);
+  assert.match(skill, /explicit.*submit request/i);
+  assert.match(skill, /never.*API key/i);
+  assert.match(skill, /do not reproduce.*rebase.*push/i);
+  assert.doesNotMatch(skill, /cowiki (?:compile|write)\b/i);
   assert.doesNotMatch(skill, /cowiki review (?:show|approve|reject)\b/i);
   assert.doesNotMatch(skill, /wiki\/entities\/concepts/i);
 });
