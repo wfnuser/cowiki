@@ -195,7 +195,7 @@ async fn require_manager(state: &AppState, space_id: Uuid, user_id: Uuid) -> App
     }
 }
 
-fn space_response(
+pub(crate) fn space_response(
     state: &AppState,
     membership: SpaceMembership,
     user_id: Uuid,

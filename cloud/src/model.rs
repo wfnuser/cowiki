@@ -30,6 +30,28 @@ pub enum PullRequestStatus {
     Closed,
 }
 
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct SpaceInvitation {
+    pub id: Uuid,
+    pub space_id: Uuid,
+    pub created_by: Uuid,
+    pub role: MemberRole,
+    pub expires_at: time::OffsetDateTime,
+    pub revoked_at: Option<time::OffsetDateTime>,
+    pub accepted_count: i32,
+    pub created_at: time::OffsetDateTime,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct SpaceInvitationPreview {
+    pub id: Uuid,
+    pub space_id: Uuid,
+    pub space_name: String,
+    pub space_slug: String,
+    pub role: MemberRole,
+    pub expires_at: time::OffsetDateTime,
+}
+
 impl MemberRole {
     pub const fn as_str(self) -> &'static str {
         match self {

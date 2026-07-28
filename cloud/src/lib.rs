@@ -5,6 +5,7 @@ pub mod db;
 pub mod error;
 pub mod git_http;
 pub mod git_repo;
+pub mod invitations;
 pub mod model;
 pub mod pull_requests;
 pub mod spaces;
@@ -46,6 +47,7 @@ pub fn build_router(config: Config, pool: PgPool) -> Result<Router, git_repo::Gi
         .merge(auth::routes())
         .merge(spaces::routes())
         .merge(content::routes())
+        .merge(invitations::routes())
         .merge(pull_requests::routes())
         .layer(DefaultBodyLimit::max(MAX_API_REQUEST_BYTES))
         .layer(TimeoutLayer::with_status_code(

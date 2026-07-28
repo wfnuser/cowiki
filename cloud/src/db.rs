@@ -5,7 +5,9 @@ use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
 use crate::auth::{api_key_hash, random_secret};
-use crate::model::{MemberRole, PullRequestStatus, User};
+use crate::model::{
+    MemberRole, PullRequestStatus, SpaceInvitation, SpaceInvitationPreview, User,
+};
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct SpaceMembership {
@@ -45,6 +47,9 @@ pub struct IssuedApiKey {
     pub api_key: String,
     pub user: User,
 }
+
+const INVITATION_COLUMNS: &str =
+    "id, space_id, created_by, role, expires_at, revoked_at, accepted_count, created_at";
 
 pub async fn connect_and_migrate(database_url: &str) -> Result<PgPool, sqlx::Error> {
     let options = PgConnectOptions::from_str(database_url)?.disable_statement_logging();
@@ -334,6 +339,185 @@ pub async fn remove_space_member(
         .bind(space_id)
         .bind(actor_id)
         .bind(member_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+    }
+    transaction.commit().await?;
+    Ok(result.rows_affected() == 1)
+}
+
+pub async fn create_space_invitation(
+    pool: &PgPool,
+    invitation_id: Uuid,
+    space_id: Uuid,
+    actor_id: Uuid,
+    role: MemberRole,
+    token_hash: &[u8],
+    expires_at: OffsetDateTime,
+) -> Result<SpaceInvitation, sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    let invitation = sqlx::query_as::<_, SpaceInvitation>(&format!(
+        "INSERT INTO space_invitations
+            (id, space_id, created_by, role, token_hash, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING {INVITATION_COLUMNS}"
+    ))
+    .bind(invitation_id)
+    .bind(space_id)
+    .bind(actor_id)
+    .bind(role)
+    .bind(token_hash)
+    .bind(expires_at)
+    .fetch_one(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "INSERT INTO audit_events
+            (space_id, actor_id, action, subject_type, subject_id, metadata)
+         VALUES ($1, $2, 'space_invitation.created', 'space_invitation', $3,
+                 jsonb_build_object('role', $4::text, 'expires_at', $5::text))",
+    )
+    .bind(space_id)
+    .bind(actor_id)
+    .bind(invitation_id.to_string())
+    .bind(role.as_str())
+    .bind(expires_at.to_string())
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(invitation)
+}
+
+pub async fn list_space_invitations(
+    pool: &PgPool,
+    space_id: Uuid,
+) -> Result<Vec<SpaceInvitation>, sqlx::Error> {
+    sqlx::query_as::<_, SpaceInvitation>(&format!(
+        "SELECT {INVITATION_COLUMNS}
+         FROM space_invitations
+         WHERE space_id = $1 AND revoked_at IS NULL AND expires_at > now()
+         ORDER BY created_at DESC"
+    ))
+    .bind(space_id)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn preview_space_invitation(
+    pool: &PgPool,
+    token_hash: &[u8],
+) -> Result<Option<SpaceInvitationPreview>, sqlx::Error> {
+    sqlx::query_as::<_, SpaceInvitationPreview>(
+        "SELECT space_invitations.id, spaces.id AS space_id, spaces.name AS space_name,
+                spaces.slug AS space_slug, space_invitations.role,
+                space_invitations.expires_at
+         FROM space_invitations
+         JOIN spaces ON spaces.id = space_invitations.space_id
+         WHERE token_hash = $1
+           AND revoked_at IS NULL
+           AND expires_at > now()",
+    )
+    .bind(token_hash)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn accept_space_invitation(
+    pool: &PgPool,
+    token_hash: &[u8],
+    user_id: Uuid,
+) -> Result<Option<SpaceMembership>, sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    let invitation = sqlx::query_as::<_, SpaceInvitationPreview>(
+        "SELECT space_invitations.id, spaces.id AS space_id, spaces.name AS space_name,
+                spaces.slug AS space_slug, space_invitations.role,
+                space_invitations.expires_at
+         FROM space_invitations
+         JOIN spaces ON spaces.id = space_invitations.space_id
+         WHERE token_hash = $1
+           AND revoked_at IS NULL
+           AND expires_at > now()
+         FOR UPDATE OF space_invitations",
+    )
+    .bind(token_hash)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let Some(invitation) = invitation else {
+        transaction.rollback().await?;
+        return Ok(None);
+    };
+    let existing = sqlx::query_scalar::<_, MemberRole>(
+        "SELECT role FROM space_members WHERE space_id = $1 AND user_id = $2",
+    )
+    .bind(invitation.space_id)
+    .bind(user_id)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let role = if let Some(existing) = existing {
+        existing
+    } else {
+        sqlx::query(
+            "INSERT INTO space_members (space_id, user_id, role)
+             VALUES ($1, $2, $3)",
+        )
+        .bind(invitation.space_id)
+        .bind(user_id)
+        .bind(invitation.role)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "UPDATE space_invitations SET accepted_count = accepted_count + 1
+             WHERE id = $1",
+        )
+        .bind(invitation.id)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "INSERT INTO audit_events
+                (space_id, actor_id, action, subject_type, subject_id, metadata)
+             VALUES ($1, $2, 'space_invitation.accepted', 'space_invitation', $3,
+                     jsonb_build_object('role', $4::text))",
+        )
+        .bind(invitation.space_id)
+        .bind(user_id)
+        .bind(invitation.id.to_string())
+        .bind(invitation.role.as_str())
+        .execute(&mut *transaction)
+        .await?;
+        invitation.role
+    };
+    transaction.commit().await?;
+    Ok(Some(SpaceMembership {
+        id: invitation.space_id,
+        name: invitation.space_name,
+        slug: invitation.space_slug,
+        role,
+    }))
+}
+
+pub async fn revoke_space_invitation(
+    pool: &PgPool,
+    space_id: Uuid,
+    invitation_id: Uuid,
+    actor_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    let result = sqlx::query(
+        "UPDATE space_invitations SET revoked_at = now()
+         WHERE id = $1 AND space_id = $2 AND revoked_at IS NULL",
+    )
+    .bind(invitation_id)
+    .bind(space_id)
+    .execute(&mut *transaction)
+    .await?;
+    if result.rows_affected() == 1 {
+        sqlx::query(
+            "INSERT INTO audit_events
+                (space_id, actor_id, action, subject_type, subject_id)
+             VALUES ($1, $2, 'space_invitation.revoked', 'space_invitation', $3)",
+        )
+        .bind(space_id)
+        .bind(actor_id)
+        .bind(invitation_id.to_string())
         .execute(&mut *transaction)
         .await?;
     }
