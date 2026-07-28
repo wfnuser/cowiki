@@ -87,6 +87,21 @@ export interface CloudPullRequest {
   status: CloudPullRequestStatus;
   mergedBy: string | null;
   approvalCount: number;
+  authorHandle: string;
+  authorName: string;
+  authorAvatarUrl: string | null;
+}
+
+export interface CloudPullRequestDiff {
+  baseOid: string;
+  headOid: string;
+  files: Array<{
+    path: string;
+    status: string;
+    additions: number;
+    deletions: number;
+  }>;
+  patch: string;
 }
 
 export class CloudApiError extends Error {
@@ -120,6 +135,7 @@ export interface CloudClient {
   revokeInvitation(spaceId: string, invitationId: string): Promise<void>;
   listPullRequests(spaceId: string): Promise<CloudPullRequest[]>;
   getPullRequest(spaceId: string, pullRequestId: string): Promise<CloudPullRequest>;
+  getPullRequestDiff(spaceId: string, pullRequestId: string): Promise<CloudPullRequestDiff>;
   approvePullRequest(spaceId: string, pullRequestId: string): Promise<CloudPullRequest>;
   mergePullRequest(spaceId: string, pullRequestId: string, expectedHeadOid: string): Promise<CloudPullRequest>;
 }
@@ -193,6 +209,9 @@ export function createCloudClient(
     ),
     listPullRequests: (spaceId) => request(spacePath(spaceId, '/pull-requests')),
     getPullRequest: (spaceId, pullRequestId) => request(pullRequestPath(spaceId, pullRequestId)),
+    getPullRequestDiff: (spaceId, pullRequestId) => request(
+      pullRequestPath(spaceId, pullRequestId, '/diff'),
+    ),
     approvePullRequest: (spaceId, pullRequestId) => request(
       pullRequestPath(spaceId, pullRequestId, '/approve'),
       { method: 'POST' },

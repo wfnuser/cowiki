@@ -182,3 +182,26 @@ test('Space invitations have a public preview and authenticated lifecycle', asyn
   });
   assert.equal(calls[4].init?.method, 'DELETE');
 });
+
+test('pull request diff is fetched from the reviewed head endpoint', async () => {
+  const calls: string[] = [];
+  const fakeFetch: CloudFetch = async (input) => {
+    calls.push(String(input));
+    return Response.json({
+      baseOid: 'a'.repeat(40),
+      headOid: 'b'.repeat(40),
+      files: [{ path: 'index.md', status: 'modified', additions: 2, deletions: 1 }],
+      patch: 'diff --git a/index.md b/index.md\n-old\n+new',
+    });
+  };
+  const client = createCloudClient(
+    { baseUrl: 'https://cloud.cowiki.test', apiKey: 'key', userId, userName: 'User' },
+    fakeFetch,
+  );
+  const diff = await client.getPullRequestDiff(spaceId, '33333333-3333-4333-8333-333333333333');
+  assert.equal(diff.files[0].additions, 2);
+  assert.equal(
+    calls[0],
+    `https://cloud.cowiki.test/api/spaces/${spaceId}/pull-requests/33333333-3333-4333-8333-333333333333/diff`,
+  );
+});
