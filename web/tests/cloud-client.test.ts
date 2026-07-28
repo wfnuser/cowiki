@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   CloudApiError,
   createCloudClient,
+  previewCloudInvitation,
   type CloudFetch,
 } from '../src/cloud/client.ts';
 import {
@@ -124,4 +125,60 @@ test('UUID Space routes round-trip document paths', () => {
     documentPath: 'guides/Shared Context.md',
   });
   assert.equal(parseCloudRoute('/cloud/spaces/not-a-uuid/wiki'), null);
+});
+
+test('Space invitations have a public preview and authenticated lifecycle', async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const fakeFetch: CloudFetch = async (input, init) => {
+    calls.push({ url: String(input), init });
+    if (calls.length === 1) {
+      return Response.json({
+        spaceId,
+        spaceName: 'Competition',
+        spaceSlug: 'competition',
+        role: 'editor',
+        expiresAt: '2026-08-01T00:00:00Z',
+      });
+    }
+    if (calls.length === 2) {
+      return Response.json({ id: spaceId, role: 'editor' });
+    }
+    if (calls.length === 3) {
+      return Response.json({
+        id: 'invite-id',
+        spaceId,
+        role: 'editor',
+        expiresAt: '2026-08-01T00:00:00Z',
+        acceptedCount: 0,
+        createdAt: '2026-07-28T00:00:00Z',
+        token: 'cw_invite_test',
+        inviteUrl: 'https://cloud.cowiki.test/invite/cw_invite_test',
+      }, { status: 201 });
+    }
+    if (calls.length === 4) return Response.json([]);
+    return new Response(null, { status: 204 });
+  };
+  const preview = await previewCloudInvitation(
+    'https://cloud.cowiki.test',
+    'cw_invite_test',
+    fakeFetch,
+  );
+  assert.equal(preview.spaceName, 'Competition');
+  const client = createCloudClient(
+    { baseUrl: 'https://cloud.cowiki.test', apiKey: 'key', userId, userName: 'User' },
+    fakeFetch,
+  );
+  await client.acceptInvitation('cw_invite_test');
+  await client.createInvitation(spaceId, 'editor', 168);
+  await client.listInvitations(spaceId);
+  await client.revokeInvitation(spaceId, 'invite-id');
+
+  assert.equal(new Headers(calls[0].init?.headers).has('authorization'), false);
+  assert.equal(calls[1].url, 'https://cloud.cowiki.test/api/invitations/cw_invite_test/accept');
+  assert.equal(new Headers(calls[1].init?.headers).get('authorization'), 'Bearer key');
+  assert.deepEqual(JSON.parse(String(calls[2].init?.body)), {
+    role: 'editor',
+    expiresInHours: 168,
+  });
+  assert.equal(calls[4].init?.method, 'DELETE');
 });

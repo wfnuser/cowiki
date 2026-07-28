@@ -15,6 +15,7 @@ const cloudHome = readFileSync(new URL('../src/cloud/CloudHome.tsx', import.meta
 const wiki = readFileSync(new URL('../src/cloud/CloudWikiView.tsx', import.meta.url), 'utf8');
 const reviews = readFileSync(new URL('../src/cloud/CloudReviewsView.tsx', import.meta.url), 'utf8');
 const members = readFileSync(new URL('../src/cloud/CloudMembersView.tsx', import.meta.url), 'utf8');
+const invitation = readFileSync(new URL('../src/cloud/CloudInvitationPage.tsx', import.meta.url), 'utf8');
 
 test('browser routing has a focused Cloud shell with no Tauri dependency', () => {
   assert.match(app, /path="\/cloud\/\*"/);
@@ -59,4 +60,13 @@ test('member and PR mutations reload server-authoritative state', () => {
   assert.match(members, /await loadMembers\(\)/);
   assert.match(reviews, /await loadPullRequests\(\)/);
   assert.match(reviews, /expectedHeadOid|headOid/);
+});
+
+test('Space invitation route remains readable before sign in and accepts into one Space', () => {
+  assert.match(app, /path="\/invite\/:token"/);
+  assert.match(invitation, /previewCloudInvitation/);
+  assert.match(invitation, /Sign in with GitHub/);
+  assert.match(invitation, /acceptInvitation/);
+  assert.match(invitation, /cloudSpaceRoute/);
+  assert.doesNotMatch(invitation, /@tauri-apps|invoke\(/);
 });

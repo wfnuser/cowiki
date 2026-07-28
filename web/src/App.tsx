@@ -5,6 +5,7 @@ import { LoginPage } from './pages/LoginPage';
 import { authHeaders, clearAuth, getCurrentAuth, getStoredAuth, storeAuth, tryLocalLogin } from './auth';
 import { apiBase, isDesktopClient } from './runtime';
 import { CloudApp } from './cloud/CloudApp';
+import { CloudInvitationPage } from './cloud/CloudInvitationPage';
 import {
   AUTH_RETURN_PATH_STORAGE,
   exchangeOAuthCode,
@@ -82,6 +83,8 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/invite/:token" element={<CloudInvitationPage />} />
+        <Route path="/auth/callback" element={<Navigate to="/login" replace />} />
         <Route path="/cloud/*" element={<CloudApp />} />
         <Route path="/" element={isDesktopClient()
           ? <ProtectedRoute><MainLayout /></ProtectedRoute>

@@ -50,6 +50,27 @@ export interface CloudMember {
   role: CloudRole;
 }
 
+export type CloudInvitableRole = Exclude<CloudRole, 'owner'>;
+
+export interface CloudInvitationPreview {
+  spaceId: string;
+  spaceName: string;
+  spaceSlug: string;
+  role: CloudInvitableRole;
+  expiresAt: string;
+}
+
+export interface CloudInvitation {
+  id: string;
+  spaceId: string;
+  role: CloudInvitableRole;
+  expiresAt: string;
+  acceptedCount: number;
+  createdAt: string;
+  token?: string;
+  inviteUrl?: string;
+}
+
 export type CloudPullRequestStatus = 'open' | 'merged' | 'closed';
 
 export interface CloudPullRequest {
@@ -89,6 +110,14 @@ export interface CloudClient {
   listMembers(spaceId: string): Promise<CloudMember[]>;
   setMember(spaceId: string, handle: string, role: CloudRole): Promise<CloudMember>;
   removeMember(spaceId: string, memberId: string): Promise<void>;
+  acceptInvitation(token: string): Promise<CloudSpace>;
+  listInvitations(spaceId: string): Promise<CloudInvitation[]>;
+  createInvitation(
+    spaceId: string,
+    role: CloudInvitableRole,
+    expiresInHours: number,
+  ): Promise<CloudInvitation>;
+  revokeInvitation(spaceId: string, invitationId: string): Promise<void>;
   listPullRequests(spaceId: string): Promise<CloudPullRequest[]>;
   getPullRequest(spaceId: string, pullRequestId: string): Promise<CloudPullRequest>;
   approvePullRequest(spaceId: string, pullRequestId: string): Promise<CloudPullRequest>;
@@ -146,6 +175,22 @@ export function createCloudClient(
       `${spacePath(spaceId, '/members')}/${encodeURIComponent(memberId)}`,
       { method: 'DELETE' },
     ),
+    acceptInvitation: (token) => request(
+      `/api/invitations/${encodeURIComponent(token)}/accept`,
+      { method: 'POST' },
+    ),
+    listInvitations: (spaceId) => request(spacePath(spaceId, '/invitations')),
+    createInvitation: (spaceId, role, expiresInHours) => request(
+      spacePath(spaceId, '/invitations'),
+      {
+        method: 'POST',
+        body: JSON.stringify({ role, expiresInHours }),
+      },
+    ),
+    revokeInvitation: (spaceId, invitationId) => request(
+      `${spacePath(spaceId, '/invitations')}/${encodeURIComponent(invitationId)}`,
+      { method: 'DELETE' },
+    ),
     listPullRequests: (spaceId) => request(spacePath(spaceId, '/pull-requests')),
     getPullRequest: (spaceId, pullRequestId) => request(pullRequestPath(spaceId, pullRequestId)),
     approvePullRequest: (spaceId, pullRequestId) => request(
@@ -157,4 +202,24 @@ export function createCloudClient(
       { method: 'POST', body: JSON.stringify({ expectedHeadOid }) },
     ),
   };
+}
+
+export async function previewCloudInvitation(
+  baseUrl: string,
+  token: string,
+  fetchImpl: CloudFetch = fetch,
+): Promise<CloudInvitationPreview> {
+  const origin = baseUrl.replace(/\/$/, '');
+  const response = await fetchImpl(
+    `${origin}/api/invitations/${encodeURIComponent(token)}`,
+    { headers: { Accept: 'application/json' } },
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: string } | null;
+    throw new CloudApiError(
+      response.status,
+      payload?.error || `Invitation request failed (${response.status})`,
+    );
+  }
+  return response.json() as Promise<CloudInvitationPreview>;
 }
