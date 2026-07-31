@@ -22,7 +22,6 @@
     "noFallthroughCasesInSwitch": true,
 
     /* Path aliases for shadcn */
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }

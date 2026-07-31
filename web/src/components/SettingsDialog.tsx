@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { Key, Copy, Check, Trash2, Plus, Loader2, AlertTriangle, Shield, Clock } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -17,7 +17,7 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const itemFade = {
+const itemFade: Variants = {
   initial: { opacity: 0, y: 12 },
   animate: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 400, damping: 30 } },
   exit: { opacity: 0, y: -8, transition: { duration: 0.15 } },
