@@ -93,6 +93,29 @@ type ActiveView =
   | { kind: 'notifications' }
   | null;
 
+function isPersonalSpace(ws: Workspace): boolean {
+  return ws.visibility === 'private' && ws.role === 'owner';
+}
+
+/** Merge main and draft recursively by stable bundle-relative path. */
+function mergePageTrees(main: PageMeta[], draft: PageMeta[]): PageMeta[] {
+  const merged: PageMeta[] = [...main];
+  const pathToIndex = new Map(merged.map((p, i) => [p.path, i] as const));
+  for (const draftPage of draft) {
+    const index = pathToIndex.get(draftPage.path);
+    if (index === undefined) {
+      pathToIndex.set(draftPage.path, merged.length);
+      merged.push(draftPage);
+    } else if (merged[index].kind === 'folder' && draftPage.kind === 'folder') {
+      merged[index] = {
+        ...merged[index],
+        children: mergePageTrees(merged[index].children || [], draftPage.children || []),
+      };
+    }
+  }
+  return merged;
+}
+
 export function MainLayout() {
   const [auth, setAuth] = useState(() => getCurrentAuth());
   const desktop = isDesktopClient();
@@ -255,7 +278,53 @@ export function MainLayout() {
     } catch {
       return null;
     }
-  }, [auth?.api_key, auth?.id, auth?.mode, auth?.name]);
+  }, [auth]);
+
+  // Load pages for a space.
+  const loadSpacePages = useCallback(async (ws: Workspace) => {
+    if (ws.visibility === 'private') {
+      const pages = visiblePageTree(await listPages(userBranch, ws.slug, 'all'));
+      setSpacePages((previous) => ({ ...previous, [ws.id]: pages }));
+      return;
+    }
+    const [mainPages, draftPages] = await Promise.all([
+      listPages('main', ws.slug, 'all'),
+      listPages(userBranch, ws.slug, 'all').catch(() => [] as PageMeta[]),
+    ]);
+    const merged = visiblePageTree(mergePageTrees(mainPages, draftPages));
+    setSpacePages((previous) => ({ ...previous, [ws.id]: merged }));
+  }, [userBranch]);
+
+  // Load sources for a space.
+  const loadSpaceSources = useCallback(async (ws: Workspace) => {
+    try {
+      if (ws.visibility === 'private') {
+        const [userSources, mainSources] = await Promise.all([
+          listSources(ws.slug, userBranch).catch(() => [] as SourceItem[]),
+          listSources(ws.slug, 'main').catch(() => [] as SourceItem[]),
+        ]);
+        const userNames = new Set(userSources.map((source) => source.filename));
+        const merged = [
+          ...userSources,
+          ...mainSources.filter((source) => !userNames.has(source.filename)),
+        ];
+        setSpaceSources((previous) => ({ ...previous, [ws.id]: merged }));
+        return;
+      }
+      const [mainSources, draftSources] = await Promise.all([
+        listSources(ws.slug, 'main'),
+        listSources(ws.slug, userBranch).catch(() => [] as SourceItem[]),
+      ]);
+      const mainNames = new Set(mainSources.map((source) => source.filename));
+      const merged = [
+        ...mainSources,
+        ...draftSources.filter((source) => !mainNames.has(source.filename)),
+      ];
+      setSpaceSources((previous) => ({ ...previous, [ws.id]: merged }));
+    } catch {
+      setSpaceSources((previous) => ({ ...previous, [ws.id]: [] }));
+    }
+  }, [userBranch]);
 
   // Load workspaces + restore state from URL
   const loadWorkspaces = useCallback(async () => {
@@ -305,12 +374,8 @@ export function MainLayout() {
       const targetWs = ws.find((w) => w.slug === decodeURIComponent(wsSlug));
       if (targetWs && !isReservedDocument(conceptPath(conceptId))) {
         setActiveWorkspace(targetWs);
-        if (!spacePages[targetWs.id]) {
-          await loadSpacePages(targetWs);
-        }
-        if (!spaceSources[targetWs.id]) {
-          await loadSpaceSources(targetWs);
-        }
+        await loadSpacePages(targetWs);
+        await loadSpaceSources(targetWs);
         const branch = targetWs.visibility === 'private' ? userBranch : 'main';
         try {
           const page = await getPage(conceptId, branch, targetWs.slug, 'wiki');
@@ -335,7 +400,7 @@ export function MainLayout() {
         }
       }
     }
-  }, [auth?.id, desktop, location.pathname]);
+  }, [auth, desktop, loadSpacePages, loadSpaceSources, location.pathname, navigate, userBranch]);
 
   useEffect(() => {
     if (!auth) return;
@@ -355,7 +420,7 @@ export function MainLayout() {
       .then((s) => !cancelled && setReviewCount(s.filter((r) => r.status === 'pending').length))
       .catch(() => !cancelled && setReviewCount(0));
     return () => { cancelled = true; };
-  }, [activeWorkspace, reviewRefreshKey]);
+  }, [activeWorkspace, desktop, reviewRefreshKey]);
 
   // The desktop version switcher is a local Git view: Working, HEAD
   // (Upstream), and currently-open isolated Agent Changes only.
@@ -390,78 +455,6 @@ export function MainLayout() {
     });
     return () => { cancelled = true; };
   }, [activeWorkspace?.localPath, activeWorkspace?.slug, desktop, reviewRefreshKey]);
-
-  function isPersonalSpace(ws: Workspace): boolean {
-    return ws.visibility === 'private' && ws.role === 'owner';
-  }
-
-  /** Merge main and draft recursively by stable bundle-relative path. */
-  function mergePageTrees(main: PageMeta[], draft: PageMeta[]): PageMeta[] {
-    const merged: PageMeta[] = [...main];
-    const pathToIndex = new Map(merged.map((p, i) => [p.path, i] as const));
-    for (const dp of draft) {
-      const idx = pathToIndex.get(dp.path);
-      if (idx === undefined) {
-        // Draft-only node — add to merged
-        pathToIndex.set(dp.path, merged.length);
-        merged.push(dp);
-      } else if (merged[idx].kind === 'folder' && dp.kind === 'folder') {
-        // Both are folders — recursively merge their children
-        merged[idx] = {
-          ...merged[idx],
-          children: mergePageTrees(merged[idx].children || [], dp.children || []),
-        };
-      }
-      // else: main has a page at this path — main wins, skip draft
-    }
-    return merged;
-  }
-
-  // Load pages for a space
-  const loadSpacePages = async (ws: Workspace) => {
-    if (ws.visibility === 'private') {
-      const pages = visiblePageTree(await listPages(userBranch, ws.slug, 'all'));
-      setSpacePages((prev) => ({ ...prev, [ws.id]: pages }));
-    } else {
-      const [mainPages, draftPages] = await Promise.all([
-        listPages('main', ws.slug, 'all'),
-        listPages(userBranch, ws.slug, 'all').catch(() => [] as PageMeta[]),
-      ]);
-      const merged = visiblePageTree(mergePageTrees(mainPages, draftPages));
-      setSpacePages((prev) => ({ ...prev, [ws.id]: merged }));
-    }
-  };
-
-  // Load sources for a space
-  const loadSpaceSources = async (ws: Workspace) => {
-    try {
-      if (ws.visibility === 'private') {
-        const [userSources, mainSources] = await Promise.all([
-          listSources(ws.slug, userBranch).catch(() => [] as SourceItem[]),
-          listSources(ws.slug, 'main').catch(() => [] as SourceItem[]),
-        ]);
-        const userNames = new Set(userSources.map((s) => s.filename));
-        const merged = [
-          ...userSources,
-          ...mainSources.filter((s) => !userNames.has(s.filename)),
-        ];
-        setSpaceSources((prev) => ({ ...prev, [ws.id]: merged }));
-      } else {
-        const [mainSources, draftSources] = await Promise.all([
-          listSources(ws.slug, 'main'),
-          listSources(ws.slug, userBranch).catch(() => [] as SourceItem[]),
-        ]);
-        const mainNames = new Set(mainSources.map((s) => s.filename));
-        const merged = [
-          ...mainSources,
-          ...draftSources.filter((s) => !mainNames.has(s.filename)),
-        ];
-        setSpaceSources((prev) => ({ ...prev, [ws.id]: merged }));
-      }
-    } catch {
-      setSpaceSources((prev) => ({ ...prev, [ws.id]: [] }));
-    }
-  };
 
   // Select a source file
   const selectSource = async (ws: Workspace, filename: string) => {
@@ -822,13 +815,16 @@ export function MainLayout() {
     } catch { /* keep the stale view */ }
   };
 
+  const editingPageSlug = activeView?.kind === 'page' ? activeView.slug : null;
+  const editingPagePath = activeView?.kind === 'page' ? activeView.path ?? '' : '';
+
   // Like VS Code, keep a clean open document in step with Agent/terminal file
   // writes. Dirty human text is never replaced: the checked-save path then
   // keeps both versions and asks the user to review the external change.
   useEffect(() => {
-    if (!desktop || !editingPage || !activeWorkspace || activeView?.kind !== 'page') return;
+    if (!desktop || !editingPage || !activeWorkspace || !editingPageSlug) return;
     const workspace = activeWorkspace;
-    const slug = activeView.slug;
+    const slug = editingPageSlug;
     let checking = false;
     const timer = window.setInterval(() => {
       if (checking) return;
@@ -855,7 +851,7 @@ export function MainLayout() {
         .finally(() => { checking = false; });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [activeView?.kind, activeView?.kind === 'page' ? activeView.slug : '', activeView?.kind === 'page' ? activeView.path : '', activeWorkspace, desktop, editingPage, userBranch]);
+  }, [activeWorkspace, desktop, editingPage, editingPagePath, editingPageSlug, userBranch]);
 
   // Full Concept IDs prevent ambiguous [[overview]] suggestions when two
   // folders contain the same filename.

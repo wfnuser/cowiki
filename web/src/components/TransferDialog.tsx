@@ -60,8 +60,8 @@ export function TransferDialog({
       await initiateTransfer(workspaceSlug, selectedId, newRole);
       onSuccess('Ownership transfer initiated.');
       onOpenChange(false);
-    } catch (e: any) {
-      onError(e?.message || 'Failed to initiate transfer');
+    } catch (error: unknown) {
+      onError(error instanceof Error ? error.message : 'Failed to initiate transfer');
     } finally {
       setSending(false);
     }

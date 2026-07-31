@@ -10,7 +10,7 @@ test("macOS desktop builds run for dev pull requests, manual dispatches, and des
 
   assert.match(
     workflow,
-    /^on:\n  pull_request:\n    branches: \[dev\]\n  workflow_dispatch:\n  push:\n    tags:\n      - "desktop-v\*"/m,
+    /^on:\n {2}pull_request:\n {4}branches: \[dev\]\n {2}workflow_dispatch:\n {2}push:\n {4}tags:\n {6}- "desktop-v\*"/m,
   )
   assert.match(workflow, /build-macos:\n[\s\S]*?runs-on: macos-15-intel/)
   assert.match(workflow, /targets: x86_64-apple-darwin/)

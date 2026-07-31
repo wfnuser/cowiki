@@ -56,7 +56,6 @@ export function MembersView({ workspaceSlug, canManage, currentUserRole, current
 
   useEffect(() => {
     let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMembers(null);
     setError(null);
     listMembers(workspaceSlug)

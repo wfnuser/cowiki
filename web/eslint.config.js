@@ -18,5 +18,12 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // Dialog resets and async data loading intentionally synchronize state
+      // with props and external services.
+      'react-hooks/set-state-in-effect': 'off',
+      // UI modules colocate components with variants and hooks used by callers.
+      'react-refresh/only-export-components': 'off',
+    },
   },
 ])
