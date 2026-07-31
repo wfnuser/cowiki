@@ -15,7 +15,8 @@ const NAVIGATION: CloudNavigationItem[] = [
   { id: 'members', label: 'Members', description: 'People and roles' },
 ];
 
-export function cloudNavigation(_role: CloudRole): CloudNavigationItem[] {
+export function cloudNavigation(role: CloudRole): CloudNavigationItem[] {
+  void role;
   return NAVIGATION;
 }
 

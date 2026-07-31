@@ -3,6 +3,10 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const mainLayout = readFileSync(new URL('../src/pages/MainLayout.tsx', import.meta.url), 'utf8');
+const contentHeader = readFileSync(
+  new URL('../src/components/layout/ContentHeader.tsx', import.meta.url),
+  'utf8',
+);
 const design = readFileSync(new URL('../src/lib/design.ts', import.meta.url), 'utf8');
 const agentTerminalPanel = readFileSync(
   new URL('../src/components/terminal/AgentTerminalPanel.tsx', import.meta.url),
@@ -24,8 +28,8 @@ test('the page header has no unused overflow actions menu', () => {
 test('the page, Space, and Agent panel headers share one visual baseline', () => {
   assert.match(design, /export const APP_HEADER_HEIGHT = 48/);
   assert.match(
-    mainLayout,
-    /height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT/,
+    contentHeader,
+    /height: APP_HEADER_HEIGHT,\s+minHeight: APP_HEADER_HEIGHT/,
   );
   assert.match(
     agentTerminalPanel,
@@ -51,8 +55,8 @@ test('Agent tabs and header actions share the centered control line', () => {
 });
 
 test('long breadcrumbs cannot shrink or wrap the header actions', () => {
-  assert.match(mainLayout, /className="app-breadcrumb"/);
-  assert.match(mainLayout, /className="app-header-actions"/);
+  assert.match(contentHeader, /className="app-breadcrumb"/);
+  assert.match(contentHeader, /className="app-header-actions"/);
 });
 
 test('source ingestion uses a direct accessible plus action beside Sources', () => {

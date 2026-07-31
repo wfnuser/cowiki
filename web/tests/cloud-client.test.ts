@@ -124,7 +124,7 @@ test('Cloud mutations serialize the current contract and surface typed failures'
 });
 
 test('role helpers preserve the Cloud permission matrix', () => {
-  assert.equal(canManageMembers('manager'), true);
+  assert.equal(canManageMembers('manager'), false);
   assert.equal(canManageMembers('editor'), false);
   assert.equal(canMerge('editor'), false);
   assert.equal(canPush('editor'), true);

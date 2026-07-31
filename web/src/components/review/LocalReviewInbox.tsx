@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, GitBranch, GitCommitHorizontal } from 'lucide-react';
+import { GitBranch, GitCommitHorizontal } from 'lucide-react';
 
 import {
   getLocalWorkingDiff,
@@ -8,6 +8,7 @@ import {
   type FileDiff,
 } from '@/api';
 import { C } from '@/lib/design';
+import { ReviewInbox, ReviewInboxRow } from './ReviewInbox';
 import {
   localReviewSelectionForRow,
   orderedLocalReviewRows,
@@ -47,110 +48,53 @@ export function LocalReviewInbox({
   const rows = useMemo(() => orderedLocalReviewRows(changes ?? []), [changes]);
 
   return (
-    <div>
-      <div style={{ marginBottom: 20 }}>
-        <h1 className="page-title" style={{ marginBottom: 5 }}>Reviews</h1>
-        <p style={{ color: C.muted, fontSize: 13, margin: 0 }}>
-          Checkpoint the Current Draft or review isolated Agent Changes.
-        </p>
-      </div>
-      {error && <p style={{ color: C.red, fontSize: 13 }}>{error}</p>}
-      {draftDiffs == null || changes == null ? (
-        <p style={{ color: C.muted, fontSize: 14 }}>Loading Reviews…</p>
-      ) : (
-        <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'hidden', background: C.panel }}>
-          {rows.map((row, index) => {
-            if (row.kind === 'draft') {
-              return (
-                <ReviewListRow
-                  key={row.id}
-                  title="Current Draft"
-                  subtitle="Working tree · compared with the latest checkpoint"
-                  status={draftDiffs.length ? 'Uncheckpointed' : 'Clean'}
-                  diffs={draftDiffs}
-                  first={index === 0}
-                  icon={<GitCommitHorizontal size={17} color={C.faint} />}
-                  onOpen={() => onOpen(localReviewSelectionForRow(row))}
-                />
-              );
-            }
-            const change = row.change;
+    <ReviewInbox
+      description="Checkpoint the Current Draft or review isolated Agent Changes."
+      error={error}
+      loading={draftDiffs == null || changes == null}
+    >
+      {draftDiffs != null && changes != null
+        ? rows.map((row, index) => {
+          if (row.kind === 'draft') {
             return (
-              <ReviewListRow
+              <ReviewInboxRow
                 key={row.id}
-                title={change.title}
-                subtitle={`agent/${change.id.slice(0, 8)} → Current Draft`}
-                status={statusLabel(change.status)}
-                diffs={change.diffs}
+                title="Current Draft"
+                subtitle="Working tree · compared with the latest checkpoint"
+                status={draftDiffs.length ? 'Uncheckpointed' : 'Clean'}
+                files={draftDiffs.length}
+                additions={sum(draftDiffs, 'additions')}
+                deletions={sum(draftDiffs, 'deletions')}
                 first={index === 0}
-                icon={<GitBranch size={17} color={C.faint} />}
+                icon={<GitCommitHorizontal size={17} color={C.faint} />}
                 onOpen={() => onOpen(localReviewSelectionForRow(row))}
               />
             );
-          })}
-        </div>
-      )}
-    </div>
+          }
+          const change = row.change;
+          return (
+            <ReviewInboxRow
+              key={row.id}
+              title={change.title}
+              subtitle={`agent/${change.id.slice(0, 8)} → Current Draft`}
+              status={statusLabel(change.status)}
+              statusTone={change.status === 'needsResolution' ? 'danger' : 'muted'}
+              files={change.diffs.length}
+              additions={sum(change.diffs, 'additions')}
+              deletions={sum(change.diffs, 'deletions')}
+              first={index === 0}
+              icon={<GitBranch size={17} color={C.faint} />}
+              onOpen={() => onOpen(localReviewSelectionForRow(row))}
+            />
+          );
+        })
+        : undefined}
+    </ReviewInbox>
   );
 }
 
-function ReviewListRow({
-  diffs,
-  first,
-  icon,
-  onOpen,
-  status,
-  subtitle,
-  title,
-}: {
-  diffs: FileDiff[];
-  first: boolean;
-  icon: React.ReactNode;
-  onOpen: () => void;
-  status: string;
-  subtitle: string;
-  title: string;
-}) {
-  const additions = diffs.reduce((total, diff) => total + diff.additions, 0);
-  const deletions = diffs.reduce((total, diff) => total + diff.deletions, 0);
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        width: '100%',
-        minWidth: 0,
-        padding: '15px 17px',
-        border: 0,
-        borderTop: first ? 'none' : `1px solid ${C.line}`,
-        background: C.panel,
-        textAlign: 'left',
-        cursor: 'pointer',
-      }}
-      onMouseEnter={(event) => { event.currentTarget.style.background = C.sidebar; }}
-      onMouseLeave={(event) => { event.currentTarget.style.background = C.panel; }}
-    >
-      {icon}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14.5, fontWeight: 650, color: C.ink }}>{title}</div>
-        <div style={{ marginTop: 3, fontSize: 12.5, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {subtitle}
-        </div>
-      </div>
-      <span style={{ color: C.muted, fontSize: 12, whiteSpace: 'nowrap' }}>
-        {diffs.length} file{diffs.length === 1 ? '' : 's'} ·{' '}
-        <span style={{ color: C.green }}>+{additions}</span> ·{' '}
-        <span style={{ color: C.red }}>−{deletions}</span>
-      </span>
-      <span style={{ fontSize: 11.5, fontWeight: 650, color: status === 'Needs resolution' ? C.red : C.muted }}>
-        {status}
-      </span>
-      <ChevronRight size={15} color={C.faint} />
-    </button>
-  );
+function sum(diffs: FileDiff[], field: 'additions' | 'deletions'): number {
+  return diffs.reduce((total, diff) => total + diff[field], 0);
 }
 
 function statusLabel(status: AgentChange['status']): string {

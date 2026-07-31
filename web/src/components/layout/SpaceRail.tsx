@@ -1,5 +1,4 @@
 import { Plus, Settings, Compass, LogOut, Bell, Cloud } from 'lucide-react';
-import type { Workspace } from '../../api';
 import {
   Tooltip, TooltipContent, TooltipTrigger,
 } from '@/components/ui/tooltip';
@@ -12,11 +11,17 @@ function tileColor(index: number): string {
   return spaceTileColors[index % spaceTileColors.length];
 }
 
-interface SpaceRailProps {
-  workspaces: Workspace[];
+export interface SpaceRailItem {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+interface SpaceRailProps<T extends SpaceRailItem> {
+  workspaces: T[];
   activeWorkspaceId: string | null;
   userName: string;
-  onSelectWorkspace: (ws: Workspace) => void;
+  onSelectWorkspace: (ws: T) => void;
   onCreateWorkspace: () => void;
   onSettings: () => void;
   onDiscover: () => void;
@@ -28,9 +33,17 @@ interface SpaceRailProps {
   showBell: boolean;
   /** Discover and sign-out only make sense after connecting a cloud account. */
   showCloudActions: boolean;
+  /** Settings belong to the desktop client and are hidden in the focused Cloud shell. */
+  showSettings?: boolean;
+  showDiscover?: boolean;
+  /** Allows browser surfaces to call this action "Join a Space". */
+  discoverLabel?: string;
+  /** The desktop window reserves room for macOS traffic lights; browsers do not. */
+  titlebarInset?: boolean;
+  createLabel?: string;
 }
 
-export function SpaceRail({
+export function SpaceRail<T extends SpaceRailItem>({
   workspaces,
   activeWorkspaceId,
   userName,
@@ -44,7 +57,12 @@ export function SpaceRail({
   onShowNotifications,
   showBell,
   showCloudActions,
-}: SpaceRailProps) {
+  showSettings = true,
+  showDiscover = true,
+  discoverLabel = 'Discover',
+  titlebarInset = true,
+  createLabel = 'Add a Space',
+}: SpaceRailProps<T>) {
   return (
     <aside style={{
       width: 68, minWidth: 68, height: '100vh',
@@ -52,7 +70,7 @@ export function SpaceRail({
       display: 'flex', flexDirection: 'column', alignItems: 'center',
       // macOS traffic lights live in the overlay titlebar. Reserve their row
       // so they never collide with the CoWiki logo or Space buttons.
-      padding: '30px 0 12px', boxSizing: 'border-box', gap: 0, position: 'sticky', top: 0,
+      padding: `${titlebarInset ? 30 : 8}px 0 12px`, boxSizing: 'border-box', gap: 0, position: 'sticky', top: 0,
       zIndex: 20,
     }}>
       {/* Logo — matches panel header height (52px) */}
@@ -102,7 +120,7 @@ export function SpaceRail({
             <Plus size={16} />
           </button>
         </TooltipTrigger>
-        <TooltipContent side="right">Add a Space</TooltipContent>
+        <TooltipContent side="right">{createLabel}</TooltipContent>
       </Tooltip>
 
       {/* Spacer */}
@@ -172,15 +190,19 @@ export function SpaceRail({
           {/* Settings is not a Cloud feature — local-only Spaces need it too.
               Discover and Sign out stay gated: both are meaningless without
               a connected Cloud account. */}
-          <DropdownMenuItem onClick={onSettings}>
-            <Settings size={14} className="mr-2" /> Settings
-          </DropdownMenuItem>
+          {showSettings && (
+            <DropdownMenuItem onClick={onSettings}>
+              <Settings size={14} className="mr-2" /> Settings
+            </DropdownMenuItem>
+          )}
           {showCloudActions && (
             <>
-              <DropdownMenuItem onClick={onDiscover}>
-                <Compass size={14} className="mr-2" /> Discover
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
+              {showDiscover && (
+                <DropdownMenuItem onClick={onDiscover}>
+                  <Compass size={14} className="mr-2" /> {discoverLabel}
+                </DropdownMenuItem>
+              )}
+              {(showSettings || showDiscover) && <DropdownMenuSeparator />}
               <DropdownMenuItem onClick={onLogout}>
                 <LogOut size={14} className="mr-2" /> Sign out
               </DropdownMenuItem>
@@ -200,7 +222,7 @@ function SpaceTile({
   icon,
   color,
 }: {
-  workspace: Workspace;
+  workspace: SpaceRailItem;
   active: boolean;
   onClick: () => void;
   style: React.CSSProperties;

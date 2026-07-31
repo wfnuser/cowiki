@@ -40,6 +40,9 @@ interface SpacePanelProps {
   onShowIngest: () => void;
   onSettings?: () => void;
   onCollapse: () => void;
+  /** Cloud main uses the same panel and tree without local mutation controls. */
+  readOnly?: boolean;
+  showHistory?: boolean;
 }
 
 export function SpacePanel({
@@ -66,6 +69,8 @@ export function SpacePanel({
   onShowIngest,
   onSettings,
   onCollapse,
+  readOnly = false,
+  showHistory = true,
 }: SpacePanelProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const hasWorkspace = !!workspace;
@@ -100,7 +105,7 @@ export function SpacePanel({
     { tab: 'wiki', icon: <BookOpen size={16} />, label: 'Wiki' },
     { tab: 'reviews', icon: <GitPullRequest size={16} />, label: 'Reviews', badge: reviewCount || undefined, hide: !showReviews },
     { tab: 'members', icon: <Users size={16} />, label: 'Members & roles', hide: isPersonal },
-    { tab: 'history', icon: <History size={16} />, label: 'History' },
+    { tab: 'history', icon: <History size={16} />, label: 'History', hide: !showHistory },
     { tab: 'links', icon: <Unlink size={16} />, label: 'Links', hide: !showLinkDiagnostics },
   ];
 
@@ -187,50 +192,54 @@ export function SpacePanel({
       {/* Tree content — always visible regardless of active tab */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 8px' }}>
         {/* Search — opens the palette (⌘K) */}
-        <button
-          onClick={() => setSearchOpen(true)}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 7, width: 'calc(100% - 4px)',
-            margin: '10px 2px 0', padding: '7px 10px',
-            background: C.rail, borderRadius: 8, border: `1px solid ${C.lineSoft}`,
-            cursor: 'pointer', color: C.faint, fontSize: 13, textAlign: 'left',
-          }}
-        >
-          <Search size={13} style={{ flexShrink: 0 }} />
-          <span style={{ flex: 1 }}>Search…</span>
-          <span style={{ fontSize: 11.5, color: C.faint, opacity: 0.75, letterSpacing: '0.04em' }}>
-            ⌘ K
-          </span>
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => setSearchOpen(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 7, width: 'calc(100% - 4px)',
+              margin: '10px 2px 0', padding: '7px 10px',
+              background: C.rail, borderRadius: 8, border: `1px solid ${C.lineSoft}`,
+              cursor: 'pointer', color: C.faint, fontSize: 13, textAlign: 'left',
+            }}
+          >
+            <Search size={13} style={{ flexShrink: 0 }} />
+            <span style={{ flex: 1 }}>Search…</span>
+            <span style={{ fontSize: 11.5, color: C.faint, opacity: 0.75, letterSpacing: '0.04em' }}>
+              ⌘ K
+            </span>
+          </button>
+        )}
 
         {/* Section 1: Sources */}
-        <ContentSection
-          title="Sources"
-          items={sources}
-          emptyText="No sources yet"
-          renderItem={(s) => (
-            <SourceEntry
-              key={s.filename}
-              source={s}
-              active={activeSource === s.filename}
-              onSelect={() => onSelectSource(s.filename)}
-            />
-          )}
-          menuItems={
-            <button
-              type="button"
-              aria-label="Add Source"
-              title="Add Source"
-              onClick={onShowIngest}
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer', padding: 2,
-                borderRadius: 4, color: C.faint, display: 'flex',
-              }}
-            >
-              <Plus size={13} />
-            </button>
-          }
-        />
+        {!readOnly && (
+          <ContentSection
+            title="Sources"
+            items={sources}
+            emptyText="No sources yet"
+            renderItem={(s) => (
+              <SourceEntry
+                key={s.filename}
+                source={s}
+                active={activeSource === s.filename}
+                onSelect={() => onSelectSource(s.filename)}
+              />
+            )}
+            menuItems={
+              <button
+                type="button"
+                aria-label="Add Source"
+                title="Add Source"
+                onClick={onShowIngest}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: 2,
+                  borderRadius: 4, color: C.faint, display: 'flex',
+                }}
+              >
+                <Plus size={13} />
+              </button>
+            }
+          />
+        )}
 
         {/* OKF concepts form one arbitrary bundle-relative hierarchy. */}
         <ContentSection
@@ -249,9 +258,10 @@ export function SpacePanel({
               onAddFolderInFolder={onAddFolderInFolder}
               onRenamePath={onRenamePath}
               onDeletePath={onDeletePath}
+              readOnly={readOnly}
             />
           )}
-          menuItems={
+          menuItems={!readOnly ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button style={{
@@ -266,17 +276,19 @@ export function SpacePanel({
                 <DropdownMenuItem onClick={onNewFolder}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          }
+          ) : undefined}
         />
       </div>
 
-      <SearchModal
-        workspaceSlug={workspace.slug}
-        workspaceName={workspace.name}
-        open={searchOpen}
-        onClose={() => setSearchOpen(false)}
-        onSelectPage={onSelectPage}
-      />
+      {!readOnly && (
+        <SearchModal
+          workspaceSlug={workspace.slug}
+          workspaceName={workspace.name}
+          open={searchOpen}
+          onClose={() => setSearchOpen(false)}
+          onSelectPage={onSelectPage}
+        />
+      )}
 
       {/* Space settings moved into nav items above */}
     </aside>
@@ -407,6 +419,7 @@ function PageTreeItem({
   onAddFolderInFolder,
   onRenamePath,
   onDeletePath,
+  readOnly,
 }: {
   page: PageMeta;
   activePage: string | null;
@@ -416,6 +429,7 @@ function PageTreeItem({
   onAddFolderInFolder: (parentPath: string) => void;
   onRenamePath: (path: string, isFolder: boolean, title: string) => void;
   onDeletePath: (path: string, isFolder: boolean, title: string) => void;
+  readOnly: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const pl = depth * 14;
@@ -455,7 +469,7 @@ function PageTreeItem({
             <Folder size={14} style={{ flexShrink: 0 }} />
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
           </span>
-          <DropdownMenu>
+          {!readOnly && <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button data-row-menu onClick={(e) => e.stopPropagation()} style={{
                 background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: C.faint, display: 'flex',
@@ -472,7 +486,7 @@ function PageTreeItem({
                 <Trash2 size={14} className="mr-2" /> Delete folder
               </DropdownMenuItem>
             </DropdownMenuContent>
-          </DropdownMenu>
+          </DropdownMenu>}
         </div>
         {open && sortedChildren.map((child) => (
           <PageTreeItem
@@ -485,6 +499,7 @@ function PageTreeItem({
             onAddFolderInFolder={onAddFolderInFolder}
             onRenamePath={onRenamePath}
             onDeletePath={onDeletePath}
+            readOnly={readOnly}
           />
         ))}
       </>
@@ -519,7 +534,7 @@ function PageTreeItem({
         <FileText size={14} style={{ flexShrink: 0 }} />
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
       </span>
-      <DropdownMenu>
+      {!readOnly && <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button data-row-menu onClick={(e) => e.stopPropagation()} style={{
             background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: C.faint, display: 'flex',
@@ -534,7 +549,7 @@ function PageTreeItem({
             <Trash2 size={14} className="mr-2" /> Delete
           </DropdownMenuItem>
         </DropdownMenuContent>
-      </DropdownMenu>
+      </DropdownMenu>}
     </div>
   );
 }

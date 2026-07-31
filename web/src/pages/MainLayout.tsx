@@ -27,6 +27,11 @@ import { SettingsDialog } from '../components/SettingsDialog';
 import { getCurrentAuth, clearAuth, isRemoteAuth, hasAuth } from '../auth';
 import { SpaceRail } from '../components/layout/SpaceRail';
 import { SpacePanel, type NavTab } from '../components/layout/SpacePanel';
+import {
+  ContentBreadcrumb,
+  ContentHeader,
+  ContentHeaderActions,
+} from '../components/layout/ContentHeader';
 import { VersionSwitcher, type VersionSelection } from '../components/layout/VersionSwitcher';
 type CreateSpaceMode = 'choose' | 'local' | 'import';
 import { ReviewList } from '../components/review/ReviewList';
@@ -42,12 +47,12 @@ import { HistoryView } from '../components/views/HistoryView';
 import { LinksView } from '../components/views/LinksView';
 import { InviteDialog } from '../components/InviteDialog';
 import { PageEditor, type PageEditorHandle } from '../components/PageEditor';
-import { PageByline } from '../components/PageByline';
+import { PageReader } from '../components/PageReader';
 import { TransferDialog } from '../components/TransferDialog';
 import { NotificationsPage } from '../components/notifications/NotificationsPage';
 import { notificationUnreadCount } from '../api';
 import { CommentsProvider, CommentsPanel, CommentsHeaderToggle, commentMarkdownComponents } from '../components/PageCommentsLayer';
-import { APP_HEADER_HEIGHT, C } from '@/lib/design';
+import { C } from '@/lib/design';
 import { apiOrigin, isDesktopClient } from '@/runtime';
 import { normalizeCloudSession } from '@/cloud/session';
 import { CloudSpaceDialog } from '@/components/cloud/CloudSpaceDialog';
@@ -1021,14 +1026,9 @@ export function MainLayout() {
               currentUserId={auth?.id}
             >
             {/* Top bar: breadcrumb + actions */}
-            <div data-tauri-drag-region="deep" style={{
-              position: 'sticky', top: 0, zIndex: 10,
-              background: C.panel, borderBottom: `1px solid ${C.line}`,
-              padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT,
-            }}>
+            <ContentHeader>
               {/* Left: breadcrumb */}
-              <div className="app-breadcrumb" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: C.muted, minWidth: 0, overflow: 'hidden' }}>
+              <ContentBreadcrumb>
                 {sidebarLayout.collapsed && (
                   <button
                     type="button"
@@ -1107,10 +1107,10 @@ export function MainLayout() {
                 {activeView?.kind === 'notifications' && (
                   <span style={{ color: C.ink }}>Notifications</span>
                 )}
-              </div>
+              </ContentBreadcrumb>
 
               {/* Right: actions */}
-              <div className="app-header-actions" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <ContentHeaderActions>
 
                 {desktop && activeWorkspace?.localPath && (
                   <button
@@ -1170,8 +1170,8 @@ export function MainLayout() {
                 )}
 
                 {/* User menu moved to Rail bottom avatar */}
-              </div>
-            </div>
+              </ContentHeaderActions>
+            </ContentHeader>
 
             {/* Message */}
             {message && (
@@ -1334,35 +1334,21 @@ export function MainLayout() {
                   // (left-anchored, same left edge as every other view), the comment
                   // panel is flush to the right edge and full height with its own
                   // scroll. Opening it shrinks the doc from the right only.
-                  <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'stretch' }}>
-                    <article ref={articleRef} className="prose" style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '36px 48px 56px 56px' }}>
-                      {versionSelection.kind !== 'working' && (
-                        <div style={readonlyVersionBannerStyle}>
-                          <span aria-hidden style={{
-                            width: 8,
-                            height: 8,
-                            borderRadius: '50%',
-                            background: versionSelection.kind === 'upstream' ? C.purple : C.blue,
-                            flexShrink: 0,
-                          }} />
-                          <span>{readonlyVersionLabel} · <span style={{ color: C.muted }}>read-only</span></span>
-                        </div>
-                      )}
-                      {viewedPageMissing ? (
-                        <div style={missingVersionStyle}>This page does not exist in the selected version.</div>
-                      ) : (
-                        <>
-                          {versionSelection.kind === 'working' && (
-                            <PageByline name={activeView.content.edited_by} editedAt={activeView.content.edited_at} />
-                          )}
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={commentMarkdownComponents}>
-                            {renderBody(viewedPageBody)}
-                          </ReactMarkdown>
-                        </>
-                      )}
-                    </article>
-                    <CommentsPanel />
-                  </div>
+                  <PageReader
+                    articleRef={articleRef}
+                    body={renderBody(viewedPageBody)}
+                    markdownComponents={commentMarkdownComponents}
+                    byline={versionSelection.kind === 'working' ? {
+                      name: activeView.content.edited_by,
+                      editedAt: activeView.content.edited_at,
+                    } : undefined}
+                    readOnlyLabel={versionSelection.kind !== 'working' ? readonlyVersionLabel : undefined}
+                    readOnlyDotColor={versionSelection.kind === 'upstream' ? C.purple : C.blue}
+                    missingMessage={viewedPageMissing
+                      ? 'This page does not exist in the selected version.'
+                      : undefined}
+                    aside={<CommentsPanel />}
+                  />
                 )
 
               /* Discover */
@@ -1777,29 +1763,6 @@ const headerBtnStyle: React.CSSProperties = {
   padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer',
   background: 'transparent', color: C.muted, fontSize: 12,
   transition: 'background 0.1s',
-};
-
-const readonlyVersionBannerStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 9,
-  marginBottom: 24,
-  padding: '10px 14px',
-  border: `1px solid ${C.line}`,
-  borderRadius: 9,
-  background: C.sidebar,
-  color: C.ink2,
-  fontSize: 12.5,
-};
-
-const missingVersionStyle: React.CSSProperties = {
-  padding: '34px 18px',
-  border: `1px dashed ${C.line}`,
-  borderRadius: 10,
-  background: C.panel,
-  color: C.muted,
-  textAlign: 'center',
-  fontSize: 13,
 };
 
 function findDiffForPath(diffs: FileDiff[], path: string): FileDiff | undefined {

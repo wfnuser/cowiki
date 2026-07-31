@@ -1,48 +1,76 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, GitMerge, GitPullRequest, RefreshCw } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { Button } from '../components/ui/button';
-import { canMerge } from './session';
+import { ArrowLeft, Check, GitBranch, GitMerge } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+
+import { DiffView } from '../components/review/DiffView';
+import { ReviewInbox, ReviewInboxRow } from '../components/review/ReviewInbox';
+import { AvatarBadge } from '../components/ui/avatar-badge';
+import { C, fonts } from '../lib/design';
+import { CloudApiError } from './client';
 import type {
   CloudClient,
   CloudPullRequest,
   CloudPullRequestDiff,
   CloudSpace,
 } from './client';
-import { CloudApiError } from './client';
+import { cloudDiffToFileDiffs } from './cloud-review-model';
 import { mergeActionVisible } from './cloud-shell-model';
 import { CloudNotice } from './CloudHome';
 import { cloudSpaceRoute } from './routes';
+import { canMerge } from './session';
 
-export function CloudReviewsView({ client, space, pullRequestId }: { client: CloudClient; space: CloudSpace; pullRequestId?: string }) {
+export function CloudReviewsView({
+  client,
+  space,
+  pullRequestId,
+}: {
+  client: CloudClient;
+  space: CloudSpace;
+  pullRequestId?: string;
+}) {
+  const navigate = useNavigate();
   const [pullRequests, setPullRequests] = useState<CloudPullRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState('');
   const [diff, setDiff] = useState<CloudPullRequestDiff | null>(null);
   const [diffError, setDiffError] = useState<{ pullRequestId: string; message: string } | null>(null);
   const [notice, setNotice] = useState<{ tone: 'error' | 'success'; message: string } | null>(null);
-  const selected = useMemo(() => pullRequests.find((pullRequest) => pullRequest.id === pullRequestId) ?? null, [pullRequestId, pullRequests]);
+  const selected = useMemo(
+    () => pullRequests.find((pullRequest) => pullRequest.id === pullRequestId) ?? null,
+    [pullRequestId, pullRequests],
+  );
 
   const loadPullRequests = useCallback(async () => {
     setLoading(true);
     try {
       setPullRequests(await client.listPullRequests(space.id));
     } catch (cause) {
-      setNotice({ tone: 'error', message: cause instanceof Error ? cause.message : 'Could not load pull requests.' });
+      setNotice({
+        tone: 'error',
+        message: cause instanceof Error ? cause.message : 'Could not load pull requests.',
+      });
     } finally {
       setLoading(false);
     }
   }, [client, space.id]);
+
   useEffect(() => {
     let active = true;
     void client.listPullRequests(space.id)
-      .then((value) => { if (active) setPullRequests(value); })
+      .then((value) => {
+        if (active) setPullRequests(value);
+      })
       .catch((cause) => {
         if (active) {
-          setNotice({ tone: 'error', message: cause instanceof Error ? cause.message : 'Could not load pull requests.' });
+          setNotice({
+            tone: 'error',
+            message: cause instanceof Error ? cause.message : 'Could not load pull requests.',
+          });
         }
       })
-      .finally(() => { if (active) setLoading(false); });
+      .finally(() => {
+        if (active) setLoading(false);
+      });
     return () => { active = false; };
   }, [client, space.id]);
 
@@ -53,9 +81,7 @@ export function CloudReviewsView({ client, space, pullRequestId }: { client: Clo
     let active = true;
     void client.getPullRequestDiff(space.id, selectedId)
       .then((value) => {
-        if (!active) return;
-        setDiff(value);
-        setDiffError(null);
+        if (active) setDiff(value);
       })
       .catch((cause) => {
         if (active) {
@@ -69,7 +95,9 @@ export function CloudReviewsView({ client, space, pullRequestId }: { client: Clo
   }, [client, selectedHeadOid, selectedId, space.id]);
 
   const currentDiff = selected && diff?.headOid === selected.headOid ? diff : null;
-  const currentDiffError = selected && diffError?.pullRequestId === selected.id ? diffError.message : '';
+  const currentDiffError = selected && diffError?.pullRequestId === selected.id
+    ? diffError.message
+    : '';
 
   const approve = async (pullRequest: CloudPullRequest) => {
     setPending('approve');
@@ -78,7 +106,10 @@ export function CloudReviewsView({ client, space, pullRequestId }: { client: Clo
       await client.approvePullRequest(space.id, pullRequest.id);
       setNotice({ tone: 'success', message: 'Approval recorded for the current head.' });
     } catch (cause) {
-      setNotice({ tone: 'error', message: cause instanceof Error ? cause.message : 'Approval failed.' });
+      setNotice({
+        tone: 'error',
+        message: cause instanceof Error ? cause.message : 'Approval failed.',
+      });
     } finally {
       await loadPullRequests();
       setPending('');
@@ -91,10 +122,13 @@ export function CloudReviewsView({ client, space, pullRequestId }: { client: Clo
     const expectedHeadOid = pullRequest.headOid;
     try {
       await client.mergePullRequest(space.id, pullRequest.id, expectedHeadOid);
-      setNotice({ tone: 'success', message: `Pull request #${pullRequest.number} merged into Cloud main.` });
+      setNotice({
+        tone: 'success',
+        message: `Pull request #${pullRequest.number} merged into Cloud main.`,
+      });
     } catch (cause) {
       const message = cause instanceof CloudApiError && cause.status === 409
-        ? 'This pull request changed. The latest head has been loaded; review it before merging.'
+        ? 'This pull request changed. Review the latest head before merging.'
         : cause instanceof Error ? cause.message : 'Merge failed.';
       setNotice({ tone: 'error', message });
     } finally {
@@ -104,93 +138,208 @@ export function CloudReviewsView({ client, space, pullRequestId }: { client: Clo
   };
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-10 py-12">
-      <div className="mb-8 flex items-end justify-between">
-        <div>
-          <h1 className="font-serif text-4xl font-bold">Reviews</h1>
-          <p className="mt-2 text-sm text-text-tertiary">User branches remain live until a maintainer merges their current head.</p>
-        </div>
-        <Button variant="outline" onClick={() => void loadPullRequests()} disabled={loading}><RefreshCw className={loading ? 'animate-spin' : ''} /> Refresh</Button>
-      </div>
-      {notice && <CloudNotice tone={notice.tone}>{notice.message}</CloudNotice>}
-      <div className="grid grid-cols-[minmax(260px,0.8fr)_minmax(0,1.4fr)] gap-5">
-        <div className="overflow-hidden rounded-xl border bg-panel">
-          {pullRequests.length === 0 && !loading && <p className="p-6 text-sm text-text-tertiary">No pull requests yet.</p>}
-          {pullRequests.map((pullRequest) => (
-            <Link key={pullRequest.id} to={cloudSpaceRoute(space.id, 'reviews', pullRequest.id)} className={`block border-b px-5 py-4 text-inherit no-underline last:border-b-0 ${selected?.id === pullRequest.id ? 'bg-accent-soft' : 'hover:bg-secondary'}`}>
-              <div className="flex items-center gap-2 text-sm font-semibold"><GitPullRequest size={15} className="text-accent" />#{pullRequest.number} {pullRequest.title}</div>
-              <div className="mt-1 text-xs text-text-secondary">{pullRequest.authorName} <span className="text-text-tertiary">@{pullRequest.authorHandle}</span></div>
-              <div className="mt-2 flex items-center justify-between text-[11px] text-text-tertiary"><span className="font-mono">{pullRequest.headRef}</span><span className="capitalize">{pullRequest.status}</span></div>
-            </Link>
-          ))}
-        </div>
-
-        <section className="rounded-xl border bg-panel p-7">
-          {!selected ? (
-            <div className="grid min-h-56 place-items-center text-sm text-text-tertiary">Choose a pull request to review its current head.</div>
-          ) : (
-            <>
-              <div className="mb-6 flex items-start justify-between gap-5">
-                <div><div className="text-xs font-semibold text-accent">PULL REQUEST #{selected.number}</div><h2 className="mt-2 font-serif text-3xl font-bold">{selected.title}</h2></div>
-                <span className="rounded-full bg-secondary px-3 py-1 text-xs font-semibold capitalize">{selected.status}</span>
-              </div>
-              {selected.body && <p className="mb-6 whitespace-pre-wrap text-sm leading-6 text-text-secondary">{selected.body}</p>}
-              <dl className="grid grid-cols-[90px_1fr] gap-x-4 gap-y-3 border-y py-5 text-xs">
-                <dt className="text-text-tertiary">Author</dt><dd>{selected.authorName} <span className="text-text-tertiary">@{selected.authorHandle}</span></dd>
-                <dt className="text-text-tertiary">Branch</dt><dd className="font-mono">{selected.headRef} → {selected.baseRef}</dd>
-                <dt className="text-text-tertiary">Head</dt><dd className="font-mono">{selected.headOid}</dd>
-                <dt className="text-text-tertiary">Approvals</dt><dd>{selected.approvalCount}</dd>
-              </dl>
-              <div className="mt-6">
-                <h3 className="text-sm font-semibold">Changed files</h3>
-                {!currentDiff && !currentDiffError && <p className="mt-3 text-xs text-text-tertiary">Loading current diff…</p>}
-                {currentDiffError && <div className="mt-3"><CloudNotice tone="error">{currentDiffError}</CloudNotice></div>}
-                {currentDiff && (
-                  <>
-                    <div className="mt-3 overflow-hidden rounded-lg border">
-                      {currentDiff.files.length === 0 && <p className="p-4 text-xs text-text-tertiary">No visible Markdown changes.</p>}
-                      {currentDiff.files.map((file) => (
-                        <div key={`${file.status}:${file.path}`} className="flex items-center gap-3 border-b px-4 py-2.5 text-xs last:border-b-0">
-                          <span className="w-16 capitalize text-text-tertiary">{file.status}</span>
-                          <span className="min-w-0 flex-1 truncate font-mono">{file.path}</span>
-                          <span className="text-success">+{file.additions}</span>
-                          <span className="text-destructive">−{file.deletions}</span>
-                        </div>
-                      ))}
-                    </div>
-                    {currentDiff.patch && (
-                      <pre className="mt-4 max-h-[520px] overflow-auto rounded-lg border bg-bg-secondary p-0 text-[11px] leading-5">
-                        {currentDiff.patch.split('\n').map((line, index) => (
-                          <div
-                            key={`${index}:${line}`}
-                            className={`min-w-max px-4 ${
-                              line.startsWith('+') && !line.startsWith('+++')
-                                ? 'bg-green-50 text-green-800'
-                                : line.startsWith('-') && !line.startsWith('---')
-                                  ? 'bg-red-50 text-red-800'
-                                  : line.startsWith('@@')
-                                    ? 'bg-blue-50 text-blue-800'
-                                    : 'text-text-secondary'
-                            }`}
-                          >
-                            {line || ' '}
-                          </div>
-                        ))}
-                      </pre>
-                    )}
-                  </>
-                )}
-              </div>
-              {selected.status === 'open' && (
-                <div className="mt-6 flex flex-wrap gap-2">
-                  {canMerge(space.role) && <Button variant="outline" disabled={!!pending || !currentDiff} onClick={() => void approve(selected)}><Check /> Approve current head</Button>}
-                  {mergeActionVisible(space.role) && <Button disabled={!!pending || !currentDiff} onClick={() => void merge(selected)}><GitMerge /> Merge into main</Button>}
-                </div>
-              )}
-            </>
-          )}
-        </section>
+    <div className="h-full overflow-y-auto">
+      <div style={{ padding: '36px 56px 56px' }}>
+        {notice && <div style={{ marginBottom: 18 }}><CloudNotice tone={notice.tone}>{notice.message}</CloudNotice></div>}
+        {pullRequestId ? (
+          <CloudReviewDetail
+            diff={currentDiff}
+            diffError={currentDiffError}
+            loading={loading}
+            pending={pending}
+            pullRequest={selected}
+            canApprove={canMerge(space.role)}
+            canMergePullRequest={mergeActionVisible(space.role)}
+            onApprove={approve}
+            onBack={() => navigate(cloudSpaceRoute(space.id, 'reviews'))}
+            onMerge={merge}
+          />
+        ) : (
+          <ReviewInbox
+            description="Review submitted changes before they become Cloud main."
+            empty="No pull requests yet."
+            loading={loading}
+          >
+            {!loading && pullRequests.length
+              ? pullRequests.map((pullRequest, index) => (
+                <ReviewInboxRow
+                  key={pullRequest.id}
+                  first={index === 0}
+                  icon={<GitBranch size={17} color={C.faint} />}
+                  title={`#${pullRequest.number} ${pullRequest.title}`}
+                  subtitle={`${pullRequest.authorName} · ${pullRequest.headRef} → ${pullRequest.baseRef}`}
+                  status={statusLabel(pullRequest.status)}
+                  onOpen={() => navigate(cloudSpaceRoute(space.id, 'reviews', pullRequest.id))}
+                  trailing={<AvatarBadge name={pullRequest.authorName} size={26} />}
+                />
+              ))
+              : undefined}
+          </ReviewInbox>
+        )}
       </div>
     </div>
   );
+}
+
+function CloudReviewDetail({
+  canApprove,
+  canMergePullRequest,
+  diff,
+  diffError,
+  loading,
+  onApprove,
+  onBack,
+  onMerge,
+  pending,
+  pullRequest,
+}: {
+  canApprove: boolean;
+  canMergePullRequest: boolean;
+  diff: CloudPullRequestDiff | null;
+  diffError: string;
+  loading: boolean;
+  onApprove: (pullRequest: CloudPullRequest) => Promise<void>;
+  onBack: () => void;
+  onMerge: (pullRequest: CloudPullRequest) => Promise<void>;
+  pending: string;
+  pullRequest: CloudPullRequest | null;
+}) {
+  if (loading && !pullRequest) {
+    return <p style={{ color: C.muted, fontSize: 14 }}>Loading Review…</p>;
+  }
+  if (!pullRequest) {
+    return <CloudNotice tone="error">This pull request could not be found.</CloudNotice>;
+  }
+
+  const diffs = diff ? cloudDiffToFileDiffs(diff) : null;
+  return (
+    <div>
+      <button type="button" onClick={onBack} style={backButtonStyle}>
+        <ArrowLeft size={14} /> Reviews
+      </button>
+
+      <div style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: 16,
+        marginTop: 10,
+      }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <GitBranch size={19} color={C.faint} />
+            <h1 style={{ margin: 0, color: C.ink, fontFamily: fonts.serif, fontSize: 28 }}>
+              {pullRequest.title}
+            </h1>
+          </div>
+          <p style={{ margin: '6px 0 0 28px', color: C.muted, fontSize: 13 }}>
+            {pullRequest.authorName} · {pullRequest.headRef} → {pullRequest.baseRef}
+          </p>
+          <span style={statusPillStyle}>{statusLabel(pullRequest.status)}</span>
+        </div>
+
+        {pullRequest.status === 'open' && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {canApprove && (
+              <ActionButton
+                subtle
+                disabled={Boolean(pending) || !diff}
+                onClick={() => void onApprove(pullRequest)}
+              >
+                <Check size={14} /> {pending === 'approve' ? 'Approving…' : 'Approve'}
+              </ActionButton>
+            )}
+            {canMergePullRequest && (
+              <ActionButton
+                disabled={Boolean(pending) || !diff}
+                onClick={() => void onMerge(pullRequest)}
+              >
+                <GitMerge size={14} /> {pending === 'merge' ? 'Merging…' : 'Merge into main'}
+              </ActionButton>
+            )}
+          </div>
+        )}
+      </div>
+
+      {pullRequest.body && (
+        <p style={{ margin: '18px 0 0 28px', color: C.ink2, fontSize: 13.5, lineHeight: 1.6 }}>
+          {pullRequest.body}
+        </p>
+      )}
+      {diffError && <p style={{ color: C.red, fontSize: 13, marginTop: 18 }}>{diffError}</p>}
+      {!diffs && !diffError ? (
+        <p style={{ color: C.muted, fontSize: 14, marginTop: 24 }}>Loading changes…</p>
+      ) : diffs ? (
+        <div style={{ marginTop: 24 }}>
+          <DiffView diffs={diffs} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ActionButton({
+  children,
+  disabled,
+  onClick,
+  subtle = false,
+}: {
+  children: React.ReactNode;
+  disabled?: boolean;
+  onClick: () => void;
+  subtle?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        border: subtle ? `1px solid ${C.line}` : 'none',
+        borderRadius: 7,
+        padding: '8px 11px',
+        background: subtle ? C.panel : C.ink,
+        color: subtle ? C.muted : '#fff',
+        cursor: disabled ? 'default' : 'pointer',
+        fontSize: 12.5,
+        fontWeight: 650,
+        opacity: disabled ? 0.55 : 1,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+const backButtonStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: 0,
+  border: 0,
+  background: 'transparent',
+  color: C.muted,
+  cursor: 'pointer',
+  fontSize: 13,
+};
+
+const statusPillStyle: React.CSSProperties = {
+  display: 'inline-block',
+  margin: '8px 0 0 28px',
+  padding: '3px 7px',
+  borderRadius: 999,
+  background: C.panel,
+  color: C.muted,
+  fontSize: 11.5,
+  fontWeight: 650,
+};
+
+function statusLabel(status: CloudPullRequest['status']): string {
+  if (status === 'merged') return 'Merged';
+  if (status === 'closed') return 'Closed';
+  return 'Open';
 }

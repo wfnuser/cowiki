@@ -11,6 +11,7 @@ use std::collections::HashSet;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
+use uuid::Uuid;
 
 use crate::knowledge_index::{self, SearchHit};
 use crate::okf::{self, DocumentKind};
@@ -42,6 +43,108 @@ pub(crate) struct CloudLink {
     pub base_url: String,
     pub git_url: String,
     pub user_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct PortableCloudLink {
+    server: String,
+    space_id: String,
+    git_url: String,
+    user_ref: String,
+}
+
+fn portable_cloud_link_path(root: &Path) -> PathBuf {
+    root.join(".cowiki").join("cloud.json")
+}
+
+fn read_portable_cloud_link(root: &Path) -> Result<Option<CloudLink>, String> {
+    let filename = portable_cloud_link_path(root);
+    let body = match std::fs::read_to_string(&filename) {
+        Ok(body) => body,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("cannot read '{}': {error}", filename.display())),
+    };
+    let portable: PortableCloudLink = serde_json::from_str(&body)
+        .map_err(|error| format!("invalid '{}': {error}", filename.display()))?;
+    portable_cloud_link(portable).map(Some)
+}
+
+fn portable_cloud_link(portable: PortableCloudLink) -> Result<CloudLink, String> {
+    let server = url::Url::parse(&portable.server)
+        .map_err(|_| "Cloud link server must be a valid URL".to_string())?;
+    if !matches!(server.scheme(), "http" | "https")
+        || server.username() != ""
+        || server.password().is_some()
+        || server.path() != "/"
+        || server.query().is_some()
+        || server.fragment().is_some()
+    {
+        return Err("Cloud link server must be a root HTTP(S) origin".into());
+    }
+    Uuid::parse_str(&portable.space_id)
+        .map_err(|_| "Cloud link Space id must be a UUID".to_string())?;
+    let git_url = url::Url::parse(&portable.git_url)
+        .map_err(|_| "Cloud link Git URL must be valid".to_string())?;
+    if !matches!(git_url.scheme(), "http" | "https")
+        || git_url.username() != ""
+        || git_url.password().is_some()
+    {
+        return Err("Cloud link Git URL must use HTTP(S) without credentials".into());
+    }
+    let user_id = portable
+        .user_ref
+        .strip_prefix("user/")
+        .ok_or_else(|| "Cloud link user ref must start with 'user/'".to_string())?;
+    Uuid::parse_str(user_id).map_err(|_| "Cloud link user ref must contain a UUID".to_string())?;
+    Ok(CloudLink {
+        cloud_space_id: portable.space_id,
+        base_url: server.origin().ascii_serialization(),
+        git_url: portable.git_url,
+        user_id: user_id.to_string(),
+    })
+}
+
+fn write_portable_cloud_link(root: &Path, link: &CloudLink) -> Result<(), String> {
+    let portable = PortableCloudLink {
+        server: link.base_url.clone(),
+        space_id: link.cloud_space_id.clone(),
+        git_url: link.git_url.clone(),
+        user_ref: format!("user/{}", link.user_id),
+    };
+    portable_cloud_link(portable.clone())?;
+    let filename = portable_cloud_link_path(root);
+    let parent = filename
+        .parent()
+        .ok_or_else(|| "Cloud link path has no parent".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let body = serde_json::to_string_pretty(&portable).map_err(|error| error.to_string())?;
+    std::fs::write(&filename, format!("{body}\n")).map_err(|error| error.to_string())?;
+    ignore_portable_cloud_link(root)
+}
+
+fn ignore_portable_cloud_link(root: &Path) -> Result<(), String> {
+    let repository = Repository::open(root).map_err(|error| error.to_string())?;
+    let filename = repository.path().join("info").join("exclude");
+    if let Some(parent) = filename.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let existing = match std::fs::read_to_string(&filename) {
+        Ok(value) => value,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error.to_string()),
+    };
+    let rule = ".cowiki/cloud.json";
+    if !existing.lines().any(|line| line == rule) {
+        let separator = if existing.is_empty() || existing.ends_with('\n') {
+            ""
+        } else {
+            "\n"
+        };
+        std::fs::write(&filename, format!("{existing}{separator}{rule}\n"))
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -303,6 +406,9 @@ impl LocalEngine {
                     .map_err(|e| format!("cannot initialize local Git repository: {e}"))?
             }
         };
+        if portable_cloud_link_path(&local_path).is_file() {
+            ignore_portable_cloud_link(&local_path)?;
+        }
         ensure_local_main(&repo)?;
         prepare_okf_repository(&repo, &local_path)?;
 
@@ -353,6 +459,18 @@ impl LocalEngine {
 
     pub(crate) fn cloud_link(&self, space_slug: &str) -> Result<Option<CloudLink>, String> {
         let space = self.find_space(space_slug)?;
+        if let Some(link) = read_portable_cloud_link(&space.local_path)? {
+            self.save_cloud_link_record(&space.id, &link)?;
+            return Ok(Some(link));
+        }
+        let link = self.cloud_link_record(&space.id)?;
+        if let Some(link) = link.as_ref() {
+            write_portable_cloud_link(&space.local_path, link)?;
+        }
+        Ok(link)
+    }
+
+    fn cloud_link_record(&self, local_space_id: &str) -> Result<Option<CloudLink>, String> {
         let db = self
             .db
             .lock()
@@ -360,7 +478,7 @@ impl LocalEngine {
         match db.query_row(
             "SELECT cloud_space_id, base_url, git_url, user_id
              FROM cloud_links WHERE local_space_id = ?1",
-            [&space.id],
+            [local_space_id],
             |row| {
                 Ok(CloudLink {
                     cloud_space_id: row.get(0)?,
@@ -378,6 +496,11 @@ impl LocalEngine {
 
     pub(crate) fn save_cloud_link(&self, space_slug: &str, link: &CloudLink) -> Result<(), String> {
         let space = self.find_space(space_slug)?;
+        write_portable_cloud_link(&space.local_path, link)?;
+        self.save_cloud_link_record(&space.id, link)
+    }
+
+    fn save_cloud_link_record(&self, local_space_id: &str, link: &CloudLink) -> Result<(), String> {
         let db = self
             .db
             .lock()
@@ -393,7 +516,7 @@ impl LocalEngine {
                 user_id = excluded.user_id,
                 updated_at = CURRENT_TIMESTAMP",
             params![
-                space.id,
+                local_space_id,
                 link.cloud_space_id,
                 link.base_url,
                 link.git_url,
@@ -2157,7 +2280,7 @@ pub(crate) fn markdown_title(body: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{sha256_file, LocalEngine};
+    use super::{sha256_file, CloudLink, LocalEngine};
     use git2::Repository;
     use std::sync::{mpsc, Arc, Barrier};
     use std::time::Duration;
@@ -2168,6 +2291,63 @@ mod tests {
         let engine = LocalEngine::open(temp.path()).unwrap();
 
         assert!(engine.list_spaces().unwrap().is_empty());
+    }
+
+    #[test]
+    fn imported_space_reads_the_shared_cloud_link_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("shared-space");
+        std::fs::create_dir_all(folder.join(".cowiki")).unwrap();
+        let user_id = uuid::Uuid::new_v4();
+        let space_id = uuid::Uuid::new_v4();
+        std::fs::write(
+            folder.join(".cowiki/cloud.json"),
+            format!(
+                "{{\n  \"server\": \"https://cloud.cowiki.app\",\n  \"spaceId\": \"{space_id}\",\n  \"gitUrl\": \"https://cloud.cowiki.app/git/{space_id}\",\n  \"userRef\": \"user/{user_id}\"\n}}\n"
+            ),
+        )
+        .unwrap();
+        engine
+            .add_space("Shared Space", "shared-space", &folder)
+            .unwrap();
+
+        let link = engine.cloud_link("shared-space").unwrap().unwrap();
+
+        assert_eq!(link.cloud_space_id, space_id.to_string());
+        assert_eq!(link.base_url, "https://cloud.cowiki.app");
+        assert_eq!(link.user_id, user_id.to_string());
+    }
+
+    #[test]
+    fn desktop_cloud_link_writes_the_portable_link_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("desktop-space");
+        std::fs::create_dir_all(&folder).unwrap();
+        engine
+            .add_space("Desktop Space", "desktop-space", &folder)
+            .unwrap();
+        let user_id = uuid::Uuid::new_v4();
+        let space_id = uuid::Uuid::new_v4();
+        let link = CloudLink {
+            cloud_space_id: space_id.to_string(),
+            base_url: "https://cloud.cowiki.app".into(),
+            git_url: format!("https://cloud.cowiki.app/git/{space_id}"),
+            user_id: user_id.to_string(),
+        };
+
+        engine.save_cloud_link("desktop-space", &link).unwrap();
+
+        let payload: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(folder.join(".cowiki/cloud.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(payload["server"], "https://cloud.cowiki.app");
+        assert_eq!(payload["spaceId"], space_id.to_string());
+        assert_eq!(payload["userRef"], format!("user/{user_id}"));
+        let exclude = std::fs::read_to_string(folder.join(".git/info/exclude")).unwrap();
+        assert!(exclude.lines().any(|line| line == ".cowiki/cloud.json"));
     }
 
     #[test]

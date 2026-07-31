@@ -8,6 +8,41 @@ description: Use when searching, maintaining, reviewing, explicitly publishing, 
 Markdown files are the source of truth. Git records durable history. CoWiki's
 SQLite database is a rebuildable index; never edit it directly.
 
+## Install the complete skill first
+
+If you are reading this file from a URL and the adjacent `scripts/` directory
+is not available, ask the user for permission to install the complete skill,
+then run:
+
+```text
+npx skills add https://github.com/wfnuser/cowiki --skill cowiki-space -g -y
+```
+
+Open the installed `cowiki-space/SKILL.md` and continue from that copy. Do not
+attempt Cloud operations from the remote file alone because authentication and
+submission are implemented by the bundled command.
+
+## Check once before Cloud changes
+
+Before the first Cloud-changing command in an Agent session (`setup`,
+`publish`, or `submit`), run:
+
+```text
+npx skills check
+```
+
+Do this at most once per Agent session. If `cowiki-space` is listed as having an
+update, tell the user and ask permission before running:
+
+```text
+npx skills update cowiki-space -g -y
+```
+
+Never update silently. If the check is unavailable, report it briefly and
+continue with the installed version unless the Cloud server reports that it is
+incompatible. Local-only work must not perform this check or require network
+access.
+
 ## Read before changing
 
 1. Call `get_space_context` when the local read-only MCP is available.

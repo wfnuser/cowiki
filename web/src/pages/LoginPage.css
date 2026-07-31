@@ -1,0 +1,184 @@
+.login-page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: clamp(20px, 3vw, 36px);
+  background: var(--color-bg-hover);
+}
+
+.login-shell {
+  width: min(880px, 100%);
+  min-height: min(460px, calc(100dvh - 48px));
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(300px, 0.88fr);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-panel);
+  box-shadow:
+    0 12px 36px rgba(29, 28, 26, 0.08),
+    0 1px 4px rgba(29, 28, 26, 0.05);
+}
+
+.login-brand-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 36px 42px 40px;
+  background: var(--color-bg-secondary);
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  color: var(--color-text);
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.login-brand img {
+  display: block;
+}
+
+.login-message {
+  width: min(100%, 400px);
+  margin: auto 0;
+}
+
+.login-message p {
+  margin: 0 0 18px;
+  color: var(--color-accent);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0.085em;
+}
+
+.login-message h1 {
+  margin: 0;
+  color: var(--color-text);
+  font-family: var(--font-serif);
+  font-size: clamp(36px, 3.4vw, 40px);
+  font-weight: 500;
+  line-height: 1.08;
+  letter-spacing: -0.028em;
+  text-wrap: balance;
+}
+
+.login-actions-panel {
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  padding: 42px;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-panel);
+}
+
+.login-actions {
+  width: min(100%, 280px);
+}
+
+.login-actions h2 {
+  margin: 0 0 18px;
+  color: var(--color-text);
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+}
+
+.login-github-button,
+.login-local-button {
+  width: 100%;
+  border-radius: 9px;
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  font-weight: 650;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
+}
+
+.login-github-button {
+  height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--color-text);
+  color: var(--color-panel);
+  text-decoration: none;
+}
+
+.login-github-button:hover {
+  background: var(--color-text-secondary);
+}
+
+.login-local-button {
+  height: 44px;
+  margin-top: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.login-local-button:hover {
+  border-color: var(--color-border-hover);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.login-github-button:focus-visible,
+.login-local-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(226, 89, 11, 0.18);
+}
+
+.login-github-button:active,
+.login-local-button:active {
+  transform: translateY(1px);
+}
+
+@media (max-width: 720px) {
+  .login-page {
+    place-items: start center;
+    padding: 16px;
+  }
+
+  .login-shell {
+    min-height: 0;
+    grid-template-columns: 1fr;
+  }
+
+  .login-brand-panel {
+    min-height: 250px;
+    padding: 32px;
+  }
+
+  .login-message h1 {
+    font-size: clamp(34px, 9vw, 40px);
+  }
+
+  .login-actions-panel {
+    padding: 32px;
+    border-top: 1px solid var(--color-border);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .login-brand-panel,
+  .login-actions-panel {
+    padding: 26px 24px;
+  }
+
+  .login-brand-panel {
+    min-height: 230px;
+  }
+}

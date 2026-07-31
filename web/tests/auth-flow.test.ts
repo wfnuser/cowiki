@@ -131,9 +131,19 @@ test('CLI OAuth uses the same exact loopback boundary as desktop', () => {
 });
 
 test('desktop sign in follows the local-first shell design', () => {
-  assert.match(loginPage, /LOCAL FIRST/);
+  assert.match(loginPage, /COLLABORATIVE LLM WIKI/);
+  assert.match(loginPage, /Connect what people and AI agents know/);
+  assert.match(loginPage, /Welcome back/);
+  assert.doesNotMatch(loginPage, /login-topbar/);
   assert.match(loginPage, /Continue locally/);
-  assert.match(loginPage, /Signing in does not upload a local Space/);
+  assert.doesNotMatch(loginPage, /Connect what people and AI know/);
+  assert.doesNotMatch(loginPage, /LOCAL-FIRST LLM WIKI FOR TEAMS/);
+  assert.doesNotMatch(loginPage, /Connect everyone’s knowledge/);
+  assert.doesNotMatch(loginPage, /Your knowledge stays yours/);
+  assert.doesNotMatch(loginPage, /Work in local Spaces without an account/);
+  assert.doesNotMatch(loginPage, /Connect to CoWiki Cloud to publish/);
+  assert.doesNotMatch(loginPage, /Signing in does not upload a local Space/);
+  assert.doesNotMatch(loginPage, /人与 AI 共建的知识空间/);
   assert.match(spaceRail, /Not signed in/);
   assert.match(spaceRail, />\s*Sign in\s*</);
 });

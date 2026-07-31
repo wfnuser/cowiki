@@ -3,6 +3,10 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const mainLayout = readFileSync(new URL('../src/pages/MainLayout.tsx', import.meta.url), 'utf8');
+const contentHeader = readFileSync(
+  new URL('../src/components/layout/ContentHeader.tsx', import.meta.url),
+  'utf8',
+);
 const spacePanel = readFileSync(
   new URL('../src/components/layout/SpacePanel.tsx', import.meta.url),
   'utf8',
@@ -12,7 +16,8 @@ const desktopCapability = JSON.parse(
 ) as { permissions: string[] };
 
 test('the desktop top bar exposes a deep Tauri drag region', () => {
-  assert.match(mainLayout, /data-tauri-drag-region="deep"/);
+  assert.match(mainLayout, /ContentHeader/);
+  assert.match(contentHeader, /data-tauri-drag-region="deep"/);
 });
 
 test('the Space title bar drags the window instead of selecting its label', () => {
