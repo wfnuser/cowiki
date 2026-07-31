@@ -322,6 +322,7 @@ pub fn run() {
             local_list_agent_changes,
             local_merge_agent_change,
             local_discard_agent_change,
+            terminal::agent_probe,
             terminal::terminal_create,
             terminal::terminal_write,
             terminal::terminal_resize,

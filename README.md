@@ -89,6 +89,11 @@ npm run desktop:dev
 Create a Space with an empty local folder, or import an existing folder of
 Markdown files. The desktop app runs as a complete standalone workspace.
 
+The Agent panel checks the selected local CLI before launch and delegates
+authentication to that CLI, so CoWiki never reads or stores Agent credentials.
+Choose **Live** to work directly in the Current Draft, or **Background** to run
+in an isolated Agent Change that must be reviewed before it reaches the Draft.
+
 ## Roadmap
 
 - Make the macOS alpha easier to install and trust.

@@ -12,6 +12,7 @@ import type {
   SpaceHistory,
   Workspace,
 } from './api';
+import type { AgentKind, AgentReadiness } from './components/terminal/terminal-contract';
 
 export function listSpaces(): Promise<Workspace[]> {
   return invoke('local_list_spaces');
@@ -91,6 +92,10 @@ export function createCheckpoint(spaceSlug: string, name?: string): Promise<Chec
 
 export function createAgentChange(spaceSlug: string, agentName: string): Promise<AgentChange> {
   return invoke('local_create_agent_change', { spaceSlug, agentName });
+}
+
+export function probeAgent(agent: AgentKind): Promise<AgentReadiness> {
+  return invoke('agent_probe', { agent });
 }
 
 export function listAgentChanges(spaceSlug: string): Promise<AgentChange[]> {

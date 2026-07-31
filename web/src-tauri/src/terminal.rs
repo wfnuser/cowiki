@@ -1,8 +1,8 @@
 //! Desktop-owned pseudo terminals for local agent CLIs.
 //!
 //! The renderer receives an opaque session id and can only write, resize, or
-//! kill that session. Commands are intentionally restricted to supported
-//! agents; arbitrary command execution is left to the interactive shell.
+//! kill that session. The desktop starts a controlled supported-agent command;
+//! the renderer cannot supply arbitrary commands or flags.
 
 use crate::local_engine::LocalEngine;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
@@ -10,8 +10,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io::{Read, Write};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 
 const DEFAULT_COLS: u16 = 80;
@@ -21,7 +25,7 @@ const MAX_COLS: u16 = 500;
 const MIN_ROWS: u16 = 5;
 const MAX_ROWS: u16 = 200;
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentKind {
     Codex,
@@ -61,6 +65,40 @@ impl AgentKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TerminalIntent {
+    Run,
+    Login,
+}
+
+impl Default for TerminalIntent {
+    fn default() -> Self {
+        Self::Run
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentReadinessStatus {
+    NotInstalled,
+    Broken,
+    SignedOut,
+    Ready,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentReadiness {
+    agent: AgentKind,
+    status: AgentReadinessStatus,
+    executable: Option<String>,
+    version: Option<String>,
+    auth_method: Option<String>,
+    message: Option<String>,
+    detail: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalCreateRequest {
@@ -70,6 +108,8 @@ pub struct TerminalCreateRequest {
     space_slug: String,
     change_id: Option<String>,
     agent: AgentKind,
+    #[serde(default)]
+    intent: TerminalIntent,
     initial_command: Option<String>,
     cols: Option<u16>,
     rows: Option<u16>,
@@ -363,6 +403,11 @@ impl TerminalState {
 }
 
 #[tauri::command]
+pub fn agent_probe(agent: AgentKind) -> AgentReadiness {
+    probe_agent(agent)
+}
+
+#[tauri::command]
 pub fn terminal_create(
     app: AppHandle,
     state: State<'_, TerminalState>,
@@ -379,6 +424,22 @@ pub fn terminal_create(
     )?;
     let space = local_engine.find_space(&request.space_slug)?;
     validate_initial_command(request.agent, request.initial_command.as_deref())?;
+    if request.intent == TerminalIntent::Login
+        && (request.agent != AgentKind::Codex || request.mode != TerminalMode::Live)
+    {
+        return Err("Codex login must run in a Live setup terminal".to_string());
+    }
+    let readiness = probe_agent(request.agent);
+    let agent_executable = readiness
+        .executable
+        .as_deref()
+        .map(PathBuf::from)
+        .ok_or_else(|| readiness_error(&readiness))?;
+    match (request.intent, readiness.status) {
+        (TerminalIntent::Run, AgentReadinessStatus::Ready) => {}
+        (TerminalIntent::Login, AgentReadinessStatus::Ready | AgentReadinessStatus::SignedOut) => {}
+        _ => return Err(readiness_error(&readiness)),
+    }
     let size = normalized_pty_size(request.cols, request.rows);
     let identity = TerminalIdentity {
         space_slug: request.space_slug.clone(),
@@ -387,12 +448,23 @@ pub fn terminal_create(
     let mut reservation =
         TerminalStartReservation::new(state.inner().clone(), &session_id, identity.clone())?;
 
+    let mcp_executable = std::env::current_exe()
+        .map_err(|error| format!("cannot locate CoWiki MCP executable: {error}"))?;
+    let agent_command = build_agent_command(
+        request.agent,
+        request.mode,
+        request.intent,
+        &space.slug,
+        &agent_executable,
+        &mcp_executable,
+    )?;
+
     let pair = native_pty_system()
         .openpty(size)
         .map_err(|error| format!("failed to create terminal: {error}"))?;
     let shell = resolve_shell();
     let mut command = CommandBuilder::new(&shell);
-    add_shell_args(&mut command, &shell);
+    add_shell_command_args(&mut command, &shell, &agent_command);
     command.cwd(&cwd);
 
     let child = pair
@@ -405,22 +477,11 @@ pub fn terminal_create(
         .master
         .try_clone_reader()
         .map_err(|error| format!("failed to open terminal output: {error}"))?;
-    let mut writer = pair
+    let writer = pair
         .master
         .take_writer()
         .map_err(|error| format!("failed to open terminal input: {error}"))?;
     let killer = child.clone_killer();
-    // Queue a fully controlled command in the login shell. Codex and Claude
-    // receive CoWiki's read-only MCP tools directly; every CLI that supports
-    // an initial instruction also receives the maintenance protocol. The
-    // renderer cannot provide arbitrary flags or commands.
-    let executable = std::env::current_exe()
-        .map_err(|error| format!("cannot locate CoWiki MCP executable: {error}"))?;
-    let agent_command = build_agent_command(request.agent, request.mode, &space.slug, &executable);
-    writer
-        .write_all(format!("{agent_command}\r").as_bytes())
-        .and_then(|_| writer.flush())
-        .map_err(|error| format!("failed to start {}: {error}", request.agent.command()))?;
 
     state.install_session(
         &session_id,
@@ -452,13 +513,23 @@ const SPACE_PROTOCOL: &str = "You are maintaining a CoWiki knowledge Space. Mark
 fn build_agent_command(
     agent: AgentKind,
     mode: TerminalMode,
+    intent: TerminalIntent,
     space_slug: &str,
-    executable: &Path,
-) -> String {
-    let executable_text = executable.to_string_lossy();
+    agent_executable: &Path,
+    mcp_executable: &Path,
+) -> Result<String, String> {
+    let agent_command = shell_quote(&agent_executable.to_string_lossy());
+    if intent == TerminalIntent::Login {
+        if agent != AgentKind::Codex || mode != TerminalMode::Live {
+            return Err("Codex login must run in a Live setup terminal".to_string());
+        }
+        return Ok(format!("exec {agent_command} login"));
+    }
+
+    let executable_text = mcp_executable.to_string_lossy();
     let mcp_args = vec!["--mcp", "--space", space_slug];
     let prompt = format!("{SPACE_PROTOCOL} {}", mode.prompt());
-    match agent {
+    let command = match agent {
         AgentKind::Claude => {
             let config = serde_json::json!({
                 "mcpServers": {
@@ -470,7 +541,7 @@ fn build_agent_command(
                 }
             });
             format!(
-                "claude --mcp-config {} --append-system-prompt {}",
+                "exec {agent_command} --mcp-config {} --append-system-prompt {}",
                 shell_quote(&config.to_string()),
                 shell_quote(&prompt),
             )
@@ -486,21 +557,247 @@ fn build_agent_command(
                     .join(",")
             );
             format!(
-                "codex -c {} -c {} {}",
+                "exec {agent_command} --no-alt-screen -c {} -c {} {}",
                 shell_quote(&format!("mcp_servers.cowiki.command={command_toml}")),
                 shell_quote(&format!("mcp_servers.cowiki.args={args_toml}")),
                 shell_quote(&prompt),
             )
         }
-        AgentKind::Grok => format!("grok --rules {}", shell_quote(&prompt)),
-        AgentKind::Gemini => format!("gemini --prompt-interactive {}", shell_quote(&prompt)),
+        AgentKind::Grok => {
+            format!("exec {agent_command} --rules {}", shell_quote(&prompt))
+        }
+        AgentKind::Gemini => {
+            format!(
+                "exec {agent_command} --prompt-interactive {}",
+                shell_quote(&prompt)
+            )
+        }
         AgentKind::OpenCode => {
-            format!("opencode --prompt {}", shell_quote(&prompt))
+            format!("exec {agent_command} --prompt {}", shell_quote(&prompt))
         }
         // Hermes discovers the Space's AGENTS.md and skills from its working
         // directory. Its interactive command has no system-prompt override.
-        AgentKind::Hermes => "hermes chat".to_string(),
+        AgentKind::Hermes => format!("exec {agent_command} chat"),
+    };
+    Ok(command)
+}
+
+fn readiness_error(readiness: &AgentReadiness) -> String {
+    readiness
+        .message
+        .clone()
+        .unwrap_or_else(|| format!("{} is not ready", readiness.agent.command()))
+}
+
+fn probe_agent(agent: AgentKind) -> AgentReadiness {
+    probe_agent_in(agent, agent_search_directories())
+}
+
+fn probe_agent_in(
+    agent: AgentKind,
+    directories: impl IntoIterator<Item = PathBuf>,
+) -> AgentReadiness {
+    let Some(executable) = resolve_agent_executable_in(agent, directories) else {
+        return AgentReadiness {
+            agent,
+            status: AgentReadinessStatus::NotInstalled,
+            executable: None,
+            version: None,
+            auth_method: None,
+            message: Some(format!(
+                "{} is not installed or is not on PATH",
+                agent.command()
+            )),
+            detail: None,
+        };
+    };
+    let executable_text = executable.to_string_lossy().into_owned();
+    let version_output =
+        match run_probe_command(&executable, &["--version"], Duration::from_secs(4)) {
+            Ok(output) => output,
+            Err(error) => {
+                return AgentReadiness {
+                    agent,
+                    status: AgentReadinessStatus::Broken,
+                    executable: Some(executable_text),
+                    version: None,
+                    auth_method: None,
+                    message: Some(format!("{} could not be checked", agent.command())),
+                    detail: Some(error),
+                };
+            }
+        };
+    if !version_output.status.success() {
+        return AgentReadiness {
+            agent,
+            status: AgentReadinessStatus::Broken,
+            executable: Some(executable_text),
+            version: None,
+            auth_method: None,
+            message: Some(format!("{} is installed but cannot start", agent.command())),
+            detail: Some(probe_output_text(&version_output)),
+        };
     }
+    let version = first_nonempty_line(&probe_output_text(&version_output));
+
+    if agent != AgentKind::Codex {
+        return AgentReadiness {
+            agent,
+            status: AgentReadinessStatus::Ready,
+            executable: Some(executable_text),
+            version,
+            auth_method: None,
+            message: None,
+            detail: None,
+        };
+    }
+
+    let auth_output =
+        match run_probe_command(&executable, &["login", "status"], Duration::from_secs(5)) {
+            Ok(output) => output,
+            Err(error) => {
+                return AgentReadiness {
+                    agent,
+                    status: AgentReadinessStatus::SignedOut,
+                    executable: Some(executable_text),
+                    version,
+                    auth_method: None,
+                    message: Some("Codex authentication could not be verified".to_string()),
+                    detail: Some(error),
+                };
+            }
+        };
+    let auth_text = probe_output_text(&auth_output);
+    if !auth_output.status.success() {
+        return AgentReadiness {
+            agent,
+            status: AgentReadinessStatus::SignedOut,
+            executable: Some(executable_text),
+            version,
+            auth_method: None,
+            message: Some("Codex is installed but not signed in".to_string()),
+            detail: (!auth_text.is_empty()).then_some(auth_text),
+        };
+    }
+
+    AgentReadiness {
+        agent,
+        status: AgentReadinessStatus::Ready,
+        executable: Some(executable_text),
+        version,
+        auth_method: first_nonempty_line(&auth_text),
+        message: None,
+        detail: None,
+    }
+}
+
+fn resolve_agent_executable_in(
+    agent: AgentKind,
+    directories: impl IntoIterator<Item = PathBuf>,
+) -> Option<PathBuf> {
+    directories
+        .into_iter()
+        .filter(|directory| directory.is_absolute())
+        .filter_map(|directory| directory.join(agent.command()).canonicalize().ok())
+        .find(|candidate| is_executable_file(candidate))
+}
+
+fn is_executable_file(candidate: &Path) -> bool {
+    let Ok(metadata) = candidate.metadata() else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+fn agent_search_directories() -> Vec<PathBuf> {
+    let mut directories = std::env::var_os("PATH")
+        .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+        .unwrap_or_default();
+    directories.extend([
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+        PathBuf::from("/usr/bin"),
+    ]);
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        directories.extend([
+            home.join(".local/bin"),
+            home.join(".cargo/bin"),
+            home.join(".npm-global/bin"),
+        ]);
+    }
+    let mut unique = Vec::new();
+    for directory in directories {
+        if !unique.contains(&directory) {
+            unique.push(directory);
+        }
+    }
+    unique
+        .into_iter()
+        .filter(|directory| directory.is_absolute())
+        .collect()
+}
+
+fn run_probe_command(
+    executable: &Path,
+    arguments: &[&str],
+    timeout: Duration,
+) -> Result<Output, String> {
+    let mut command = Command::new(executable);
+    command
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Ok(path) = std::env::join_paths(agent_search_directories()) {
+        command.env("PATH", path);
+    }
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait().map_err(|error| error.to_string())? {
+            Some(_) => return child.wait_with_output().map_err(|error| error.to_string()),
+            None if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "{} readiness check timed out",
+                    executable.display()
+                ));
+            }
+        }
+    }
+}
+
+fn probe_output_text(output: &Output) -> String {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = [stdout.trim(), stderr.trim()]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    combined.chars().take(2_000).collect()
+}
+
+fn first_nonempty_line(value: &str) -> Option<String> {
+    value
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn shell_quote(value: &str) -> String {
@@ -698,35 +995,54 @@ fn resolve_shell() -> PathBuf {
     }
 }
 
-fn add_shell_args(command: &mut CommandBuilder, shell: &Path) {
+fn add_shell_command_args(command: &mut CommandBuilder, shell: &Path, agent_command: &str) {
     #[cfg(not(windows))]
-    if shell
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| {
-            matches!(
-                name,
-                "bash" | "csh" | "dash" | "fish" | "ksh" | "sh" | "tcsh" | "zsh"
-            )
-        })
     {
-        command.arg("-l");
+        // Execute the controlled agent command as part of shell startup instead
+        // of typing it into an interactive prompt. PTY input sent before zsh's
+        // line editor is ready can leave the command visible but unexecuted.
+        // Interactive login mode still loads the user's normal CLI environment.
+        if shell
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                matches!(
+                    name,
+                    "bash" | "csh" | "dash" | "fish" | "ksh" | "sh" | "tcsh" | "zsh"
+                )
+            })
+        {
+            command.arg("-l");
+            command.arg("-i");
+        }
+        command.arg("-c");
+        command.arg(agent_command);
     }
 
     #[cfg(windows)]
-    let _ = (command, shell);
+    {
+        let _ = shell;
+        command.arg("-NoLogo");
+        command.arg("-Command");
+        command.arg(agent_command);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        build_agent_command, normalized_pty_size, resolve_terminal_cwd, validate_initial_command,
-        validate_session_id, AgentKind, TerminalIdentity, TerminalMode, TerminalState,
+        build_agent_command, normalized_pty_size, probe_agent_in, resolve_agent_executable_in,
+        resolve_terminal_cwd, validate_initial_command, validate_session_id, AgentKind,
+        AgentReadinessStatus, TerminalIdentity, TerminalIntent, TerminalMode, TerminalState,
     };
     #[cfg(unix)]
     use super::{TerminalPhase, TerminalSession};
     use crate::local_engine::LocalEngine;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
+    #[cfg(unix)]
+    use std::path::PathBuf;
 
     #[test]
     fn clamps_terminal_dimensions() {
@@ -746,6 +1062,70 @@ mod tests {
         assert!(validate_initial_command(AgentKind::Codex, Some("rm -rf ~")).is_err());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn resolves_only_absolute_executable_agent_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("codex");
+        std::fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+
+        let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o644);
+        std::fs::set_permissions(&executable, permissions).unwrap();
+        assert!(
+            resolve_agent_executable_in(AgentKind::Codex, [directory.path().to_path_buf()])
+                .is_none()
+        );
+
+        let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&executable, permissions).unwrap();
+        assert_eq!(
+            resolve_agent_executable_in(AgentKind::Codex, [directory.path().to_path_buf()]),
+            Some(executable.canonicalize().unwrap())
+        );
+        assert!(
+            resolve_agent_executable_in(AgentKind::Codex, [PathBuf::from("relative/bin")])
+                .is_none()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn distinguishes_missing_signed_out_and_ready_codex_installations() {
+        let directory = tempfile::tempdir().unwrap();
+        let search_path = || [directory.path().to_path_buf()];
+
+        let missing = probe_agent_in(AgentKind::Codex, search_path());
+        assert_eq!(missing.status, AgentReadinessStatus::NotInstalled);
+
+        let executable = directory.path().join("codex");
+        std::fs::write(
+            &executable,
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'codex-cli test'; exit 0; fi\nif [ \"$1\" = \"login\" ]; then echo 'Not logged in' >&2; exit 1; fi\n",
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&executable, permissions).unwrap();
+
+        let signed_out = probe_agent_in(AgentKind::Codex, search_path());
+        assert_eq!(signed_out.status, AgentReadinessStatus::SignedOut);
+        assert_eq!(signed_out.version.as_deref(), Some("codex-cli test"));
+
+        std::fs::write(
+            &executable,
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'codex-cli test'; exit 0; fi\nif [ \"$1\" = \"login\" ]; then echo 'Logged in using ChatGPT'; exit 0; fi\n",
+        )
+        .unwrap();
+        let ready = probe_agent_in(AgentKind::Codex, search_path());
+        assert_eq!(ready.status, AgentReadinessStatus::Ready);
+        assert_eq!(
+            ready.auth_method.as_deref(),
+            Some("Logged in using ChatGPT")
+        );
+    }
+
     #[test]
     fn terminal_session_ids_are_renderer_known_uuids() {
         let id = format!("terminal:{}", uuid::Uuid::new_v4());
@@ -753,23 +1133,30 @@ mod tests {
         assert!(validate_session_id("terminal:not-a-uuid").is_err());
         assert!(validate_session_id("other:00000000-0000-0000-0000-000000000000").is_err());
     }
-
     #[test]
     fn launches_agents_with_read_only_cowiki_mcp_and_maintenance_protocol() {
         let executable = Path::new("/Applications/CoWiki.app/Contents/MacOS/cowiki-desktop");
         let codex = build_agent_command(
             AgentKind::Codex,
             TerminalMode::Live,
+            TerminalIntent::Run,
             "research-space",
+            Path::new("/opt/homebrew/bin/codex"),
             executable,
-        );
+        )
+        .unwrap();
         let claude = build_agent_command(
             AgentKind::Claude,
             TerminalMode::Background,
+            TerminalIntent::Run,
             "research-space",
+            Path::new("/opt/homebrew/bin/claude"),
             executable,
-        );
+        )
+        .unwrap();
 
+        assert!(codex.starts_with("exec '/opt/homebrew/bin/codex'"));
+        assert!(codex.contains("--no-alt-screen"));
         assert!(codex.contains("mcp_servers.cowiki.command"));
         assert!(codex.contains("--space"));
         assert!(codex.contains("research-space"));
@@ -784,35 +1171,58 @@ mod tests {
         let grok = build_agent_command(
             AgentKind::Grok,
             TerminalMode::Live,
+            TerminalIntent::Run,
             "research-space",
+            Path::new("/opt/homebrew/bin/grok"),
             executable,
-        );
+        )
+        .unwrap();
         let gemini = build_agent_command(
             AgentKind::Gemini,
             TerminalMode::Live,
+            TerminalIntent::Run,
             "research-space",
+            Path::new("/opt/homebrew/bin/gemini"),
             executable,
-        );
+        )
+        .unwrap();
         let opencode = build_agent_command(
             AgentKind::OpenCode,
             TerminalMode::Live,
+            TerminalIntent::Run,
             "research-space",
+            Path::new("/opt/homebrew/bin/opencode"),
             executable,
-        );
+        )
+        .unwrap();
         let hermes = build_agent_command(
             AgentKind::Hermes,
             TerminalMode::Live,
+            TerminalIntent::Run,
             "research-space",
+            Path::new("/opt/homebrew/bin/hermes"),
             executable,
-        );
+        )
+        .unwrap();
 
-        assert!(grok.starts_with("grok --rules "));
+        assert!(grok.starts_with("exec '/opt/homebrew/bin/grok' --rules "));
         assert!(grok.contains("Before claiming that knowledge is absent"));
-        assert!(gemini.starts_with("gemini --prompt-interactive "));
+        assert!(gemini.starts_with("exec '/opt/homebrew/bin/gemini' --prompt-interactive "));
         assert!(gemini.contains("Before claiming that knowledge is absent"));
-        assert!(opencode.starts_with("opencode --prompt "));
+        assert!(opencode.starts_with("exec '/opt/homebrew/bin/opencode' --prompt "));
         assert!(opencode.contains("Before claiming that knowledge is absent"));
-        assert_eq!(hermes, "hermes chat");
+        assert_eq!(hermes, "exec '/opt/homebrew/bin/hermes' chat");
+
+        let login = build_agent_command(
+            AgentKind::Codex,
+            TerminalMode::Live,
+            TerminalIntent::Login,
+            "research-space",
+            Path::new("/opt/homebrew/bin/codex"),
+            executable,
+        )
+        .unwrap();
+        assert_eq!(login, "exec '/opt/homebrew/bin/codex' login");
     }
 
     #[test]
