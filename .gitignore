@@ -1,6 +1,9 @@
 target/
 node_modules/
 .env
+.env.test
+.env.prod
+.env.*.local
 data/
 **/data/
 web/dist/
@@ -16,3 +19,13 @@ mcp-server
 .github/skills
 .github/*.md
 .omg
+
+# claude related
+.claude/skills
+.claude/CLAUDE.md
+.claude/settings.local.json
+
+.omc
+# local comment-system test stack
+data-comments-test/
+cowiki.conf

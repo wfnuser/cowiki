@@ -1,3 +1,5 @@
-# Cargo configuration for cowiki workspace
-# Default binary: cowiki-server (via workspace default-members in Cargo.toml)
-
+# Cargo must use the system Git client for the private backend source dependency.
+# It respects the same SSH / credential-helper configuration as `git clone`;
+# libgit2 otherwise fails with a misleading "revision not found" error.
+[net]
+git-fetch-with-cli = true

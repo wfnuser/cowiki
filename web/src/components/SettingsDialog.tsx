@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence, type Variants } from 'framer-motion';
-import { Key, Copy, Check, Trash2, Plus, Loader2, AlertTriangle, Shield, Clock } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { AlertTriangle, Bot, Check, Clock, Cloud, Copy, Key, Loader2, Plus, Shield, Trash2 } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -10,16 +10,27 @@ import {
   listApiKeys, createApiKey, revokeApiKey,
   type ApiKeyInfo, type ApiKeyCreated,
 } from '../api';
-import { getStoredAuth } from '../auth';
+import type { AuthUser } from '../auth';
+import {
+  settingsTabs,
+  type DefaultAgent,
+} from '../lib/client-settings';
+import { agentDefinition, SUPPORTED_AGENTS } from '../lib/agents';
 
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  clientMode: boolean;
+  cloudConnected: boolean;
+  auth: AuthUser | null;
+  defaultAgent: DefaultAgent;
+  onDefaultAgentChange: (agent: DefaultAgent) => void;
+  onConnectCloud: () => void;
 }
 
-const itemFade: Variants = {
+const itemFade = {
   initial: { opacity: 0, y: 12 },
-  animate: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 400, damping: 30 } },
+  animate: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 400, damping: 30 } },
   exit: { opacity: 0, y: -8, transition: { duration: 0.15 } },
 };
 
@@ -293,8 +304,17 @@ function RevokeConfirmDialog({
 
 // ── Main Settings Dialog ──
 
-export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
-  const [auth] = useState(() => getStoredAuth());
+export function SettingsDialog({
+  open,
+  onOpenChange,
+  clientMode,
+  cloudConnected,
+  auth,
+  defaultAgent,
+  onDefaultAgentChange,
+  onConnectCloud,
+}: SettingsDialogProps) {
+  const availableTabs = settingsTabs({ clientMode, cloudConnected });
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -321,8 +341,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   }, []);
 
   useEffect(() => {
-    if (open) fetchKeys();
-  }, [open, fetchKeys]);
+    if (!open || !cloudConnected) return;
+    const pending = window.setTimeout(() => { void fetchKeys(); }, 0);
+    return () => window.clearTimeout(pending);
+  }, [open, cloudConnected, fetchKeys]);
 
   const handleRevoke = async () => {
     if (!revokeTarget) return;
@@ -351,26 +373,97 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <DialogTitle>Settings</DialogTitle>
           </DialogHeader>
 
-          <Tabs defaultValue="profile" className="w-full">
+          <Tabs
+            key={`${clientMode}:${cloudConnected}`}
+            defaultValue={availableTabs[0]}
+            className="w-full"
+          >
             <TabsList className="w-full">
-              <TabsTrigger value="profile" className="flex-1">Profile</TabsTrigger>
-              <TabsTrigger value="keys" className="flex-1">API Keys</TabsTrigger>
+              {availableTabs.includes('client') && (
+                <TabsTrigger value="client" className="flex-1">Client</TabsTrigger>
+              )}
+              <TabsTrigger value="account" className="flex-1">Account</TabsTrigger>
+              {availableTabs.includes('keys') && (
+                <TabsTrigger value="keys" className="flex-1">API Keys</TabsTrigger>
+              )}
             </TabsList>
 
-            <TabsContent value="profile" className="mt-4 space-y-4 data-[state=inactive]:hidden" forceMount style={{ minHeight: 320 }}>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">Name</label>
-                  <p className="text-sm">{auth?.name || '—'}</p>
+            {availableTabs.includes('client') && (
+              <TabsContent value="client" className="mt-4 data-[state=inactive]:hidden" forceMount style={{ minHeight: 320 }}>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Bot className="h-4 w-4 text-muted-foreground" />
+                    <h4 className="text-sm font-medium">Default agent</h4>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Used as the primary action when you open the agent panel. Every installed CLI remains available in a new tab.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 pt-2">
+                    {SUPPORTED_AGENTS.map((agent) => {
+                      const selected = defaultAgent === agent;
+                      const definition = agentDefinition(agent);
+                      return (
+                        <button
+                          key={agent}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => onDefaultAgentChange(agent)}
+                          className={`rounded-lg border px-3 py-3 text-left transition-colors ${
+                            selected
+                              ? 'border-orange-300 bg-orange-50 text-orange-900'
+                              : 'border-border bg-background hover:bg-muted/60'
+                          }`}
+                        >
+                          <span className="block text-sm font-medium">
+                            {definition.displayName}
+                          </span>
+                          <span className="mt-0.5 block text-xs text-muted-foreground">
+                            {definition.providerName} CLI
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">User ID</label>
-                  <p className="font-mono text-xs text-muted-foreground">{auth?.id || '—'}</p>
+              </TabsContent>
+            )}
+
+            <TabsContent value="account" className="mt-4 data-[state=inactive]:hidden" forceMount style={{ minHeight: 320 }}>
+              {cloudConnected && auth ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground">Name</label>
+                    <p className="text-sm">{auth.name}</p>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground">User ID</label>
+                    <p className="font-mono text-xs text-muted-foreground">{auth.id}</p>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="flex min-h-[280px] flex-col items-center justify-center text-center">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-orange-50">
+                    <Cloud className="h-5 w-5 text-orange-600" />
+                  </div>
+                  <p className="text-sm font-medium">Connect to CoWiki Cloud</p>
+                  <p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">
+                    Keep local Spaces account-free. Sign in only when you want to publish or join a shared Space.
+                  </p>
+                  <Button
+                    className="mt-4 bg-orange-600 text-white hover:bg-orange-700"
+                    onClick={() => {
+                      onOpenChange(false);
+                      onConnectCloud();
+                    }}
+                  >
+                    Sign up / Sign in
+                  </Button>
+                </div>
+              )}
             </TabsContent>
 
-            <TabsContent value="keys" className="mt-4 flex flex-col data-[state=inactive]:hidden" forceMount style={{ minHeight: 320 }}>
+            {availableTabs.includes('keys') && (
+              <TabsContent value="keys" className="mt-4 flex flex-col data-[state=inactive]:hidden" forceMount style={{ minHeight: 320 }}>
               <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-sm text-amber-800 mb-4">
                 <Shield className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>API keys are only shown once upon creation. Copy and store them securely.</span>
@@ -429,24 +522,29 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   </AnimatePresence>
                 </motion.div>
               )}
-            </TabsContent>
+              </TabsContent>
+            )}
           </Tabs>
         </DialogContent>
       </Dialog>
 
-      <CreateKeyDialog
-        open={showCreate}
-        onOpenChange={setShowCreate}
-        onCreated={fetchKeys}
-      />
+      {cloudConnected && (
+        <>
+          <CreateKeyDialog
+            open={showCreate}
+            onOpenChange={setShowCreate}
+            onCreated={fetchKeys}
+          />
 
-      <RevokeConfirmDialog
-        open={!!revokeTarget}
-        keyName={revokeTarget?.name || ''}
-        revoking={!!revoking}
-        onConfirm={handleRevoke}
-        onCancel={() => setRevokeTarget(null)}
-      />
+          <RevokeConfirmDialog
+            open={!!revokeTarget}
+            keyName={revokeTarget?.name || ''}
+            revoking={!!revoking}
+            onConfirm={handleRevoke}
+            onCancel={() => setRevokeTarget(null)}
+          />
+        </>
+      )}
     </>
   );
 }

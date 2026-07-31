@@ -1,5 +1,9 @@
 # cowiki Configuration Reference
 
+> This reference describes the legacy/Cloud backend crates. The CoWiki desktop
+> app does not read `cowiki.conf`; a local Space requires no server, database
+> URL, API key, or MCP configuration.
+
 ## Configuration File
 
 cowiki uses a TOML configuration file named `cowiki.conf`. All settings can also be set via environment variables, which take precedence over file values.
@@ -48,7 +52,9 @@ url = "postgres://cowiki:cowiki@localhost:5432/cowiki"
 
 Server runtime settings (shared by `cowiki-server` via `cowiki-utils` crate).
 
-> **Note**: MCP server (`cowiki-mcp`) is now a standalone crate at `cowiki-mcp-server/` with its own `.env` configuration. It no longer reads `cowiki.conf`. See `cowiki-mcp-server/.env.example`.
+> The current local MCP is embedded in the desktop app and has no server
+> configuration. The `cowiki-mcp-server/` REST proxy is a legacy Cloud
+> prototype.
 
 | Field | Type | Default | Env Var | Description |
 |-------|------|---------|---------|-------------|
@@ -65,8 +71,6 @@ data_dir = "./data"
 ```bash
 # Start REST API on port 3000
 cowiki-server &
-# Start MCP server on port 8080 (configured via cowiki-mcp-server/.env)
-cd cowiki-mcp-server && cargo run &
 ```
 
 ---
@@ -151,27 +155,27 @@ dimension = 1024
 
 ### `[mcp-server]`
 
-> **已移除**: MCP server 配置已迁移至 `cowiki-mcp-server/.env`（独立于 `cowiki.conf`）。
-> 参考 `cowiki-mcp-server/.env.example` 了解 `COWIKI_MCP_PORT` 和 `COWIKI_BASE_URL` 的配置方式。
+The desktop's local MCP needs no configuration and is launched automatically
+for the selected Space. The old REST-proxy configuration is retired; remote
+MCP will receive a separate Cloud contract.
 
 ---
 
-### `[github]`
+### GitHub OAuth (environment variables only)
 
-GitHub OAuth app credentials for social login.
+GitHub OAuth credentials are **not** read from `cowiki.conf` — they come from environment variables only (loaded from `.env` via dotenvy), to keep a single source of truth.
 
-| Field | Type | Default | Env Var | Description |
-|-------|------|---------|---------|-------------|
-| `client_id` | string | `""` | `GITHUB_CLIENT_ID` | GitHub OAuth app client ID |
-| `client_secret` | string | `""` | `GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret |
-| `redirect_uri` | string | `"http://localhost:3000/api/auth/github/callback"` | `GITHUB_REDIRECT_URI` | OAuth callback URL |
+| Env Var | Default | Description |
+|---------|---------|-------------|
+| `GITHUB_CLIENT_ID` | `""` | GitHub OAuth app client ID |
+| `GITHUB_CLIENT_SECRET` | `""` | GitHub OAuth app client secret |
+| `GITHUB_REDIRECT_URI` | `"http://localhost:3000/api/auth/github/callback"` | OAuth callback URL |
 
-Example:
-```toml
-[github]
-client_id = "Iv23li..."
-client_secret = "abc123..."
-redirect_uri = "http://localhost:3000/api/auth/github/callback"
+Example (`.env`):
+```bash
+GITHUB_CLIENT_ID=Iv23li...
+GITHUB_CLIENT_SECRET=abc123...
+GITHUB_REDIRECT_URI=http://localhost:3000/api/auth/github/callback
 ```
 
 ---
@@ -213,10 +217,9 @@ Every field in `cowiki.conf` can be overridden by an environment variable. The e
 | `embedder.api_key` | `COWIKI_EMBEDDER_API_KEY` |
 | `embedder.api_base` | `COWIKI_EMBEDDER_BASE_URL` |
 | `embedder.dimension` | `COWIKI_EMBEDDER_DIMENSION` |
-| `github.client_id` | `GITHUB_CLIENT_ID` |
-| `github.client_secret` | `GITHUB_CLIENT_SECRET` |
-| `github.redirect_uri` | `GITHUB_REDIRECT_URI` |
 | `frontend.url` | `FRONTEND_URL` |
+
+> GitHub OAuth has no `cowiki.conf` keys — it is configured via `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_REDIRECT_URI` environment variables only.
 
 ---
 

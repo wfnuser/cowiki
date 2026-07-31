@@ -1,143 +1,121 @@
 <p align="center">
-  <h1 align="center">CoWiki</h1>
-  <p align="center"><strong>A team wiki that builds itself.</strong></p>
-  <p align="center">
-    Open-source LLM Wiki for teams — agents contribute, humans review, all version-controlled.
-  </p>
+  <img src="web/public/cowiki-logo.svg" width="88" alt="CoWiki logo" />
+</p>
+
+<h1 align="center">CoWiki: An LLM Wiki, but multiplayer.</h1>
+
+<p align="center">
+  <strong>Product philosophy / 产品理念</strong>
+  <br />
+  <a href="https://x.com/weiraolilun/status/2078748340813189471">Read the original thread on X</a>
+  ·
+  <a href="https://www.xiaohongshu.com/explore/6a57ae3100000000070229aa?xsec_token=AB3r79vLLhY9g4EOR2V9GfBSUNgWPYIsJJYs7GQ4DsmaI=&amp;xsec_source=pc_user">阅读小红书原文</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/wfnuser/cowiki/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
-  <a href="https://github.com/wfnuser/cowiki"><img src="https://img.shields.io/github/stars/wfnuser/cowiki?style=social" alt="Stars"></a>
+  <a href="https://github.com/wfnuser/cowiki/actions/workflows/macos-desktop.yml"><img src="https://img.shields.io/github/actions/workflow/status/wfnuser/cowiki/macos-desktop.yml?branch=dev&label=macOS%20build" alt="macOS build" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-EF5A29" alt="Apache 2.0 license" /></a>
+  <a href="docs/okf-v0.1.md"><img src="https://img.shields.io/badge/OKF-v0.1-EF5A29" alt="Open Knowledge Format v0.1" /></a>
+  <a href="https://github.com/wfnuser/cowiki"><img src="https://img.shields.io/github/stars/wfnuser/cowiki?style=flat&color=EF5A29" alt="GitHub stars" /></a>
+  <a href="https://github.com/wfnuser/cowiki/issues"><img src="https://img.shields.io/github/issues/wfnuser/cowiki?color=6B625C" alt="Open issues" /></a>
+  <a href="https://github.com/wfnuser/cowiki/graphs/contributors"><img src="https://img.shields.io/github/contributors/wfnuser/cowiki?color=6B625C" alt="Contributors" /></a>
 </p>
 
----
+<p align="center">
+  <img src="docs/assets/cowiki-desktop.png" alt="CoWiki reviewing local Markdown changes beside an embedded Claude Code terminal" />
+</p>
 
-## The Problem
+<p align="center">
+  <strong>A local-first, Git-based workspace where teams and their agents compile sources into a portable, reviewable, and shareable LLM Wiki.</strong>
+  <br />
+  <sub>Bring your own agents. Turn files and URLs into linked OKF knowledge, review every diff, and keep only what you trust.</sub>
+</p>
 
-Karpathy's [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) pattern is powerful — instead of re-discovering knowledge at query time, compile it once into a persistent wiki. But every implementation today is single-player. Your team's agents each learn independently, and nothing compounds.
-
-CoWiki makes LLM Wiki multiplayer:
-
-- **Your space, your pace** — Ingest sources and compile wiki pages in your personal space. No one sees your drafts until you're ready.
-- **Submit for review** — When you're happy, submit to the shared wiki. The system checks for duplicates and generates a summary.
-- **Review like a PR** — Reviewers see an LLM-generated summary, full diff, and duplicate warnings. Approve or reject with one click.
-- **Agents welcome** — AI agents connect via MCP, contribute knowledge alongside humans, and follow the same review process.
-- **Git under the hood** — Every change is version-controlled. Full history, rollback, blame — but you never touch Git directly.
-
-## How It Works
-
-```
-  You / Your Agent                              Your Team
-
-  1. Ingest                                  5. Pages appear in
-     URL, text, file                            the shared wiki
-         |                                          |
-  2. Compile                                 6. Anyone can browse
-     AI turns sources                           and search
-     into wiki pages
-         |
-  3. Edit drafts
-     in personal space
-         |
-  4. Submit ──────────> Review ──────────> Shared Wiki
-                        (diff + summary       (version-controlled,
-                         + dedup check)        searchable)
-```
-
-## Quick Start
-
-```bash
-# Clone
-git clone https://github.com/wfnuser/cowiki.git
-cd cowiki
-
-# Start PostgreSQL using default volume for data persistence 
-# (in /var/lib/docker/volumes/pgdata/cowiki_pgdata)
-docker compose up -d
-
-# Or you can specify your own Postgres config, below will store data in /path/to/data on host
-# PGDATA_TYPE=bind PGDATA_SOURCE=/path/to/data docker compose up -d
-
-# start from copy
-cp cowiki.conf.example cowiki.conf
-# edit cowiki.conf to set cowiki
-
-# Start the server
-cargo run
-
-# Start the MCP server (in another terminal)
-cd cowiki-mcp-server && cargo run  # or: cargo mcp
-
-# Start the frontend (in another terminal)
-cd web && npm install && npm run dev
-```
-
-Open [http://localhost:5173](http://localhost:5173)
+> **macOS-first alpha:** local Spaces work today. Cloud collaboration comes next.
 
 ## Features
 
-### Personal Space
-Ingest sources (URLs, text, files) and compile them into structured wiki pages using LLM. Edit freely — only you can see your drafts.
+| Feature | What it means |
+| --- | --- |
+| **Local Spaces** | A Space is an ordinary folder. No account, server, or external database is required. |
+| **Agent-compiled Wiki** | Add URLs, PDFs, documents, spreadsheets, or slides. Agents compile them into structured, linked knowledge. |
+| **Bring your own agents** | Use the built-in Codex and Claude terminals, or let Grok, Antigravity, and other file/MCP-capable agents work on the same Space. |
+| **Git-based review** | Inspect human and agent edits as diffs, then merge, discard, commit, or checkpoint them. |
+| **OKF-native** | CoWiki follows [Google's Open Knowledge Format v0.1](docs/okf-v0.1.md), keeping knowledge readable, linked, and portable. |
+| **Collaboration-ready** | The same local Space can later gain cloud publishing, permissions, and team review. |
 
-### Shared Wiki
-The team's knowledge base. Pages enter through review only. Semantic search powered by pgvector finds what you need.
+## Ingest. Compile. Review.
 
-### Review Workflow
-Every submission shows an LLM-generated summary, full file diff, and duplicate warnings. Approve, reject, or request changes.
+<p align="center">
+  <img src="docs/assets/compilation-pipeline.svg" alt="Ingest, compile, lint, and review pipeline" width="100%" />
+</p>
 
-### Semantic Search
-Search by meaning, not just keywords. Powered by OpenAI embeddings and PostgreSQL pgvector.
+Drop source material into a Space. Your agents compile it into linked OKF
+knowledge, check its structure, and return a Git diff for human review. Keep
+the result, continue editing it, or discard the change as a unit.
 
-### Version Control
-Git tracks every change under the hood. Full history, per-page diffs, and the ability to see who contributed what and when.
+## Your Space is a folder
 
-## Architecture
-
-```
-┌─────────────────────────────────┐
-│  React + TypeScript + Tailwind  │
-│  shadcn/ui · Milkdown editor   │
-└──────────────┬──────────────────┘
-               │
-┌──────────────▼──────────────────┐
-│       Rust Backend (axum)       │
-│                                 │
-│  Pages · Ingest · Compile       │
-│  Submit · Review · Search       │
-├────────────────┬────────────────┤
-│  Git (files)   │  PostgreSQL    │
-│  branches,     │  pgvector,     │
-│  version ctrl  │  metadata      │
-└────────────────┴────────────────┘
+```text
+research-space/
+├── index.md
+├── architecture.md
+├── projects/
+│   └── cowiki.md
+├── .cowiki/
+│   └── sources/
+└── .git/
 ```
 
-## Tech Stack
+Markdown and Git are the source of truth. SQLite only stores a rebuildable
+local search and backlink index. You can open the same files in another
+editor, use normal Git tools, or leave CoWiki without exporting anything.
 
-| Layer | Choice |
-|-------|--------|
-| Backend | Rust, axum |
-| Frontend | React, TypeScript, Vite, Tailwind, shadcn/ui |
-| Database | PostgreSQL + pgvector |
-| Version Control | Git (libgit2) |
-| LLM | OpenAI API |
-| Agent Protocol | MCP (coming soon) |
+CoWiki aligns Spaces with [Open Knowledge Format v0.1](docs/okf-v0.1.md) and
+preserves frontmatter fields it does not understand.
+
+## Local-first, collaboration-ready
+
+CoWiki is local-first, not local-only. Today the desktop app keeps a complete
+offline Space and supports local human–agent review. The next layer will let
+you publish that same Space for team permissions, browser access, asynchronous
+review, and reusable remote MCP—without changing its portable source format.
+
+## Run from source
+
+Requires macOS, Xcode Command Line Tools, [Node.js 24+](https://nodejs.org/),
+and [Rust stable](https://rustup.rs/). Install Codex CLI and/or Claude Code to
+use the embedded Agent panel.
+
+```bash
+git clone https://github.com/wfnuser/cowiki.git
+cd cowiki/web
+npm ci
+npm run desktop:dev
+```
+
+Create a Space with an empty local folder, or import an existing folder of
+Markdown files. The desktop app runs as a complete standalone workspace.
+
+Agents launched by the app receive CoWiki's read-only local MCP for retrieval
+and edit the Space's Markdown files directly. The
+[`cowiki-space` skill](skills/cowiki-space/SKILL.md) defines the same contract
+for external Agents; local work never requires a CoWiki account, API key, or
+backend.
 
 ## Roadmap
 
-- [ ] MCP Server — agents connect directly
-- [ ] Multi-user auth and API keys
-- [ ] Markdown editor (Milkdown) in the browser
-- [ ] Wikilink auto-resolution
-- [ ] Incremental compilation (skip unchanged sources)
-- [ ] Knowledge graph visualization
-- [ ] Desktop app (Tauri)
-- [ ] CRDT for real-time co-editing
+- Make the macOS alpha easier to install and trust.
+- Improve local review and conflict resolution for many agents.
+- Publish local Spaces for team permissions, sync, and browser review.
+- Offer compatible remote MCP and expand desktop platform support.
 
 ## Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+CoWiki is early, and the collaboration model is still an open design problem.
+Issues, product criticism, experiments, and code are welcome. See
+[CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
 ## License
 
-[Apache License 2.0](LICENSE)
+CoWiki is licensed under the [Apache License 2.0](LICENSE).

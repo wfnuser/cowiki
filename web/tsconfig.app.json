@@ -21,7 +21,7 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
 
-    /* Path aliases for shadcn */
+    /* Path aliases for shadcn (bundler resolution resolves paths without baseUrl) */
     "paths": {
       "@/*": ["./src/*"]
     }

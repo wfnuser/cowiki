@@ -37,7 +37,8 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 z-[100] bg-black/50 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+        // Match the search palette: warm ink scrim + slight blur.
+        "fixed inset-0 z-[100] bg-[rgba(29,28,26,0.32)] backdrop-blur-[2px] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
         className
       )}
       {...props}
@@ -59,7 +60,9 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed top-[50%] left-[50%] z-[100] grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+          // One dialog language across the app (matches SearchModal): top-anchored,
+          // warm panel, hairline border, 14px radius, layered soft shadow.
+          "fixed top-[16vh] left-[50%] z-[100] grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] gap-4 rounded-[14px] border border-[#e8e6e1] bg-[#fdfcfb] p-6 shadow-[0_24px_64px_rgba(29,28,26,0.22),0_4px_16px_rgba(29,28,26,0.10)] duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           className
         )}
         {...props}
