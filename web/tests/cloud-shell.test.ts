@@ -23,6 +23,7 @@ const reviews = readFileSync(new URL('../src/cloud/CloudReviewsView.tsx', import
 const localReviews = readFileSync(new URL('../src/components/review/LocalReviewInbox.tsx', import.meta.url), 'utf8');
 const members = readFileSync(new URL('../src/cloud/CloudMembersView.tsx', import.meta.url), 'utf8');
 const invitation = readFileSync(new URL('../src/cloud/CloudInvitationPage.tsx', import.meta.url), 'utf8');
+const publicReader = readFileSync(new URL('../src/cloud/PublicCloudSpacePage.tsx', import.meta.url), 'utf8');
 
 test('browser routing has a focused Cloud shell with no Tauri dependency', () => {
   assert.match(app, /path="\/cloud\/\*"/);
@@ -35,6 +36,13 @@ test('browser routing has a focused Cloud shell with no Tauri dependency', () =>
   assert.match(cloudHome, /New shared Space/);
   assert.match(cloudHome, /createSpace/);
   assert.match(cloudHome, /navigate\(cloudSpaceRoute\(created\.id\)\)/);
+});
+
+test('public Space routes render merged Markdown without a session', () => {
+  assert.match(app, /path="\/spaces\/:slug\/\*"/);
+  assert.match(publicReader, /createPublicCloudClient/);
+  assert.match(publicReader, /PageReader/);
+  assert.doesNotMatch(publicReader, /Authorization|CloudMembersView|CloudReviewsView/);
 });
 
 test('Cloud reuses the client Space rail and keeps the zero-Space state quiet', () => {
@@ -100,7 +108,7 @@ test('Cloud Space navigation exposes read surfaces to every member', () => {
 
 test('Editor and Viewer never receive management or merge actions', () => {
   assert.equal(memberManagementMode('owner'), 'manage');
-  assert.equal(memberManagementMode('manager'), 'read');
+  assert.equal(memberManagementMode('manager'), 'manage');
   assert.equal(memberManagementMode('editor'), 'read');
   assert.equal(memberManagementMode('viewer'), 'read');
   assert.equal(mergeActionVisible('editor'), false);
@@ -139,13 +147,18 @@ test('Space invitation route remains readable before sign in and accepts into on
   assert.doesNotMatch(invitation, /@tauri-apps|invoke\(/);
 });
 
-test('Members stay simple and only Owners can change roles', () => {
-  assert.match(members, /space\.role === 'owner'/);
+test('Members let Owners and Managers delegate roles within the target matrix', () => {
+  assert.match(members, /canManageMembers/);
+  assert.match(members, /canManageTarget/);
   assert.match(members, /setMember/);
+  assert.match(members, /updateSpaceVisibility/);
+  assert.match(members, /Public|Private/);
   assert.match(members, /'manager'/);
   assert.match(members, /'editor'/);
   assert.match(members, /'viewer'/);
-  assert.doesNotMatch(members, /createInvitation|removeMember|Invite link/);
+  assert.match(members, /createInvitation/);
+  assert.match(members, /Invite link/);
+  assert.doesNotMatch(members, /removeMember/);
   assert.match(members, /padding: '36px 56px 56px'/);
   assert.match(reviews, /padding: '36px 56px 56px'/);
 });

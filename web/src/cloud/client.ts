@@ -1,7 +1,9 @@
 import {
+  normalizeCloudOrigin,
   normalizeCloudSession,
   type CloudRole,
   type CloudSession,
+  type CloudVisibility,
 } from './session.ts';
 
 export type CloudFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -18,10 +20,21 @@ export interface CloudSpace {
   id: string;
   name: string;
   slug: string;
+  visibility: CloudVisibility;
   role: CloudRole;
   gitUrl: string;
   mainRef: 'main';
   userRef: string;
+  publicUrl: string;
+}
+
+export interface PublicCloudSpace {
+  id: string;
+  name: string;
+  slug: string;
+  visibility: 'public';
+  mainRef: 'main';
+  publicUrl: string;
 }
 
 export interface CloudTreeEntry {
@@ -50,7 +63,7 @@ export interface CloudMember {
   role: CloudRole;
 }
 
-export type CloudInvitableRole = Exclude<CloudRole, 'owner'>;
+export type CloudInvitableRole = 'editor' | 'viewer';
 
 export interface CloudInvitationPreview {
   spaceId: string;
@@ -119,7 +132,8 @@ export interface CloudClient {
   currentUser(): Promise<CloudUser>;
   logout(): Promise<void>;
   listSpaces(): Promise<CloudSpace[]>;
-  createSpace(name: string, slug: string): Promise<CloudSpace>;
+  createSpace(name: string, slug: string, visibility?: CloudVisibility): Promise<CloudSpace>;
+  updateSpaceVisibility(spaceId: string, visibility: CloudVisibility): Promise<CloudSpace>;
   getSpace(spaceId: string): Promise<CloudSpace>;
   getTree(spaceId: string): Promise<CloudTree>;
   getContent(spaceId: string, path: string): Promise<CloudContent>;
@@ -174,9 +188,13 @@ export function createCloudClient(
     },
     logout: () => request('/api/auth/logout', { method: 'POST' }),
     listSpaces: () => request('/api/spaces'),
-    createSpace: (name, slug) => request('/api/spaces', {
+    createSpace: (name, slug, visibility = 'private') => request('/api/spaces', {
       method: 'POST',
-      body: JSON.stringify({ name, slug }),
+      body: JSON.stringify({ name, slug, visibility }),
+    }),
+    updateSpaceVisibility: (spaceId, visibility) => request(spacePath(spaceId), {
+      method: 'PATCH',
+      body: JSON.stringify({ visibility }),
     }),
     getSpace: (spaceId) => request(spacePath(spaceId)),
     getTree: (spaceId) => request(`${spacePath(spaceId, '/tree')}?ref=main`),
@@ -222,6 +240,47 @@ export function createCloudClient(
       pullRequestPath(spaceId, pullRequestId, '/merge'),
       { method: 'POST', body: JSON.stringify({ expectedHeadOid }) },
     ),
+  };
+}
+
+export interface PublicCloudClient {
+  listSpaces(): Promise<PublicCloudSpace[]>;
+  getSpace(slug: string): Promise<PublicCloudSpace>;
+  getTree(slug: string): Promise<CloudTree>;
+  getContent(slug: string, path: string): Promise<CloudContent>;
+}
+
+export function createPublicCloudClient(
+  baseUrl: string,
+  fetchImpl: CloudFetch = fetch,
+): PublicCloudClient {
+  const origin = normalizeCloudOrigin(baseUrl);
+
+  async function request<T>(path: string): Promise<T> {
+    const response = await fetchImpl(`${origin}${path}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: string } | null;
+      throw new CloudApiError(
+        response.status,
+        payload?.error || `Cloud request failed (${response.status})`,
+      );
+    }
+    return response.json() as Promise<T>;
+  }
+
+  const spacePath = (slug: string, suffix = '') =>
+    `/api/public/spaces/${encodeURIComponent(slug)}${suffix}`;
+
+  return {
+    listSpaces: () => request('/api/public/spaces'),
+    getSpace: (slug) => request(spacePath(slug)),
+    getTree: (slug) => request(`${spacePath(slug, '/tree')}?ref=main`),
+    getContent: (slug, path) => {
+      const query = new URLSearchParams({ ref: 'main', path });
+      return request(`${spacePath(slug, '/content')}?${query}`);
+    },
   };
 }
 
