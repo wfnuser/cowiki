@@ -4,11 +4,56 @@
 //! derived data and may be dropped and rebuilt without losing user content.
 
 use percent_encoding::percent_decode_str;
-use pulldown_cmark::{Event, Options, Parser, Tag};
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::path::Path;
+
+const SCHEMA_VERSION: i64 = 1;
+
+const CREATE_SCHEMA: &str = "CREATE TABLE knowledge_index_metadata (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        schema_version INTEGER NOT NULL
+    );
+    CREATE TABLE indexed_pages (
+        id INTEGER PRIMARY KEY,
+        space_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        modified_ns INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(space_id, path)
+    );
+    CREATE VIRTUAL TABLE indexed_pages_fts USING fts5(
+        title,
+        body,
+        content='indexed_pages',
+        content_rowid='id',
+        tokenize='unicode61 remove_diacritics 2'
+    );
+    CREATE TRIGGER indexed_pages_insert AFTER INSERT ON indexed_pages BEGIN
+        INSERT INTO indexed_pages_fts(rowid, title, body)
+        VALUES (new.id, new.title, new.body);
+    END;
+    CREATE TRIGGER indexed_pages_delete AFTER DELETE ON indexed_pages BEGIN
+        INSERT INTO indexed_pages_fts(indexed_pages_fts, rowid, title, body)
+        VALUES ('delete', old.id, old.title, old.body);
+    END;
+    CREATE TRIGGER indexed_pages_update AFTER UPDATE ON indexed_pages BEGIN
+        INSERT INTO indexed_pages_fts(indexed_pages_fts, rowid, title, body)
+        VALUES ('delete', old.id, old.title, old.body);
+        INSERT INTO indexed_pages_fts(rowid, title, body)
+        VALUES (new.id, new.title, new.body);
+    END;
+    CREATE TABLE page_links (
+        space_id TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        target TEXT NOT NULL,
+        UNIQUE(space_id, source_path, target)
+    );
+    CREATE INDEX page_links_target ON page_links(space_id, target);";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SearchHit {
@@ -19,48 +64,110 @@ pub struct SearchHit {
     pub title_match: bool,
 }
 
-pub fn initialize(connection: &Connection) -> Result<(), String> {
-    connection
-        .execute_batch(
-            "CREATE TABLE IF NOT EXISTS indexed_pages (
-                id INTEGER PRIMARY KEY,
-                space_id TEXT NOT NULL,
-                path TEXT NOT NULL,
-                title TEXT NOT NULL,
-                body TEXT NOT NULL,
-                modified_ns INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(space_id, path)
-            );
-            CREATE VIRTUAL TABLE IF NOT EXISTS indexed_pages_fts USING fts5(
-                title,
-                body,
-                content='indexed_pages',
-                content_rowid='id',
-                tokenize='unicode61 remove_diacritics 2'
-            );
-            CREATE TRIGGER IF NOT EXISTS indexed_pages_insert AFTER INSERT ON indexed_pages BEGIN
-                INSERT INTO indexed_pages_fts(rowid, title, body)
-                VALUES (new.id, new.title, new.body);
-            END;
-            CREATE TRIGGER IF NOT EXISTS indexed_pages_delete AFTER DELETE ON indexed_pages BEGIN
-                INSERT INTO indexed_pages_fts(indexed_pages_fts, rowid, title, body)
-                VALUES ('delete', old.id, old.title, old.body);
-            END;
-            CREATE TRIGGER IF NOT EXISTS indexed_pages_update AFTER UPDATE ON indexed_pages BEGIN
-                INSERT INTO indexed_pages_fts(indexed_pages_fts, rowid, title, body)
-                VALUES ('delete', old.id, old.title, old.body);
-                INSERT INTO indexed_pages_fts(rowid, title, body)
-                VALUES (new.id, new.title, new.body);
-            END;
-            CREATE TABLE IF NOT EXISTS page_links (
-                space_id TEXT NOT NULL,
-                source_path TEXT NOT NULL,
-                target TEXT NOT NULL,
-                UNIQUE(space_id, source_path, target)
-            );
-            CREATE INDEX IF NOT EXISTS page_links_target
-                ON page_links(space_id, target);",
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct BrokenLink {
+    pub source_path: String,
+    pub source_title: String,
+    pub target: String,
+}
+
+/// Keep only a compatible derived schema at startup.
+/// Page rows are deliberately left empty after a reset; the selected Space is
+/// repopulated by `refresh_space` when search, backlinks, or MCP context needs it.
+pub fn initialize(connection: &mut Connection) -> Result<(), String> {
+    let version = connection
+        .query_row(
+            "SELECT schema_version FROM knowledge_index_metadata WHERE singleton = 1",
+            [],
+            |row| row.get::<_, i64>(0),
         )
+        .ok();
+    let healthy = version == Some(SCHEMA_VERSION) && schema_is_structurally_healthy(connection);
+    if healthy {
+        return Ok(());
+    }
+    reset_schema(connection)
+}
+
+fn schema_is_structurally_healthy(connection: &Connection) -> bool {
+    let required_objects = [
+        ("table", "indexed_pages"),
+        ("table", "indexed_pages_fts"),
+        ("table", "page_links"),
+        ("trigger", "indexed_pages_insert"),
+        ("trigger", "indexed_pages_delete"),
+        ("trigger", "indexed_pages_update"),
+        ("index", "page_links_target"),
+    ];
+    if required_objects.iter().any(|(kind, name)| {
+        !connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM sqlite_schema WHERE type = ?1 AND name = ?2
+                )",
+                params![kind, name],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap_or(false)
+    }) {
+        return false;
+    }
+    if connection
+        .prepare(
+            "SELECT id, space_id, path, title, body, modified_ns
+             FROM indexed_pages LIMIT 0",
+        )
+        .is_err()
+        || connection
+            .prepare("SELECT space_id, source_path, target FROM page_links LIMIT 0")
+            .is_err()
+    {
+        return false;
+    }
+    true
+}
+
+/// FTS5's external-content integrity check is proportional to indexed content,
+/// so run it lazily on first index access instead of on every application open.
+pub fn repair_if_corrupt(connection: &mut Connection) -> Result<(), String> {
+    if connection
+        .execute(
+            "INSERT INTO indexed_pages_fts(indexed_pages_fts, rank)
+             VALUES ('integrity-check', 1)",
+            [],
+        )
+        .is_ok()
+    {
+        Ok(())
+    } else {
+        reset_schema(connection)
+    }
+}
+
+fn reset_schema(connection: &mut Connection) -> Result<(), String> {
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("cannot reset the disposable local search index: {error}"))?;
+    transaction
+        .execute_batch(
+            "DROP TRIGGER IF EXISTS indexed_pages_insert;
+             DROP TRIGGER IF EXISTS indexed_pages_delete;
+             DROP TRIGGER IF EXISTS indexed_pages_update;
+             DROP TABLE IF EXISTS indexed_pages_fts;
+             DROP TABLE IF EXISTS page_links;
+             DROP TABLE IF EXISTS indexed_pages;
+             DROP TABLE IF EXISTS knowledge_index_metadata;",
+        )
+        .and_then(|_| transaction.execute_batch(CREATE_SCHEMA))
+        .map_err(|error| format!("cannot reset the disposable local search index: {error}"))?;
+    transaction
+        .execute(
+            "INSERT INTO knowledge_index_metadata (singleton, schema_version) VALUES (1, ?1)",
+            [SCHEMA_VERSION],
+        )
+        .map_err(|error| format!("cannot version the local search index: {error}"))?;
+    transaction
+        .commit()
         .map_err(|error| format!("cannot initialize local search index: {error}"))
 }
 
@@ -148,6 +255,40 @@ pub fn refresh_space(
                 params![space_id, deleted],
             )
             .map_err(|e| e.to_string())?;
+    }
+    transaction.commit().map_err(|e| e.to_string())
+}
+
+/// Re-derive one Space's relationship graph after its Markdown rows have been
+/// refreshed. This runs lazily before the first backlinks query in a process,
+/// so corrupt link rows cannot make SQLite authoritative at startup.
+pub fn rebuild_links(connection: &mut Connection, space_id: &str) -> Result<(), String> {
+    let transaction = connection.transaction().map_err(|e| e.to_string())?;
+    let pages = {
+        let mut statement = transaction
+            .prepare("SELECT path, body FROM indexed_pages WHERE space_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let rows = statement
+            .query_map([space_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    };
+    transaction
+        .execute("DELETE FROM page_links WHERE space_id = ?1", [space_id])
+        .map_err(|e| e.to_string())?;
+    for (source_path, body) in pages {
+        for target in extract_links(&body, &source_path) {
+            transaction
+                .execute(
+                    "INSERT INTO page_links (space_id, source_path, target)
+                     VALUES (?1, ?2, ?3)",
+                    params![space_id, source_path, target],
+                )
+                .map_err(|e| e.to_string())?;
+        }
     }
     transaction.commit().map_err(|e| e.to_string())
 }
@@ -271,7 +412,9 @@ pub fn backlinks(
     space_id: &str,
     target_path: &str,
 ) -> Result<Vec<SearchHit>, String> {
-    let target = normalize_link_target(target_path);
+    let Some(target) = resolve_wikilink_target(target_path) else {
+        return Ok(Vec::new());
+    };
     let mut statement = connection
         .prepare(
             "SELECT page.path, page.title, page.body
@@ -305,6 +448,59 @@ pub fn backlinks(
             && !hit.path.ends_with("/log.md")
     });
     Ok(results)
+}
+
+pub fn broken_links(
+    connection: &Connection,
+    space_id: &str,
+    root: &Path,
+) -> Result<Vec<BrokenLink>, String> {
+    let live_targets = live_space_targets(root)?;
+    let mut statement = connection
+        .prepare(
+            "SELECT link.source_path, page.title, link.target
+             FROM page_links AS link
+             JOIN indexed_pages AS page
+               ON page.space_id = link.space_id AND page.path = link.source_path
+             WHERE link.space_id = ?1
+             ORDER BY link.source_path, link.target",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map([space_id], |row| {
+            Ok(BrokenLink {
+                source_path: row.get(0)?,
+                source_title: row.get(1)?,
+                target: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let results = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|link| {
+            is_diagnostic_source(&link.source_path)
+                && is_diagnostic_target(&link.target)
+                && !live_targets.contains(&link.target)
+        })
+        .collect();
+    Ok(results)
+}
+
+fn live_space_targets(root: &Path) -> Result<HashSet<String>, String> {
+    let mut targets = HashSet::new();
+    for entry in walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| should_walk(entry.path(), root))
+    {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if entry.path() != root {
+            targets.insert(relative_path(root, entry.path())?);
+        }
+    }
+    Ok(targets)
 }
 
 pub fn page_count(connection: &Connection, space_id: &str) -> Result<usize, String> {
@@ -344,7 +540,9 @@ fn should_walk(path: &Path, root: &Path) -> bool {
         .map(|component| component.as_os_str().to_string_lossy())
         .collect::<Vec<_>>();
     if parts.first().is_some_and(|part| part == ".cowiki") {
-        return parts.len() == 1 || parts.get(1).is_some_and(|part| part == "sources");
+        return parts.len() == 1
+            || (parts.get(1).is_some_and(|part| part == "sources")
+                && parts[2..].iter().all(|part| !part.starts_with('.')));
     }
     parts.iter().all(|part| !part.starts_with('.'))
 }
@@ -378,47 +576,134 @@ fn fts_query(query: &str) -> String {
 
 fn extract_links(body: &str, source_path: &str) -> Vec<String> {
     let mut links = Vec::new();
-    let mut rest = body;
-    while let Some(start) = rest.find("[[") {
-        rest = &rest[start + 2..];
-        let Some(end) = rest.find("]]") else { break };
-        let raw = &rest[..end];
-        let target = raw
-            .split('|')
-            .next()
-            .unwrap_or_default()
-            .split('#')
-            .next()
-            .unwrap_or_default();
-        let normalized = normalize_link_target(target);
-        if !normalized.is_empty() && !links.contains(&normalized) {
-            links.push(normalized);
+    let excluded = code_ranges(body);
+    let wikilinks = extract_wikilinks(body, &excluded);
+    for (_, target) in &wikilinks {
+        if !links.contains(target) {
+            links.push(target.clone());
         }
-        rest = &rest[end + 2..];
     }
-    for event in Parser::new_ext(body, Options::all()) {
-        if let Event::Start(Tag::Link { dest_url, .. }) = event {
-            if let Some(target) = resolve_markdown_target(source_path, dest_url.as_ref()) {
-                if !links.contains(&target) {
-                    links.push(target);
+
+    let mut code_block_depth = 0;
+    for (event, range) in Parser::new_ext(body, Options::all()).into_offset_iter() {
+        match event {
+            Event::Start(Tag::CodeBlock(_)) => code_block_depth += 1,
+            Event::End(TagEnd::CodeBlock) => code_block_depth -= 1,
+            Event::Start(Tag::Link { dest_url, .. })
+                if code_block_depth == 0
+                    && !wikilinks
+                        .iter()
+                        .any(|(wikilink, _)| ranges_overlap(wikilink, &range)) =>
+            {
+                if let Some(target) = resolve_markdown_target(source_path, dest_url.as_ref()) {
+                    if !links.contains(&target) {
+                        links.push(target);
+                    }
                 }
             }
+            _ => {}
         }
     }
     links
 }
 
-fn resolve_markdown_target(source_path: &str, target: &str) -> Option<String> {
-    let target = target.split(['#', '?']).next()?.trim();
-    let target = percent_decode_str(target).decode_utf8().ok()?;
-    let target = target.as_ref();
+fn code_ranges(body: &str) -> Vec<Range<usize>> {
+    let mut ranges = Vec::new();
+    let mut code_block_depth = 0;
+    for (event, range) in Parser::new_ext(body, Options::all()).into_offset_iter() {
+        match event {
+            Event::Start(Tag::CodeBlock(_)) => {
+                code_block_depth += 1;
+                ranges.push(range);
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                ranges.push(range);
+                code_block_depth -= 1;
+            }
+            Event::Code(_) => ranges.push(range),
+            _ if code_block_depth > 0 => ranges.push(range),
+            _ => {}
+        }
+    }
+    ranges
+}
+
+fn ranges_overlap(left: &Range<usize>, right: &Range<usize>) -> bool {
+    left.start < right.end && right.start < left.end
+}
+
+fn extract_wikilinks(text: &str, excluded: &[Range<usize>]) -> Vec<(Range<usize>, String)> {
+    let mut links = Vec::new();
+    let mut cursor = 0;
+    while let Some(relative_start) = text[cursor..].find("[[") {
+        let start = cursor + relative_start;
+        let content_start = start + 2;
+        let Some(relative_end) = text[content_start..].find("]]") else {
+            break;
+        };
+        let content_end = content_start + relative_end;
+        let span = start..content_end + 2;
+        let raw = &text[content_start..content_end];
+        if !raw.contains('\n') && !excluded.iter().any(|range| ranges_overlap(&span, range)) {
+            let raw_target = raw.split('|').next().unwrap_or_default();
+            if let Some(target) = resolve_wikilink_target(raw_target) {
+                links.push((span.clone(), target));
+            }
+        }
+        cursor = span.end;
+    }
+    links
+}
+
+fn local_link_target(target: &str) -> Option<&str> {
+    let target = target.trim();
     if target.is_empty()
-        || target.starts_with('#')
-        || target.contains("://")
-        || target.starts_with("mailto:")
+        || target.starts_with(['#', '?'])
+        || target.starts_with("//")
+        || has_uri_scheme(target)
     {
         return None;
     }
+    target
+        .split(['#', '?'])
+        .next()
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
+}
+
+fn has_uri_scheme(target: &str) -> bool {
+    let Some((scheme, _)) = target.split_once(':') else {
+        return false;
+    };
+    !scheme.is_empty()
+        && scheme.chars().enumerate().all(|(index, character)| {
+            if index == 0 {
+                character.is_ascii_alphabetic()
+            } else {
+                character.is_ascii_alphanumeric() || matches!(character, '+' | '-' | '.')
+            }
+        })
+}
+
+fn is_diagnostic_source(path: &str) -> bool {
+    !path.split('/').any(|component| component.starts_with('.'))
+        && !matches!(path.rsplit('/').next(), Some("index.md" | "log.md"))
+}
+
+fn is_diagnostic_target(target: &str) -> bool {
+    let parts = target.split('/').collect::<Vec<_>>();
+    if parts.first() == Some(&".cowiki") {
+        return parts.get(1) == Some(&"sources")
+            && parts.len() > 2
+            && parts[2..].iter().all(|part| !part.starts_with('.'));
+    }
+    parts.iter().all(|part| !part.starts_with('.'))
+}
+
+fn resolve_markdown_target(source_path: &str, target: &str) -> Option<String> {
+    let target = local_link_target(target)?;
+    let target = percent_decode_str(target).decode_utf8().ok()?;
+    let target = target.as_ref();
     let joined = if target.starts_with('/') {
         target.trim_start_matches('/').to_string()
     } else {
@@ -442,22 +727,33 @@ fn resolve_markdown_target(source_path: &str, target: &str) -> Option<String> {
             component => components.push(component),
         }
     }
-    Some(normalize_link_target(&components.join("/")))
+    Some(components.join("/"))
 }
 
-fn normalize_link_target(target: &str) -> String {
-    let cleaned = target
-        .trim()
-        .trim_start_matches("./")
-        .trim_start_matches('/')
-        .strip_suffix(".md")
-        .unwrap_or_else(|| {
-            target
-                .trim()
-                .trim_start_matches("./")
-                .trim_start_matches('/')
-        });
-    cleaned.to_string()
+fn resolve_wikilink_target(target: &str) -> Option<String> {
+    let target = local_link_target(target)?;
+    let target = percent_decode_str(target).decode_utf8().ok()?;
+    let mut components = Vec::new();
+    for component in target.trim_start_matches('/').split('/') {
+        match component {
+            "" | "." => {}
+            ".." => {
+                components.pop()?;
+            }
+            component => components.push(component),
+        }
+    }
+    let mut normalized = components.join("/");
+    if normalized.is_empty() {
+        return None;
+    }
+    if !normalized
+        .rsplit_once('.')
+        .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("md"))
+    {
+        normalized.push_str(".md");
+    }
+    Some(normalized)
 }
 
 fn first_content_line(body: &str) -> String {

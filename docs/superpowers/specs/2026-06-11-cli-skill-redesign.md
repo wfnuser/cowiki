@@ -1,5 +1,9 @@
 # cowiki CLI Rewrite & Agent-First SKILL.md Redesign
 
+> **Historical document — superseded.** The standalone CLI and its API-key
+> workflow were retired by issue #74. Current guidance lives in the
+> [`cowiki-space` skill](../../../skills/cowiki-space/SKILL.md).
+
 **Date:** 2026-06-11  
 **Issue:** [#74](https://github.com/wfnuser/cowiki/issues/74)  
 **Status:** design complete

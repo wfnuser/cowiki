@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Compass,
-  Upload,
   Pencil, FolderOpen, PanelLeft, Bot, HardDrive, FolderInput, Cloud, UserPlus, ChevronLeft,
 } from 'lucide-react';
 import {
@@ -19,29 +18,49 @@ import {
   deleteWorkspace,
   listPublicWorkspaces, joinWorkspace,
   listSources, getSource, listReviews, renamePath, deletePath,
+  getLocalWorkingDiff, listLocalAgentChanges,
   type Workspace, type PageMeta, type PageFull, type SourceItem, type SourceContent,
+  type AgentChange, type FileDiff,
 } from '../api';
 import { AddSourceDialog } from '@/components/AddSourceDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { getCurrentAuth, clearAuth, isRemoteAuth, hasAuth } from '../auth';
 import { SpaceRail } from '../components/layout/SpaceRail';
 import { SpacePanel, type NavTab } from '../components/layout/SpacePanel';
+import {
+  ContentBreadcrumb,
+  ContentHeader,
+  ContentHeaderActions,
+} from '../components/layout/ContentHeader';
+import { VersionSwitcher, type VersionSelection } from '../components/layout/VersionSwitcher';
 type CreateSpaceMode = 'choose' | 'local' | 'import';
 import { ReviewList } from '../components/review/ReviewList';
 import { ReviewDetail } from '../components/review/ReviewDetail';
+import { LocalReviewDetail } from '../components/review/LocalReviewDetail';
+import {
+  parseReviewRoute,
+  reviewRoute,
+  type ReviewTarget,
+} from '../components/review/review-navigation';
 import { MembersView } from '../components/views/MembersView';
 import { HistoryView } from '../components/views/HistoryView';
+import { LinksView } from '../components/views/LinksView';
 import { InviteDialog } from '../components/InviteDialog';
 import { PageEditor, type PageEditorHandle } from '../components/PageEditor';
-import { PageByline } from '../components/PageByline';
+import { PageReader } from '../components/PageReader';
 import { TransferDialog } from '../components/TransferDialog';
 import { NotificationsPage } from '../components/notifications/NotificationsPage';
 import { notificationUnreadCount } from '../api';
 import { CommentsProvider, CommentsPanel, CommentsHeaderToggle, commentMarkdownComponents } from '../components/PageCommentsLayer';
 import { C } from '@/lib/design';
-import { isDesktopClient } from '@/runtime';
+import { apiOrigin, isDesktopClient } from '@/runtime';
+import { normalizeCloudSession } from '@/cloud/session';
+import { CloudSpaceDialog } from '@/components/cloud/CloudSpaceDialog';
 import { chooseLocalSpaceDirectory, localSpaceIdentityFromPath } from '@/local-space';
-import { AgentTerminalPanel } from '@/components/terminal/AgentTerminalPanel';
+import {
+  AgentTerminalPanel,
+  type AgentPanelOpenRequest,
+} from '@/components/terminal/AgentTerminalPanel';
 import {
   conceptIdFromPath,
   conceptPath,
@@ -60,16 +79,42 @@ import {
   saveClientSettings,
   type DefaultAgent,
 } from '@/lib/client-settings';
+import { splitSystemFrontmatter } from '@/lib/page-frontmatter';
+import { sourceOrganizationTask } from '@/lib/source-ingest';
 
 type ActiveView =
   | { kind: 'page'; slug: string; path?: string; content: PageFull | null }
   | { kind: 'source'; filename: string; content: SourceContent | null }
   | { kind: 'review-list'; workspaceSlug: string }
-  | { kind: 'review-detail'; workspaceSlug: string; submissionId: string }
+  | { kind: 'review-detail'; workspaceSlug: string; target: ReviewTarget }
   | { kind: 'members'; workspaceSlug: string }
   | { kind: 'history'; workspaceSlug: string }
+  | { kind: 'links'; workspaceSlug: string }
   | { kind: 'notifications' }
   | null;
+
+function isPersonalSpace(ws: Workspace): boolean {
+  return ws.visibility === 'private' && ws.role === 'owner';
+}
+
+/** Merge main and draft recursively by stable bundle-relative path. */
+function mergePageTrees(main: PageMeta[], draft: PageMeta[]): PageMeta[] {
+  const merged: PageMeta[] = [...main];
+  const pathToIndex = new Map(merged.map((p, i) => [p.path, i] as const));
+  for (const draftPage of draft) {
+    const index = pathToIndex.get(draftPage.path);
+    if (index === undefined) {
+      pathToIndex.set(draftPage.path, merged.length);
+      merged.push(draftPage);
+    } else if (merged[index].kind === 'folder' && draftPage.kind === 'folder') {
+      merged[index] = {
+        ...merged[index],
+        children: mergePageTrees(merged[index].children || [], draftPage.children || []),
+      };
+    }
+  }
+  return merged;
+}
 
 export function MainLayout() {
   const [auth, setAuth] = useState(() => getCurrentAuth());
@@ -97,10 +142,14 @@ export function MainLayout() {
   const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<NavTab>('wiki');
   const [reviewCount, setReviewCount] = useState(0);
+  const [versionSelection, setVersionSelection] = useState<VersionSelection>({ kind: 'working' });
+  const [openAgentChanges, setOpenAgentChanges] = useState<AgentChange[]>([]);
+  const [workingDiffs, setWorkingDiffs] = useState<FileDiff[]>([]);
   const [sidebarLayout, setSidebarLayout] = useState(() => loadSidebarLayout(window.localStorage));
   const [resizingSidebar, setResizingSidebar] = useState(false);
   const sidebarResizeStart = useRef({ pointerX: 0, width: sidebarLayout.width });
   const [agentPanelOpen, setAgentPanelOpen] = useState(false);
+  const [agentOpenRequest, setAgentOpenRequest] = useState<AgentPanelOpenRequest | null>(null);
   const [clientSettings, setClientSettings] = useState(() => (
     loadClientSettings(window.localStorage)
   ));
@@ -202,6 +251,7 @@ export function MainLayout() {
     return () => clearTimeout(t);
   }, [message]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [cloudDialogOpen, setCloudDialogOpen] = useState(false);
   const [editingPage, setEditingPage] = useState(false);
   // Tree path ops (rename/delete of pages & folders on the draft branch)
   const [pathOp, setPathOp] = useState<
@@ -216,6 +266,65 @@ export function MainLayout() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<Workspace | null>(null);
 
   const userBranch = `user/${auth?.id}`;
+  const cloudSession = useMemo(() => {
+    if (!isRemoteAuth(auth) || !auth?.api_key) return null;
+    try {
+      return normalizeCloudSession({
+        baseUrl: apiOrigin(),
+        apiKey: auth.api_key,
+        userId: auth.id,
+        userName: auth.name,
+      });
+    } catch {
+      return null;
+    }
+  }, [auth]);
+
+  // Load pages for a space.
+  const loadSpacePages = useCallback(async (ws: Workspace) => {
+    if (ws.visibility === 'private') {
+      const pages = visiblePageTree(await listPages(userBranch, ws.slug, 'all'));
+      setSpacePages((previous) => ({ ...previous, [ws.id]: pages }));
+      return;
+    }
+    const [mainPages, draftPages] = await Promise.all([
+      listPages('main', ws.slug, 'all'),
+      listPages(userBranch, ws.slug, 'all').catch(() => [] as PageMeta[]),
+    ]);
+    const merged = visiblePageTree(mergePageTrees(mainPages, draftPages));
+    setSpacePages((previous) => ({ ...previous, [ws.id]: merged }));
+  }, [userBranch]);
+
+  // Load sources for a space.
+  const loadSpaceSources = useCallback(async (ws: Workspace) => {
+    try {
+      if (ws.visibility === 'private') {
+        const [userSources, mainSources] = await Promise.all([
+          listSources(ws.slug, userBranch).catch(() => [] as SourceItem[]),
+          listSources(ws.slug, 'main').catch(() => [] as SourceItem[]),
+        ]);
+        const userNames = new Set(userSources.map((source) => source.filename));
+        const merged = [
+          ...userSources,
+          ...mainSources.filter((source) => !userNames.has(source.filename)),
+        ];
+        setSpaceSources((previous) => ({ ...previous, [ws.id]: merged }));
+        return;
+      }
+      const [mainSources, draftSources] = await Promise.all([
+        listSources(ws.slug, 'main'),
+        listSources(ws.slug, userBranch).catch(() => [] as SourceItem[]),
+      ]);
+      const mainNames = new Set(mainSources.map((source) => source.filename));
+      const merged = [
+        ...mainSources,
+        ...draftSources.filter((source) => !mainNames.has(source.filename)),
+      ];
+      setSpaceSources((previous) => ({ ...previous, [ws.id]: merged }));
+    } catch {
+      setSpaceSources((previous) => ({ ...previous, [ws.id]: [] }));
+    }
+  }, [userBranch]);
 
   // Load workspaces + restore state from URL
   const loadWorkspaces = useCallback(async () => {
@@ -232,6 +341,21 @@ export function MainLayout() {
     const ws = await listWorkspaces();
     setWorkspaces(ws);
     setWorkspacesLoaded(true);
+
+    const reviewLocation = parseReviewRoute(location.pathname, ws.map((workspace) => workspace.slug));
+    if (reviewLocation) {
+      const targetWs = ws.find((workspace) => workspace.slug === reviewLocation.workspaceSlug);
+      if (targetWs) {
+        setActiveWorkspace(targetWs);
+        setActiveTab('reviews');
+        setActiveView(reviewLocation.target
+          ? { kind: 'review-detail', workspaceSlug: targetWs.slug, target: reviewLocation.target }
+          : { kind: 'review-list', workspaceSlug: targetWs.slug });
+        await loadSpacePages(targetWs);
+        await loadSpaceSources(targetWs);
+        return;
+      }
+    }
 
     // Auto-expand personal space and load its pages
     const personal = ws.find((w) => w.visibility === 'private' && w.role === 'owner');
@@ -250,12 +374,8 @@ export function MainLayout() {
       const targetWs = ws.find((w) => w.slug === decodeURIComponent(wsSlug));
       if (targetWs && !isReservedDocument(conceptPath(conceptId))) {
         setActiveWorkspace(targetWs);
-        if (!spacePages[targetWs.id]) {
-          await loadSpacePages(targetWs);
-        }
-        if (!spaceSources[targetWs.id]) {
-          await loadSpaceSources(targetWs);
-        }
+        await loadSpacePages(targetWs);
+        await loadSpaceSources(targetWs);
         const branch = targetWs.visibility === 'private' ? userBranch : 'main';
         try {
           const page = await getPage(conceptId, branch, targetWs.slug, 'wiki');
@@ -280,7 +400,7 @@ export function MainLayout() {
         }
       }
     }
-  }, [auth?.id, desktop]);
+  }, [auth, desktop, loadSpacePages, loadSpaceSources, location.pathname, navigate, userBranch]);
 
   useEffect(() => {
     if (!auth) return;
@@ -300,79 +420,41 @@ export function MainLayout() {
       .then((s) => !cancelled && setReviewCount(s.filter((r) => r.status === 'pending').length))
       .catch(() => !cancelled && setReviewCount(0));
     return () => { cancelled = true; };
-  }, [activeWorkspace, reviewRefreshKey]);
+  }, [activeWorkspace, desktop, reviewRefreshKey]);
 
-  function isPersonalSpace(ws: Workspace): boolean {
-    return ws.visibility === 'private' && ws.role === 'owner';
-  }
-
-  /** Merge main and draft recursively by stable bundle-relative path. */
-  function mergePageTrees(main: PageMeta[], draft: PageMeta[]): PageMeta[] {
-    const merged: PageMeta[] = [...main];
-    const pathToIndex = new Map(merged.map((p, i) => [p.path, i] as const));
-    for (const dp of draft) {
-      const idx = pathToIndex.get(dp.path);
-      if (idx === undefined) {
-        // Draft-only node — add to merged
-        pathToIndex.set(dp.path, merged.length);
-        merged.push(dp);
-      } else if (merged[idx].kind === 'folder' && dp.kind === 'folder') {
-        // Both are folders — recursively merge their children
-        merged[idx] = {
-          ...merged[idx],
-          children: mergePageTrees(merged[idx].children || [], dp.children || []),
-        };
-      }
-      // else: main has a page at this path — main wins, skip draft
+  // The desktop version switcher is a local Git view: Working, HEAD
+  // (Upstream), and currently-open isolated Agent Changes only.
+  useEffect(() => {
+    if (!desktop || !activeWorkspace?.localPath) {
+      const task = window.setTimeout(() => {
+        setOpenAgentChanges([]);
+        setWorkingDiffs([]);
+        setVersionSelection({ kind: 'working' });
+      }, 0);
+      return () => window.clearTimeout(task);
     }
-    return merged;
-  }
-
-  // Load pages for a space
-  const loadSpacePages = async (ws: Workspace) => {
-    if (ws.visibility === 'private') {
-      const pages = visiblePageTree(await listPages(userBranch, ws.slug, 'all'));
-      setSpacePages((prev) => ({ ...prev, [ws.id]: pages }));
-    } else {
-      const [mainPages, draftPages] = await Promise.all([
-        listPages('main', ws.slug, 'all'),
-        listPages(userBranch, ws.slug, 'all').catch(() => [] as PageMeta[]),
-      ]);
-      const merged = visiblePageTree(mergePageTrees(mainPages, draftPages));
-      setSpacePages((prev) => ({ ...prev, [ws.id]: merged }));
-    }
-  };
-
-  // Load sources for a space
-  const loadSpaceSources = async (ws: Workspace) => {
-    try {
-      if (ws.visibility === 'private') {
-        const [userSources, mainSources] = await Promise.all([
-          listSources(ws.slug, userBranch).catch(() => [] as SourceItem[]),
-          listSources(ws.slug, 'main').catch(() => [] as SourceItem[]),
-        ]);
-        const userNames = new Set(userSources.map((s) => s.filename));
-        const merged = [
-          ...userSources,
-          ...mainSources.filter((s) => !userNames.has(s.filename)),
-        ];
-        setSpaceSources((prev) => ({ ...prev, [ws.id]: merged }));
-      } else {
-        const [mainSources, draftSources] = await Promise.all([
-          listSources(ws.slug, 'main'),
-          listSources(ws.slug, userBranch).catch(() => [] as SourceItem[]),
-        ]);
-        const mainNames = new Set(mainSources.map((s) => s.filename));
-        const merged = [
-          ...mainSources,
-          ...draftSources.filter((s) => !mainNames.has(s.filename)),
-        ];
-        setSpaceSources((prev) => ({ ...prev, [ws.id]: merged }));
-      }
-    } catch {
-      setSpaceSources((prev) => ({ ...prev, [ws.id]: [] }));
-    }
-  };
+    let cancelled = false;
+    Promise.all([
+      listLocalAgentChanges(activeWorkspace.slug),
+      getLocalWorkingDiff(activeWorkspace.slug),
+    ]).then(([changes, diffs]) => {
+      if (cancelled) return;
+      const openChanges = changes.filter((change) => change.status === 'open');
+      setOpenAgentChanges(openChanges);
+      setWorkingDiffs(diffs);
+      setVersionSelection((current) => (
+        current.kind === 'agent' && !openChanges.some((change) => change.id === current.changeId)
+          ? { kind: 'working' }
+          : current
+      ));
+    }).catch(() => {
+      if (cancelled) return;
+      setOpenAgentChanges([]);
+      setWorkingDiffs([]);
+      setVersionSelection({ kind: 'working' });
+    });
+    return () => { cancelled = true; };
+  }, [activeWorkspace?.localPath, activeWorkspace?.slug, desktop, reviewRefreshKey]);
 
   // Select a source file
   const selectSource = async (ws: Workspace, filename: string) => {
@@ -574,7 +656,7 @@ export function MainLayout() {
       }
       case 'reviews':
         setActiveView({ kind: 'review-list', workspaceSlug: activeWorkspace.slug });
-        navigate(`/${owner}/${activeWorkspace.slug}/reviews`);
+        navigate(reviewRoute(owner, activeWorkspace.slug));
         break;
       case 'members':
         setActiveView({ kind: 'members', workspaceSlug: activeWorkspace.slug });
@@ -584,19 +666,22 @@ export function MainLayout() {
         setActiveView({ kind: 'history', workspaceSlug: activeWorkspace.slug });
         navigate(`/${owner}/${activeWorkspace.slug}/history`);
         break;
+      case 'links':
+        setActiveView({ kind: 'links', workspaceSlug: activeWorkspace.slug });
+        navigate('/', { replace: true });
+        break;
     }
   };
 
-  const openReviewDetail = (submissionId: string) => {
+  const openReviewDetail = (target: ReviewTarget) => {
     if (!activeWorkspace) return;
     const owner = auth?.name || 'user';
-    setActiveView({ kind: 'review-detail', workspaceSlug: activeWorkspace.slug, submissionId });
-    navigate(`/${owner}/${activeWorkspace.slug}/reviews/${submissionId}`);
+    setActiveView({ kind: 'review-detail', workspaceSlug: activeWorkspace.slug, target });
+    navigate(reviewRoute(owner, activeWorkspace.slug, target));
   };
 
-  // Handle ingest completion
-  const handleIngestDone = () => {
-    setShowIngest(false);
+  // Deterministic local import finishes before optional Agent organization.
+  const handleSourcesImported = () => {
     if (activeWorkspace) {
       loadSpacePages(activeWorkspace);
       loadSpaceSources(activeWorkspace);
@@ -730,13 +815,16 @@ export function MainLayout() {
     } catch { /* keep the stale view */ }
   };
 
+  const editingPageSlug = activeView?.kind === 'page' ? activeView.slug : null;
+  const editingPagePath = activeView?.kind === 'page' ? activeView.path ?? '' : '';
+
   // Like VS Code, keep a clean open document in step with Agent/terminal file
   // writes. Dirty human text is never replaced: the checked-save path then
   // keeps both versions and asks the user to review the external change.
   useEffect(() => {
-    if (!desktop || !editingPage || !activeWorkspace || activeView?.kind !== 'page') return;
+    if (!desktop || !editingPage || !activeWorkspace || !editingPageSlug) return;
     const workspace = activeWorkspace;
-    const slug = activeView.slug;
+    const slug = editingPageSlug;
     let checking = false;
     const timer = window.setInterval(() => {
       if (checking) return;
@@ -763,7 +851,7 @@ export function MainLayout() {
         .finally(() => { checking = false; });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [activeView?.kind, activeView?.kind === 'page' ? activeView.slug : '', activeView?.kind === 'page' ? activeView.path : '', activeWorkspace, desktop, editingPage, userBranch]);
+  }, [activeWorkspace, desktop, editingPage, editingPagePath, editingPageSlug, userBranch]);
 
   // Full Concept IDs prevent ambiguous [[overview]] suggestions when two
   // folders contain the same filename.
@@ -776,6 +864,33 @@ export function MainLayout() {
   // Determine active page/source for panel highlight
   const currentActivePage = activeView?.kind === 'page' ? activeView.slug : null;
   const currentActiveSource = activeView?.kind === 'source' ? activeView.filename : null;
+  const selectedAgentChange = versionSelection.kind === 'agent'
+    ? openAgentChanges.find((change) => change.id === versionSelection.changeId)
+    : undefined;
+  const activePagePath = activeView?.kind === 'page'
+    ? (activeView.path || conceptPath(activeView.slug))
+    : null;
+  const workingPageDiff = activePagePath ? findDiffForPath(workingDiffs, activePagePath) : undefined;
+  const agentPageDiff = activePagePath && selectedAgentChange
+    ? findDiffForPath(selectedAgentChange.diffs, activePagePath)
+    : undefined;
+  const viewedPageBody = activeView?.kind === 'page' && activeView.content
+    ? versionSelection.kind === 'upstream'
+      ? (workingPageDiff?.old_content ?? activeView.content.body)
+      : versionSelection.kind === 'agent'
+        ? (agentPageDiff?.new_content ?? activeView.content.body)
+        : activeView.content.body
+    : '';
+  const viewedPageMissing = versionSelection.kind === 'upstream'
+    ? workingPageDiff?.old_content === null
+    : versionSelection.kind === 'agent'
+      ? agentPageDiff?.new_content === null
+      : false;
+  const readonlyVersionLabel = versionSelection.kind === 'upstream'
+    ? 'Viewing upstream “main”'
+    : versionSelection.kind === 'agent'
+      ? `Viewing ${selectedAgentChange?.title ?? 'Agent Change'} changes`
+      : '';
 
   if (desktop && workspacesLoaded && workspaces.length === 0) {
     return (
@@ -850,6 +965,7 @@ export function MainLayout() {
                 reviewCount={reviewCount}
                 isPersonal={personal}
                 showReviews={desktop || !personal}
+                showLinkDiagnostics={desktop && !!activeWorkspace?.localPath}
                 isOwner={isOwner}
                 onSelectPage={(slug, path) => activeWorkspace && selectPage(activeWorkspace, slug, path)}
                 onSelectSource={(filename) => activeWorkspace && selectSource(activeWorkspace, filename)}
@@ -906,14 +1022,9 @@ export function MainLayout() {
               currentUserId={auth?.id}
             >
             {/* Top bar: breadcrumb + actions */}
-            <div data-tauri-drag-region="deep" style={{
-              position: 'sticky', top: 0, zIndex: 10,
-              background: C.panel, borderBottom: `1px solid ${C.line}`,
-              padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              height: 52, minHeight: 52,
-            }}>
+            <ContentHeader>
               {/* Left: breadcrumb */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: C.muted, minWidth: 0, overflow: 'hidden' }}>
+              <ContentBreadcrumb>
                 {sidebarLayout.collapsed && (
                   <button
                     type="button"
@@ -946,7 +1057,9 @@ export function MainLayout() {
                     <span style={{ color: C.faint }}>/</span>
                     <span style={{ color: C.faint }}>sources</span>
                     <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeView.filename}</span>
+                    <span style={{ color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {activeView.content?.title || activeView.filename}
+                    </span>
                   </>
                 )}
                 {activeView?.kind === 'review-list' && (
@@ -960,7 +1073,13 @@ export function MainLayout() {
                     <span style={{ color: C.faint }}>/</span>
                     <span style={{ color: C.ink }}>Reviews</span>
                     <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>#{activeView.submissionId.slice(0, 6)}</span>
+                    <span style={{ color: C.ink }}>
+                      {activeView.target.kind === 'local-draft'
+                        ? 'Current Draft'
+                        : activeView.target.kind === 'local-agent'
+                          ? `Agent #${activeView.target.changeId.slice(0, 6)}`
+                          : `#${activeView.target.submissionId.slice(0, 6)}`}
+                    </span>
                   </>
                 )}
                 {activeView?.kind === 'members' && (
@@ -975,13 +1094,45 @@ export function MainLayout() {
                     <span style={{ color: C.ink }}>History</span>
                   </>
                 )}
+                {activeView?.kind === 'links' && (
+                  <>
+                    <span style={{ color: C.faint }}>/</span>
+                    <span style={{ color: C.ink }}>Links</span>
+                  </>
+                )}
                 {activeView?.kind === 'notifications' && (
                   <span style={{ color: C.ink }}>Notifications</span>
                 )}
-              </div>
+              </ContentBreadcrumb>
 
               {/* Right: actions */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <ContentHeaderActions>
+
+                {desktop && activeWorkspace?.localPath && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!cloudSession) {
+                        navigate('/login');
+                        return;
+                      }
+                      setCloudDialogOpen(true);
+                    }}
+                    style={headerBtnStyle}
+                    title={cloudSession ? 'Publish, sync, or submit this Space' : 'Publish to Cloud'}
+                  >
+                    <Cloud size={14} /> {cloudSession ? 'Cloud' : 'Publish to Cloud'}
+                  </button>
+                )}
+
+                {desktop && activeWorkspace?.localPath && !editingPage && (
+                  <VersionSwitcher
+                    selection={versionSelection}
+                    agentChanges={openAgentChanges}
+                    onSelect={setVersionSelection}
+                    onSeeReviews={() => handleTabChange('reviews')}
+                  />
+                )}
 
                 {desktop && activeWorkspace?.localPath && (
                   <button
@@ -999,7 +1150,7 @@ export function MainLayout() {
                 )}
 
                 {/* Wiki-specific actions */}
-                {activeTab === 'wiki' && (activeView?.kind === 'page' || activeView?.kind === 'source') && (
+                {versionSelection.kind === 'working' && activeTab === 'wiki' && (activeView?.kind === 'page' || activeView?.kind === 'source') && (
                   <>
                     {activeView?.kind === 'page' && activeView.content && !editingPage && (
                       <button
@@ -1010,20 +1161,13 @@ export function MainLayout() {
                         <Pencil size={13} /> Edit
                       </button>
                     )}
-                    <button
-                      onClick={() => setShowIngest(true)}
-                      style={headerBtnStyle}
-                      title="Add Source"
-                    >
-                      <Upload size={13} /> Add Source
-                    </button>
                     <CommentsHeaderToggle style={{ ...headerBtnStyle, marginLeft: 2 }} />
                   </>
                 )}
 
                 {/* User menu moved to Rail bottom avatar */}
-              </div>
-            </div>
+              </ContentHeaderActions>
+            </ContentHeader>
 
             {/* Message */}
             {message && (
@@ -1043,7 +1187,20 @@ export function MainLayout() {
               branch={userBranch}
               workspaceName={activeWorkspace?.name || ''}
               workspaceSlug={activeWorkspace?.slug || ''}
-              onDone={handleIngestDone}
+              defaultAgent={clientSettings.defaultAgent}
+              onImported={handleSourcesImported}
+              onOrganize={(sources) => {
+                setAgentPanelOpen(true);
+                setAgentOpenRequest({
+                  requestId: crypto.randomUUID(),
+                  kind: 'new-change',
+                  agent: clientSettings.defaultAgent,
+                  title: sources.length === 1
+                    ? `Organize Source: ${sources[0].title || sources[0].filename}`
+                    : `Organize ${sources.length} Sources`,
+                  initialTask: sourceOrganizationTask(sources),
+                });
+              }}
             />
 
             {/* Content */}
@@ -1054,23 +1211,42 @@ export function MainLayout() {
 
               /* Review detail */
               ) : activeView?.kind === 'review-detail' ? (
-                <ReviewDetail
-                  workspaceSlug={activeView.workspaceSlug}
-                  submissionId={activeView.submissionId}
-                  onBack={() => handleTabChange('reviews')}
-                  onActioned={() => setReviewRefreshKey((k) => k + 1)}
-                />
+                activeView.target.kind === 'cloud' ? (
+                  <ReviewDetail
+                    workspaceSlug={activeView.workspaceSlug}
+                    submissionId={activeView.target.submissionId}
+                    onBack={() => handleTabChange('reviews')}
+                    onActioned={() => setReviewRefreshKey((k) => k + 1)}
+                  />
+                ) : (
+                  <LocalReviewDetail
+                    workspaceSlug={activeView.workspaceSlug}
+                    target={activeView.target}
+                    onBack={() => handleTabChange('reviews')}
+                    onDraftChanged={() => {
+                      if (!activeWorkspace || activeWorkspace.slug !== activeView.workspaceSlug) return;
+                      void loadSpacePages(activeWorkspace);
+                      void loadSpaceSources(activeWorkspace);
+                    }}
+                    onReviewsChanged={() => setReviewRefreshKey((key) => key + 1)}
+                    onContinueAgent={(change: AgentChange) => {
+                      setAgentPanelOpen(true);
+                      setAgentOpenRequest({
+                        requestId: crypto.randomUUID(),
+                        kind: 'existing-change',
+                        agent: clientSettings.defaultAgent,
+                        changeId: change.id,
+                        worktreePath: change.worktreePath,
+                      });
+                    }}
+                  />
+                )
 
               /* Review list */
               ) : activeView?.kind === 'review-list' ? (
                 <ReviewList
                   workspaceSlug={activeView.workspaceSlug}
                   onOpen={openReviewDetail}
-                  onLocalDraftChanged={() => {
-                    if (!activeWorkspace || activeWorkspace.slug !== activeView.workspaceSlug) return;
-                    void loadSpacePages(activeWorkspace);
-                    void loadSpaceSources(activeWorkspace);
-                  }}
                   refreshKey={reviewRefreshKey}
                 />
 
@@ -1093,6 +1269,13 @@ export function MainLayout() {
                   local={desktop && !!activeWorkspace.localPath}
                 />
 
+              /* Link diagnostics */
+              ) : activeView?.kind === 'links' && activeWorkspace ? (
+                <LinksView
+                  workspaceSlug={activeWorkspace.slug}
+                  onOpenPage={(path) => selectPage(activeWorkspace, conceptIdFromPath(path), path)}
+                />
+
               /* Source view */
               ) : activeView?.kind === 'source' && activeView.content ? (
                 <div>
@@ -1105,11 +1288,13 @@ export function MainLayout() {
                     </span>
                   </div>
                   <article>
-                    <h1 className="page-title page-title--compact">
-                      {activeView.content.filename}
+                    <h1 className="page-title page-title--compact source-title">
+                      {activeView.content.title || activeView.content.filename}
                     </h1>
-                    <div className="prose">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeView.content.content}</ReactMarkdown>
+                    <div className="prose source-body">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {splitSystemFrontmatter(activeView.content.content).body}
+                      </ReactMarkdown>
                     </div>
                   </article>
                 </div>
@@ -1145,15 +1330,21 @@ export function MainLayout() {
                   // (left-anchored, same left edge as every other view), the comment
                   // panel is flush to the right edge and full height with its own
                   // scroll. Opening it shrinks the doc from the right only.
-                  <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'stretch' }}>
-                    <article ref={articleRef} className="prose" style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '36px 48px 56px 56px' }}>
-                      <PageByline name={activeView.content.edited_by} editedAt={activeView.content.edited_at} />
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={commentMarkdownComponents}>
-                        {renderBody(activeView.content.body)}
-                      </ReactMarkdown>
-                    </article>
-                    <CommentsPanel />
-                  </div>
+                  <PageReader
+                    articleRef={articleRef}
+                    body={renderBody(viewedPageBody)}
+                    markdownComponents={commentMarkdownComponents}
+                    byline={versionSelection.kind === 'working' ? {
+                      name: activeView.content.edited_by,
+                      editedAt: activeView.content.edited_at,
+                    } : undefined}
+                    readOnlyLabel={versionSelection.kind !== 'working' ? readonlyVersionLabel : undefined}
+                    readOnlyDotColor={versionSelection.kind === 'upstream' ? C.purple : C.blue}
+                    missingMessage={viewedPageMissing
+                      ? 'This page does not exist in the selected version.'
+                      : undefined}
+                    aside={<CommentsPanel />}
+                  />
                 )
 
               /* Discover */
@@ -1173,8 +1364,8 @@ export function MainLayout() {
             </CommentsProvider>
           </main>
 
-          {desktop && agentPanelOpen && activeWorkspace?.localPath && (
-            <div style={{
+          {desktop && activeWorkspace?.localPath && (
+            <div hidden={!agentPanelOpen} style={{
               width: agentPanelWidth, minWidth: agentPanelWidth, height: '100vh',
               position: 'relative', flexShrink: 0,
             }}>
@@ -1209,6 +1400,12 @@ export function MainLayout() {
                 spacePath={activeWorkspace.localPath}
                 spaceSlug={activeWorkspace.slug}
                 defaultAgent={clientSettings.defaultAgent}
+                openRequest={agentOpenRequest}
+                onOpenRequestHandled={(requestId) => {
+                  setAgentOpenRequest((current) => (
+                    current?.requestId === requestId ? null : current
+                  ));
+                }}
                 onClose={() => setAgentPanelOpen(false)}
               />
             </div>
@@ -1375,6 +1572,17 @@ export function MainLayout() {
         onDefaultAgentChange={handleDefaultAgentChange}
         onConnectCloud={() => navigate('/login')}
       />
+
+      {cloudSession && (
+        <CloudSpaceDialog
+          open={cloudDialogOpen}
+          onOpenChange={setCloudDialogOpen}
+          space={activeWorkspace ? { name: activeWorkspace.name, slug: activeWorkspace.slug } : null}
+          session={cloudSession}
+          hasLocalChanges={workingDiffs.length > 0}
+          onChanged={() => setReviewRefreshKey((key) => key + 1)}
+        />
+      )}
     </>
   );
 }
@@ -1552,6 +1760,11 @@ const headerBtnStyle: React.CSSProperties = {
   background: 'transparent', color: C.muted, fontSize: 12,
   transition: 'background 0.1s',
 };
+
+function findDiffForPath(diffs: FileDiff[], path: string): FileDiff | undefined {
+  const normalized = path.replace(/^\.\//, '');
+  return diffs.find((diff) => diff.path.replace(/^\.\//, '') === normalized);
+}
 
 function isMissingLocalPageError(error: unknown): boolean {
   const message = String(error).toLowerCase();

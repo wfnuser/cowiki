@@ -5,6 +5,14 @@
 <h1 align="center">CoWiki: An LLM Wiki, but multiplayer.</h1>
 
 <p align="center">
+  <strong>Product philosophy / 产品理念</strong>
+  <br />
+  <a href="https://x.com/weiraolilun/status/2078748340813189471">Read the original thread on X</a>
+  ·
+  <a href="https://www.xiaohongshu.com/explore/6a57ae3100000000070229aa?xsec_token=AB3r79vLLhY9g4EOR2V9GfBSUNgWPYIsJJYs7GQ4DsmaI=&amp;xsec_source=pc_user">阅读小红书原文</a>
+</p>
+
+<p align="center">
   <a href="https://github.com/wfnuser/cowiki/actions/workflows/macos-desktop.yml"><img src="https://img.shields.io/github/actions/workflow/status/wfnuser/cowiki/macos-desktop.yml?branch=dev&label=macOS%20build" alt="macOS build" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-EF5A29" alt="Apache 2.0 license" /></a>
   <a href="docs/okf-v0.1.md"><img src="https://img.shields.io/badge/OKF-v0.1-EF5A29" alt="Open Knowledge Format v0.1" /></a>
@@ -89,7 +97,13 @@ npm run desktop:dev
 Create a Space with an empty local folder, or import an existing folder of
 Markdown files. The desktop app runs as a complete standalone workspace.
 
-The Agent panel checks the selected local CLI before launch and delegates
+Agents launched by the app receive CoWiki's read-only local MCP for retrieval
+and edit the Space's Markdown files directly. The
+[`cowiki-space` skill](skills/cowiki-space/SKILL.md) defines the same contract
+for external Agents; local work never requires a CoWiki account, API key, or
+backend.
+
+Before launch, the Agent panel checks the selected local CLI and delegates
 authentication to that CLI, so CoWiki never reads or stores Agent credentials.
 Choose **Live** to work directly in the Current Draft, or **Background** to run
 in an isolated Agent Change that must be reviewed before it reaches the Draft.
@@ -106,9 +120,6 @@ in an isolated Agent Change that must be reviewed before it reaches the Draft.
 CoWiki is early, and the collaboration model is still an open design problem.
 Issues, product criticism, experiments, and code are welcome. See
 [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
-
-<img width="161" height="247" alt="9f97463e4dec44b4681d4d3ef853448f" src="https://github.com/user-attachments/assets/fa08defd-55f9-4c43-aa13-d17c78a17228" />
-
 
 ## License
 

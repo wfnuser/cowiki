@@ -11,14 +11,12 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { SUPPORTED_AGENTS } from '@/lib/agents';
 import { createLocalAgentChange } from '@/api';
+import { APP_HEADER_HEIGHT } from '@/lib/design';
 import { probeAgent } from '@/local-api';
 
 import {
@@ -34,6 +32,7 @@ import {
   addAgentTab,
   addOrFocusCodexLoginTab,
   closeAgentTab,
+  openOrActivateAgentChangeTab,
   terminalTabLabel,
   type AgentTerminalTab,
   type AgentTerminalTabsState,
@@ -44,16 +43,37 @@ type AgentTerminalPanelProps = {
   spacePath: string;
   spaceSlug: string;
   defaultAgent: AgentKind;
+  openRequest?: AgentPanelOpenRequest | null;
+  onOpenRequestHandled?: (requestId: string) => void;
   onClose?: () => void;
   className?: string;
 };
 
+export type AgentPanelOpenRequest =
+  | {
+    requestId: string;
+    kind: 'new-change';
+    agent: AgentKind;
+    title: string;
+    initialTask?: string;
+  }
+  | {
+    requestId: string;
+    kind: 'existing-change';
+    agent: AgentKind;
+    changeId: string;
+    worktreePath: string;
+  };
+
 let terminalTabSequence = 0;
+
 type OpenAgent = (
   agent: AgentKind,
   mode?: AgentTerminalMode,
+  title?: string,
+  initialTask?: string,
   intent?: AgentTerminalIntent,
-) => void;
+) => Promise<void>;
 
 function nextTerminalTabId(agent: AgentKind): string {
   terminalTabSequence += 1;
@@ -64,6 +84,8 @@ export function AgentTerminalPanel({
   spacePath,
   spaceSlug,
   defaultAgent,
+  openRequest,
+  onOpenRequestHandled,
   onClose,
   className,
 }: AgentTerminalPanelProps) {
@@ -72,27 +94,26 @@ export function AgentTerminalPanel({
     tabs: [],
   });
   const [launchError, setLaunchError] = useState<string | null>(null);
+  const handledOpenRequestRef = useRef<string | null>(null);
 
-  const openCodexLogin = () => {
-    setTabState((state) => addOrFocusCodexLoginTab(state, nextTerminalTabId('codex')));
-  };
-
-  const openAgent = async (
+  const openAgent = useCallback(async (
     agent: AgentKind,
     mode: AgentTerminalMode = 'live',
+    title?: string,
+    initialTask?: string,
     intent: AgentTerminalIntent = 'run',
   ) => {
     setLaunchError(null);
     try {
       if (intent === 'login') {
         if (agent !== 'codex') throw new Error('Only Codex supports Agent sign-in');
-        openCodexLogin();
+        setTabState((state) => addOrFocusCodexLoginTab(state, nextTerminalTabId('codex')));
         return;
       }
       const readiness = await probeAgent(agent);
       const readinessAction = agentReadinessAction(agent, readiness.status);
       if (readinessAction === 'login') {
-        openCodexLogin();
+        setTabState((state) => addOrFocusCodexLoginTab(state, nextTerminalTabId('codex')));
         return;
       }
       if (readinessAction === 'blocked') {
@@ -106,18 +127,47 @@ export function AgentTerminalPanel({
         setTabState((state) => addAgentTab(state, agent, nextTerminalTabId(agent), mode));
         return;
       }
-      const change = await createLocalAgentChange(spaceSlug, agentDisplayName(agent));
+      const change = await createLocalAgentChange(spaceSlug, title || agentDisplayName(agent));
       setTabState((state) => addAgentTab(
         state,
         agent,
         nextTerminalTabId(agent),
         mode,
-        { changeId: change.id, worktreePath: change.worktreePath },
+        { changeId: change.id, worktreePath: change.worktreePath, initialTask },
       ));
     } catch (cause) {
       setLaunchError(cause instanceof Error ? cause.message : String(cause));
     }
-  };
+  }, [spaceSlug]);
+
+  useEffect(() => {
+    if (!openRequest) return;
+    if (handledOpenRequestRef.current === openRequest.requestId) return;
+    if (openRequest.kind === 'existing-change') {
+      const task = window.setTimeout(() => {
+        if (handledOpenRequestRef.current === openRequest.requestId) return;
+        handledOpenRequestRef.current = openRequest.requestId;
+        setTabState((state) => openOrActivateAgentChangeTab(
+          state,
+          openRequest.agent,
+          nextTerminalTabId(openRequest.agent),
+          {
+            changeId: openRequest.changeId,
+            worktreePath: openRequest.worktreePath,
+          },
+        ));
+        onOpenRequestHandled?.(openRequest.requestId);
+      }, 0);
+      return () => window.clearTimeout(task);
+    }
+    const task = window.setTimeout(() => {
+      if (handledOpenRequestRef.current === openRequest.requestId) return;
+      handledOpenRequestRef.current = openRequest.requestId;
+      void openAgent(openRequest.agent, 'background', openRequest.title, openRequest.initialTask)
+        .finally(() => onOpenRequestHandled?.(openRequest.requestId));
+    }, 0);
+    return () => window.clearTimeout(task);
+  }, [onOpenRequestHandled, openAgent, openRequest]);
 
   const closeTab = (tabId: string) => {
     setTabState((state) => closeAgentTab(state, tabId));
@@ -125,15 +175,18 @@ export function AgentTerminalPanel({
 
   return (
     <aside className={cn('flex h-full min-w-0 flex-col border-l border-border bg-[#faf9f7]', className)}>
-      <header className="flex h-11 shrink-0 items-end border-b border-border bg-[#f5f4f1] pl-1.5 pr-1">
-        <div className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto">
+      <header
+        className="flex shrink-0 items-center border-b border-border bg-[#f5f4f1] pl-1.5 pr-1"
+        style={{ height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT }}
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
           {tabState.tabs.map((tab) => {
             const active = tab.id === tabState.activeTabId;
             return (
               <div
                 key={tab.id}
                 className={cn(
-                  'group flex h-9 min-w-0 max-w-40 shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-2 text-xs',
+                  'group flex h-9 min-w-0 max-w-40 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs',
                   active
                     ? 'border-border bg-[#1d1c1a] text-white'
                     : 'border-transparent text-text-tertiary hover:bg-white/65 hover:text-text',
@@ -168,7 +221,7 @@ export function AgentTerminalPanel({
             type="button"
             variant="ghost"
             size="icon-xs"
-            className="mb-1.5 ml-1 text-text-tertiary"
+            className="ml-1 text-text-tertiary"
             aria-label="Collapse agent panel"
             onClick={onClose}
           >
@@ -184,7 +237,7 @@ export function AgentTerminalPanel({
           </div>
         )}
         {tabState.tabs.length === 0 ? (
-          <AgentLaunchPage key={defaultAgent} defaultAgent={defaultAgent} onOpenAgent={openAgent} />
+          <AgentLaunchPage defaultAgent={defaultAgent} onOpenAgent={openAgent} />
         ) : (
           tabState.tabs.map((tab) => (
             <AgentTerminalInstance
@@ -286,14 +339,14 @@ function AgentLaunchPage({
         checking={checking}
         readiness={readiness}
         onRefresh={refreshReadiness}
-        onSignIn={() => onOpenAgent(selectedAgent, 'live', 'login')}
+        onSignIn={() => void onOpenAgent(selectedAgent, 'live', undefined, undefined, 'login')}
       />
       {ready && (
         <ExecutionModeControl
           agent={selectedAgent}
           mode={selectedMode}
           onModeChange={setSelectedMode}
-          onStart={() => onOpenAgent(selectedAgent, selectedMode)}
+          onStart={() => void onOpenAgent(selectedAgent, selectedMode)}
         />
       )}
     </div>
@@ -441,50 +494,29 @@ function ExecutionModeControl({
 
   return (
     <div className="mt-3 w-full max-w-72 text-left">
-      <div
-        className="grid grid-cols-2 rounded-lg border border-border bg-[#efeeeb] p-1"
-        role="group"
-        aria-label="Agent execution mode"
-      >
+      <div className="grid grid-cols-2 rounded-lg border border-border bg-[#efeeeb] p-1" role="group" aria-label="Agent execution mode">
         <button
           type="button"
           aria-pressed={!background}
-          className={cn(
-            'flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors',
-            !background
-              ? 'bg-white text-text shadow-sm'
-              : 'text-text-tertiary hover:text-text',
-          )}
+          className={cn('flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors', !background ? 'bg-white text-text shadow-sm' : 'text-text-tertiary hover:text-text')}
           onClick={() => onModeChange('live')}
         >
-          <SquareTerminal className="size-3.5" />
-          Live
+          <SquareTerminal className="size-3.5" /> Live
         </button>
         <button
           type="button"
           aria-pressed={background}
-          className={cn(
-            'flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors',
-            background
-              ? 'bg-white text-text shadow-sm'
-              : 'text-text-tertiary hover:text-text',
-          )}
+          className={cn('flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors', background ? 'bg-white text-text shadow-sm' : 'text-text-tertiary hover:text-text')}
           onClick={() => onModeChange('background')}
         >
-          <GitBranch className="size-3.5" />
-          Background
+          <GitBranch className="size-3.5" /> Background
         </button>
       </div>
       <div className="mt-2 min-h-16 rounded-lg border border-border bg-white/70 px-3 py-2.5">
         <div className="text-xs font-semibold text-text">{details.title}</div>
-        <p className="mt-1 text-[11px] leading-relaxed text-text-tertiary">
-          {details.description}
-        </p>
+        <p className="mt-1 text-[11px] leading-relaxed text-text-tertiary">{details.description}</p>
       </div>
-      <Button
-        className="mt-2 w-full bg-[#e2590b] text-white hover:bg-[#c94b08]"
-        onClick={onStart}
-      >
+      <Button className="mt-2 w-full bg-[#e2590b] text-white hover:bg-[#c94b08]" onClick={onStart}>
         {background ? <GitBranch className="size-4" /> : <SquareTerminal className="size-4" />}
         Start {agentDisplayName(agent)}
       </Button>
@@ -495,7 +527,7 @@ function ExecutionModeControl({
 function NewViewMenu({
   onOpenAgent,
 }: {
-  onOpenAgent: OpenAgent;
+  onOpenAgent: (agent: AgentKind, mode?: AgentTerminalMode) => void;
 }) {
   return (
     <DropdownMenu>
@@ -504,30 +536,25 @@ function NewViewMenu({
           type="button"
           variant="ghost"
           size="icon-xs"
-          className="mb-1.5 shrink-0 text-text-tertiary"
+          className="shrink-0 text-text-tertiary"
           aria-label="Open agent or view"
         >
           <Plus />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-48">
-        <DropdownMenuLabel className="text-xs text-text-tertiary">New agent session</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-xs text-text-tertiary">Current Draft</DropdownMenuLabel>
         {SUPPORTED_AGENTS.map((agent) => (
-          <DropdownMenuSub key={agent}>
-            <DropdownMenuSubTrigger>
-              <Bot /> {agentDisplayName(agent)}
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-44">
-              <DropdownMenuItem onSelect={() => onOpenAgent(agent, 'live')}>
-                <SquareTerminal /> Live
-                <span className="ml-auto text-[10px] text-text-tertiary">Draft</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => onOpenAgent(agent, 'background')}>
-                <GitBranch /> Background
-                <span className="ml-auto text-[10px] text-text-tertiary">Review</span>
-              </DropdownMenuItem>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+          <DropdownMenuItem key={`live-${agent}`} onSelect={() => onOpenAgent(agent, 'live')}>
+            <Bot /> {agentDisplayName(agent)}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs text-text-tertiary">New Agent Change</DropdownMenuLabel>
+        {SUPPORTED_AGENTS.map((agent) => (
+          <DropdownMenuItem key={`background-${agent}`} onSelect={() => onOpenAgent(agent, 'background')}>
+            <GitBranch /> {agentDisplayName(agent)}
+          </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-xs text-text-tertiary">Views</DropdownMenuLabel>
@@ -566,15 +593,16 @@ function AgentTerminalInstance({
 
   const { error, resize, start, status, write } = useAgentTerminal({
     cwd,
-    intent: tab.intent ?? 'run',
     mode: tab.mode,
     spaceSlug,
     changeId: tab.changeId,
     agent: tab.agent,
+    intent: tab.intent,
+    initialTask: tab.initialTask,
     onData: handleData,
     onExit: (exitCode) => {
       terminalRef.current?.writeln(
-        `\r\n[${tab.intent === 'login' ? `${agentDisplayName(tab.agent)} sign-in` : agentDisplayName(tab.agent)} exited${exitCode == null ? '' : `: ${exitCode}`}]`,
+        `\r\n[${agentDisplayName(tab.agent)} exited${exitCode == null ? '' : `: ${exitCode}`}]`,
       );
     },
   });
@@ -625,11 +653,7 @@ function AgentTerminalInstance({
   useEffect(() => {
     const terminal = terminalRef.current;
     if (!terminal) return;
-    terminal.writeln(
-      tab.intent === 'login'
-        ? `Starting ${agentDisplayName(tab.agent)} sign-in…`
-        : `Starting ${agentDisplayName(tab.agent)} in ${cwd}…`,
-    );
+    terminal.writeln(`${tab.intent === 'login' ? 'Opening sign-in for' : 'Starting'} ${agentDisplayName(tab.agent)} in ${cwd}…`);
     fitAddonRef.current?.fit();
     void start({ cols: terminal.cols, rows: terminal.rows });
   }, [cwd, start, tab.agent, tab.intent]);
@@ -651,7 +675,7 @@ function AgentTerminalInstance({
         <span>{status}</span>
         <span className="ml-2 shrink-0 text-white/55">
           {tab.intent === 'login'
-            ? 'Account Setup'
+            ? 'Agent access'
             : tab.mode === 'background'
               ? 'Background Change'
               : 'Current Draft'}

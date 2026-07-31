@@ -65,7 +65,7 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
   };
 
   return (
-    <section style={{ width: 'min(760px, 100%)', margin: '0 auto' }}>
+    <section style={{ width: 'min(860px, 100%)' }}>
       <header style={{ marginBottom: 30 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
           <History size={20} color={C.accent} strokeWidth={1.8} />
@@ -147,12 +147,11 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
             {loading ? (
               <div style={emptyStyle}><LoaderCircle size={17} className="animate-spin" /> Loading history…</div>
             ) : spaceHistory?.checkpoints.length ? (
-              <ol style={{ margin: 0, padding: 0, listStyle: 'none' }}>
-                {spaceHistory.checkpoints.map((checkpoint, index) => (
-                  <li key={checkpoint.id} style={{ position: 'relative', display: 'grid', gridTemplateColumns: '34px 1fr', gap: 12, paddingBottom: 18 }}>
-                    {index < spaceHistory.checkpoints.length - 1 && <span aria-hidden style={timelineStyle} />}
-                    <span style={commitIconStyle}><GitCommitHorizontal size={16} /></span>
+              <ol style={{ display: 'grid', gap: 10, margin: 0, padding: 0, listStyle: 'none' }}>
+                {spaceHistory.checkpoints.map((checkpoint) => (
+                  <li key={checkpoint.id}>
                     <div style={checkpointCardStyle}>
+                      <span style={commitIconStyle}><GitCommitHorizontal size={16} /></span>
                       <div style={{ minWidth: 0 }}>
                         <strong style={{ display: 'block', color: C.ink2, fontSize: 13.5, fontWeight: 620, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {checkpoint.name}
@@ -236,8 +235,6 @@ const checkpointCardStyle: React.CSSProperties = {
 };
 
 const commitIconStyle: React.CSSProperties = {
-  position: 'relative',
-  zIndex: 1,
   width: 34,
   height: 34,
   display: 'grid',
@@ -245,16 +242,8 @@ const commitIconStyle: React.CSSProperties = {
   borderRadius: 999,
   color: C.green,
   background: C.greenSoft,
-  border: '3px solid #faf9f7',
-};
-
-const timelineStyle: React.CSSProperties = {
-  position: 'absolute',
-  top: 31,
-  bottom: -3,
-  left: 16,
-  width: 1,
-  background: C.line,
+  border: `1px solid ${C.line}`,
+  flexShrink: 0,
 };
 
 const commitCodeStyle: React.CSSProperties = {

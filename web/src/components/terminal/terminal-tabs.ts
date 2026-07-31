@@ -12,6 +12,7 @@ export type AgentTerminalTab = {
   intent?: AgentTerminalIntent;
   changeId?: string;
   worktreePath?: string;
+  initialTask?: string;
 };
 
 export type AgentTerminalTabsState = {
@@ -24,7 +25,7 @@ export function addAgentTab(
   agent: AgentKind,
   id: string,
   mode: AgentTerminalMode = 'live',
-  background?: { changeId: string; worktreePath: string },
+  background?: { changeId: string; worktreePath: string; initialTask?: string },
   intent: AgentTerminalIntent = 'run',
 ): AgentTerminalTabsState {
   if (intent === 'login' && (agent !== 'codex' || mode !== 'live')) {
@@ -71,6 +72,17 @@ export function closeAgentTab(
     tabs,
     activeTabId: tabs[closedIndex]?.id ?? tabs[closedIndex - 1]?.id ?? null,
   };
+}
+
+export function openOrActivateAgentChangeTab(
+  state: AgentTerminalTabsState,
+  agent: AgentKind,
+  id: string,
+  change: { changeId: string; worktreePath: string; initialTask?: string },
+): AgentTerminalTabsState {
+  const existing = state.tabs.find((tab) => tab.changeId === change.changeId);
+  if (existing) return { ...state, activeTabId: existing.id };
+  return addAgentTab(state, agent, id, 'background', change);
 }
 
 export function terminalTabLabel(tabs: AgentTerminalTab[], tab: AgentTerminalTab): string {

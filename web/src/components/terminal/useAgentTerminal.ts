@@ -23,6 +23,7 @@ type UseAgentTerminalOptions = {
   mode: AgentTerminalMode;
   spaceSlug: string;
   changeId?: string;
+  initialTask?: string;
   onData: (data: string) => void;
   onExit?: (exitCode: number | null) => void;
 };
@@ -33,6 +34,7 @@ export function useAgentTerminal({
   cwd,
   intent = 'run',
   mode,
+  initialTask,
   onData,
   onExit,
   spaceSlug,
@@ -87,6 +89,7 @@ export function useAgentTerminal({
           agent,
           intent,
           initialCommand: agentInitialCommand(agent),
+          taskPrompt: initialTask,
           ...normalized,
         },
       });
@@ -110,7 +113,7 @@ export function useAgentTerminal({
       setStatus('error');
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [agent, changeId, cwd, intent, mode, spaceSlug]);
+  }, [agent, changeId, cwd, initialTask, intent, mode, spaceSlug]);
 
   const write = useCallback(async (data: string) => {
     const sessionId = sessionIdRef.current;

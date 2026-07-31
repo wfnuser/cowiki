@@ -7,13 +7,13 @@ import { AvatarBadge } from '@/components/ui/avatar-badge';
 import { statusBadge } from '@/lib/review';
 import { isDesktopClient } from '@/runtime';
 import { LocalReviewInbox } from './LocalReviewInbox';
+import type { ReviewTarget } from './review-navigation';
 
 type Filter = 'open' | 'merged' | 'all';
 
 type ReviewListProps = {
   workspaceSlug: string;
-  onOpen: (id: string) => void;
-  onLocalDraftChanged?: () => void;
+  onOpen: (target: ReviewTarget) => void;
   refreshKey?: number;
 };
 
@@ -23,7 +23,7 @@ export function ReviewList(props: ReviewListProps) {
       <LocalReviewInbox
         workspaceSlug={props.workspaceSlug}
         refreshKey={props.refreshKey}
-        onDraftChanged={props.onLocalDraftChanged}
+        onOpen={props.onOpen}
       />
     )
     : <CloudReviewList {...props} />;
@@ -115,7 +115,7 @@ function CloudReviewList({
             return (
               <button
                 key={s.id}
-                onClick={() => onOpen(s.id)}
+                onClick={() => onOpen({ kind: 'cloud', submissionId: s.id })}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 14,
                   padding: '15px 18px', background: C.panel, border: 'none',

@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   AgentChange,
+  BrokenLink,
   PageFull,
   PageMeta,
   FileDiff,
@@ -57,7 +58,7 @@ export function ingest(
   sourceType: string,
   content: string,
   filename?: string,
-): Promise<unknown> {
+): Promise<SourceItem> {
   return invoke('local_ingest', { spaceSlug, sourceType, content, filename });
 }
 
@@ -114,10 +115,87 @@ export function search(spaceSlug: string, query: string, limit: number): Promise
   return invoke('local_search', { spaceSlug, query, limit });
 }
 
+export function listBrokenLinks(spaceSlug: string): Promise<BrokenLink[]> {
+  return invoke('local_list_broken_links', { spaceSlug });
+}
+
 export function renamePath(spaceSlug: string, from: string, to: string): Promise<void> {
   return invoke('local_rename_path', { spaceSlug, from, to });
 }
 
 export function deletePath(spaceSlug: string, path: string): Promise<void> {
   return invoke('local_delete_path', { spaceSlug, path });
+}
+
+export type CloudSyncState =
+  | 'unlinked'
+  | 'dirty'
+  | 'upToDate'
+  | 'needsSync'
+  | 'synced'
+  | 'conflicted'
+  | 'submitted'
+  | 'leaseRejected';
+
+export interface CloudPullRequest {
+  id: string;
+  number: number;
+  title: string;
+  headRef: string;
+  headOid: string;
+  status: string;
+}
+
+export interface CloudSyncResult {
+  state: CloudSyncState;
+  conflicts: string[];
+  committed: boolean;
+  message: string;
+  pullRequest: CloudPullRequest | null;
+  cloudSpaceId: string | null;
+  cloudBaseUrl: string | null;
+}
+
+export interface CloudLinkOptions {
+  spaceSlug: string;
+  cloudBaseUrl: string;
+  apiKey: string;
+  cloudName: string;
+  cloudSlug: string;
+  userName: string;
+  userId: string;
+  cloudSpaceId?: string;
+  gitUrl?: string;
+  commitMessage?: string;
+}
+
+export function linkCloudSpace(options: CloudLinkOptions): Promise<CloudSyncResult> {
+  return invoke<CloudSyncResult>('cloud_link_space', { ...options });
+}
+
+export function getCloudStatus(spaceSlug: string): Promise<CloudSyncResult> {
+  return invoke<CloudSyncResult>('cloud_get_status', { spaceSlug });
+}
+
+export function syncCloudIfClean(spaceSlug: string, apiKey: string): Promise<CloudSyncResult> {
+  return invoke<CloudSyncResult>('cloud_sync_if_clean', { spaceSlug, apiKey });
+}
+
+export function submitCloud(options: {
+  spaceSlug: string;
+  apiKey: string;
+  userName: string;
+  commitMessage?: string;
+  pullRequestTitle?: string;
+  pullRequestBody?: string;
+}): Promise<CloudSyncResult> {
+  return invoke<CloudSyncResult>('cloud_submit', { ...options });
+}
+
+export function continueCloudRebase(spaceSlug: string): Promise<CloudSyncResult> {
+  return invoke<CloudSyncResult>('cloud_rebase_continue', { spaceSlug });
+}
+
+export function abortCloudRebase(spaceSlug: string): Promise<CloudSyncResult> {
+  return invoke<CloudSyncResult>('cloud_rebase_abort', { spaceSlug });
 }

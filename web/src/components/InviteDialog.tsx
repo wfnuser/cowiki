@@ -133,8 +133,8 @@ export function InviteDialog({
       await inviteToWorkspace(workspaceSlug, selected.id, role, Number(expires));
       onInvited(`Invitation sent to ${selected.name}.`);
       onOpenChange(false);
-    } catch (e: any) {
-      onError(e?.message || 'Failed to send invitation');
+    } catch (error: unknown) {
+      onError(error instanceof Error ? error.message : 'Failed to send invitation');
     } finally {
       setSending(false);
     }

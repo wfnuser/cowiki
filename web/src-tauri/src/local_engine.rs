@@ -1,17 +1,23 @@
 use git2::build::CheckoutBuilder;
-use git2::{DiffOptions, IndexEntry, IndexTime, Oid, Repository, Signature, StatusOptions};
+use git2::{
+    DiffOptions, IndexEntry, IndexTime, Oid, Repository, RepositoryInitOptions, Signature,
+    StatusOptions,
+};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use similar::{ChangeTag, TextDiff};
+use std::collections::HashSet;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
+use uuid::Uuid;
 
 use crate::knowledge_index::{self, SearchHit};
 use crate::okf::{self, DocumentKind};
 
 mod agent_changes;
+pub use crate::knowledge_index::BrokenLink;
 pub use agent_changes::AgentChange;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -28,6 +34,117 @@ pub struct Space {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SubmitResult {
     pub committed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CloudLink {
+    pub cloud_space_id: String,
+    pub base_url: String,
+    pub git_url: String,
+    pub user_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct PortableCloudLink {
+    server: String,
+    space_id: String,
+    git_url: String,
+    user_ref: String,
+}
+
+fn portable_cloud_link_path(root: &Path) -> PathBuf {
+    root.join(".cowiki").join("cloud.json")
+}
+
+fn read_portable_cloud_link(root: &Path) -> Result<Option<CloudLink>, String> {
+    let filename = portable_cloud_link_path(root);
+    let body = match std::fs::read_to_string(&filename) {
+        Ok(body) => body,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("cannot read '{}': {error}", filename.display())),
+    };
+    let portable: PortableCloudLink = serde_json::from_str(&body)
+        .map_err(|error| format!("invalid '{}': {error}", filename.display()))?;
+    portable_cloud_link(portable).map(Some)
+}
+
+fn portable_cloud_link(portable: PortableCloudLink) -> Result<CloudLink, String> {
+    let server = url::Url::parse(&portable.server)
+        .map_err(|_| "Cloud link server must be a valid URL".to_string())?;
+    if !matches!(server.scheme(), "http" | "https")
+        || server.username() != ""
+        || server.password().is_some()
+        || server.path() != "/"
+        || server.query().is_some()
+        || server.fragment().is_some()
+    {
+        return Err("Cloud link server must be a root HTTP(S) origin".into());
+    }
+    Uuid::parse_str(&portable.space_id)
+        .map_err(|_| "Cloud link Space id must be a UUID".to_string())?;
+    let git_url = url::Url::parse(&portable.git_url)
+        .map_err(|_| "Cloud link Git URL must be valid".to_string())?;
+    if !matches!(git_url.scheme(), "http" | "https")
+        || git_url.username() != ""
+        || git_url.password().is_some()
+    {
+        return Err("Cloud link Git URL must use HTTP(S) without credentials".into());
+    }
+    let user_id = portable
+        .user_ref
+        .strip_prefix("user/")
+        .ok_or_else(|| "Cloud link user ref must start with 'user/'".to_string())?;
+    Uuid::parse_str(user_id).map_err(|_| "Cloud link user ref must contain a UUID".to_string())?;
+    Ok(CloudLink {
+        cloud_space_id: portable.space_id,
+        base_url: server.origin().ascii_serialization(),
+        git_url: portable.git_url,
+        user_id: user_id.to_string(),
+    })
+}
+
+fn write_portable_cloud_link(root: &Path, link: &CloudLink) -> Result<(), String> {
+    let portable = PortableCloudLink {
+        server: link.base_url.clone(),
+        space_id: link.cloud_space_id.clone(),
+        git_url: link.git_url.clone(),
+        user_ref: format!("user/{}", link.user_id),
+    };
+    portable_cloud_link(portable.clone())?;
+    let filename = portable_cloud_link_path(root);
+    let parent = filename
+        .parent()
+        .ok_or_else(|| "Cloud link path has no parent".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let body = serde_json::to_string_pretty(&portable).map_err(|error| error.to_string())?;
+    std::fs::write(&filename, format!("{body}\n")).map_err(|error| error.to_string())?;
+    ignore_portable_cloud_link(root)
+}
+
+fn ignore_portable_cloud_link(root: &Path) -> Result<(), String> {
+    let repository = Repository::open(root).map_err(|error| error.to_string())?;
+    let filename = repository.path().join("info").join("exclude");
+    if let Some(parent) = filename.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let existing = match std::fs::read_to_string(&filename) {
+        Ok(value) => value,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error.to_string()),
+    };
+    let rule = ".cowiki/cloud.json";
+    if !existing.lines().any(|line| line == rule) {
+        let separator = if existing.is_empty() || existing.ends_with('\n') {
+            ""
+        } else {
+            "\n"
+        };
+        std::fs::write(&filename, format!("{existing}{separator}{rule}\n"))
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -74,6 +191,7 @@ pub struct PageFull {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SourceItem {
     pub filename: String,
+    pub title: String,
 }
 
 /// One file's result from a batch `ingest_files` call. A batch import keeps
@@ -90,6 +208,7 @@ pub struct IngestFileOutcome {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SourceContent {
     pub filename: String,
+    pub title: String,
     pub content: String,
 }
 
@@ -130,6 +249,8 @@ pub struct FileDiff {
 pub struct LocalEngine {
     db: Arc<Mutex<Connection>>,
     metadata_dir: PathBuf,
+    search_index_checked: Arc<Mutex<bool>>,
+    backlinks_checked: Arc<Mutex<HashSet<String>>>,
     // Product-owned Draft writers serialize here. External filesystem writers
     // cannot join this protocol, so merge still performs its final no-follow
     // content CAS immediately before each replacement.
@@ -139,7 +260,7 @@ pub struct LocalEngine {
 impl LocalEngine {
     pub fn open(metadata_dir: &Path) -> Result<Self, String> {
         std::fs::create_dir_all(metadata_dir).map_err(|e| e.to_string())?;
-        let connection =
+        let mut connection =
             Connection::open(metadata_dir.join("local.db")).map_err(|e| e.to_string())?;
         connection
             .execute_batch(
@@ -149,16 +270,27 @@ impl LocalEngine {
                     slug TEXT NOT NULL UNIQUE,
                     local_path TEXT NOT NULL UNIQUE,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS cloud_links (
+                    local_space_id TEXT PRIMARY KEY REFERENCES spaces(id) ON DELETE CASCADE,
+                    cloud_space_id TEXT NOT NULL,
+                    base_url TEXT NOT NULL,
+                    git_url TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    linked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );",
             )
             .map_err(|e| e.to_string())?;
-        knowledge_index::initialize(&connection)?;
+        knowledge_index::initialize(&mut connection)?;
         let engine = Self {
             db: Arc::new(Mutex::new(connection)),
             metadata_dir: metadata_dir.to_path_buf(),
+            search_index_checked: Arc::new(Mutex::new(false)),
+            backlinks_checked: Arc::new(Mutex::new(HashSet::new())),
             mutation_lock: Arc::new(Mutex::new(())),
         };
-        engine.rebuild_all_search_indexes()?;
+        engine.prepare_registered_spaces()?;
         Ok(engine)
     }
 
@@ -237,6 +369,7 @@ impl LocalEngine {
             .to_string_lossy()
             .to_string();
         let git = Repository::open(&repo).map_err(|error| error.to_string())?;
+        ensure_local_main(&git)?;
         prepare_okf_repository(&git, &repo)?;
         let name = if slug.starts_with("personal-") {
             "My Space".to_string()
@@ -264,9 +397,19 @@ impl LocalEngine {
         if let Some(existing) = self.space_by_path(&local_path)? {
             return Ok(existing);
         }
-        let repo = Repository::open(&local_path)
-            .or_else(|_| Repository::init(&local_path))
-            .map_err(|e| format!("cannot initialize local Git repository: {e}"))?;
+        let repo = match Repository::open(&local_path) {
+            Ok(repo) => repo,
+            Err(_) => {
+                let mut options = RepositoryInitOptions::new();
+                options.initial_head("main");
+                Repository::init_opts(&local_path, &options)
+                    .map_err(|e| format!("cannot initialize local Git repository: {e}"))?
+            }
+        };
+        if portable_cloud_link_path(&local_path).is_file() {
+            ignore_portable_cloud_link(&local_path)?;
+        }
+        ensure_local_main(&repo)?;
         prepare_okf_repository(&repo, &local_path)?;
 
         let space = self.insert_space(name, slug, &local_path)?;
@@ -312,6 +455,76 @@ impl LocalEngine {
             .into_iter()
             .find(|space| space.slug == slug)
             .ok_or_else(|| format!("Space '{slug}' is not registered on this device"))
+    }
+
+    pub(crate) fn cloud_link(&self, space_slug: &str) -> Result<Option<CloudLink>, String> {
+        let space = self.find_space(space_slug)?;
+        if let Some(link) = read_portable_cloud_link(&space.local_path)? {
+            self.save_cloud_link_record(&space.id, &link)?;
+            return Ok(Some(link));
+        }
+        let link = self.cloud_link_record(&space.id)?;
+        if let Some(link) = link.as_ref() {
+            write_portable_cloud_link(&space.local_path, link)?;
+        }
+        Ok(link)
+    }
+
+    fn cloud_link_record(&self, local_space_id: &str) -> Result<Option<CloudLink>, String> {
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| "local database lock poisoned".to_string())?;
+        match db.query_row(
+            "SELECT cloud_space_id, base_url, git_url, user_id
+             FROM cloud_links WHERE local_space_id = ?1",
+            [local_space_id],
+            |row| {
+                Ok(CloudLink {
+                    cloud_space_id: row.get(0)?,
+                    base_url: row.get(1)?,
+                    git_url: row.get(2)?,
+                    user_id: row.get(3)?,
+                })
+            },
+        ) {
+            Ok(link) => Ok(Some(link)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    pub(crate) fn save_cloud_link(&self, space_slug: &str, link: &CloudLink) -> Result<(), String> {
+        let space = self.find_space(space_slug)?;
+        write_portable_cloud_link(&space.local_path, link)?;
+        self.save_cloud_link_record(&space.id, link)
+    }
+
+    fn save_cloud_link_record(&self, local_space_id: &str, link: &CloudLink) -> Result<(), String> {
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| "local database lock poisoned".to_string())?;
+        db.execute(
+            "INSERT INTO cloud_links
+                (local_space_id, cloud_space_id, base_url, git_url, user_id)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(local_space_id) DO UPDATE SET
+                cloud_space_id = excluded.cloud_space_id,
+                base_url = excluded.base_url,
+                git_url = excluded.git_url,
+                user_id = excluded.user_id,
+                updated_at = CURRENT_TIMESTAMP",
+            params![
+                local_space_id,
+                link.cloud_space_id,
+                link.base_url,
+                link.git_url,
+                link.user_id
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -667,12 +880,14 @@ impl LocalEngine {
                     .extension()
                     .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
             {
+                let filename = entry
+                    .path()
+                    .strip_prefix(&root)
+                    .map(normalize_path)
+                    .unwrap_or_default();
                 sources.push(SourceItem {
-                    filename: entry
-                        .path()
-                        .strip_prefix(&root)
-                        .map(normalize_path)
-                        .unwrap_or_default(),
+                    title: source_display_title(entry.path(), &filename),
+                    filename,
                 });
             }
         }
@@ -686,9 +901,13 @@ impl LocalEngine {
             &space.local_path,
             &Path::new(okf::RAW_SOURCES_DIR).join(relative),
         )?;
+        let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
         Ok(SourceContent {
             filename: filename.to_string(),
-            content: std::fs::read_to_string(path).map_err(|e| e.to_string())?,
+            title: okf::display_metadata(&content)
+                .0
+                .unwrap_or_else(|| filename.to_string()),
+            content,
         })
     }
 
@@ -701,12 +920,16 @@ impl LocalEngine {
         knowledge_index::rebuild_space(&mut db, &space.id, &space.local_path)
     }
 
-    pub fn rebuild_all_search_indexes(&self) -> Result<(), String> {
+    /// Preserve OKF preparation/migration on startup without populating the
+    /// disposable search index for every registered Space.
+    fn prepare_registered_spaces(&self) -> Result<(), String> {
         for space in self.list_spaces()? {
             if space.local_path.is_dir() {
                 match Repository::open(&space.local_path) {
                     Ok(repo) => {
-                        if let Err(error) = prepare_okf_repository(&repo, &space.local_path) {
+                        if let Err(error) = ensure_local_main(&repo)
+                            .and_then(|_| prepare_okf_repository(&repo, &space.local_path))
+                        {
                             eprintln!(
                                 "CoWiki skipped startup migration for Space '{}': {error}",
                                 space.slug
@@ -720,19 +943,31 @@ impl LocalEngine {
                         );
                     }
                 }
-                let mut db = self
-                    .db
-                    .lock()
-                    .map_err(|_| "local database lock poisoned".to_string())?;
-                if let Err(error) =
-                    knowledge_index::rebuild_space(&mut db, &space.id, &space.local_path)
-                {
-                    eprintln!(
-                        "CoWiki skipped startup indexing for Space '{}': {error}",
-                        space.slug
-                    );
-                }
             }
+        }
+        Ok(())
+    }
+
+    fn refresh_search_index(&self, db: &mut Connection, space: &Space) -> Result<(), String> {
+        let mut checked = self
+            .search_index_checked
+            .lock()
+            .map_err(|_| "search index health lock poisoned".to_string())?;
+        if !*checked {
+            knowledge_index::repair_if_corrupt(db)?;
+            *checked = true;
+        }
+        knowledge_index::refresh_space(db, &space.id, &space.local_path)
+    }
+
+    fn prepare_backlinks(&self, db: &mut Connection, space_id: &str) -> Result<(), String> {
+        let mut checked = self
+            .backlinks_checked
+            .lock()
+            .map_err(|_| "backlink index health lock poisoned".to_string())?;
+        if !checked.contains(space_id) {
+            knowledge_index::rebuild_links(db, space_id)?;
+            checked.insert(space_id.to_string());
         }
         Ok(())
     }
@@ -748,7 +983,7 @@ impl LocalEngine {
             .db
             .lock()
             .map_err(|_| "local database lock poisoned".to_string())?;
-        knowledge_index::refresh_space(&mut db, &space.id, &space.local_path)?;
+        self.refresh_search_index(&mut db, &space)?;
         knowledge_index::search(&db, &space.id, query, limit)
     }
 
@@ -780,16 +1015,29 @@ impl LocalEngine {
             .db
             .lock()
             .map_err(|_| "local database lock poisoned".to_string())?;
-        knowledge_index::refresh_space(&mut db, &space.id, &space.local_path)?;
+        self.refresh_search_index(&mut db, &space)?;
+        self.prepare_backlinks(&mut db, &space.id)?;
         knowledge_index::backlinks(&db, &space.id, target_path)
+    }
+
+    pub fn list_broken_links(&self, space_slug: &str) -> Result<Vec<BrokenLink>, String> {
+        let space = self.find_space(space_slug)?;
+        let mut db = self
+            .db
+            .lock()
+            .map_err(|_| "local database lock poisoned".to_string())?;
+        self.refresh_search_index(&mut db, &space)?;
+        self.prepare_backlinks(&mut db, &space.id)?;
+        knowledge_index::broken_links(&db, &space.id, &space.local_path)
     }
 
     pub fn indexed_page_count(&self, space_slug: &str) -> Result<usize, String> {
         let space = self.find_space(space_slug)?;
-        let db = self
+        let mut db = self
             .db
             .lock()
             .map_err(|_| "local database lock poisoned".to_string())?;
+        self.refresh_search_index(&mut db, &space)?;
         knowledge_index::page_count(&db, &space.id)
     }
 
@@ -950,6 +1198,27 @@ impl LocalEngine {
     }
 
     pub fn submit(&self, space_slug: &str, paths: &[String]) -> Result<SubmitResult, String> {
+        self.submit_with_message(
+            space_slug,
+            paths,
+            "Update local Space",
+            "CoWiki Local",
+            "local@cowiki.app",
+        )
+    }
+
+    pub(crate) fn submit_with_message(
+        &self,
+        space_slug: &str,
+        paths: &[String],
+        message: &str,
+        author_name: &str,
+        author_email: &str,
+    ) -> Result<SubmitResult, String> {
+        let message = message.trim();
+        if message.is_empty() {
+            return Err("Commit message is required for a Cloud submission".to_string());
+        }
         let repo = self.repo(space_slug)?;
         let root = repo
             .workdir()
@@ -989,14 +1258,14 @@ impl LocalEngine {
         }
 
         let tree = repo.find_tree(tree_id).map_err(|e| e.to_string())?;
-        let signature =
-            Signature::now("CoWiki Local", "local@cowiki.app").map_err(|e| e.to_string())?;
+        let signature = Signature::now(author_name.trim(), author_email.trim())
+            .map_err(|e| format!("invalid commit identity: {e}"))?;
         let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
         if let Err(error) = repo.commit(
             Some("HEAD"),
             &signature,
             &signature,
-            "Update local Space",
+            message,
             &tree,
             &parents,
         ) {
@@ -1353,6 +1622,54 @@ fn commit_initial_okf_indexes(repo: &Repository, root: &Path) -> Result<(), Stri
     )
     .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn ensure_local_main(repo: &Repository) -> Result<(), String> {
+    let current_branch = repo
+        .head()
+        .ok()
+        .filter(|head| head.is_branch())
+        .and_then(|head| head.shorthand().map(str::to_string));
+    if current_branch.as_deref() == Some("main") {
+        return Ok(());
+    }
+
+    let has_commit = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
+    if has_commit.is_some() && !repository_worktree_is_clean(repo)? {
+        return Err(
+            "This imported repository is not on main and has uncommitted files. Commit or discard them before CoWiki switches the editable Draft to main."
+                .to_string(),
+        );
+    }
+
+    if repo.find_branch("main", git2::BranchType::Local).is_err() {
+        if let Some(commit) = has_commit.as_ref() {
+            repo.branch("main", commit, false)
+                .map_err(|error| format!("cannot create local main branch: {error}"))?;
+        } else {
+            repo.set_head("refs/heads/main")
+                .map_err(|error| format!("cannot initialize local main branch: {error}"))?;
+            return Ok(());
+        }
+    }
+
+    repo.set_head("refs/heads/main")
+        .map_err(|error| format!("cannot switch the local Draft to main: {error}"))?;
+    repo.checkout_head(Some(CheckoutBuilder::new().safe()))
+        .map_err(|error| format!("cannot check out local main branch: {error}"))?;
+    Ok(())
+}
+
+fn repository_worktree_is_clean(repo: &Repository) -> Result<bool, String> {
+    let mut options = StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false);
+    Ok(repo
+        .statuses(Some(&mut options))
+        .map_err(|error| error.to_string())?
+        .is_empty())
 }
 
 fn prepare_okf_repository(repo: &Repository, root: &Path) -> Result<(), String> {
@@ -1785,12 +2102,27 @@ fn source_hash_matches(path: &Path, expected_hash: &str) -> bool {
 }
 
 fn source_item_for_path(space: &Space, path: &Path) -> Result<SourceItem, String> {
+    let filename = path
+        .strip_prefix(space.local_path.join(okf::RAW_SOURCES_DIR))
+        .map(normalize_path)
+        .map_err(|error| error.to_string())?;
     Ok(SourceItem {
-        filename: path
-            .strip_prefix(space.local_path.join(okf::RAW_SOURCES_DIR))
-            .map(normalize_path)
-            .map_err(|error| error.to_string())?,
+        title: source_display_title(path, &filename),
+        filename,
     })
+}
+
+fn source_display_title(path: &Path, fallback: &str) -> String {
+    const METADATA_PREVIEW_BYTES: u64 = 64 * 1024;
+    let mut preview = Vec::new();
+    let content = std::fs::File::open(path)
+        .and_then(|file| file.take(METADATA_PREVIEW_BYTES).read_to_end(&mut preview))
+        .ok()
+        .map(|_| String::from_utf8_lossy(&preview).into_owned())
+        .unwrap_or_default();
+    okf::display_metadata(&content)
+        .0
+        .unwrap_or_else(|| fallback.to_string())
 }
 
 fn read_page_tree(root: &Path, current: &Path) -> Result<Vec<PageMeta>, String> {
@@ -1948,7 +2280,7 @@ pub(crate) fn markdown_title(body: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{sha256_file, LocalEngine};
+    use super::{sha256_file, CloudLink, LocalEngine};
     use git2::Repository;
     use std::sync::{mpsc, Arc, Barrier};
     use std::time::Duration;
@@ -1959,6 +2291,155 @@ mod tests {
         let engine = LocalEngine::open(temp.path()).unwrap();
 
         assert!(engine.list_spaces().unwrap().is_empty());
+    }
+
+    #[test]
+    fn imported_space_reads_the_shared_cloud_link_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("shared-space");
+        std::fs::create_dir_all(folder.join(".cowiki")).unwrap();
+        let user_id = uuid::Uuid::new_v4();
+        let space_id = uuid::Uuid::new_v4();
+        std::fs::write(
+            folder.join(".cowiki/cloud.json"),
+            format!(
+                "{{\n  \"server\": \"https://cloud.cowiki.app\",\n  \"spaceId\": \"{space_id}\",\n  \"gitUrl\": \"https://cloud.cowiki.app/git/{space_id}\",\n  \"userRef\": \"user/{user_id}\"\n}}\n"
+            ),
+        )
+        .unwrap();
+        engine
+            .add_space("Shared Space", "shared-space", &folder)
+            .unwrap();
+
+        let link = engine.cloud_link("shared-space").unwrap().unwrap();
+
+        assert_eq!(link.cloud_space_id, space_id.to_string());
+        assert_eq!(link.base_url, "https://cloud.cowiki.app");
+        assert_eq!(link.user_id, user_id.to_string());
+    }
+
+    #[test]
+    fn desktop_cloud_link_writes_the_portable_link_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("desktop-space");
+        std::fs::create_dir_all(&folder).unwrap();
+        engine
+            .add_space("Desktop Space", "desktop-space", &folder)
+            .unwrap();
+        let user_id = uuid::Uuid::new_v4();
+        let space_id = uuid::Uuid::new_v4();
+        let link = CloudLink {
+            cloud_space_id: space_id.to_string(),
+            base_url: "https://cloud.cowiki.app".into(),
+            git_url: format!("https://cloud.cowiki.app/git/{space_id}"),
+            user_id: user_id.to_string(),
+        };
+
+        engine.save_cloud_link("desktop-space", &link).unwrap();
+
+        let payload: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(folder.join(".cowiki/cloud.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(payload["server"], "https://cloud.cowiki.app");
+        assert_eq!(payload["spaceId"], space_id.to_string());
+        assert_eq!(payload["userRef"], format!("user/{user_id}"));
+        let exclude = std::fs::read_to_string(folder.join(".git/info/exclude")).unwrap();
+        assert!(exclude.lines().any(|line| line == ".cowiki/cloud.json"));
+    }
+
+    #[test]
+    fn new_space_uses_main_as_its_editable_branch() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("new-space");
+        std::fs::create_dir_all(&folder).unwrap();
+
+        engine.add_space("New Space", "new-space", &folder).unwrap();
+
+        let repo = Repository::open(&folder).unwrap();
+        assert_eq!(repo.head().unwrap().shorthand(), Some("main"));
+    }
+
+    #[test]
+    fn clean_existing_branch_becomes_main_without_changing_existing_remotes() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("imported");
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut options = git2::RepositoryInitOptions::new();
+        options.initial_head("topic");
+        let repo = Repository::init_opts(&folder, &options).unwrap();
+        std::fs::write(
+            folder.join("index.md"),
+            "---\nokf_version: \"0.1\"\n---\n\n# Imported\n",
+        )
+        .unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("index.md")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let signature = git2::Signature::now("author", "author@example.com").unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+            .unwrap();
+        repo.remote("origin", "https://example.com/team/imported.git")
+            .unwrap();
+        drop(tree);
+        drop(repo);
+
+        engine.add_space("Imported", "imported", &folder).unwrap();
+
+        let repo = Repository::open(&folder).unwrap();
+        assert_eq!(repo.head().unwrap().shorthand(), Some("main"));
+        assert!(repo.find_branch("topic", git2::BranchType::Local).is_ok());
+        assert_eq!(
+            repo.find_remote("origin").unwrap().url(),
+            Some("https://example.com/team/imported.git")
+        );
+    }
+
+    #[test]
+    fn dirty_existing_non_main_branch_is_rejected_without_mutation() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("dirty-import");
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut options = git2::RepositoryInitOptions::new();
+        options.initial_head("topic");
+        let repo = Repository::init_opts(&folder, &options).unwrap();
+        std::fs::write(
+            folder.join("index.md"),
+            "---\nokf_version: \"0.1\"\n---\n\n# Imported\n",
+        )
+        .unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("index.md")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let signature = git2::Signature::now("author", "author@example.com").unwrap();
+        let original = repo
+            .commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+            .unwrap();
+        drop(tree);
+        drop(repo);
+        std::fs::write(folder.join("draft.md"), "# Unsaved\n").unwrap();
+
+        let error = engine
+            .add_space("Dirty", "dirty-import", &folder)
+            .unwrap_err();
+        assert!(error.contains("main"));
+        let repo = Repository::open(&folder).unwrap();
+        assert_eq!(repo.head().unwrap().shorthand(), Some("topic"));
+        assert_eq!(repo.head().unwrap().target(), Some(original));
+        assert!(repo.find_branch("main", git2::BranchType::Local).is_err());
+        assert_eq!(
+            std::fs::read_to_string(folder.join("draft.md")).unwrap(),
+            "# Unsaved\n"
+        );
     }
 
     #[test]
@@ -2058,6 +2539,209 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(statuses_after, statuses_before);
+    }
+
+    #[test]
+    fn reopening_does_not_rebuild_a_healthy_search_index() {
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join("metadata");
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        let engine = LocalEngine::open(&metadata).unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+        engine
+            .write_page(
+                &space.slug,
+                "stable",
+                "---\ntype: Note\n---\n\nHealthy search evidence.\n",
+            )
+            .unwrap();
+        drop(engine);
+
+        let database = rusqlite::Connection::open(metadata.join("local.db")).unwrap();
+        database
+            .execute_batch(
+                "CREATE TABLE index_deletions (path TEXT NOT NULL);
+                 CREATE TRIGGER audit_index_deletions
+                 AFTER DELETE ON indexed_pages BEGIN
+                     INSERT INTO index_deletions(path) VALUES (old.path);
+                 END;",
+            )
+            .unwrap();
+        drop(database);
+
+        let reopened = LocalEngine::open(&metadata).unwrap();
+        let database = reopened.db.lock().unwrap();
+        let deletions = database
+            .query_row("SELECT COUNT(*) FROM index_deletions", [], |row| {
+                row.get::<_, usize>(0)
+            })
+            .unwrap();
+        drop(database);
+
+        assert_eq!(deletions, 0, "startup must not rebuild an unchanged index");
+        assert_eq!(
+            reopened
+                .search_pages(&space.slug, "healthy search", 10)
+                .unwrap()[0]
+                .path,
+            "stable.md"
+        );
+    }
+
+    #[test]
+    fn search_lazily_repairs_missing_full_text_index_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join("metadata");
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        let engine = LocalEngine::open(&metadata).unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+        engine
+            .write_page(
+                &space.slug,
+                "repairable",
+                "---\ntype: Note\n---\n\nDisposable index evidence.\n",
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .search_pages(&space.slug, "disposable index", 10)
+                .unwrap()
+                .len(),
+            1
+        );
+        let expected_page_count = engine.indexed_page_count(&space.slug).unwrap();
+        drop(engine);
+
+        let database = rusqlite::Connection::open(metadata.join("local.db")).unwrap();
+        database
+            .execute_batch("DROP TABLE indexed_pages_fts;")
+            .unwrap();
+        drop(database);
+
+        let reopened = LocalEngine::open(&metadata).unwrap();
+        assert_eq!(
+            reopened.indexed_page_count(&space.slug).unwrap(),
+            expected_page_count
+        );
+        let hits = reopened
+            .search_pages(&space.slug, "disposable index", 10)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, "repairable.md");
+    }
+
+    #[test]
+    fn search_lazily_repairs_corrupt_full_text_index_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join("metadata");
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        let engine = LocalEngine::open(&metadata).unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+        engine
+            .write_page(
+                &space.slug,
+                "recoverable",
+                "---\ntype: Note\n---\n\nCorrupt cache evidence.\n",
+            )
+            .unwrap();
+        drop(engine);
+
+        let database = rusqlite::Connection::open(metadata.join("local.db")).unwrap();
+        database
+            .execute(
+                "INSERT INTO indexed_pages_fts(indexed_pages_fts) VALUES ('delete-all')",
+                [],
+            )
+            .unwrap();
+        drop(database);
+
+        let reopened = LocalEngine::open(&metadata).unwrap();
+        let indexed_rows = reopened
+            .db
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM indexed_pages", [], |row| {
+                row.get::<_, usize>(0)
+            })
+            .unwrap();
+        assert!(
+            indexed_rows > 0,
+            "startup must defer the full-text integrity scan until index access"
+        );
+        let hits = reopened
+            .search_pages(&space.slug, "corrupt cache", 10)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, "recoverable.md");
+    }
+
+    #[test]
+    fn backlinks_lazily_repair_corrupt_link_index_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join("metadata");
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        let engine = LocalEngine::open(&metadata).unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+        engine
+            .write_page(&space.slug, "target", "---\ntype: Note\n---\n\nTarget.\n")
+            .unwrap();
+        engine
+            .write_page(
+                &space.slug,
+                "source",
+                "---\ntype: Note\n---\n\nSee [[target]].\n",
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .list_backlinks(&space.slug, "target.md")
+                .unwrap()
+                .len(),
+            1
+        );
+        drop(engine);
+
+        let database = rusqlite::Connection::open(metadata.join("local.db")).unwrap();
+        database.execute("DELETE FROM page_links", []).unwrap();
+        drop(database);
+
+        let reopened = LocalEngine::open(&metadata).unwrap();
+        let links = reopened.list_backlinks(&space.slug, "target.md").unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].path, "source.md");
+    }
+
+    #[test]
+    fn broken_links_lazily_repair_deleted_link_index_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join("metadata");
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(&folder).unwrap();
+        let engine = LocalEngine::open(&metadata).unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+        engine
+            .write_page(
+                &space.slug,
+                "source",
+                "---\ntype: Note\n---\n\nSee [missing](missing.md).\n",
+            )
+            .unwrap();
+        assert_eq!(engine.list_broken_links(&space.slug).unwrap().len(), 1);
+        drop(engine);
+
+        let database = rusqlite::Connection::open(metadata.join("local.db")).unwrap();
+        database.execute("DELETE FROM page_links", []).unwrap();
+        drop(database);
+
+        let reopened = LocalEngine::open(&metadata).unwrap();
+        let broken = reopened.list_broken_links(&space.slug).unwrap();
+        assert_eq!(broken.len(), 1);
+        assert_eq!(broken[0].source_path, "source.md");
+        assert_eq!(broken[0].target, "missing.md");
     }
 
     #[test]
@@ -2673,7 +3357,9 @@ mod tests {
     #[test]
     fn dirty_conforming_bundles_open_without_optional_indexes_or_version() {
         fn commit_all(folder: &std::path::Path, paths: &[&str]) {
-            let repo = git2::Repository::init(folder).unwrap();
+            let mut options = git2::RepositoryInitOptions::new();
+            options.initial_head("main");
+            let repo = git2::Repository::init_opts(folder, &options).unwrap();
             let mut index = repo.index().unwrap();
             for path in paths {
                 index.add_path(std::path::Path::new(path)).unwrap();
@@ -2916,6 +3602,14 @@ mod tests {
         let index_before = std::fs::read(folder.join(".git/index")).unwrap();
 
         let change = engine.create_agent_change(&space.slug, "Codex").unwrap();
+        let repo = Repository::open(&folder).unwrap();
+        assert!(repo
+            .find_reference(&format!("refs/heads/agent/{}", change.id))
+            .is_ok());
+        assert!(repo
+            .find_reference(&format!("refs/heads/cowiki/agent/{}", change.id))
+            .is_err());
+        drop(repo);
         assert_eq!(
             std::fs::read(folder.join(".git/index")).unwrap(),
             index_before
@@ -3450,8 +4144,11 @@ mod tests {
                 Some("Research Note"),
             )
             .unwrap();
+        assert_eq!(item.title, "Research Note");
         assert!(item.filename.starts_with("_encoded/"));
         assert!(item.filename.ends_with(".md"));
+        let source = engine.get_source(&space.slug, &item.filename).unwrap();
+        assert_eq!(source.title, "Research Note");
         let body =
             std::fs::read_to_string(folder.join(".cowiki/sources").join(&item.filename)).unwrap();
         assert!(body.contains("type: Source"));
@@ -3783,7 +4480,135 @@ mod tests {
     }
 
     #[test]
-    fn search_refreshes_files_changed_directly_by_an_agent() {
+    fn broken_links_validate_exact_paths_and_ignore_non_document_syntax() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        std::fs::create_dir_all(folder.join("notes/deep")).unwrap();
+        std::fs::create_dir_all(folder.join("assets")).unwrap();
+        std::fs::write(folder.join("Target.md"), "# Exact target\n").unwrap();
+        std::fs::write(folder.join("My Doc.md"), "# Encoded target\n").unwrap();
+        std::fs::write(folder.join("x.md"), "# Markdown target\n").unwrap();
+        std::fs::write(folder.join("attachment.pdf"), b"attachment").unwrap();
+        std::fs::write(
+            folder.join("notes/deep/source.md"),
+            "# Source\n\n[exact](../../Target.md), [encoded](../../My%20Doc.md), \
+             [wrong case](../../target.md), [missing](../../missing.md#details), \
+             [attachment](../../attachment.pdf), [attachment wrong case](../../Attachment.pdf), \
+             [directory](../../assets/), [extensionless](../../x), \
+             and [raw source](../../.cowiki/sources/paper.pdf).\n\n\
+             [external](https://example.com/missing.md) \
+             [protocol relative](//example.com/missing.md) \
+             [email](mailto:docs@example.com) [anchor](#local) \
+             [hidden state](../../.cowiki/cache/session.md) \
+             [hidden source runtime](../../.cowiki/sources/.runtime/missing.json).\n\n\
+             [[Target]], [[Target.md]], and [[Missing Wiki|missing]].\n\n\
+             `[[inline-code]]`\n\n```md\n[[fenced-wiki]]\n[fenced](../../fenced.md)\n```\n",
+        )
+        .unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+
+        std::fs::create_dir_all(folder.join(".cowiki/sources")).unwrap();
+        std::fs::write(folder.join(".cowiki/sources/paper.pdf"), b"paper").unwrap();
+        std::fs::write(
+            folder.join(".cowiki/sources/raw.md"),
+            "# Hidden source\n\n[[hidden-missing]]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(folder.join(".cowiki/sources/.runtime")).unwrap();
+        std::fs::write(
+            folder.join(".cowiki/sources/.runtime/hidden.md"),
+            "# Hidden runtime\n\nruntime-only-sentinel\n",
+        )
+        .unwrap();
+        std::fs::write(
+            folder.join("index.md"),
+            "# Knowledge\n\n[[reserved-missing]]\n",
+        )
+        .unwrap();
+
+        assert!(engine
+            .search_pages(&space.slug, "runtime-only-sentinel", 10)
+            .unwrap()
+            .is_empty());
+        let broken = engine.list_broken_links(&space.slug).unwrap();
+        assert_eq!(
+            broken
+                .iter()
+                .map(|link| (
+                    link.source_path.as_str(),
+                    link.source_title.as_str(),
+                    link.target.as_str(),
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("notes/deep/source.md", "Source", "Attachment.pdf"),
+                ("notes/deep/source.md", "Source", "Missing Wiki.md"),
+                ("notes/deep/source.md", "Source", "missing.md"),
+                ("notes/deep/source.md", "Source", "target.md"),
+                ("notes/deep/source.md", "Source", "x"),
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn broken_links_count_symlinks_without_following_them_outside_the_space() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("knowledge");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("paper.pdf"), b"paper").unwrap();
+        std::fs::write(outside.join("secret.md"), "# Secret\n").unwrap();
+        symlink(outside.join("paper.pdf"), folder.join("linked.pdf")).unwrap();
+        symlink(&outside, folder.join("linked-directory")).unwrap();
+        std::fs::write(
+            folder.join("source.md"),
+            "# Source\n\n[linked file](linked.pdf)\n\n[escaped child](linked-directory/secret.md)\n",
+        )
+        .unwrap();
+        let space = engine.add_space("Knowledge", "knowledge", &folder).unwrap();
+
+        let broken = engine.list_broken_links(&space.slug).unwrap();
+        assert_eq!(
+            broken
+                .iter()
+                .map(|link| link.target.as_str())
+                .collect::<Vec<_>>(),
+            vec!["linked-directory/secret.md"]
+        );
+    }
+
+    #[test]
+    fn broken_links_refresh_after_external_editor_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("agent-space");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(
+            folder.join("source.md"),
+            "# Source\n\n[Future](future.md)\n",
+        )
+        .unwrap();
+        let space = engine.add_space("Agent", "agent", &folder).unwrap();
+
+        assert_eq!(engine.list_broken_links(&space.slug).unwrap().len(), 1);
+
+        std::fs::write(folder.join("future.md"), "# Future\n").unwrap();
+        assert!(engine.list_broken_links(&space.slug).unwrap().is_empty());
+
+        std::fs::write(folder.join("source.md"), "# Source\n\n[Later](later.md)\n").unwrap();
+        let refreshed = engine.list_broken_links(&space.slug).unwrap();
+        assert_eq!(refreshed.len(), 1);
+        assert_eq!(refreshed[0].target, "later.md");
+    }
+
+    #[test]
+    fn search_refreshes_files_changed_or_deleted_directly_by_an_agent() {
         let temp = tempfile::tempdir().unwrap();
         let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
         let folder = temp.path().join("agent-space");
@@ -3798,6 +4623,26 @@ mod tests {
 
         let hits = engine.search_pages(&space.slug, "capybara", 5).unwrap();
         assert_eq!(hits[0].path, "agent-note.md");
+
+        std::fs::write(
+            folder.join("agent-note.md"),
+            "# Agent note\n\nA revised quokka fact.",
+        )
+        .unwrap();
+        assert!(engine
+            .search_pages(&space.slug, "capybara", 5)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            engine.search_pages(&space.slug, "quokka", 5).unwrap()[0].path,
+            "agent-note.md"
+        );
+
+        std::fs::remove_file(folder.join("agent-note.md")).unwrap();
+        assert!(engine
+            .search_pages(&space.slug, "quokka", 5)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

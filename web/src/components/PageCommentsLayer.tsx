@@ -148,11 +148,6 @@ export function CommentsProvider({
   const [panelOpen, setPanelOpen] = useState(true);
   const [pending, setPending] = useState<{ start: number; end: number; x: number; y: number } | null>(null);
   const [composing, setComposing] = useState<{ start: number; end: number; quote: string } | null>(null);
-  // Mirror `composing` into a ref so the once-registered mouseup handler can read
-  // it without a stale closure (and without re-subscribing on every change).
-  const composingRef = useRef(false);
-  composingRef.current = composing != null;
-
   const enabled = !!workspaceSlug && !!pageSlug;
 
   const reload = useCallback(async () => {
@@ -224,7 +219,7 @@ export function CommentsProvider({
     const onUp = () => {
       // A composer is open — don't let the still-present selection re-arm the
       // floating "Comment" bubble (it would resurface after cancel/submit).
-      if (composingRef.current) return;
+      if (composing) return;
       const root = articleRef.current;
       if (!root) return;
       const lr = selectionLineRange(root);
@@ -234,7 +229,7 @@ export function CommentsProvider({
     };
     document.addEventListener('mouseup', onUp);
     return () => document.removeEventListener('mouseup', onUp);
-  }, [articleRef, enabled]);
+  }, [articleRef, composing, enabled]);
 
   const submitNew = async (body: string) => {
     if (!composing || !body.trim()) return;

@@ -121,6 +121,12 @@ export interface SearchResponse {
   semantic: SemanticHit[];
 }
 
+export interface BrokenLink {
+  source_path: string;
+  source_title: string;
+  target: string;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -166,10 +172,14 @@ export interface PendingInvitation {
 
 export interface SourceItem {
   filename: string;
+  /** Human-readable OKF title. filename remains the stable storage identity. */
+  title?: string;
 }
 
 export interface SourceContent {
   filename: string;
+  /** Human-readable OKF title. */
+  title?: string;
   content: string;
 }
 
@@ -434,7 +444,7 @@ export async function listReviews(workspaceSlug: string): Promise<Submission[]> 
       status: change.status === 'merged' ? 'merged' : change.status === 'discarded' ? 'rejected' : 'pending',
       summary: change.title,
       paths: change.diffs.map((diff) => diff.path),
-      source_branch: `cowiki/agent/${change.id}`,
+      source_branch: `agent/${change.id}`,
       created_at: new Date(change.createdAt * 1000).toISOString(),
       reviewed_by: null,
       reviewed_at: null,
@@ -557,6 +567,11 @@ export async function searchWorkspace(
     throw new Error(err.error || `Request failed: ${res.status}`);
   }
   return res.json();
+}
+
+export async function listBrokenLinks(workspaceSlug: string): Promise<BrokenLink[]> {
+  if (!isDesktopClient()) return [];
+  return localApi.listBrokenLinks(workspaceSlug);
 }
 
 // ── API Keys ──

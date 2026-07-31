@@ -27,10 +27,17 @@ test('client settings default to Codex and persist the selected agent', () => {
   saveClientSettings(storage, { defaultAgent: 'claude' });
   assert.deepEqual(loadClientSettings(storage), { defaultAgent: 'claude' });
 
-  for (const defaultAgent of ['grok', 'gemini', 'opencode', 'hermes'] as const) {
+  for (const defaultAgent of ['grok', 'antigravity', 'opencode', 'hermes'] as const) {
     saveClientSettings(storage, { defaultAgent });
     assert.deepEqual(loadClientSettings(storage), { defaultAgent });
   }
+});
+
+test('legacy Gemini settings migrate to Antigravity', () => {
+  const storage = new MemoryStorage();
+  storage.setItem('cowiki.client.settings', JSON.stringify({ defaultAgent: 'gemini' }));
+
+  assert.deepEqual(loadClientSettings(storage), { defaultAgent: 'antigravity' });
 });
 
 test('malformed client settings fall back to safe defaults', () => {

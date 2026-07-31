@@ -9,7 +9,6 @@ cowiki.conf
 .git/
 .vscode/
 .github/
-cli/
 cowiki-mcp-server/
 docs/
 scripts/

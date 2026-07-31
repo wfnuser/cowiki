@@ -1,0 +1,4 @@
+interface:
+  display_name: "Maintain a CoWiki Space"
+  short_description: "Search and maintain local OKF knowledge safely"
+  default_prompt: "Use $cowiki-space to search and maintain the current local CoWiki Space."

@@ -1,3 +1,4 @@
+mod cloud_sync;
 mod extract;
 mod knowledge_index;
 mod local_engine;
@@ -6,8 +7,8 @@ mod okf;
 mod terminal;
 
 use local_engine::{
-    AgentChange, Checkpoint, FileDiff, IngestFileOutcome, LocalEngine, PageFull, PageMeta,
-    SearchResponse, SourceContent, SourceItem, Space, SpaceHistory, SubmitResult,
+    AgentChange, BrokenLink, Checkpoint, FileDiff, IngestFileOutcome, LocalEngine, PageFull,
+    PageMeta, SearchResponse, SourceContent, SourceItem, Space, SpaceHistory, SubmitResult,
 };
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -15,7 +16,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tauri::{Manager, State};
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DesktopOAuthCredential {
     api_key: String,
@@ -202,6 +203,14 @@ fn local_search(
 }
 
 #[tauri::command]
+fn local_list_broken_links(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<Vec<BrokenLink>, String> {
+    engine.list_broken_links(&space_slug)
+}
+
+#[tauri::command]
 fn local_submit(
     engine: State<'_, LocalEngine>,
     space_slug: String,
@@ -294,10 +303,137 @@ fn local_discard_agent_change(
     engine.discard_agent_change(&space_slug, &change_id)
 }
 
+#[tauri::command]
+async fn cloud_link_space(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    cloud_base_url: String,
+    api_key: String,
+    cloud_space_id: Option<String>,
+    git_url: Option<String>,
+    cloud_name: String,
+    cloud_slug: String,
+    commit_message: Option<String>,
+    user_name: String,
+    user_id: String,
+) -> Result<cloud_sync::CloudSyncResult, String> {
+    let engine = engine.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let user_id = uuid::Uuid::parse_str(&user_id)
+            .map_err(|_| "signed-in Cloud user id is invalid".to_string())?;
+        let _mutation = engine.lock_mutations()?;
+        cloud_sync::link_space(
+            &engine,
+            &space_slug,
+            &cloud_base_url,
+            &api_key,
+            cloud_space_id.as_deref(),
+            git_url.as_deref(),
+            &cloud_name,
+            &cloud_slug,
+            commit_message.as_deref(),
+            &user_name,
+            user_id,
+        )
+    })
+    .await
+    .map_err(|error| format!("Cloud link task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn cloud_get_status(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<cloud_sync::CloudSyncResult, String> {
+    let engine = engine.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || cloud_sync::get_status(&engine, &space_slug))
+        .await
+        .map_err(|error| format!("Cloud status task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn cloud_sync_if_clean(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    api_key: String,
+) -> Result<cloud_sync::CloudSyncResult, String> {
+    let engine = engine.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _mutation = engine.lock_mutations()?;
+        cloud_sync::sync_if_clean(&engine, &space_slug, &api_key)
+    })
+    .await
+    .map_err(|error| format!("Cloud sync task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn cloud_submit(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    api_key: String,
+    commit_message: Option<String>,
+    pull_request_title: Option<String>,
+    pull_request_body: Option<String>,
+    user_name: String,
+) -> Result<cloud_sync::CloudSyncResult, String> {
+    let engine = engine.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _mutation = engine.lock_mutations()?;
+        cloud_sync::submit(
+            &engine,
+            &space_slug,
+            &api_key,
+            commit_message.as_deref(),
+            pull_request_title.as_deref(),
+            pull_request_body.as_deref(),
+            &user_name,
+        )
+    })
+    .await
+    .map_err(|error| format!("Cloud submit task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn cloud_rebase_continue(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<cloud_sync::CloudSyncResult, String> {
+    let engine = engine.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _mutation = engine.lock_mutations()?;
+        cloud_sync::rebase_continue(&engine, &space_slug)
+    })
+    .await
+    .map_err(|error| format!("Cloud rebase task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn cloud_rebase_abort(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<cloud_sync::CloudSyncResult, String> {
+    let engine = engine.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _mutation = engine.lock_mutations()?;
+        cloud_sync::rebase_abort(&engine, &space_slug)
+    })
+    .await
+    .map_err(|error| format!("Cloud rebase task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn open_external_url(url: String) -> Result<(), String> {
+    let url = validate_external_url(&url)?.to_string();
+    tauri::async_runtime::spawn_blocking(move || open_system_browser(&url))
+        .await
+        .map_err(|error| format!("browser opener task failed: {error}"))?
+}
+
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             start_desktop_oauth,
+            open_external_url,
             choose_local_space_directory,
             choose_source_files,
             local_list_spaces,
@@ -313,6 +449,7 @@ pub fn run() {
             local_rename_path,
             local_delete_path,
             local_search,
+            local_list_broken_links,
             local_submit,
             local_working_diff,
             local_keep_working_diff,
@@ -323,6 +460,12 @@ pub fn run() {
             local_merge_agent_change,
             local_discard_agent_change,
             terminal::agent_probe,
+            cloud_link_space,
+            cloud_get_status,
+            cloud_sync_if_clean,
+            cloud_submit,
+            cloud_rebase_continue,
+            cloud_rebase_abort,
             terminal::terminal_create,
             terminal::terminal_write,
             terminal::terminal_resize,
@@ -407,13 +550,21 @@ fn run_loopback_oauth(auth_base_url: String) -> Result<DesktopOAuthCredential, S
                     .query_pairs()
                     .into_owned()
                     .collect::<std::collections::HashMap<_, _>>();
-                let credential = DesktopOAuthCredential {
-                    api_key: parameters.get("api_key").ok_or("missing api_key")?.clone(),
-                    user_name: parameters
-                        .get("user_name")
-                        .ok_or("missing user_name")?
-                        .clone(),
-                    user_id: parameters.get("user_id").ok_or("missing user_id")?.clone(),
+                let credential = if let (Some(api_key), Some(user_name), Some(user_id)) = (
+                    parameters.get("api_key"),
+                    parameters.get("user_name"),
+                    parameters.get("user_id"),
+                ) {
+                    DesktopOAuthCredential {
+                        api_key: api_key.clone(),
+                        user_name: user_name.clone(),
+                        user_id: user_id.clone(),
+                    }
+                } else {
+                    let code = parameters
+                        .get("code")
+                        .ok_or("missing desktop exchange code")?;
+                    exchange_desktop_oauth_code(&auth_base_url, code)?
                 };
                 let body = "CoWiki Cloud sign-in complete. You can return to the desktop app.";
                 let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
@@ -431,6 +582,33 @@ fn run_loopback_oauth(auth_base_url: String) -> Result<DesktopOAuthCredential, S
     }
 }
 
+fn exchange_desktop_oauth_code(
+    auth_base_url: &str,
+    code: &str,
+) -> Result<DesktopOAuthCredential, String> {
+    let endpoint = url::Url::parse(auth_base_url)
+        .map_err(|error| format!("invalid Cloud sign-in URL: {error}"))?
+        .join("desktop/exchange")
+        .map_err(|error| format!("invalid Cloud exchange URL: {error}"))?;
+    let response = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| error.to_string())?
+        .post(endpoint)
+        .json(&serde_json::json!({ "code": code }))
+        .send()
+        .map_err(|error| format!("Cloud sign-in exchange failed: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Cloud sign-in exchange was rejected ({})",
+            response.status()
+        ));
+    }
+    response
+        .json::<DesktopOAuthCredential>()
+        .map_err(|error| format!("Cloud sign-in response was invalid: {error}"))
+}
+
 fn open_system_browser(url: &str) -> Result<(), String> {
     let status = if cfg!(target_os = "macos") {
         std::process::Command::new("open").arg(url).status()
@@ -446,5 +624,26 @@ fn open_system_browser(url: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("browser opener exited with {status}"))
+    }
+}
+
+fn validate_external_url(url: &str) -> Result<url::Url, String> {
+    let parsed = url::Url::parse(url).map_err(|error| format!("invalid external URL: {error}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host().is_none() {
+        return Err("external URL must be HTTP(S) and include a host".to_string());
+    }
+    Ok(parsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn external_browser_urls_accept_only_http_and_https() {
+        assert!(validate_external_url("https://cloud.cowiki.app/cloud").is_ok());
+        assert!(validate_external_url("http://localhost:8787/cloud").is_ok());
+        assert!(validate_external_url("file:///tmp/private").is_err());
+        assert!(validate_external_url("javascript:alert(1)").is_err());
     }
 }

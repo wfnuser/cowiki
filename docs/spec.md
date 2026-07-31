@@ -1,5 +1,10 @@
 # cowiki MVP Spec
 
+> **Historical document — superseded.** This describes the original
+> backend-first MVP. For the current local Space and Agent contract, see
+> [README](../README.md), [Local MCP](mcp.md), and the
+> [`cowiki-space` skill](../skills/cowiki-space/SKILL.md).
+
 ## Overview
 
 cowiki is a collaborative knowledge base where humans and AI agents co-maintain a shared wiki. Users ingest sources, compile them into wiki pages, and submit to a shared space with review workflows. Version control is powered by Git under the hood, but users never see Git directly.

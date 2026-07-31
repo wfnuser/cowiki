@@ -1,5 +1,9 @@
 # Submit Path Awareness — Design Spec
 
+> **Historical document — superseded.** This submit flow belonged to the
+> retired CLI/backend review model. Local review now uses Draft and Agent
+> Changes; see the [`cowiki-space` skill](../../../skills/cowiki-space/SKILL.md).
+
 **Date:** 2026-06-17
 **PR:** [#92](https://github.com/wfnuser/cowiki/pull/92)
 **Status:** approved
