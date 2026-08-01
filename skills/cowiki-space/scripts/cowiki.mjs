@@ -18,7 +18,7 @@ import {
 } from './lib/git.mjs';
 import { loginWithBrowser } from './lib/oauth.mjs';
 
-const DEFAULT_SERVER = process.env.COWIKI_CLOUD_URL || 'https://cloud.cowiki.app';
+const DEFAULT_SERVER = process.env.COWIKI_CLOUD_URL || 'https://api.cowiki.app';
 
 export async function main(argv = process.argv.slice(2)) {
   const [command, ...rest] = argv;
