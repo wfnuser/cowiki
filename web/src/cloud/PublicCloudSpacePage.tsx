@@ -116,21 +116,23 @@ export function PublicCloudSpacePage() {
         </nav>
       </aside>
 
-      <main className="min-w-0 flex-1">
-        <header className="flex h-14 items-center justify-between border-b bg-panel px-5 md:px-8">
+      <main className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-14 shrink-0 items-center justify-between border-b bg-panel px-5 md:px-8">
           <div className="min-w-0 truncate text-sm font-semibold md:hidden">{space.name}</div>
           <div className="hidden text-xs text-text-tertiary md:block">{documentPath || 'Published knowledge'}</div>
           <Link className="text-xs font-semibold text-accent hover:underline" to="/login">
             Sign in to collaborate
           </Link>
         </header>
-        {documentPath && content?.path === documentPath ? (
-          <PageReader body={splitSystemFrontmatter(content.content).body} />
-        ) : pages.length === 0 ? (
-          <div className="p-10 text-sm text-text-tertiary">No published Markdown pages yet.</div>
-        ) : (
-          <div className="p-10 text-sm text-text-tertiary">Loading page…</div>
-        )}
+        <div className="relative min-h-0 flex-1">
+          {documentPath && content?.path === documentPath ? (
+            <PageReader body={splitSystemFrontmatter(content.content).body} />
+          ) : pages.length === 0 ? (
+            <div className="p-10 text-sm text-text-tertiary">No published Markdown pages yet.</div>
+          ) : (
+            <div className="p-10 text-sm text-text-tertiary">Loading page…</div>
+          )}
+        </div>
       </main>
     </div>
   );

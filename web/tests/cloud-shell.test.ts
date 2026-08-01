@@ -42,6 +42,8 @@ test('public Space routes render merged Markdown without a session', () => {
   assert.match(app, /path="\/spaces\/:slug\/\*"/);
   assert.match(publicReader, /createPublicCloudClient/);
   assert.match(publicReader, /PageReader/);
+  assert.match(publicReader, /<main className="flex min-w-0 flex-1 flex-col">/);
+  assert.match(publicReader, /<div className="relative min-h-0 flex-1">/);
   assert.doesNotMatch(publicReader, /Authorization|CloudMembersView|CloudReviewsView/);
 });
 
