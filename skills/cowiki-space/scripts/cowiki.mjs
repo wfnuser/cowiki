@@ -11,7 +11,7 @@ import {
   writeSpaceConfig,
 } from './lib/config.mjs';
 import {
-  repositoryStatus,
+  refreshRepositoryStatus,
   runGit,
   setupCowikiRemote,
   submitRepository,
@@ -118,7 +118,7 @@ async function statusCommand(options) {
   const cwd = path.resolve(options.cwd || process.cwd());
   const space = await readSpaceConfig(cwd);
   const credential = await requiredCredential(space.server);
-  const status = repositoryStatus(cwd);
+  const status = refreshRepositoryStatus(cwd, space, credential);
   process.stdout.write(`${JSON.stringify({
     server: space.server,
     spaceId: space.spaceId,

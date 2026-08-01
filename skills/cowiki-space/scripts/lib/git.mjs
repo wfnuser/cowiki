@@ -209,6 +209,11 @@ export function repositoryStatus(cwd) {
   };
 }
 
+export function refreshRepositoryStatus(cwd, space, credential) {
+  fetchCloudRefs(cwd, space, credential);
+  return repositoryStatus(cwd);
+}
+
 function ensureMain(cwd) {
   const branch = runGit(cwd, ['branch', '--show-current']).stdout.trim();
   if (branch !== 'main') {
