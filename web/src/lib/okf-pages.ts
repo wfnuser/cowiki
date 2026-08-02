@@ -16,7 +16,7 @@ export function conceptPath(conceptId: string): string {
 
 export function isReservedDocument(path: string): boolean {
   const name = normalizeRepoPath(path).split('/').at(-1);
-  return name === 'index.md' || name === 'log.md';
+  return name === 'log.md';
 }
 
 export function isHiddenRepoPath(path: string): boolean {
@@ -44,8 +44,8 @@ function sortPages(pages: PageMeta[]): PageMeta[] {
 }
 
 /**
- * Present an OKF bundle as one tree. Generated index/log files and CoWiki's
- * hidden storage remain addressable on disk but are not editable concepts.
+ * Present an OKF bundle as one tree. Generated log files and CoWiki's hidden
+ * storage remain addressable on disk but are not editable concepts.
  */
 function visibleNodes(pages: PageMeta[]): PageMeta[] {
   const visible = pages.flatMap((page): PageMeta[] => {

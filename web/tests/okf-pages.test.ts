@@ -28,15 +28,17 @@ function folder(path: string, children: PageMeta[]): PageMeta {
 
 test('an OKF bundle is one arbitrary hierarchy and legacy names stay ordinary folders', () => {
   const tree = visiblePageTree([
-    page('index.md'),
+    page('index.md', 'Home'),
     page('log.md'),
-    folder('research', [page('research/index.md'), page('research/paper.md', 'Paper')]),
+    folder('research', [page('research/index.md', 'Overview'), page('research/paper.md', 'Paper')]),
     folder('wiki', [page('wiki/legacy.md', 'Legacy')]),
     folder('entities', [page('entities/alice.md', 'Alice')]),
   ]);
 
-  assert.deepEqual(tree.map((item) => item.path), ['entities', 'research', 'wiki']);
-  assert.deepEqual(tree[1].children.map((item) => item.path), ['research/paper.md']);
+  assert.deepEqual(tree.map((item) => item.path), ['entities', 'research', 'wiki', 'index.md']);
+  assert.deepEqual(tree[1].children.map((item) => item.path), [
+    'research/index.md', 'research/paper.md',
+  ]);
 });
 
 test('a single real wiki folder titled Knowledge keeps its full Concept IDs', () => {
@@ -65,13 +67,13 @@ test('CoWiki source storage and every hidden subtree stay out of the page tree',
   assert.deepEqual(submitConceptPaths(tree), [
     'notes/Index.md', 'notes/Log.md', 'notes/visible.md',
   ]);
-  assert.equal(isReservedDocument('notes/index.md'), true);
+  assert.equal(isReservedDocument('notes/index.md'), false);
   assert.equal(isReservedDocument('notes/log.md'), true);
   assert.equal(isReservedDocument('notes/Index.md'), false);
   assert.equal(isReservedDocument('notes/Log.md'), false);
   assert.equal(isReservedDocument('notes/catalog.md'), false);
   assert.equal(isSearchableConceptPath('.cowiki/sources/raw.md'), false);
-  assert.equal(isSearchableConceptPath('research/index.md'), false);
+  assert.equal(isSearchableConceptPath('research/index.md'), true);
   assert.equal(isSearchableConceptPath('research/paper.md'), true);
 });
 
