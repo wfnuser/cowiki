@@ -9,6 +9,11 @@ export interface CloudNavigationItem {
   description: string;
 }
 
+export interface SpaceScopedResource<T> {
+  spaceId: string;
+  value: T;
+}
+
 const NAVIGATION: CloudNavigationItem[] = [
   { id: 'wiki', label: 'Wiki', description: 'Published knowledge' },
   { id: 'reviews', label: 'Reviews', description: 'Cloud pull requests' },
@@ -33,4 +38,11 @@ export function resolveInitialCloudPage(entries: CloudTreeEntry[]): string | nul
   return pages.find((entry) => entry.path.toLowerCase() === 'index.md')?.path
     ?? pages[0]?.path
     ?? null;
+}
+
+export function routeScopedValue<T>(
+  selectedSpaceId: string,
+  loaded: SpaceScopedResource<T> | null,
+): T | null {
+  return loaded?.spaceId === selectedSpaceId ? loaded.value : null;
 }

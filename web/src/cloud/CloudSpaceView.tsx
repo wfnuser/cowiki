@@ -20,6 +20,7 @@ import { CloudNotice } from './CloudHome';
 import { CloudMembersView } from './CloudMembersView';
 import { CloudReviewsView } from './CloudReviewsView';
 import { CloudWikiView } from './CloudWikiView';
+import { routeScopedValue, type SpaceScopedResource } from './cloud-shell-model';
 import { cloudSpaceRoute, type ParsedCloudRoute } from './routes';
 import type { CloudSession } from './session';
 
@@ -35,12 +36,17 @@ const EMPTY_MAIN: CloudTree = { ref: 'main', oid: '', entries: [] };
 export function CloudSpaceView({ client, session, route, onSignOut }: CloudSpaceViewProps) {
   const navigate = useNavigate();
   const [spaces, setSpaces] = useState<CloudSpace[]>([]);
-  const [space, setSpace] = useState<CloudSpace | null>(null);
-  const [tree, setTree] = useState<CloudTree | null>(null);
-  const [spaceError, setSpaceError] = useState('');
-  const [treeError, setTreeError] = useState('');
-  const [unpublished, setUnpublished] = useState(false);
+  const [loadedSpace, setLoadedSpace] = useState<SpaceScopedResource<CloudSpace> | null>(null);
+  const [loadedTree, setLoadedTree] = useState<SpaceScopedResource<CloudTree> | null>(null);
+  const [spaceErrorState, setSpaceErrorState] = useState<SpaceScopedResource<string> | null>(null);
+  const [treeErrorState, setTreeErrorState] = useState<SpaceScopedResource<string> | null>(null);
+  const [unpublishedState, setUnpublishedState] = useState<SpaceScopedResource<boolean> | null>(null);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const space = routeScopedValue(route.spaceId, loadedSpace);
+  const tree = routeScopedValue(route.spaceId, loadedTree);
+  const spaceError = routeScopedValue(route.spaceId, spaceErrorState) ?? '';
+  const treeError = routeScopedValue(route.spaceId, treeErrorState) ?? '';
+  const unpublished = routeScopedValue(route.spaceId, unpublishedState) ?? false;
   const pages = useMemo(() => cloudTreePages(tree), [tree]);
   const workspace = useMemo(() => space ? cloudWorkspace(space) : null, [space]);
   const headerLabel = cloudHeaderLabel(route);
@@ -50,12 +56,15 @@ export function CloudSpaceView({ client, session, route, onSignOut }: CloudSpace
     void client.getSpace(route.spaceId)
       .then((value) => {
         if (!active) return;
-        setSpace(value);
-        setSpaceError('');
+        setLoadedSpace({ spaceId: route.spaceId, value });
+        setSpaceErrorState(null);
       })
       .catch((cause) => {
         if (active) {
-          setSpaceError(cause instanceof Error ? cause.message : 'Could not load this Cloud Space.');
+          setSpaceErrorState({
+            spaceId: route.spaceId,
+            value: cause instanceof Error ? cause.message : 'Could not load this Cloud Space.',
+          });
         }
       });
     return () => { active = false; };
@@ -66,19 +75,22 @@ export function CloudSpaceView({ client, session, route, onSignOut }: CloudSpace
     void client.getTree(route.spaceId)
       .then((value) => {
         if (!active) return;
-        setTree(value);
-        setTreeError('');
-        setUnpublished(false);
+        setLoadedTree({ spaceId: route.spaceId, value });
+        setTreeErrorState(null);
+        setUnpublishedState({ spaceId: route.spaceId, value: false });
       })
       .catch((cause) => {
         if (!active) return;
         if (cause instanceof CloudApiError && cause.status === 404) {
-          setTree(EMPTY_MAIN);
-          setTreeError('');
-          setUnpublished(true);
+          setLoadedTree({ spaceId: route.spaceId, value: EMPTY_MAIN });
+          setTreeErrorState(null);
+          setUnpublishedState({ spaceId: route.spaceId, value: true });
           return;
         }
-        setTreeError(cause instanceof Error ? cause.message : 'Could not load Cloud main.');
+        setTreeErrorState({
+          spaceId: route.spaceId,
+          value: cause instanceof Error ? cause.message : 'Could not load Cloud main.',
+        });
       });
     return () => { active = false; };
   }, [client, route.spaceId]);

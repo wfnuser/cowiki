@@ -7,6 +7,7 @@ import {
   memberManagementMode,
   mergeActionVisible,
   resolveInitialCloudPage,
+  routeScopedValue,
 } from '../src/cloud/cloud-shell-model.ts';
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
@@ -132,6 +133,18 @@ test('read-only Wiki selects index.md before the first available page', () => {
   assert.match(wiki, /PageReader/);
   assert.match(pageReader, /ReactMarkdown/);
   assert.match(pageReader, /remarkGfm/);
+});
+
+test('a previous Space tree is hidden while the selected Space loads', () => {
+  const previousTree = {
+    ref: 'main',
+    oid: 'old-tree',
+    entries: [{ path: 'old-page.md', kind: 'page' as const }],
+  };
+  const loaded = { spaceId: 'space-old', value: previousTree };
+
+  assert.equal(routeScopedValue('space-new', loaded), null);
+  assert.equal(routeScopedValue('space-old', loaded), previousTree);
 });
 
 test('member and PR mutations reload server-authoritative state', () => {
