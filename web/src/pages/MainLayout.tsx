@@ -81,6 +81,7 @@ import {
 } from '@/lib/client-settings';
 import { splitSystemFrontmatter } from '@/lib/page-frontmatter';
 import { sourceOrganizationTask } from '@/lib/source-ingest';
+import { resolveWorkspaceSwitchTarget } from '@/lib/workspace-navigation';
 
 type ActiveView =
   | { kind: 'page'; slug: string; path?: string; content: PageFull | null }
@@ -285,7 +286,7 @@ export function MainLayout() {
     if (ws.visibility === 'private') {
       const pages = visiblePageTree(await listPages(userBranch, ws.slug, 'all'));
       setSpacePages((previous) => ({ ...previous, [ws.id]: pages }));
-      return;
+      return pages;
     }
     const [mainPages, draftPages] = await Promise.all([
       listPages('main', ws.slug, 'all'),
@@ -293,6 +294,7 @@ export function MainLayout() {
     ]);
     const merged = visiblePageTree(mergePageTrees(mainPages, draftPages));
     setSpacePages((previous) => ({ ...previous, [ws.id]: merged }));
+    return merged;
   }, [userBranch]);
 
   // Load sources for a space.
@@ -473,18 +475,19 @@ export function MainLayout() {
   };
 
   // Switch workspace via rail
-  const handleSelectWorkspace = (ws: Workspace) => {
+  const handleSelectWorkspace = async (ws: Workspace) => {
     if (activeWorkspace?.id === ws.id) return;
     setActiveWorkspace(ws);
     setActiveTab('wiki');
-    // Load pages/sources if not already loaded
-    if (!spacePages[ws.id]) loadSpacePages(ws);
+    // Resolve navigation from the loaded tree, not the pre-request state snapshot.
+    const targetPromise = resolveWorkspaceSwitchTarget(
+      spacePages[ws.id],
+      () => loadSpacePages(ws),
+    );
     if (!spaceSources[ws.id]) loadSpaceSources(ws);
-    // Navigate to first page
-    const pages = spacePages[ws.id] || [];
-    const first = firstConcept(pages);
-    if (first) {
-      selectPage(ws, conceptIdFromPath(first.path), first.path);
+    const target = await targetPromise;
+    if (target) {
+      selectPage(ws, target.conceptId, target.path);
     } else {
       setActiveView(null);
     }
