@@ -459,6 +459,7 @@ pub fn run() {
             local_list_agent_changes,
             local_merge_agent_change,
             local_discard_agent_change,
+            terminal::agent_probe,
             cloud_link_space,
             cloud_get_status,
             cloud_sync_if_clean,

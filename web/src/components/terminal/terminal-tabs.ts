@@ -1,6 +1,7 @@
 import {
   agentDisplayName,
   type AgentKind,
+  type AgentTerminalIntent,
   type AgentTerminalMode,
 } from './terminal-contract.ts';
 
@@ -8,6 +9,7 @@ export type AgentTerminalTab = {
   id: string;
   agent: AgentKind;
   mode: AgentTerminalMode;
+  intent?: AgentTerminalIntent;
   changeId?: string;
   worktreePath?: string;
   initialTask?: string;
@@ -24,7 +26,11 @@ export function addAgentTab(
   id: string,
   mode: AgentTerminalMode = 'live',
   background?: { changeId: string; worktreePath: string; initialTask?: string },
+  intent: AgentTerminalIntent = 'run',
 ): AgentTerminalTabsState {
+  if (intent === 'login' && (agent !== 'codex' || mode !== 'live')) {
+    throw new Error('Only Codex can open a live Agent login tab');
+  }
   if (mode === 'background' && !background) {
     throw new Error('background Agent tabs require a managed Change');
   }
@@ -36,10 +42,20 @@ export function addAgentTab(
         id,
         agent,
         mode,
+        ...(intent === 'run' ? {} : { intent }),
         ...(background ?? {}),
       },
     ],
   };
+}
+
+export function addOrFocusCodexLoginTab(
+  state: AgentTerminalTabsState,
+  id: string,
+): AgentTerminalTabsState {
+  const existing = state.tabs.find((tab) => tab.agent === 'codex' && tab.intent === 'login');
+  if (existing) return { ...state, activeTabId: existing.id };
+  return addAgentTab(state, 'codex', id, 'live', undefined, 'login');
 }
 
 export function closeAgentTab(
@@ -74,5 +90,6 @@ export function terminalTabLabel(tabs: AgentTerminalTab[], tab: AgentTerminalTab
   const position = matchingTabs.findIndex((candidate) => candidate.id === tab.id);
   const label = agentDisplayName(tab.agent);
   const numbered = matchingTabs.length > 1 ? `${label} ${position + 1}` : label;
+  if (tab.intent === 'login') return `${numbered} · Sign in`;
   return tab.mode === 'background' ? `${numbered} · Background` : numbered;
 }

@@ -103,6 +103,10 @@ and edit the Space's Markdown files directly. The
 for external Agents; local work never requires a CoWiki account, API key, or
 backend.
 
+Before launch, the Agent panel checks the selected local CLI in the user's login
+shell environment and delegates authentication to that CLI, so CoWiki never
+reads or stores Agent credentials. Available Agents start in the Current Draft.
+
 ## Roadmap
 
 - Make the macOS alpha easier to install and trust.

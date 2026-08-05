@@ -1,5 +1,6 @@
 import { ChevronRight } from 'lucide-react';
 
+import { InlineFeedback } from '@/components/ui/inline-feedback';
 import { C } from '@/lib/design';
 
 export function ReviewInbox({
@@ -33,7 +34,7 @@ export function ReviewInbox({
         {action}
       </div>
 
-      {error && <p style={{ color: C.red, fontSize: 13 }}>{error}</p>}
+      {error && <InlineFeedback className="mb-4" title="Could not load Reviews" description={error} />}
       {loading ? (
         <p style={{ color: C.muted, fontSize: 14 }}>Loading Reviews…</p>
       ) : children ? (
