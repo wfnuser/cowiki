@@ -103,10 +103,9 @@ and edit the Space's Markdown files directly. The
 for external Agents; local work never requires a CoWiki account, API key, or
 backend.
 
-Before launch, the Agent panel checks the selected local CLI and delegates
-authentication to that CLI, so CoWiki never reads or stores Agent credentials.
-Choose **Live** to work directly in the Current Draft, or **Background** to run
-in an isolated Agent Change that must be reviewed before it reaches the Draft.
+Before launch, the Agent panel checks the selected local CLI in the user's login
+shell environment and delegates authentication to that CLI, so CoWiki never
+reads or stores Agent credentials. Available Agents start in the Current Draft.
 
 ## Roadmap
 

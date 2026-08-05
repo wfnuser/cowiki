@@ -14,6 +14,7 @@ import {
   type SpaceHistory,
 } from '@/api';
 import { Button } from '@/components/ui/button';
+import { InlineFeedback } from '@/components/ui/inline-feedback';
 import { C } from '@/lib/design';
 import {
   canCreateCheckpoint,
@@ -127,11 +128,12 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
           </article>
 
           {error && (
-            <div role="alert" style={{ ...noticeStyle, marginTop: 14, borderColor: '#f0cbc5', background: C.redBgSoft }}>
-              <CircleAlert size={17} color={C.red} />
-              <span style={{ flex: 1, color: C.red, fontSize: 12.5 }}>{error}</span>
-              <button type="button" onClick={() => { void refresh(); }} style={retryStyle}>Retry</button>
-            </div>
+            <InlineFeedback
+              className="mt-3.5"
+              title="Could not update history"
+              description={error}
+              action={<button type="button" onClick={() => { void refresh(); }} style={retryStyle}>Retry</button>}
+            />
           )}
 
           <div style={{ marginTop: 30 }}>

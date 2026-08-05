@@ -7,7 +7,6 @@ import {
   agentDisplayName,
   agentInitialCommand,
   agentReadinessAction,
-  agentTerminalModeDetails,
   belongsToTerminalSession,
   normalizeTerminalSize,
 } from '../src/components/terminal/terminal-contract.ts';
@@ -54,22 +53,48 @@ test('normalizes terminal dimensions to the PTY contract', () => {
   assert.deepEqual(normalizeTerminalSize(101.8, 42.9), { cols: 101, rows: 42 });
 });
 
-test('explains live and background as execution modes instead of agent types', () => {
-  assert.deepEqual(agentTerminalModeDetails('live'), {
-    title: 'Current Draft',
-    description: 'Works directly in the Current Draft. Changes appear immediately, so coordinate with concurrent human or Agent edits.',
-  });
-  assert.deepEqual(agentTerminalModeDetails('background'), {
-    title: 'Isolated Agent Change',
-    description: 'Runs in an isolated worktree. Review the diff, then keep or discard it before it reaches the Current Draft.',
-  });
-});
-
 test('routes signed-out Codex sessions through the single login flow', () => {
-  assert.equal(agentReadinessAction('codex', 'ready'), 'run');
+  assert.equal(agentReadinessAction('codex', 'available'), 'run');
   assert.equal(agentReadinessAction('codex', 'signedOut'), 'login');
   assert.equal(agentReadinessAction('codex', 'broken'), 'blocked');
   assert.equal(agentReadinessAction('claude', 'signedOut'), 'blocked');
+});
+
+test('the launch page uses one stateful primary action and no execution-mode promotion', () => {
+  const panel = readFileSync(
+    new URL('../src/components/terminal/AgentTerminalPanel.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(panel, /const buttonLabel = checking[\s\S]*Sign in to/);
+  assert.match(panel, /<Button[\s\S]*disabled=\{busy \|\| \(!available && !signedOut\)\}/);
+  assert.doesNotMatch(panel, /function ExecutionModeControl/);
+  assert.doesNotMatch(panel, /agentTerminalModeDetails/);
+});
+
+test('the add menu keeps readiness checks local and prevents duplicate launches', () => {
+  const panel = readFileSync(
+    new URL('../src/components/terminal/AgentTerminalPanel.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(panel, /pendingLaunchesRef\.current\.has\(launchKey\)/);
+  assert.match(panel, /event\.preventDefault\(\);[\s\S]*attemptOpen\(agent, 'live'\)/);
+  assert.match(panel, /const attemptedFeedback = attemptedAgent \? feedback\[attemptedAgent\]/);
+  assert.match(panel, /checking \|\| pending[\s\S]*LoaderCircle/);
+  assert.match(panel, /tab\.intent === 'login'[\s\S]*checkAgent\(tab\.agent, true\)/);
+});
+
+test('agent probes and terminal startup run outside the Tauri command thread', () => {
+  const terminal = readFileSync(
+    new URL('../src-tauri/src/terminal.rs', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(terminal, /pub async fn agent_probe[\s\S]*spawn_blocking/);
+  assert.match(terminal, /pub async fn terminal_create[\s\S]*spawn_blocking/);
+  assert.match(terminal, /fn cached_readiness[\s\S]*Duration::from_secs\(30\)/);
+  assert.match(terminal, /fn resolve_agent_lookup_shell/);
 });
 
 test('routes terminal events only to their owning session', () => {

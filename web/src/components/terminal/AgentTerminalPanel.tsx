@@ -1,10 +1,11 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { Bot, ChevronDown, FileText, GitBranch, History, KeyRound, PanelRightClose, Plus, RotateCcw, SquareTerminal, X } from 'lucide-react';
+import { Bot, ChevronDown, FileText, GitBranch, History, LoaderCircle, PanelRightClose, Plus, RotateCcw, SquareTerminal, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { InlineFeedback } from '@/components/ui/inline-feedback';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,12 +18,10 @@ import { cn } from '@/lib/utils';
 import { SUPPORTED_AGENTS } from '@/lib/agents';
 import { createLocalAgentChange } from '@/api';
 import { APP_HEADER_HEIGHT } from '@/lib/design';
-import { probeAgent } from '@/local-api';
 
 import {
   agentDisplayName,
   agentReadinessAction,
-  agentTerminalModeDetails,
   type AgentReadiness,
   type AgentKind,
   type AgentTerminalIntent,
@@ -38,6 +37,7 @@ import {
   type AgentTerminalTabsState,
 } from './terminal-tabs';
 import { useAgentTerminal } from './useAgentTerminal';
+import { type AgentProbeState, useAgentReadiness } from './useAgentReadiness';
 
 type AgentTerminalPanelProps = {
   spacePath: string;
@@ -73,7 +73,13 @@ type OpenAgent = (
   title?: string,
   initialTask?: string,
   intent?: AgentTerminalIntent,
-) => Promise<void>;
+) => Promise<boolean>;
+
+type LaunchFeedback = {
+  title: string;
+  description?: string;
+  details?: string;
+};
 
 function nextTerminalTabId(agent: AgentKind): string {
   terminalTabSequence += 1;
@@ -93,8 +99,16 @@ export function AgentTerminalPanel({
     activeTabId: null,
     tabs: [],
   });
-  const [launchError, setLaunchError] = useState<string | null>(null);
+  const [launchFeedback, setLaunchFeedback] = useState<Partial<Record<AgentKind, LaunchFeedback>>>({});
+  const [pendingLaunches, setPendingLaunches] = useState<ReadonlySet<string>>(new Set());
+  const pendingLaunchesRef = useRef(new Set<string>());
+  const { check: checkReadiness, stateFor: readinessStateFor } = useAgentReadiness();
   const handledOpenRequestRef = useRef<string | null>(null);
+
+  const checkAgent = useCallback((agent: AgentKind, force = false) => {
+    if (force) setLaunchFeedback((current) => ({ ...current, [agent]: undefined }));
+    return checkReadiness(agent, force);
+  }, [checkReadiness]);
 
   const openAgent = useCallback(async (
     agent: AgentKind,
@@ -103,29 +117,33 @@ export function AgentTerminalPanel({
     initialTask?: string,
     intent: AgentTerminalIntent = 'run',
   ) => {
-    setLaunchError(null);
+    const launchKey = `${agent}:${mode}:${intent}`;
+    if (pendingLaunchesRef.current.has(launchKey)) return false;
+    pendingLaunchesRef.current.add(launchKey);
+    setPendingLaunches(new Set(pendingLaunchesRef.current));
+    setLaunchFeedback((current) => ({ ...current, [agent]: undefined }));
     try {
       if (intent === 'login') {
         if (agent !== 'codex') throw new Error('Only Codex supports Agent sign-in');
         setTabState((state) => addOrFocusCodexLoginTab(state, nextTerminalTabId('codex')));
-        return;
+        return true;
       }
-      const readiness = await probeAgent(agent);
-      const readinessAction = agentReadinessAction(agent, readiness.status);
+      const readinessResult = await checkReadiness(agent);
+      const readinessAction = agentReadinessAction(agent, readinessResult.status);
       if (readinessAction === 'login') {
         setTabState((state) => addOrFocusCodexLoginTab(state, nextTerminalTabId('codex')));
-        return;
+        return true;
       }
       if (readinessAction === 'blocked') {
-        throw new Error(
-          readiness.detail
-          ?? readiness.message
-          ?? `${agentDisplayName(agent)} is not ready`,
-        );
+        setLaunchFeedback((current) => ({
+          ...current,
+          [agent]: readinessFeedback(agent, readinessResult),
+        }));
+        return false;
       }
       if (mode === 'live') {
         setTabState((state) => addAgentTab(state, agent, nextTerminalTabId(agent), mode));
-        return;
+        return true;
       }
       const change = await createLocalAgentChange(spaceSlug, title || agentDisplayName(agent));
       setTabState((state) => addAgentTab(
@@ -135,10 +153,22 @@ export function AgentTerminalPanel({
         mode,
         { changeId: change.id, worktreePath: change.worktreePath, initialTask },
       ));
+      return true;
     } catch (cause) {
-      setLaunchError(cause instanceof Error ? cause.message : String(cause));
+      setLaunchFeedback((current) => ({
+        ...current,
+        [agent]: {
+          title: `Could not start ${agentDisplayName(agent)}`,
+          description: 'Check the CLI and try again.',
+          details: cause instanceof Error ? cause.message : String(cause),
+        },
+      }));
+      return false;
+    } finally {
+      pendingLaunchesRef.current.delete(launchKey);
+      setPendingLaunches(new Set(pendingLaunchesRef.current));
     }
-  }, [spaceSlug]);
+  }, [checkReadiness, spaceSlug]);
 
   useEffect(() => {
     if (!openRequest) return;
@@ -214,7 +244,13 @@ export function AgentTerminalPanel({
               </div>
             );
           })}
-          <NewViewMenu onOpenAgent={openAgent} />
+          <NewViewMenu
+            onOpenAgent={openAgent}
+            stateFor={readinessStateFor}
+            feedback={launchFeedback}
+            pendingLaunches={pendingLaunches}
+            onCheck={(agent) => checkAgent(agent, true)}
+          />
         </div>
         {onClose && (
           <Button
@@ -231,13 +267,15 @@ export function AgentTerminalPanel({
       </header>
 
       <div className="relative min-h-0 flex-1">
-        {launchError && (
-          <div className="absolute inset-x-0 top-0 z-10 bg-red-950 px-3 py-2 text-xs text-red-200">
-            {launchError}
-          </div>
-        )}
         {tabState.tabs.length === 0 ? (
-          <AgentLaunchPage defaultAgent={defaultAgent} onOpenAgent={openAgent} />
+          <AgentLaunchPage
+            defaultAgent={defaultAgent}
+            onOpenAgent={openAgent}
+            stateFor={readinessStateFor}
+            feedback={launchFeedback}
+            pendingLaunches={pendingLaunches}
+            onCheck={checkAgent}
+          />
         ) : (
           tabState.tabs.map((tab) => (
             <AgentTerminalInstance
@@ -246,6 +284,9 @@ export function AgentTerminalPanel({
               spacePath={spacePath}
               spaceSlug={spaceSlug}
               active={tab.id === tabState.activeTabId}
+              onLoginFinished={tab.intent === 'login'
+                ? () => { void checkAgent(tab.agent, true); }
+                : undefined}
             />
           ))
         )}
@@ -257,72 +298,50 @@ export function AgentTerminalPanel({
 function AgentLaunchPage({
   defaultAgent,
   onOpenAgent,
+  stateFor,
+  feedback,
+  pendingLaunches,
+  onCheck,
 }: {
   defaultAgent: AgentKind;
   onOpenAgent: OpenAgent;
+  stateFor: (agent: AgentKind) => AgentProbeState;
+  feedback: Partial<Record<AgentKind, LaunchFeedback>>;
+  pendingLaunches: ReadonlySet<string>;
+  onCheck: (agent: AgentKind, force?: boolean) => Promise<AgentReadiness>;
 }) {
-  const [readiness, setReadiness] = useState<AgentReadiness | null>(null);
-  const [checking, setChecking] = useState(true);
   const [selectedAgent, setSelectedAgent] = useState(defaultAgent);
-  const [selectedMode, setSelectedMode] = useState<AgentTerminalMode>('live');
-  const readinessGenerationRef = useRef(0);
-
-  const refreshReadiness = useCallback(async () => {
-    const generation = readinessGenerationRef.current + 1;
-    readinessGenerationRef.current = generation;
-    setChecking(true);
-    try {
-      const result = await probeAgent(selectedAgent);
-      if (readinessGenerationRef.current === generation) setReadiness(result);
-    } catch (cause) {
-      if (readinessGenerationRef.current === generation) {
-        setReadiness({
-          agent: selectedAgent,
-          status: 'broken',
-          message: 'CoWiki could not check this agent',
-          detail: cause instanceof Error ? cause.message : String(cause),
-        });
-      }
-    } finally {
-      if (readinessGenerationRef.current === generation) setChecking(false);
-    }
-  }, [selectedAgent]);
-
-  const selectAgent = (agent: AgentKind) => {
-    if (agent === selectedAgent) return;
-    readinessGenerationRef.current += 1;
-    setChecking(true);
-    setReadiness(null);
-    setSelectedAgent(agent);
-  };
+  const probeState = stateFor(selectedAgent);
+  const readinessResult = probeState.readiness;
+  const checking = probeState.phase !== 'settled';
+  const signingIn = pendingLaunches.has(`${selectedAgent}:live:login`);
+  const starting = pendingLaunches.has(`${selectedAgent}:live:run`);
 
   useEffect(() => {
-    let cancelled = false;
-    const generation = readinessGenerationRef.current + 1;
-    readinessGenerationRef.current = generation;
-    probeAgent(selectedAgent)
-      .then((result) => {
-        if (!cancelled && readinessGenerationRef.current === generation) setReadiness(result);
-      })
-      .catch((cause) => {
-        if (!cancelled && readinessGenerationRef.current === generation) {
-          setReadiness({
-            agent: selectedAgent,
-            status: 'broken',
-            message: 'CoWiki could not check this agent',
-            detail: cause instanceof Error ? cause.message : String(cause),
-          });
-        }
-      })
-      .finally(() => {
-        if (!cancelled && readinessGenerationRef.current === generation) setChecking(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedAgent]);
+    if (probeState.phase === 'idle') void onCheck(selectedAgent);
+  }, [onCheck, probeState.phase, selectedAgent]);
 
-  const ready = readiness?.agent === selectedAgent && readiness.status === 'ready';
+  const unavailable = readinessResult
+    && (readinessResult.status === 'notInstalled' || readinessResult.status === 'broken')
+    ? readinessFeedback(selectedAgent, readinessResult)
+    : null;
+  const inlineFeedback = feedback[selectedAgent] ?? unavailable;
+  const signedOut = readinessResult?.status === 'signedOut';
+  const available = readinessResult?.status === 'available';
+  const busy = checking || starting || signingIn;
+  const buttonLabel = checking
+    ? `Checking ${agentDisplayName(selectedAgent)}…`
+    : starting
+      ? `Starting ${agentDisplayName(selectedAgent)}…`
+      : signingIn
+        ? `Opening sign-in…`
+        : available
+          ? `Start ${agentDisplayName(selectedAgent)}`
+          : signedOut
+            ? `Sign in to ${agentDisplayName(selectedAgent)}`
+            : readinessResult?.status === 'notInstalled'
+              ? `${agentDisplayName(selectedAgent)} not found`
+              : `${agentDisplayName(selectedAgent)} needs attention`;
 
   return (
     <div className="flex h-full flex-col items-center justify-center px-7 text-center">
@@ -331,114 +350,42 @@ function AgentLaunchPage({
       </div>
       <h2 className="text-base font-semibold text-text">Work with an agent</h2>
       <p className="mt-1.5 max-w-64 text-xs leading-relaxed text-text-tertiary">
-        Choose an agent, then decide how its changes enter this Space.
+        Choose a local Agent CLI and start it in the Current Draft.
       </p>
-      <AgentPicker selectedAgent={selectedAgent} onSelectAgent={selectAgent} />
-      <AgentReadinessCard
-        agent={selectedAgent}
-        checking={checking}
-        readiness={readiness}
-        onRefresh={refreshReadiness}
-        onSignIn={() => void onOpenAgent(selectedAgent, 'live', undefined, undefined, 'login')}
-      />
-      {ready && (
-        <ExecutionModeControl
-          agent={selectedAgent}
-          mode={selectedMode}
-          onModeChange={setSelectedMode}
-          onStart={() => void onOpenAgent(selectedAgent, selectedMode)}
+      <AgentPicker selectedAgent={selectedAgent} onSelectAgent={setSelectedAgent} />
+      <Button
+        className="mt-3 w-full max-w-72 bg-[#e2590b] text-white hover:bg-[#c94b08]"
+        disabled={busy || (!available && !signedOut)}
+        onClick={() => void onOpenAgent(
+          selectedAgent,
+          'live',
+          undefined,
+          undefined,
+          signedOut ? 'login' : 'run',
+        )}
+      >
+        {busy && <LoaderCircle className="size-4 animate-spin" />}
+        {buttonLabel}
+      </Button>
+      {signedOut && !inlineFeedback && (
+        <p className="mt-2 max-w-72 text-[11px] leading-relaxed text-text-tertiary">
+          Sign-in runs inside the official CLI. CoWiki does not read or store its credentials.
+        </p>
+      )}
+      {inlineFeedback && (
+        <InlineFeedback
+          className="mt-2 w-full max-w-72"
+          compact
+          title={inlineFeedback.title}
+          description={inlineFeedback.description}
+          details={inlineFeedback.details}
+          action={(
+            <Button size="xs" variant="outline" onClick={() => void onCheck(selectedAgent, true)}>
+              Check again
+            </Button>
+          )}
         />
       )}
-    </div>
-  );
-}
-
-function AgentReadinessCard({
-  agent,
-  checking,
-  readiness,
-  onRefresh,
-  onSignIn,
-}: {
-  agent: AgentKind;
-  checking: boolean;
-  readiness: AgentReadiness | null;
-  onRefresh: () => Promise<void>;
-  onSignIn: () => void;
-}) {
-  if (checking || !readiness) {
-    return (
-      <div className="mt-5 w-full max-w-72 rounded-lg border border-border bg-white/70 px-3 py-3 text-xs text-text-tertiary">
-        Checking {agentDisplayName(agent)}…
-      </div>
-    );
-  }
-
-  const copyCommand = async (command: string) => {
-    await navigator.clipboard.writeText(command);
-  };
-  const detail = readiness.detail ?? readiness.message;
-  const version = readiness.version?.replace(/^codex-cli\s+/, '');
-
-  if (readiness.status === 'ready') {
-    return (
-      <div className="mt-5 w-full max-w-72 rounded-lg border border-[#cce2d3] bg-[#f3faf5] px-3 py-3 text-left">
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-[#27643a]">
-          <KeyRound className="size-3.5" />
-          Agent access
-        </div>
-        <div className="mt-1 text-xs font-medium text-[#27643a]">
-          {agentDisplayName(agent)} is ready{version ? ` · ${version}` : ''}
-        </div>
-        {readiness.authMethod && (
-          <div className="mt-1 truncate text-[11px] text-[#4e765b]">{readiness.authMethod}</div>
-        )}
-      </div>
-    );
-  }
-
-  if (readiness.status === 'signedOut' && agent === 'codex') {
-    return (
-      <div className="mt-5 w-full max-w-72 rounded-lg border border-[#ead5bd] bg-[#fff9f1] px-3 py-3 text-left">
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-[#7d4c16]">
-          <KeyRound className="size-3.5" />
-          Agent access
-        </div>
-        <div className="mt-1 text-xs font-medium text-[#7d4c16]">Codex is not signed in</div>
-        <div className="mt-1 text-[11px] leading-relaxed text-[#80684d]">
-          CoWiki delegates authentication to the official Codex CLI and never reads your credentials.
-        </div>
-        <div className="mt-3 flex gap-2">
-          <Button size="sm" className="h-7 bg-[#e2590b] text-xs text-white hover:bg-[#c94b08]" onClick={onSignIn}>
-            Sign in
-          </Button>
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void onRefresh()}>
-            Check again
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  const command = agent === 'codex' ? 'npm install -g @openai/codex@latest' : undefined;
-  return (
-    <div className="mt-5 w-full max-w-72 rounded-lg border border-[#ecc8c3] bg-[#fff5f4] px-3 py-3 text-left">
-      <div className="text-xs font-semibold text-[#8a3028]">
-        {readiness.status === 'notInstalled'
-          ? `${agentDisplayName(agent)} is not installed`
-          : `${agentDisplayName(agent)} needs repair`}
-      </div>
-      {detail && <div className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap break-words text-[10px] leading-relaxed text-[#855c58]">{detail}</div>}
-      <div className="mt-3 flex flex-wrap gap-2">
-        {command && (
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void copyCommand(command)}>
-            Copy {readiness.status === 'notInstalled' ? 'install' : 'repair'} command
-          </Button>
-        )}
-        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void onRefresh()}>
-          Check again
-        </Button>
-      </div>
     </div>
   );
 }
@@ -478,59 +425,66 @@ function AgentPicker({
   );
 }
 
-function ExecutionModeControl({
-  agent,
-  mode,
-  onModeChange,
-  onStart,
-}: {
-  agent: AgentKind;
-  mode: AgentTerminalMode;
-  onModeChange: (mode: AgentTerminalMode) => void;
-  onStart: () => void;
-}) {
-  const background = mode === 'background';
-  const details = agentTerminalModeDetails(mode);
-
-  return (
-    <div className="mt-3 w-full max-w-72 text-left">
-      <div className="grid grid-cols-2 rounded-lg border border-border bg-[#efeeeb] p-1" role="group" aria-label="Agent execution mode">
-        <button
-          type="button"
-          aria-pressed={!background}
-          className={cn('flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors', !background ? 'bg-white text-text shadow-sm' : 'text-text-tertiary hover:text-text')}
-          onClick={() => onModeChange('live')}
-        >
-          <SquareTerminal className="size-3.5" /> Live
-        </button>
-        <button
-          type="button"
-          aria-pressed={background}
-          className={cn('flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors', background ? 'bg-white text-text shadow-sm' : 'text-text-tertiary hover:text-text')}
-          onClick={() => onModeChange('background')}
-        >
-          <GitBranch className="size-3.5" /> Background
-        </button>
-      </div>
-      <div className="mt-2 min-h-16 rounded-lg border border-border bg-white/70 px-3 py-2.5">
-        <div className="text-xs font-semibold text-text">{details.title}</div>
-        <p className="mt-1 text-[11px] leading-relaxed text-text-tertiary">{details.description}</p>
-      </div>
-      <Button className="mt-2 w-full bg-[#e2590b] text-white hover:bg-[#c94b08]" onClick={onStart}>
-        {background ? <GitBranch className="size-4" /> : <SquareTerminal className="size-4" />}
-        Start {agentDisplayName(agent)}
-      </Button>
-    </div>
-  );
+function readinessFeedback(agent: AgentKind, readiness: AgentReadiness): LaunchFeedback {
+  const name = agentDisplayName(agent);
+  const details = [readiness.message, readiness.detail]
+    .filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index)
+    .join('\n');
+  if (readiness.status === 'notInstalled') {
+    return {
+      title: `${name} isn’t available`,
+      description: `Install ${name}, make it available in your login shell, then check again.`,
+      details: details || undefined,
+    };
+  }
+  return {
+    title: `${name} needs attention`,
+    description: 'Check that the CLI can start normally, then try again.',
+    details: details || undefined,
+  };
 }
 
 function NewViewMenu({
   onOpenAgent,
+  stateFor,
+  feedback,
+  pendingLaunches,
+  onCheck,
 }: {
-  onOpenAgent: (agent: AgentKind, mode?: AgentTerminalMode) => void;
+  onOpenAgent: OpenAgent;
+  stateFor: (agent: AgentKind) => AgentProbeState;
+  feedback: Partial<Record<AgentKind, LaunchFeedback>>;
+  pendingLaunches: ReadonlySet<string>;
+  onCheck: (agent: AgentKind) => Promise<AgentReadiness>;
 }) {
+  const [open, setOpen] = useState(false);
+  const [attemptedAgent, setAttemptedAgent] = useState<AgentKind | null>(null);
+
+  const attemptOpen = async (agent: AgentKind, mode: AgentTerminalMode) => {
+    setAttemptedAgent(agent);
+    const opened = await onOpenAgent(agent, mode);
+    if (opened) setOpen(false);
+  };
+
+  const itemLabel = (agent: AgentKind, mode: AgentTerminalMode) => {
+    const checking = stateFor(agent).phase === 'checking';
+    const pending = pendingLaunches.has(`${agent}:${mode}:run`);
+    return (
+      <>
+        {checking || pending
+          ? <LoaderCircle className="animate-spin" />
+          : mode === 'background' ? <GitBranch /> : <Bot />}
+        {checking ? `Checking ${agentDisplayName(agent)}…` : agentDisplayName(agent)}
+      </>
+    );
+  };
+  const isAgentBusy = (agent: AgentKind, mode: AgentTerminalMode) => (
+    stateFor(agent).phase === 'checking' || pendingLaunches.has(`${agent}:${mode}:run`)
+  );
+
+  const attemptedFeedback = attemptedAgent ? feedback[attemptedAgent] : undefined;
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button
           type="button"
@@ -545,17 +499,46 @@ function NewViewMenu({
       <DropdownMenuContent align="start" className="w-48">
         <DropdownMenuLabel className="text-xs text-text-tertiary">Current Draft</DropdownMenuLabel>
         {SUPPORTED_AGENTS.map((agent) => (
-          <DropdownMenuItem key={`live-${agent}`} onSelect={() => onOpenAgent(agent, 'live')}>
-            <Bot /> {agentDisplayName(agent)}
+          <DropdownMenuItem
+            key={`live-${agent}`}
+            disabled={isAgentBusy(agent, 'live')}
+            onSelect={(event) => {
+              event.preventDefault();
+              void attemptOpen(agent, 'live');
+            }}
+          >
+            {itemLabel(agent, 'live')}
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-xs text-text-tertiary">New Agent Change</DropdownMenuLabel>
         {SUPPORTED_AGENTS.map((agent) => (
-          <DropdownMenuItem key={`background-${agent}`} onSelect={() => onOpenAgent(agent, 'background')}>
-            <GitBranch /> {agentDisplayName(agent)}
+          <DropdownMenuItem
+            key={`background-${agent}`}
+            disabled={isAgentBusy(agent, 'background')}
+            onSelect={(event) => {
+              event.preventDefault();
+              void attemptOpen(agent, 'background');
+            }}
+          >
+            {itemLabel(agent, 'background')}
           </DropdownMenuItem>
         ))}
+        {attemptedFeedback && attemptedAgent && (
+          <div className="px-1.5 py-1">
+            <InlineFeedback
+              compact
+              title={attemptedFeedback.title}
+              description={attemptedFeedback.description}
+              details={attemptedFeedback.details}
+              action={(
+                <Button size="xs" variant="outline" onClick={() => void onCheck(attemptedAgent)}>
+                  Check again
+                </Button>
+              )}
+            />
+          </div>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-xs text-text-tertiary">Views</DropdownMenuLabel>
         <DropdownMenuItem disabled><FileText /> Files <span className="ml-auto text-[10px]">Soon</span></DropdownMenuItem>
@@ -571,11 +554,13 @@ function AgentTerminalInstance({
   spacePath,
   spaceSlug,
   active,
+  onLoginFinished,
 }: {
   tab: AgentTerminalTab;
   spacePath: string;
   spaceSlug: string;
   active: boolean;
+  onLoginFinished?: () => void;
 }) {
   const cwd = tab.mode === 'background' ? tab.worktreePath! : spacePath;
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -604,6 +589,7 @@ function AgentTerminalInstance({
       terminalRef.current?.writeln(
         `\r\n[${agentDisplayName(tab.agent)} exited${exitCode == null ? '' : `: ${exitCode}`}]`,
       );
+      if (tab.intent === 'login') onLoginFinished?.();
     },
   });
 
@@ -666,6 +652,11 @@ function AgentTerminalInstance({
     terminal?.focus();
   }, [active, resize]);
 
+  useEffect(() => {
+    if (!error) return;
+    terminalRef.current?.writeln(`\r\n[Unable to start ${agentDisplayName(tab.agent)}: ${error}]`);
+  }, [error, tab.agent]);
+
   return (
     <section
       className="absolute inset-0 min-h-0 flex-col bg-[#1d1c1a]"
@@ -696,7 +687,6 @@ function AgentTerminalInstance({
           <RotateCcw />
         </Button>
       </div>
-      {error && <div className="shrink-0 bg-red-950 px-3 py-2 text-xs text-red-200">{error}</div>}
       <div ref={containerRef} className="min-h-0 flex-1 px-2 py-1" />
     </section>
   );

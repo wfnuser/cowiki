@@ -27,7 +27,7 @@ const MIN_ROWS: u16 = 5;
 const MAX_ROWS: u16 = 200;
 const MAX_TASK_PROMPT_BYTES: usize = 8 * 1024;
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentKind {
     Codex,
@@ -86,7 +86,7 @@ pub enum AgentReadinessStatus {
     NotInstalled,
     Broken,
     SignedOut,
-    Ready,
+    Available,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -207,6 +207,12 @@ struct TerminalRegistry {
     closing_changes: HashSet<AgentChangeIdentity>,
 }
 
+#[derive(Clone)]
+struct CachedAgentReadiness {
+    value: AgentReadiness,
+    checked_at: Instant,
+}
+
 impl TerminalRegistry {
     fn mark_stopping(&mut self, session_id: &str) -> Result<(), String> {
         let slot = self
@@ -227,6 +233,7 @@ impl TerminalRegistry {
 #[derive(Clone, Default)]
 pub struct TerminalState {
     registry: Arc<Mutex<TerminalRegistry>>,
+    readiness: Arc<Mutex<HashMap<AgentKind, CachedAgentReadiness>>>,
 }
 
 pub(crate) struct TerminalChangeGuard {
@@ -285,6 +292,32 @@ impl Drop for TerminalChangeGuard {
 }
 
 impl TerminalState {
+    fn cache_readiness(&self, value: AgentReadiness) {
+        if let Ok(mut cache) = self.readiness.lock() {
+            cache.insert(
+                value.agent,
+                CachedAgentReadiness {
+                    value,
+                    checked_at: Instant::now(),
+                },
+            );
+        }
+    }
+
+    fn cached_readiness(&self, agent: AgentKind) -> Option<AgentReadiness> {
+        const MAX_AGE: Duration = Duration::from_secs(30);
+        let cache = self.readiness.lock().ok()?;
+        let cached = cache.get(&agent)?;
+        if cached.checked_at.elapsed() > MAX_AGE {
+            return None;
+        }
+        let executable = cached.value.executable.as_deref().map(Path::new)?;
+        if !is_executable_file(executable) {
+            return None;
+        }
+        Some(cached.value.clone())
+    }
+
     fn reserve_session(&self, session_id: &str, identity: TerminalIdentity) -> Result<(), String> {
         let mut registry = self
             .registry
@@ -406,15 +439,40 @@ impl TerminalState {
 }
 
 #[tauri::command]
-pub fn agent_probe(agent: AgentKind) -> AgentReadiness {
-    probe_agent(agent)
+pub async fn agent_probe(
+    state: State<'_, TerminalState>,
+    agent: AgentKind,
+) -> Result<AgentReadiness, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let readiness = probe_agent(agent);
+        state.cache_readiness(readiness.clone());
+        readiness
+    })
+    .await
+    .map_err(|error| format!("Agent readiness task failed: {error}"))
 }
 
 #[tauri::command]
-pub fn terminal_create(
+pub async fn terminal_create(
     app: AppHandle,
     state: State<'_, TerminalState>,
     local_engine: State<'_, LocalEngine>,
+    request: TerminalCreateRequest,
+) -> Result<TerminalCreated, String> {
+    let state = state.inner().clone();
+    let local_engine = local_engine.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        terminal_create_blocking(app, state, local_engine, request)
+    })
+    .await
+    .map_err(|error| format!("terminal startup task failed: {error}"))?
+}
+
+fn terminal_create_blocking(
+    app: AppHandle,
+    state: TerminalState,
+    local_engine: LocalEngine,
     request: TerminalCreateRequest,
 ) -> Result<TerminalCreated, String> {
     let session_id = validate_session_id(&request.session_id)?;
@@ -432,15 +490,22 @@ pub fn terminal_create(
     {
         return Err("Codex login must run in a Live setup terminal".to_string());
     }
-    let readiness = probe_agent(request.agent);
+    let readiness = state.cached_readiness(request.agent).unwrap_or_else(|| {
+        let readiness = probe_agent(request.agent);
+        state.cache_readiness(readiness.clone());
+        readiness
+    });
     let agent_executable = readiness
         .executable
         .as_deref()
         .map(PathBuf::from)
         .ok_or_else(|| readiness_error(&readiness))?;
     match (request.intent, readiness.status) {
-        (TerminalIntent::Run, AgentReadinessStatus::Ready) => {}
-        (TerminalIntent::Login, AgentReadinessStatus::Ready | AgentReadinessStatus::SignedOut) => {}
+        (TerminalIntent::Run, AgentReadinessStatus::Available) => {}
+        (
+            TerminalIntent::Login,
+            AgentReadinessStatus::Available | AgentReadinessStatus::SignedOut,
+        ) => {}
         _ => return Err(readiness_error(&readiness)),
     }
     let size = normalized_pty_size(request.cols, request.rows);
@@ -449,7 +514,7 @@ pub fn terminal_create(
         change_id: request.change_id.clone(),
     };
     let mut reservation =
-        TerminalStartReservation::new(state.inner().clone(), &session_id, identity.clone())?;
+        TerminalStartReservation::new(state.clone(), &session_id, identity.clone())?;
 
     let executable = std::env::current_exe()
         .map_err(|error| format!("cannot locate CoWiki MCP executable: {error}"))?;
@@ -506,7 +571,7 @@ pub fn terminal_create(
     reservation.finish();
 
     spawn_output_forwarder(app.clone(), session_id.clone(), reader);
-    spawn_exit_watcher(app, session_id.clone(), state.inner().clone(), child);
+    spawn_exit_watcher(app, session_id.clone(), state, child);
 
     Ok(TerminalCreated { session_id })
 }
@@ -664,14 +729,44 @@ fn readiness_error(readiness: &AgentReadiness) -> String {
 }
 
 fn probe_agent(agent: AgentKind) -> AgentReadiness {
-    probe_agent_in(agent, agent_search_directories())
+    let shell = resolve_agent_lookup_shell();
+    #[cfg(not(windows))]
+    let lookup = run_shell_command(
+        &shell,
+        &format!("command -v {}", shell_quote(agent.command())),
+        Duration::from_secs(4),
+    )
+    .ok();
+    #[cfg(not(windows))]
+    let lookup_text = lookup
+        .as_ref()
+        .filter(|output| output.status.success())
+        .map(|output| strip_terminal_control_sequences(&String::from_utf8_lossy(&output.stdout)));
+    #[cfg(windows)]
+    let lookup_text: Option<String> = None;
+    let executable = resolve_agent_executable_from_lookup(
+        agent,
+        lookup_text.as_deref(),
+        agent_search_directories(),
+    );
+    probe_resolved_agent(agent, executable, &shell)
 }
 
+#[cfg(test)]
 fn probe_agent_in(
     agent: AgentKind,
     directories: impl IntoIterator<Item = PathBuf>,
 ) -> AgentReadiness {
-    let Some(executable) = resolve_agent_executable_in(agent, directories) else {
+    let executable = resolve_agent_executable_in(agent, directories);
+    probe_resolved_agent(agent, executable, &resolve_agent_lookup_shell())
+}
+
+fn probe_resolved_agent(
+    agent: AgentKind,
+    executable: Option<PathBuf>,
+    shell: &Path,
+) -> AgentReadiness {
+    let Some(executable) = executable else {
         return AgentReadiness {
             agent,
             status: AgentReadinessStatus::NotInstalled,
@@ -687,7 +782,7 @@ fn probe_agent_in(
     };
     let executable_text = executable.to_string_lossy().into_owned();
     let version_output =
-        match run_probe_command(&executable, &["--version"], Duration::from_secs(4)) {
+        match run_probe_command(shell, &executable, &["--version"], Duration::from_secs(4)) {
             Ok(output) => output,
             Err(error) => {
                 return AgentReadiness {
@@ -717,7 +812,7 @@ fn probe_agent_in(
     if agent != AgentKind::Codex {
         return AgentReadiness {
             agent,
-            status: AgentReadinessStatus::Ready,
+            status: AgentReadinessStatus::Available,
             executable: Some(executable_text),
             version,
             auth_method: None,
@@ -726,21 +821,25 @@ fn probe_agent_in(
         };
     }
 
-    let auth_output =
-        match run_probe_command(&executable, &["login", "status"], Duration::from_secs(5)) {
-            Ok(output) => output,
-            Err(error) => {
-                return AgentReadiness {
-                    agent,
-                    status: AgentReadinessStatus::SignedOut,
-                    executable: Some(executable_text),
-                    version,
-                    auth_method: None,
-                    message: Some("Codex authentication could not be verified".to_string()),
-                    detail: Some(error),
-                };
-            }
-        };
+    let auth_output = match run_probe_command(
+        shell,
+        &executable,
+        &["login", "status"],
+        Duration::from_secs(5),
+    ) {
+        Ok(output) => output,
+        Err(error) => {
+            return AgentReadiness {
+                agent,
+                status: AgentReadinessStatus::SignedOut,
+                executable: Some(executable_text),
+                version,
+                auth_method: None,
+                message: Some("Codex authentication could not be verified".to_string()),
+                detail: Some(error),
+            };
+        }
+    };
     let auth_text = probe_output_text(&auth_output);
     if !auth_output.status.success() {
         return AgentReadiness {
@@ -756,13 +855,30 @@ fn probe_agent_in(
 
     AgentReadiness {
         agent,
-        status: AgentReadinessStatus::Ready,
+        status: AgentReadinessStatus::Available,
         executable: Some(executable_text),
         version,
         auth_method: first_nonempty_line(&auth_text),
         message: None,
         detail: None,
     }
+}
+
+fn resolve_agent_executable_from_lookup(
+    agent: AgentKind,
+    lookup_output: Option<&str>,
+    fallback_directories: impl IntoIterator<Item = PathBuf>,
+) -> Option<PathBuf> {
+    let shell_candidate = lookup_output
+        .into_iter()
+        .flat_map(str::lines)
+        .map(|line| PathBuf::from(line.trim()))
+        .find(|candidate| {
+            candidate.is_absolute()
+                && candidate.file_name().and_then(|name| name.to_str()) == Some(agent.command())
+                && is_executable_file(candidate)
+        });
+    shell_candidate.or_else(|| resolve_agent_executable_in(agent, fallback_directories))
 }
 
 fn resolve_agent_executable_in(
@@ -822,19 +938,68 @@ fn agent_search_directories() -> Vec<PathBuf> {
 }
 
 fn run_probe_command(
+    shell: &Path,
     executable: &Path,
     arguments: &[&str],
     timeout: Duration,
 ) -> Result<Output, String> {
-    let mut command = Command::new(executable);
+    #[cfg(windows)]
+    {
+        let mut command = Command::new(executable);
+        command.args(arguments);
+        prepare_probe_command(&mut command);
+        return run_command_with_timeout(
+            command,
+            timeout,
+            format!("{} readiness check timed out", executable.display()),
+        );
+    }
+
+    #[cfg(not(windows))]
+    let arguments = arguments
+        .iter()
+        .map(|argument| shell_quote(argument))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let command = format!(
+        "exec {}{}{}",
+        shell_quote(&executable.to_string_lossy()),
+        (!arguments.is_empty()).then_some(" ").unwrap_or_default(),
+        arguments,
+    );
+    #[cfg(not(windows))]
+    return run_shell_command(shell, &command, timeout);
+}
+
+fn run_shell_command(
+    shell: &Path,
+    shell_command: &str,
+    timeout: Duration,
+) -> Result<Output, String> {
+    let mut command = Command::new(shell);
+    add_process_shell_command_args(&mut command, shell, shell_command);
+    prepare_probe_command(&mut command);
+    run_command_with_timeout(
+        command,
+        timeout,
+        format!("Agent command through {} timed out", shell.display()),
+    )
+}
+
+fn prepare_probe_command(command: &mut Command) {
     command
-        .args(arguments)
+        .env("TERM", "dumb")
+        .env("NO_COLOR", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Ok(path) = std::env::join_paths(agent_search_directories()) {
-        command.env("PATH", path);
-    }
+}
+
+fn run_command_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+    timeout_error: String,
+) -> Result<Output, String> {
     let mut child = command.spawn().map_err(|error| error.to_string())?;
     let deadline = Instant::now() + timeout;
     loop {
@@ -844,12 +1009,29 @@ fn run_probe_command(
             None => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!(
-                    "{} readiness check timed out",
-                    executable.display()
-                ));
+                return Err(timeout_error);
             }
         }
+    }
+}
+
+fn add_process_shell_command_args(command: &mut Command, shell: &Path, shell_command: &str) {
+    #[cfg(not(windows))]
+    {
+        if is_known_shell(shell) {
+            command.arg("-l");
+            command.arg("-i");
+        }
+        command.arg("-c");
+        command.arg(shell_command);
+    }
+
+    #[cfg(windows)]
+    {
+        let _ = shell;
+        command.arg("-NoLogo");
+        command.arg("-Command");
+        command.arg(shell_command);
     }
 }
 
@@ -861,7 +1043,30 @@ fn probe_output_text(output: &Output) -> String {
         .filter(|value| !value.is_empty())
         .collect::<Vec<_>>()
         .join("\n");
-    combined.chars().take(2_000).collect()
+    strip_terminal_control_sequences(&combined)
+        .chars()
+        .take(2_000)
+        .collect()
+}
+
+fn strip_terminal_control_sequences(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut characters = value.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\u{1b}' && characters.peek() == Some(&'[') {
+            characters.next();
+            for sequence_character in characters.by_ref() {
+                if ('@'..='~').contains(&sequence_character) {
+                    break;
+                }
+            }
+            continue;
+        }
+        if !character.is_control() || matches!(character, '\n' | '\r' | '\t') {
+            output.push(character);
+        }
+    }
+    output
 }
 
 fn first_nonempty_line(value: &str) -> Option<String> {
@@ -1132,19 +1337,34 @@ fn resolve_shell() -> PathBuf {
     }
 }
 
+fn resolve_agent_lookup_shell() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        PathBuf::from("/bin/zsh")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        resolve_shell()
+    }
+}
+
+#[cfg(not(windows))]
+fn is_known_shell(shell: &Path) -> bool {
+    shell
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            matches!(
+                name,
+                "bash" | "csh" | "dash" | "fish" | "ksh" | "sh" | "tcsh" | "zsh"
+            )
+        })
+}
+
 fn add_shell_command_args(command: &mut CommandBuilder, shell: &Path, agent_command: &str) {
     #[cfg(not(windows))]
     {
-        if shell
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| {
-                matches!(
-                    name,
-                    "bash" | "csh" | "dash" | "fish" | "ksh" | "sh" | "tcsh" | "zsh"
-                )
-            })
-        {
+        if is_known_shell(shell) {
             command.arg("-l");
             command.arg("-i");
         }
@@ -1165,9 +1385,10 @@ fn add_shell_command_args(command: &mut CommandBuilder, shell: &Path, agent_comm
 mod tests {
     use super::{
         build_agent_command, ensure_antigravity_mcp_config, normalized_pty_size, probe_agent_in,
-        resolve_agent_executable_in, resolve_terminal_cwd, validate_initial_command,
-        validate_session_id, validate_task_prompt, AgentKind, AgentReadinessStatus,
-        TerminalIdentity, TerminalIntent, TerminalMode, TerminalState, MAX_TASK_PROMPT_BYTES,
+        resolve_agent_executable_from_lookup, resolve_agent_executable_in, resolve_terminal_cwd,
+        validate_initial_command, validate_session_id, validate_task_prompt, AgentKind,
+        AgentReadinessStatus, TerminalIdentity, TerminalIntent, TerminalMode, TerminalState,
+        MAX_TASK_PROMPT_BYTES,
     };
     #[cfg(unix)]
     use super::{TerminalPhase, TerminalSession};
@@ -1226,7 +1447,34 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn distinguishes_missing_signed_out_and_ready_codex_installations() {
+    fn login_shell_lookup_wins_over_a_stale_finder_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let stale_directory = directory.path().join("homebrew/bin");
+        let current_directory = directory.path().join("pnpm");
+        std::fs::create_dir_all(&stale_directory).unwrap();
+        std::fs::create_dir_all(&current_directory).unwrap();
+        let stale = stale_directory.join("codex");
+        let current = current_directory.join("codex");
+        for executable in [&stale, &current] {
+            std::fs::write(executable, "#!/bin/sh\nexit 0\n").unwrap();
+            let mut permissions = std::fs::metadata(executable).unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(executable, permissions).unwrap();
+        }
+
+        assert_eq!(
+            resolve_agent_executable_from_lookup(
+                AgentKind::Codex,
+                Some(&format!("{}\n", current.display())),
+                [stale_directory],
+            ),
+            Some(current),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn distinguishes_missing_signed_out_and_available_codex_installations() {
         let directory = tempfile::tempdir().unwrap();
         let search_path = || [directory.path().to_path_buf()];
 
@@ -1253,7 +1501,7 @@ mod tests {
         )
         .unwrap();
         let ready = probe_agent_in(AgentKind::Codex, search_path());
-        assert_eq!(ready.status, AgentReadinessStatus::Ready);
+        assert_eq!(ready.status, AgentReadinessStatus::Available);
         assert_eq!(
             ready.auth_method.as_deref(),
             Some("Logged in using browser")

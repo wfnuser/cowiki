@@ -10,6 +10,7 @@ import {
 } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { InlineFeedback } from '../ui/inline-feedback';
 import { Textarea } from '../ui/textarea';
 import {
   getCloudStatus,
@@ -176,7 +177,7 @@ export function CloudSpaceDialog({
         </DialogHeader>
 
         {loading && !status ? <div className="flex items-center gap-2 py-8 text-sm text-text-tertiary"><Loader2 className="animate-spin" /> Checking this Space…</div> : null}
-        {error && <div className="rounded-lg border border-red/20 bg-red-soft px-4 py-3 text-sm text-red">{error}</div>}
+        {error && <InlineFeedback title="Cloud action failed" description={error} />}
 
         {model?.kind === 'publish' && (
           <div className="space-y-4">

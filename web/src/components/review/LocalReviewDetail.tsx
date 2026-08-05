@@ -11,6 +11,7 @@ import {
   type FileDiff,
 } from '@/api';
 import { C, fonts } from '@/lib/design';
+import { InlineFeedback } from '@/components/ui/inline-feedback';
 import { DiffView } from './DiffView';
 import { agentMergeResult, type LocalReviewSelection } from './local-review-model';
 
@@ -172,7 +173,7 @@ export function LocalReviewDetail({
         )}
       </div>
 
-      {error && <p style={{ color: C.red, fontSize: 13, marginTop: 18 }}>{error}</p>}
+      {error && <InlineFeedback className="mt-[18px]" title="Could not update this Review" description={error} />}
       {loading || diffs == null ? (
         <p style={{ color: C.muted, fontSize: 14, marginTop: 24 }}>Loading changes…</p>
       ) : (

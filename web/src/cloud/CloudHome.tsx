@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { SpaceRail } from '../components/layout/SpaceRail';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import { InlineFeedback } from '../components/ui/inline-feedback';
 import {
   Select,
   SelectContent,
@@ -186,11 +187,12 @@ export function SpaceMonogram({ name }: { name: string }) {
 }
 
 export function CloudNotice({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: 'neutral' | 'error' | 'success' }) {
-  const styles = tone === 'error'
-    ? 'border-red/20 bg-red-soft text-red'
-    : tone === 'success'
-      ? 'border-green/20 bg-green-soft text-green'
-      : 'border-border bg-secondary text-text-secondary';
+  if (tone === 'error') {
+    return <InlineFeedback className="mb-5" title="Cloud action failed" description={children} />;
+  }
+  const styles = tone === 'success'
+    ? 'border-green/20 bg-green-soft text-green'
+    : 'border-border bg-secondary text-text-secondary';
   return <div className={`mb-5 rounded-lg border px-4 py-3 text-sm ${styles}`}>{children}</div>;
 }
 
