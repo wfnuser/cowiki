@@ -6,6 +6,7 @@ import { authHeaders, clearAuth, getCurrentAuth, getStoredAuth, storeAuth } from
 import { apiBase, isDesktopClient } from './runtime';
 import { CloudApp } from './cloud/CloudApp';
 import { CloudInvitationPage } from './cloud/CloudInvitationPage';
+import { PublicCloudSpacePage } from './cloud/PublicCloudSpacePage';
 import {
   AUTH_RETURN_PATH_STORAGE,
   createWebAuthBootstrap,
@@ -69,6 +70,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/invite/:token" element={<CloudInvitationPage />} />
+        <Route path="/spaces/:slug/*" element={<PublicCloudSpacePage />} />
         <Route path="/auth/callback" element={<Navigate to="/login" replace />} />
         <Route path="/cloud/*" element={<CloudApp />} />
         <Route path="/" element={isDesktopClient()

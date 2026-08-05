@@ -4,11 +4,13 @@ import test from 'node:test';
 import {
   CloudApiError,
   createCloudClient,
+  createPublicCloudClient,
   previewCloudInvitation,
   type CloudFetch,
 } from '../src/cloud/client.ts';
 import {
   canManageMembers,
+  canManageTarget,
   canMerge,
   canPush,
   normalizeCloudSession,
@@ -123,9 +125,73 @@ test('Cloud mutations serialize the current contract and surface typed failures'
   assert.deepEqual(JSON.parse(String(calls[2].init?.body)), { expectedHeadOid: 'b'.repeat(40) });
 });
 
+test('Space visibility mutations preserve explicit public and private intent', async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const fakeFetch: CloudFetch = async (input, init) => {
+    calls.push({ url: String(input), init });
+    return Response.json({ id: spaceId, visibility: 'public' });
+  };
+  const client = createCloudClient(
+    { baseUrl: 'https://cloud.cowiki.test', apiKey: 'key', userId, userName: 'User' },
+    fakeFetch,
+  );
+
+  await client.createSpace('Competition', 'competition', 'public');
+  await client.updateSpaceVisibility(spaceId, 'private');
+
+  assert.deepEqual(JSON.parse(String(calls[0].init?.body)), {
+    name: 'Competition',
+    slug: 'competition',
+    visibility: 'public',
+  });
+  assert.equal(calls[1].url, `https://cloud.cowiki.test/api/spaces/${spaceId}`);
+  assert.equal(calls[1].init?.method, 'PATCH');
+  assert.deepEqual(JSON.parse(String(calls[1].init?.body)), { visibility: 'private' });
+});
+
+test('public Cloud reads never send a bearer credential', async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const fakeFetch: CloudFetch = async (input, init) => {
+    calls.push({ url: String(input), init });
+    return Response.json([]);
+  };
+  const client = createPublicCloudClient('https://cloud.cowiki.test/', fakeFetch);
+
+  await client.listSpaces();
+  await client.getSpace('competition');
+  await client.getTree('competition');
+  await client.getContent('competition', 'project/info.md');
+
+  assert.deepEqual(calls.map((call) => call.url), [
+    'https://cloud.cowiki.test/api/public/spaces',
+    'https://cloud.cowiki.test/api/public/spaces/competition',
+    'https://cloud.cowiki.test/api/public/spaces/competition/tree?ref=main',
+    'https://cloud.cowiki.test/api/public/spaces/competition/content?ref=main&path=project%2Finfo.md',
+  ]);
+  for (const call of calls) {
+    assert.equal(new Headers(call.init?.headers).has('authorization'), false);
+  }
+});
+
+test('public Cloud reads reject origins with embedded credentials or paths', () => {
+  assert.throws(
+    () => createPublicCloudClient('https://user:password@cloud.cowiki.test'),
+    /origin without credentials/,
+  );
+  assert.throws(
+    () => createPublicCloudClient('https://cloud.cowiki.test/api'),
+    /origin without credentials/,
+  );
+});
+
 test('role helpers preserve the Cloud permission matrix', () => {
-  assert.equal(canManageMembers('manager'), false);
+  assert.equal(canManageMembers('manager'), true);
   assert.equal(canManageMembers('editor'), false);
+  assert.equal(canManageTarget('manager', 'editor'), true);
+  assert.equal(canManageTarget('manager', 'viewer'), true);
+  assert.equal(canManageTarget('manager', 'manager'), false);
+  assert.equal(canManageTarget('manager', 'owner'), false);
+  assert.equal(canManageTarget('owner', 'manager'), true);
   assert.equal(canMerge('editor'), false);
   assert.equal(canPush('editor'), true);
   assert.equal(canPush('viewer'), false);

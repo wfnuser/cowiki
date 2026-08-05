@@ -11,14 +11,14 @@ import {
   writeSpaceConfig,
 } from './lib/config.mjs';
 import {
-  repositoryStatus,
+  refreshRepositoryStatus,
   runGit,
   setupCowikiRemote,
   submitRepository,
 } from './lib/git.mjs';
 import { loginWithBrowser } from './lib/oauth.mjs';
 
-const DEFAULT_SERVER = process.env.COWIKI_CLOUD_URL || 'https://cloud.cowiki.app';
+const DEFAULT_SERVER = process.env.COWIKI_CLOUD_URL || 'https://api.cowiki.app';
 
 export async function main(argv = process.argv.slice(2)) {
   const [command, ...rest] = argv;
@@ -118,7 +118,7 @@ async function statusCommand(options) {
   const cwd = path.resolve(options.cwd || process.cwd());
   const space = await readSpaceConfig(cwd);
   const credential = await requiredCredential(space.server);
-  const status = repositoryStatus(cwd);
+  const status = refreshRepositoryStatus(cwd, space, credential);
   process.stdout.write(`${JSON.stringify({
     server: space.server,
     spaceId: space.spaceId,

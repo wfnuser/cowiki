@@ -1,4 +1,5 @@
 export type CloudRole = 'owner' | 'manager' | 'editor' | 'viewer';
+export type CloudVisibility = 'private' | 'public';
 
 export interface CloudSession {
   baseUrl: string;
@@ -44,5 +45,11 @@ export function canMerge(role: CloudRole): boolean {
 }
 
 export function canManageMembers(role: CloudRole): boolean {
-  return role === 'owner';
+  return role === 'owner' || role === 'manager';
+}
+
+export function canManageTarget(actor: CloudRole, target: CloudRole): boolean {
+  if (actor === 'owner') return target !== 'owner';
+  if (actor === 'manager') return target === 'editor' || target === 'viewer';
+  return false;
 }

@@ -4,10 +4,18 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { SpaceRail } from '../components/layout/SpaceRail';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select';
 import { TooltipProvider } from '../components/ui/tooltip';
 import type { CloudClient, CloudSpace } from './client';
 import { cloudSpaceRoute } from './routes';
 import type { CloudSession } from './session';
+import type { CloudVisibility } from './session';
 
 interface CloudHomeProps {
   client: CloudClient;
@@ -27,6 +35,7 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [slugEdited, setSlugEdited] = useState(false);
+  const [visibility, setVisibility] = useState<CloudVisibility>('private');
   const panel = panelFromSearch(location.search);
 
   useEffect(() => {
@@ -56,7 +65,7 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
     setCreating(true);
     setError('');
     try {
-      const created = await client.createSpace(name.trim(), slug.trim());
+      const created = await client.createSpace(name.trim(), slug.trim(), visibility);
       navigate(cloudSpaceRoute(created.id));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not create this shared Space.');
@@ -120,6 +129,18 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
                       value={name}
                       onChange={(event) => changeName(event.target.value)}
                     />
+                    <Select
+                      value={visibility}
+                      onValueChange={(value) => setVisibility(value as CloudVisibility)}
+                    >
+                      <SelectTrigger aria-label="Space visibility" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="private">Private — members only</SelectItem>
+                        <SelectItem value="public">Public — anyone can read merged pages</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <Input
                       aria-label="Shared Space slug"
                       placeholder="space-name"
