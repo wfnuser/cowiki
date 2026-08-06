@@ -8,6 +8,7 @@ import {
   mergeActionVisible,
   resolveInitialCloudPage,
   routeScopedValue,
+  spaceCreationPanelMode,
 } from '../src/cloud/cloud-shell-model.ts';
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
@@ -56,6 +57,36 @@ test('Cloud reuses the client Space rail and keeps the zero-Space state quiet', 
   assert.doesNotMatch(cloudHome, /Use invitation link/);
   assert.doesNotMatch(cloudHome, />Shared Spaces</);
   assert.doesNotMatch(cloudSpace, /CloudHeader/);
+});
+
+test('shared Space creation switches between invite, creation, and quota states', () => {
+  assert.equal(spaceCreationPanelMode({
+    authorized: false,
+    createdCount: 0,
+    limit: 2,
+    canCreate: false,
+    reason: 'invite_required',
+  }), 'invite');
+  assert.equal(spaceCreationPanelMode({
+    authorized: true,
+    createdCount: 1,
+    limit: 2,
+    canCreate: true,
+    reason: null,
+  }), 'create');
+  assert.equal(spaceCreationPanelMode({
+    authorized: true,
+    createdCount: 2,
+    limit: 2,
+    canCreate: false,
+    reason: 'limit_reached',
+  }), 'limit');
+  assert.match(cloudHome, /getSpaceCreationCapability/);
+  assert.match(cloudHome, /redeemSpaceCreationInvite/);
+  assert.match(cloudHome, /Space creation invite code/);
+  assert.match(cloudHome, /You can still join existing shared Spaces/);
+  assert.match(cloudHome, /createdCount/);
+  assert.match(cloudHome, /limit_reached/);
 });
 
 test('Cloud Space reuses the client panel, knowledge tree, and page reader', () => {
