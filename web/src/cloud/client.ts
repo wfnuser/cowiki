@@ -28,6 +28,16 @@ export interface CloudSpace {
   publicUrl: string;
 }
 
+export type CloudSpaceCreationReason = 'invite_required' | 'limit_reached' | null;
+
+export interface CloudSpaceCreationCapability {
+  authorized: boolean;
+  createdCount: number;
+  limit: number;
+  canCreate: boolean;
+  reason: CloudSpaceCreationReason;
+}
+
 export interface PublicCloudSpace {
   id: string;
   name: string;
@@ -119,11 +129,13 @@ export interface CloudPullRequestDiff {
 
 export class CloudApiError extends Error {
   readonly status: number;
+  readonly code: string | null;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code: string | null = null) {
     super(message);
     this.name = 'CloudApiError';
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -132,6 +144,8 @@ export interface CloudClient {
   currentUser(): Promise<CloudUser>;
   logout(): Promise<void>;
   listSpaces(): Promise<CloudSpace[]>;
+  getSpaceCreationCapability(): Promise<CloudSpaceCreationCapability>;
+  redeemSpaceCreationInvite(code: string): Promise<CloudSpaceCreationCapability>;
   createSpace(name: string, slug: string, visibility?: CloudVisibility): Promise<CloudSpace>;
   updateSpaceVisibility(spaceId: string, visibility: CloudVisibility): Promise<CloudSpace>;
   getSpace(spaceId: string): Promise<CloudSpace>;
@@ -168,8 +182,15 @@ export function createCloudClient(
     if (init.body != null) headers.set('Content-Type', 'application/json');
     const response = await fetchImpl(`${session.baseUrl}${path}`, { ...init, headers });
     if (!response.ok) {
-      const payload = await response.json().catch(() => null) as { error?: string } | null;
-      throw new CloudApiError(response.status, payload?.error || `Cloud request failed (${response.status})`);
+      const payload = await response.json().catch(() => null) as {
+        error?: string;
+        code?: string;
+      } | null;
+      throw new CloudApiError(
+        response.status,
+        payload?.error || `Cloud request failed (${response.status})`,
+        payload?.code ?? null,
+      );
     }
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
@@ -188,6 +209,11 @@ export function createCloudClient(
     },
     logout: () => request('/api/auth/logout', { method: 'POST' }),
     listSpaces: () => request('/api/spaces'),
+    getSpaceCreationCapability: () => request('/api/space-creation-capability'),
+    redeemSpaceCreationInvite: (code) => request('/api/space-creation-capability/redeem', {
+      method: 'POST',
+      body: JSON.stringify({ code: code.trim() }),
+    }),
     createSpace: (name, slug, visibility = 'private') => request('/api/spaces', {
       method: 'POST',
       body: JSON.stringify({ name, slug, visibility }),

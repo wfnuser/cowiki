@@ -149,6 +149,65 @@ test('Space visibility mutations preserve explicit public and private intent', a
   assert.deepEqual(JSON.parse(String(calls[1].init?.body)), { visibility: 'private' });
 });
 
+test('Space creation capability can be read and unlocked with a trimmed invite code', async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const responses = [
+    {
+      authorized: false,
+      createdCount: 0,
+      limit: 2,
+      canCreate: false,
+      reason: 'invite_required',
+    },
+    {
+      authorized: true,
+      createdCount: 0,
+      limit: 2,
+      canCreate: true,
+      reason: null,
+    },
+  ];
+  const fakeFetch: CloudFetch = async (input, init) => {
+    calls.push({ url: String(input), init });
+    return Response.json(responses.shift());
+  };
+  const client = createCloudClient(
+    { baseUrl: 'https://cloud.cowiki.test', apiKey: 'key', userId, userName: 'User' },
+    fakeFetch,
+  );
+
+  const locked = await client.getSpaceCreationCapability();
+  const unlocked = await client.redeemSpaceCreationInvite('  cw_space_test  ');
+
+  assert.equal(locked.reason, 'invite_required');
+  assert.equal(unlocked.canCreate, true);
+  assert.deepEqual(calls.map((call) => call.url), [
+    'https://cloud.cowiki.test/api/space-creation-capability',
+    'https://cloud.cowiki.test/api/space-creation-capability/redeem',
+  ]);
+  assert.equal(calls[1].init?.method, 'POST');
+  assert.deepEqual(JSON.parse(String(calls[1].init?.body)), { code: 'cw_space_test' });
+  assert.equal(new Headers(calls[1].init?.headers).get('authorization'), 'Bearer key');
+});
+
+test('Cloud API failures retain the structured server error code', async () => {
+  const fakeFetch: CloudFetch = async () => Response.json(
+    { error: 'Space creation requires an invite', code: 'invite_required' },
+    { status: 403 },
+  );
+  const client = createCloudClient(
+    { baseUrl: 'https://cloud.cowiki.test', apiKey: 'key', userId, userName: 'User' },
+    fakeFetch,
+  );
+
+  await assert.rejects(
+    client.createSpace('Competition', 'competition'),
+    (error: unknown) => error instanceof CloudApiError
+      && error.status === 403
+      && error.code === 'invite_required',
+  );
+});
+
 test('public Cloud reads never send a bearer credential', async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const fakeFetch: CloudFetch = async (input, init) => {

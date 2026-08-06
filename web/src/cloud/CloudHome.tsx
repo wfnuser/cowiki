@@ -12,7 +12,13 @@ import {
   SelectValue,
 } from '../components/ui/select';
 import { TooltipProvider } from '../components/ui/tooltip';
-import type { CloudClient, CloudSpace } from './client';
+import {
+  CloudApiError,
+  type CloudClient,
+  type CloudSpace,
+  type CloudSpaceCreationCapability,
+} from './client';
+import { spaceCreationPanelMode } from './cloud-shell-model';
 import { cloudSpaceRoute } from './routes';
 import type { CloudSession } from './session';
 import type { CloudVisibility } from './session';
@@ -32,6 +38,10 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
+  const [capability, setCapability] = useState<CloudSpaceCreationCapability | null>(null);
+  const [capabilityLoading, setCapabilityLoading] = useState(false);
+  const [inviteCode, setInviteCode] = useState('');
+  const [redeeming, setRedeeming] = useState(false);
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [slugEdited, setSlugEdited] = useState(false);
@@ -51,6 +61,22 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
     return () => { active = false; };
   }, [client]);
 
+  useEffect(() => {
+    if (panel !== 'create') return undefined;
+    let active = true;
+    setCapabilityLoading(true);
+    setError('');
+    void client.getSpaceCreationCapability()
+      .then((value) => { if (active) setCapability(value); })
+      .catch((cause) => {
+        if (active) {
+          setError(cause instanceof Error ? cause.message : 'Could not check Space creation access.');
+        }
+      })
+      .finally(() => { if (active) setCapabilityLoading(false); });
+    return () => { active = false; };
+  }, [client, panel]);
+
   const openCreatePanel = () => {
     setError('');
     navigate('/cloud?action=create', { replace: true });
@@ -68,9 +94,32 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
       const created = await client.createSpace(name.trim(), slug.trim(), visibility);
       navigate(cloudSpaceRoute(created.id));
     } catch (cause) {
+      if (cause instanceof CloudApiError
+        && (cause.code === 'invite_required' || cause.code === 'limit_reached')) {
+        try {
+          setCapability(await client.getSpaceCreationCapability());
+        } catch {
+          // Keep the authoritative creation error when refreshing capability also fails.
+        }
+      }
       setError(cause instanceof Error ? cause.message : 'Could not create this shared Space.');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const redeemInvite = async (event: FormEvent) => {
+    event.preventDefault();
+    setRedeeming(true);
+    setError('');
+    try {
+      const unlocked = await client.redeemSpaceCreationInvite(inviteCode);
+      setCapability(unlocked);
+      setInviteCode('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not redeem this invite code.');
+    } finally {
+      setRedeeming(false);
     }
   };
 
@@ -122,38 +171,80 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
                       Cancel
                     </button>
                   </div>
-                  <form className="space-y-3" onSubmit={(event) => void createSharedSpace(event)}>
-                    <Input
-                      aria-label="Shared Space name"
-                      placeholder="Space name"
-                      value={name}
-                      onChange={(event) => changeName(event.target.value)}
+                  {capabilityLoading || !capability ? (
+                    <div
+                      aria-label="Checking Space creation access"
+                      className="h-24 animate-pulse rounded-lg bg-secondary"
                     />
-                    <Select
-                      value={visibility}
-                      onValueChange={(value) => setVisibility(value as CloudVisibility)}
-                    >
-                      <SelectTrigger aria-label="Space visibility" className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="private">Private — members only</SelectItem>
-                        <SelectItem value="public">Public — anyone can read merged pages</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      aria-label="Shared Space slug"
-                      placeholder="space-name"
-                      value={slug}
-                      onChange={(event) => {
-                        setSlug(event.target.value);
-                        setSlugEdited(true);
-                      }}
-                    />
-                    <Button className="w-full" type="submit" disabled={creating || !name.trim() || !slug.trim()}>
-                      {creating ? 'Creating…' : 'Create Space'}
-                    </Button>
-                  </form>
+                  ) : spaceCreationPanelMode(capability) === 'invite' ? (
+                    <div>
+                      <p className="mb-4 text-sm leading-6 text-text-secondary">
+                        Your GitHub account can join existing shared Spaces. Enter a one-time
+                        invite code to unlock creation for this account.
+                      </p>
+                      <form className="space-y-3" onSubmit={(event) => void redeemInvite(event)}>
+                        <Input
+                          aria-label="Space creation invite code"
+                          autoComplete="off"
+                          placeholder="cw_space_…"
+                          value={inviteCode}
+                          onChange={(event) => setInviteCode(event.target.value)}
+                        />
+                        <Button
+                          className="w-full"
+                          type="submit"
+                          disabled={redeeming || !inviteCode.trim()}
+                        >
+                          {redeeming ? 'Unlocking…' : 'Unlock Space creation'}
+                        </Button>
+                      </form>
+                    </div>
+                  ) : spaceCreationPanelMode(capability) === 'limit' ? (
+                    <div className="rounded-lg bg-secondary px-4 py-5 text-sm leading-6 text-text-secondary">
+                      <p className="font-medium text-text">
+                        You have created {capability.createdCount} of {capability.limit} shared Spaces.
+                      </p>
+                      <p className="mt-1.5">
+                        Your creation limit has been reached. You can still join existing shared Spaces.
+                      </p>
+                    </div>
+                  ) : (
+                    <form className="space-y-3" onSubmit={(event) => void createSharedSpace(event)}>
+                      <p className="text-xs text-text-tertiary">
+                        {capability.createdCount} of {capability.limit} shared Spaces created
+                      </p>
+                      <Input
+                        aria-label="Shared Space name"
+                        placeholder="Space name"
+                        value={name}
+                        onChange={(event) => changeName(event.target.value)}
+                      />
+                      <Select
+                        value={visibility}
+                        onValueChange={(value) => setVisibility(value as CloudVisibility)}
+                      >
+                        <SelectTrigger aria-label="Space visibility" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="private">Private — members only</SelectItem>
+                          <SelectItem value="public">Public — anyone can read merged pages</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        aria-label="Shared Space slug"
+                        placeholder="space-name"
+                        value={slug}
+                        onChange={(event) => {
+                          setSlug(event.target.value);
+                          setSlugEdited(true);
+                        }}
+                      />
+                      <Button className="w-full" type="submit" disabled={creating || !name.trim() || !slug.trim()}>
+                        {creating ? 'Creating…' : 'Create Space'}
+                      </Button>
+                    </form>
+                  )}
                 </section>
               ) : loading ? (
                 <div className="mx-auto size-6 animate-pulse rounded-md bg-secondary" aria-label="Loading Spaces" />
