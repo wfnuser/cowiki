@@ -12,6 +12,7 @@
   <a href="https://www.xiaohongshu.com/explore/6a57ae3100000000070229aa?xsec_token=AB3r79vLLhY9g4EOR2V9GfBSUNgWPYIsJJYs7GQ4DsmaI=&amp;xsec_source=pc_user">阅读小红书原文</a>
 </p>
 
+
 <p align="center">
   <a href="https://github.com/wfnuser/cowiki/actions/workflows/macos-desktop.yml"><img src="https://img.shields.io/github/actions/workflow/status/wfnuser/cowiki/macos-desktop.yml?branch=dev&label=macOS%20build" alt="macOS build" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-EF5A29" alt="Apache 2.0 license" /></a>
@@ -24,6 +25,8 @@
 <p align="center">
   <img src="docs/assets/cowiki-desktop.png" alt="CoWiki reviewing local Markdown changes beside an embedded Claude Code terminal" />
 </p>
+
+<img width="161" height="247" alt="IMG_0185" src="https://github.com/user-attachments/assets/e4019204-90d4-4828-961e-27be03a3b955" />
 
 <p align="center">
   <strong>A local-first, Git-based workspace where teams and their agents compile sources into a portable, reviewable, and shareable LLM Wiki.</strong>
