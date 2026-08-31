@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  CircleAlert,
   CircleCheck,
   FileText,
   LoaderCircle,
@@ -9,6 +8,7 @@ import {
 } from 'lucide-react';
 
 import { listBrokenLinks, type BrokenLink } from '@/api';
+import { InlineFeedback } from '@/components/ui/inline-feedback';
 import { C } from '@/lib/design';
 import {
   brokenLinkSummary,
@@ -89,13 +89,15 @@ export function LinksView({ workspaceSlug, onOpenPage }: LinksViewProps) {
       {mode === 'loading' ? (
         <div style={emptyStyle}><LoaderCircle size={17} className="animate-spin" /> Checking links…</div>
       ) : mode === 'error' ? (
-        <div role="alert" style={errorStyle}>
-          <CircleAlert size={17} color={C.red} />
-          <span style={{ flex: 1, color: C.red, fontSize: 12.5 }}>{error}</span>
-          <button type="button" onClick={() => { void refresh(); }} disabled={refreshing} style={retryStyle}>
-            <RefreshCw size={12} /> Retry
-          </button>
-        </div>
+        <InlineFeedback
+          title="Could not inspect links"
+          description={error}
+          action={(
+            <button type="button" onClick={() => { void refresh(); }} disabled={refreshing} style={retryStyle}>
+              <RefreshCw size={12} /> Retry
+            </button>
+          )}
+        />
       ) : mode === 'clean' ? (
         <div style={cleanStyle} aria-live="polite">
           <span style={cleanIconStyle}><CircleCheck size={21} /></span>
@@ -146,11 +148,6 @@ export function LinksView({ workspaceSlug, onOpenPage }: LinksViewProps) {
     </section>
   );
 }
-
-const errorStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, padding: '11px 13px',
-  border: '1px solid #f0cbc5', borderRadius: 9, background: C.redBgSoft,
-};
 
 const retryStyle: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none', background: 'transparent',

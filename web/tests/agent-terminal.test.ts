@@ -6,11 +6,13 @@ import test from 'node:test';
 import {
   agentDisplayName,
   agentInitialCommand,
+  agentReadinessAction,
   belongsToTerminalSession,
   normalizeTerminalSize,
 } from '../src/components/terminal/terminal-contract.ts';
 import {
   addAgentTab,
+  addOrFocusCodexLoginTab,
   closeAgentTab,
   openOrActivateAgentChangeTab,
   terminalTabLabel,
@@ -49,6 +51,50 @@ test('normalizes terminal dimensions to the PTY contract', () => {
   assert.deepEqual(normalizeTerminalSize(0, Number.NaN), { cols: 20, rows: 24 });
   assert.deepEqual(normalizeTerminalSize(900, 999), { cols: 500, rows: 200 });
   assert.deepEqual(normalizeTerminalSize(101.8, 42.9), { cols: 101, rows: 42 });
+});
+
+test('routes signed-out Codex sessions through the single login flow', () => {
+  assert.equal(agentReadinessAction('codex', 'available'), 'run');
+  assert.equal(agentReadinessAction('codex', 'signedOut'), 'login');
+  assert.equal(agentReadinessAction('codex', 'broken'), 'blocked');
+  assert.equal(agentReadinessAction('claude', 'signedOut'), 'blocked');
+});
+
+test('the launch page uses one stateful primary action and no execution-mode promotion', () => {
+  const panel = readFileSync(
+    new URL('../src/components/terminal/AgentTerminalPanel.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(panel, /const buttonLabel = checking[\s\S]*Sign in to/);
+  assert.match(panel, /<Button[\s\S]*disabled=\{busy \|\| \(!available && !signedOut\)\}/);
+  assert.doesNotMatch(panel, /function ExecutionModeControl/);
+  assert.doesNotMatch(panel, /agentTerminalModeDetails/);
+});
+
+test('the add menu keeps readiness checks local and prevents duplicate launches', () => {
+  const panel = readFileSync(
+    new URL('../src/components/terminal/AgentTerminalPanel.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(panel, /pendingLaunchesRef\.current\.has\(launchKey\)/);
+  assert.match(panel, /event\.preventDefault\(\);[\s\S]*attemptOpen\(agent, 'live'\)/);
+  assert.match(panel, /const attemptedFeedback = attemptedAgent \? feedback\[attemptedAgent\]/);
+  assert.match(panel, /checking \|\| pending[\s\S]*LoaderCircle/);
+  assert.match(panel, /tab\.intent === 'login'[\s\S]*checkAgent\(tab\.agent, true\)/);
+});
+
+test('agent probes and terminal startup run outside the Tauri command thread', () => {
+  const terminal = readFileSync(
+    new URL('../src-tauri/src/terminal.rs', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(terminal, /pub async fn agent_probe[\s\S]*spawn_blocking/);
+  assert.match(terminal, /pub async fn terminal_create[\s\S]*spawn_blocking/);
+  assert.match(terminal, /fn cached_readiness[\s\S]*Duration::from_secs\(30\)/);
+  assert.match(terminal, /fn resolve_agent_lookup_shell/);
 });
 
 test('routes terminal events only to their owning session', () => {
@@ -138,6 +184,43 @@ test('agent tabs keep live and background execution identities separate', () => 
   ]);
   assert.equal(terminalTabLabel(background.tabs, background.tabs[0]), 'Codex 1');
   assert.equal(terminalTabLabel(background.tabs, background.tabs[1]), 'Codex 2 · Background');
+});
+
+test('Codex login tabs remain separate, unique, and live-only', () => {
+  const empty: AgentTerminalTabsState = { activeTabId: null, tabs: [] };
+  const login = addOrFocusCodexLoginTab(empty, 'login-1');
+
+  assert.deepEqual(login.tabs, [
+    { id: 'login-1', agent: 'codex', mode: 'live', intent: 'login' },
+  ]);
+  assert.equal(terminalTabLabel(login.tabs, login.tabs[0]), 'Codex · Sign in');
+  assert.deepEqual(
+    addOrFocusCodexLoginTab({
+      activeTabId: 'claude-1',
+      tabs: [
+        ...login.tabs,
+        { id: 'claude-1', agent: 'claude', mode: 'live' },
+      ],
+    }, 'login-2'),
+    {
+      activeTabId: 'login-1',
+      tabs: [
+        { id: 'login-1', agent: 'codex', mode: 'live', intent: 'login' },
+        { id: 'claude-1', agent: 'claude', mode: 'live' },
+      ],
+    },
+  );
+  assert.throws(
+    () => addAgentTab(empty, 'codex', 'login-2', 'background', {
+      changeId: 'change-2',
+      worktreePath: '/managed/change-2',
+    }, 'login'),
+    /Only Codex/,
+  );
+  assert.throws(
+    () => addAgentTab(empty, 'claude', 'login-3', 'live', undefined, 'login'),
+    /Only Codex/,
+  );
 });
 
 test('continuing an Agent Change activates its existing tab instead of duplicating it', () => {

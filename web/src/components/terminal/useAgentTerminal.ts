@@ -7,6 +7,7 @@ import {
   belongsToTerminalSession,
   normalizeTerminalSize,
   type AgentKind,
+  type AgentTerminalIntent,
   type AgentTerminalMode,
   type TerminalDataEvent,
   type TerminalExitEvent,
@@ -18,6 +19,7 @@ type TerminalStatus = 'idle' | 'starting' | 'running' | 'exited' | 'error';
 type UseAgentTerminalOptions = {
   cwd: string;
   agent: AgentKind;
+  intent?: AgentTerminalIntent;
   mode: AgentTerminalMode;
   spaceSlug: string;
   changeId?: string;
@@ -30,6 +32,7 @@ export function useAgentTerminal({
   agent,
   changeId,
   cwd,
+  intent = 'run',
   mode,
   initialTask,
   onData,
@@ -84,6 +87,7 @@ export function useAgentTerminal({
           spaceSlug,
           changeId,
           agent,
+          intent,
           initialCommand: agentInitialCommand(agent),
           taskPrompt: initialTask,
           ...normalized,
@@ -109,7 +113,7 @@ export function useAgentTerminal({
       setStatus('error');
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [agent, changeId, cwd, initialTask, mode, spaceSlug]);
+  }, [agent, changeId, cwd, initialTask, intent, mode, spaceSlug]);
 
   const write = useCallback(async (data: string) => {
     const sessionId = sessionIdRef.current;
