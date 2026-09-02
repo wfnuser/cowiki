@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { FileText, Search, Sparkles, CornerDownLeft, X } from 'lucide-react';
 import { searchWorkspace, type SearchResponse } from '../api';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { C, fonts } from '@/lib/design';
 import { isDesktopClient } from '@/runtime';
 import { conceptIdFromPath, conceptPath, isSearchableConceptPath } from '@/lib/okf-pages';
@@ -67,30 +67,17 @@ export function SearchModal({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Reset on open; autofocus.
+  // Reset on open. Focus/Esc/outside-click are handled by the Dialog primitive:
+  // it auto-focuses the first focusable element (the search input) and closes on
+  // Escape no matter where focus is, plus on pointer-down outside the panel.
   useEffect(() => {
     if (open) {
       setQ('');
       setKw(null);
       setSem(null);
       setSel(0);
-      setTimeout(() => inputRef.current?.focus(), 30);
     }
   }, [open]);
-
-  // Esc must close no matter where focus is (the input handler only covers the
-  // input itself — clicking anywhere in the panel used to strand Esc).
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
 
   // Two parallel debounced fetches: keyword is a fast local scan (short debounce,
   // renders first); semantic needs an embedding round-trip (longer debounce, fills
@@ -158,8 +145,7 @@ export function SearchModal({
   }, [onClose, onSelectPage]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') { e.preventDefault(); onClose(); }
-    else if (e.key === 'ArrowDown') { e.preventDefault(); setSel((s) => Math.min(s + 1, rows.length - 1)); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setSel((s) => Math.min(s + 1, rows.length - 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setSel((s) => Math.max(s - 1, 0)); }
     else if (e.key === 'Enter') { e.preventDefault(); pick(rows[sel]); }
   };
@@ -171,8 +157,6 @@ export function SearchModal({
       ?.scrollIntoView({ block: 'nearest' });
   }, [sel]);
 
-  if (!open) return null;
-
   const sectionLabel = (icon: React.ReactNode, label: string) => (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 6, padding: '10px 18px 4px',
@@ -182,27 +166,17 @@ export function SearchModal({
     </div>
   );
 
-  return createPortal(
-    <div
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 90,
-        background: 'rgba(29, 28, 26, 0.32)', backdropFilter: 'blur(2px)',
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-        paddingTop: '16vh',
-      }}
-    >
-      <div
-        role="dialog"
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      {/* ui/Dialog already carries this palette's scrim, 16vh anchor, 14px
+          radius, border and layered shadow; strip its padding/gap/close button
+          and open animation so the palette keeps its exact previous layout. */}
+      <DialogContent
+        showCloseButton={false}
         aria-label="Search"
-        style={{
-          width: 'min(620px, 92vw)', maxHeight: '60vh',
-          display: 'flex', flexDirection: 'column',
-          background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`,
-          boxShadow: '0 24px 64px rgba(29,28,26,0.22), 0 4px 16px rgba(29,28,26,0.10)',
-          overflow: 'hidden',
-        }}
+        className="flex max-h-[60vh] w-[min(620px,92vw)] max-w-[min(620px,92vw)] flex-col gap-0 overflow-hidden p-0 data-[state=closed]:animate-none data-[state=open]:animate-none sm:max-w-[min(620px,92vw)]"
       >
+        <DialogTitle className="sr-only">Search</DialogTitle>
         {/* Input row */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px',
@@ -266,7 +240,7 @@ export function SearchModal({
                     <div style={{
                       width: 30, height: 30, borderRadius: 8, flexShrink: 0, marginTop: 1,
                       background: sel === i ? C.accent : C.rail,
-                      color: sel === i ? '#fff' : C.muted,
+                      color: sel === i ? C.onAccent : C.muted,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}>
                       {row.kind === 'semantic' ? <Sparkles size={14} /> : <FileText size={14} />}
@@ -328,9 +302,8 @@ export function SearchModal({
           <span><Kbd>esc</Kbd> close</span>
           <span style={{ marginLeft: 'auto' }}>Searches your view: drafts + published</span>
         </div>
-      </div>
-    </div>,
-    document.body
+      </DialogContent>
+    </Dialog>
   );
 }
 

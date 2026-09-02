@@ -7,24 +7,9 @@ import { Button } from '@/components/ui/button';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { AvatarBadge } from '@/components/ui/avatar-badge';
 import { searchUsers, inviteToWorkspace, type UserSearchResult } from '../api';
-import { C } from '@/lib/design';
-
-// ── Avatar color (same algo as MembersView) ──
-
-const AVATAR_COLORS = [
-  '#3f6c8c', '#5d8a6c', '#9a6f93', '#c2410c',
-  '#6366f1', '#14b8a6', '#f59e0b', '#8b5cf6',
-];
-
-function avatarColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = ((hash << 5) - hash) + name.charCodeAt(i);
-    hash |= 0;
-  }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
-}
+import { C, shadows } from '@/lib/design';
 
 // ── Props ──
 
@@ -160,7 +145,7 @@ export function InviteDialog({
         <div className="space-y-4 mt-2">
           {/* User search input */}
           <div>
-            <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">
+            <label className="mb-1.5 block text-sm text-text-secondary">
               User
             </label>
             {selected ? (
@@ -172,14 +157,7 @@ export function InviteDialog({
                   border: `1px solid ${C.line}`, background: C.sidebar,
                 }}
               >
-                <div style={{
-                  width: 32, height: 32, borderRadius: '50%',
-                  background: avatarColor(selected.name),
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 13, fontWeight: 600, color: '#fff', flexShrink: 0,
-                }}>
-                  {selected.name[0]?.toUpperCase() || '?'}
-                </div>
+                <AvatarBadge name={selected.name} size={32} kind="member" />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 550, color: C.ink }}>
                     {selected.name}
@@ -237,7 +215,7 @@ export function InviteDialog({
                       position: 'absolute', top: '100%', left: 0, right: 0,
                       marginTop: 4, zIndex: 300,
                       border: `1px solid ${C.line}`, borderRadius: 8,
-                      background: C.panel, boxShadow: '0 8px 28px rgba(29,28,26,0.12)',
+                      background: C.panel, boxShadow: shadows.lifted,
                       maxHeight: 240, overflow: 'auto',
                     }}
                   >
@@ -255,14 +233,7 @@ export function InviteDialog({
                           borderBottom: i < results.length - 1 ? `1px solid ${C.lineSoft}` : 'none',
                         }}
                       >
-                        <div style={{
-                          width: 30, height: 30, borderRadius: '50%',
-                          background: avatarColor(user.name),
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 12, fontWeight: 600, color: '#fff', flexShrink: 0,
-                        }}>
-                          {user.name[0]?.toUpperCase() || '?'}
-                        </div>
+                        <AvatarBadge name={user.name} size={30} kind="member" />
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 14, fontWeight: 550, color: C.ink }}>
                             {user.name}
@@ -289,7 +260,7 @@ export function InviteDialog({
           {selected && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
-                <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Role</label>
+                <label className="mb-1.5 block text-sm text-text-secondary">Role</label>
                 <Select value={role} onValueChange={setRole}>
                   <SelectTrigger>
                     <SelectValue />
@@ -303,7 +274,7 @@ export function InviteDialog({
                 </Select>
               </div>
               <div>
-                <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Expires</label>
+                <label className="mb-1.5 block text-sm text-text-secondary">Expires</label>
                 <Select value={expires} onValueChange={setExpires}>
                   <SelectTrigger>
                     <SelectValue />

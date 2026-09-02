@@ -69,7 +69,7 @@ export function IngestForm({ branch, onDone, workspaceSlug }: { branch: string; 
         {loading ? 'Adding...' : 'Add source'}
       </Button>
       {error && (
-        <p className="text-xs text-red-600">{error}</p>
+        <p className="text-xs text-red">{error}</p>
       )}
     </form>
   );

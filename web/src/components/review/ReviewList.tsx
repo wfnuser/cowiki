@@ -90,7 +90,7 @@ function CloudReviewList({
               padding: '6px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
               fontWeight: 550,
               background: filter === tab.key ? C.ink : 'transparent',
-              color: filter === tab.key ? '#fff' : C.muted,
+              color: filter === tab.key ? C.onAccent : C.muted,
               transition: 'all 0.15s',
             }}
           >

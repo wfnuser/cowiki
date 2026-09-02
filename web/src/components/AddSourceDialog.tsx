@@ -137,7 +137,7 @@ export function AddSourceDialog({
         {importedSources.length > 0 ? (
           <div className="space-y-5 py-2">
             <div className="flex items-start gap-3 rounded-lg border bg-muted/35 p-4">
-              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green" />
               <div className="min-w-0">
                 <p className="font-medium">
                   {importedSources.length} source{importedSources.length === 1 ? '' : 's'} imported
@@ -148,7 +148,7 @@ export function AddSourceDialog({
               </div>
             </div>
             {error && (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <div className="rounded-lg border border-red/20 bg-red-soft p-3 text-sm text-red">
                 <p className="font-medium">Some files still need attention</p>
                 <p className="mt-1 text-xs leading-relaxed">{error}</p>
               </div>
@@ -268,7 +268,7 @@ export function AddSourceDialog({
             )}
           </Tabs>
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p className="text-sm text-red">{error}</p>}
 
           <Button type="submit" disabled={!canSubmit || loading}>
             {loading

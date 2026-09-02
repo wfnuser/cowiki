@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Check, GitBranch, GitMerge } from 'lucide-react';
+import { Check, GitBranch, GitMerge } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 import { DiffView } from '../components/review/DiffView';
+import { ReviewBackButton } from '../components/review/ReviewBackButton';
 import { ReviewInbox, ReviewInboxRow } from '../components/review/ReviewInbox';
 import { AvatarBadge } from '../components/ui/avatar-badge';
 import { C, fonts } from '../lib/design';
@@ -214,9 +215,7 @@ function CloudReviewDetail({
   const diffs = diff ? cloudDiffToFileDiffs(diff) : null;
   return (
     <div>
-      <button type="button" onClick={onBack} style={backButtonStyle}>
-        <ArrowLeft size={14} /> Reviews
-      </button>
+      <ReviewBackButton onClick={onBack} />
 
       <div style={{
         display: 'flex',
@@ -302,7 +301,7 @@ function ActionButton({
         borderRadius: 7,
         padding: '8px 11px',
         background: subtle ? C.panel : C.ink,
-        color: subtle ? C.muted : '#fff',
+        color: subtle ? C.muted : C.onAccent,
         cursor: disabled ? 'default' : 'pointer',
         fontSize: 12.5,
         fontWeight: 650,
@@ -314,18 +313,6 @@ function ActionButton({
     </button>
   );
 }
-
-const backButtonStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: 0,
-  border: 0,
-  background: 'transparent',
-  color: C.muted,
-  cursor: 'pointer',
-  fontSize: 13,
-};
 
 const statusPillStyle: React.CSSProperties = {
   display: 'inline-block',

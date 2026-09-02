@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
-import { ArrowLeft, MessageSquare, XCircle, GitMerge, Check, AlertCircle, Plus } from 'lucide-react';
+import { MessageSquare, XCircle, GitMerge, Check, AlertCircle, Plus } from 'lucide-react';
 import {
   getReview, reviewAction, createComment, resolveComment, unresolveComment, editReview,
   type ReviewDetail as ReviewDetailData, type ReviewComment,
 } from '../../api';
 import { DiffView } from './DiffView';
+import { ReviewBackButton } from './ReviewBackButton';
 import { C, fonts } from '@/lib/design';
 import { timeAgo } from '../../lib/time';
 import { AvatarBadge } from '@/components/ui/avatar-badge';
@@ -128,7 +129,7 @@ export function ReviewDetail({
   if (error) {
     return (
       <div style={{ padding: 24 }}>
-        <button onClick={onBack} style={backBtnStyle}><ArrowLeft size={14} /> Reviews</button>
+        <ReviewBackButton onClick={onBack} />
         <p style={{ color: C.red, fontSize: 14, marginTop: 12 }}>Failed to load review: {error}</p>
       </div>
     );
@@ -137,7 +138,7 @@ export function ReviewDetail({
   if (data == null) {
     return (
       <div style={{ padding: 24 }}>
-        <button onClick={onBack} style={backBtnStyle}><ArrowLeft size={14} /> Reviews</button>
+        <ReviewBackButton onClick={onBack} />
         <p style={{ color: C.muted, fontSize: 14, marginTop: 12 }}>Loading review...</p>
       </div>
     );
@@ -154,10 +155,10 @@ export function ReviewDetail({
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Header */}
       <div style={{ flexShrink: 0 }}>
-        <button onClick={onBack} style={backBtnStyle}>
-          <ArrowLeft size={14} /> Reviews
+        <ReviewBackButton onClick={onBack}>
+          Reviews
           <span style={{ color: C.faint }}> / #{submissionId.slice(0, 6)}</span>
-        </button>
+        </ReviewBackButton>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
           <h1 style={{ fontFamily: fonts.serif, fontSize: 26, fontWeight: 700, color: C.ink, margin: 0 }}>
@@ -178,12 +179,12 @@ export function ReviewDetail({
           <span>wants to merge</span>
           <code style={{
             fontSize: 12, padding: '2px 7px', borderRadius: 6,
-            background: C.rail, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+            background: C.rail, fontFamily: fonts.mono,
           }}>{submission.source_branch}</code>
           <span style={{ color: C.faint }}>&rarr;</span>
           <code style={{
             fontSize: 12, padding: '2px 7px', borderRadius: 6,
-            background: C.rail, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+            background: C.rail, fontFamily: fonts.mono,
           }}>wiki/main</code>
           <span style={{ color: C.green }}>+{totalAdd}</span>
           <span style={{ color: C.red }}>&minus;{totalDel}</span>
@@ -194,7 +195,7 @@ export function ReviewDetail({
         </div>
 
         {actionError && (
-          <div style={{ marginTop: 8, padding: '6px 12px', background: '#fbeadd', borderRadius: 6, fontSize: 13, color: C.accent }}>
+          <div style={{ marginTop: 8, padding: '6px 12px', background: C.accentSoft, borderRadius: 6, fontSize: 13, color: C.accent }}>
             {actionError}
           </div>
         )}
@@ -227,7 +228,7 @@ export function ReviewDetail({
               style={{
                 width: '100%', fontSize: 13, padding: '10px 12px', border: `1px solid ${C.line}`,
                 borderRadius: 8, resize: 'vertical', outline: 'none', fontFamily: 'inherit',
-                background: '#fff', boxSizing: 'border-box',
+                background: C.panel, boxSizing: 'border-box',
               }}
             />
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10, alignItems: 'center' }}>
@@ -237,7 +238,7 @@ export function ReviewDetail({
                     onClick={() => { handleSubmitReview(); act('approve'); }}
                     disabled={busy != null}
                     style={{
-                      ...actionBtnStyle, background: C.green, color: '#fff',
+                      ...actionBtnStyle, background: C.green, color: C.onAccent,
                       opacity: busy != null ? 0.5 : 1,
                     }}
                   >
@@ -248,7 +249,7 @@ export function ReviewDetail({
                     onClick={() => { handleSubmitReview(); act('reject'); }}
                     disabled={busy != null}
                     style={{
-                      ...actionBtnStyle, background: '#fbeadd', color: C.accent,
+                      ...actionBtnStyle, background: C.accentSoft, color: C.accent,
                       opacity: busy != null ? 0.5 : 1,
                     }}
                   >
@@ -258,7 +259,7 @@ export function ReviewDetail({
                 </>
               )}
               {reviewBody.trim() && (
-                <button onClick={handleSubmitReview} style={{ ...actionBtnStyle, background: '#fff', color: C.ink2, border: `1px solid ${C.line}` }}>
+                <button onClick={handleSubmitReview} style={{ ...actionBtnStyle, background: C.panel, color: C.ink2, border: `1px solid ${C.line}` }}>
                   <MessageSquare size={14} /> Comment
                 </button>
               )}
@@ -268,7 +269,7 @@ export function ReviewDetail({
                     onClick={() => act('merge')}
                     disabled={busy != null}
                     style={{
-                      ...actionBtnStyle, background: C.ink, color: '#fff',
+                      ...actionBtnStyle, background: C.ink, color: C.onAccent,
                       opacity: busy != null ? 0.5 : 1,
                     }}
                   >
@@ -309,8 +310,8 @@ export function ReviewDetail({
                     : submission.status === 'rejected' ? C.accent : C.faint,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
-                  {submission.status === 'approved' && <Check size={11} color="#fff" />}
-                  {submission.status === 'rejected' && <XCircle size={11} color="#fff" />}
+                  {submission.status === 'approved' && <Check size={11} color={C.onAccent} />}
+                  {submission.status === 'rejected' && <XCircle size={11} color={C.onAccent} />}
                 </div>
               </div>
             ) : (
@@ -336,7 +337,7 @@ export function ReviewDetail({
                   width: 16, height: 16, borderRadius: '50%', background: C.green,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
-                  <Check size={10} color="#fff" />
+                  <Check size={10} color={C.onAccent} />
                 </div>
                 <span style={{ fontSize: 13, color: C.ink2 }}>Links valid</span>
               </div>
@@ -346,7 +347,7 @@ export function ReviewDetail({
                     width: 16, height: 16, borderRadius: '50%', background: C.amber,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                   }}>
-                    <AlertCircle size={10} color="#fff" />
+                    <AlertCircle size={10} color={C.onAccent} />
                   </div>
                   <span style={{ fontSize: 13, color: C.ink2 }}>{unresolvedCount} unresolved</span>
                 </div>
@@ -375,12 +376,6 @@ export function ReviewDetail({
     </div>
   );
 }
-
-const backBtnStyle: React.CSSProperties = {
-  background: 'none', border: 'none', cursor: 'pointer',
-  display: 'flex', alignItems: 'center', gap: 6,
-  fontSize: 12.5, color: C.muted, padding: 0,
-};
 
 const actionBtnStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 6,

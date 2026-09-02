@@ -10,7 +10,7 @@ import { SearchModal } from '../SearchModal';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { APP_HEADER_HEIGHT, C, spaceTileColors } from '@/lib/design';
+import { APP_HEADER_HEIGHT, C, colorForSpaceId, shadows } from '@/lib/design';
 import { conceptIdFromPath, visiblePageTree } from '@/lib/okf-pages';
 
 export type NavTab = 'wiki' | 'reviews' | 'members' | 'history' | 'links';
@@ -110,9 +110,7 @@ export function SpacePanel({
   ];
 
   const wikiActive = activeTab === 'wiki';
-  const colorIndex = Array.from(workspace.id || workspace.slug)
-    .reduce((sum, character) => sum + character.charCodeAt(0), 0);
-  const spaceColor = spaceTileColors[colorIndex % spaceTileColors.length];
+  const spaceColor = colorForSpaceId(workspace.id || workspace.slug);
 
   return (
     <aside style={panelStyle}>
@@ -124,7 +122,7 @@ export function SpacePanel({
       }}>
         <div style={{
           width: 26, height: 26, borderRadius: 8,
-          background: spaceColor, color: '#fff',
+          background: spaceColor, color: C.onAccent,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 12, fontWeight: 700,
         }}>
@@ -145,7 +143,7 @@ export function SpacePanel({
             style={{
               display: 'flex', alignItems: 'center', gap: 9, width: 'calc(100% - 16px)',
               padding: '8px 14px', margin: '1px 8px', borderRadius: 8, border: 'none', cursor: 'pointer',
-              background: activeTab === n.tab ? '#fbeadd' : 'transparent',
+              background: activeTab === n.tab ? C.accentSoft : 'transparent',
               color: activeTab === n.tab ? C.accent : C.ink2,
               fontSize: 14, fontWeight: activeTab === n.tab ? 600 : 450,
               transition: 'all 0.1s',
@@ -159,7 +157,7 @@ export function SpacePanel({
             {n.badge != null && n.badge > 0 && (
               <span style={{
                 fontSize: 11.5, fontWeight: 700, padding: '0 5px', borderRadius: 999,
-                background: C.accent, color: '#fff', minWidth: 18, height: 18,
+                background: C.accent, color: C.onAccent, minWidth: 18, height: 18,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               }}>
                 {n.badge}
@@ -392,7 +390,7 @@ function SourceEntry({
         style={{
           display: 'flex', alignItems: 'center', gap: 8, width: '100%',
           padding: '6px 10px', borderRadius: 6, border: 'none', cursor: 'pointer',
-          background: active ? 'rgba(0,0,0,0.05)' : 'transparent',
+          background: active ? `color-mix(in srgb, ${C.ink} 5%, transparent)` : 'transparent',
           color: active ? C.ink : C.ink2,
           fontSize: 14, fontWeight: active ? 550 : 400,
           textAlign: 'left',
@@ -482,7 +480,7 @@ function PageTreeItem({
               <DropdownMenuItem onClick={() => onAddPageInFolder(folderPath)}><FileText size={14} className="mr-2" /> New Page</DropdownMenuItem>
               <DropdownMenuItem onClick={() => onAddFolderInFolder(folderPath)}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
               <DropdownMenuItem onClick={() => onRenamePath(folderPath, true, title)}><Pencil size={14} className="mr-2" /> Rename</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onDeletePath(folderPath, true, title)} className="text-red-600 focus:text-red-600">
+              <DropdownMenuItem onClick={() => onDeletePath(folderPath, true, title)} className="text-red focus:text-red">
                 <Trash2 size={14} className="mr-2" /> Delete folder
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -514,10 +512,10 @@ function PageTreeItem({
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '6px 10px', paddingLeft: 10 + pl, borderRadius: 6,
         cursor: 'pointer', fontSize: 14,
-        background: isActive ? 'rgba(0,0,0,0.05)' : 'transparent',
+        background: isActive ? `color-mix(in srgb, ${C.ink} 5%, transparent)` : 'transparent',
         color: isActive ? C.ink : C.ink2,
         fontWeight: isActive ? 550 : 400,
-        boxShadow: isActive ? '0 1px 2px rgba(0,0,0,0.04)' : 'none',
+        boxShadow: isActive ? shadows.tick : 'none',
       }}
       onMouseEnter={(e) => {
         if (!isActive) e.currentTarget.style.background = C.rail;
@@ -545,7 +543,7 @@ function PageTreeItem({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-40">
           <DropdownMenuItem onClick={() => onRenamePath(pagePath, false, title)}><Pencil size={14} className="mr-2" /> Rename</DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onDeletePath(pagePath, false, title)} className="text-red-600 focus:text-red-600">
+          <DropdownMenuItem onClick={() => onDeletePath(pagePath, false, title)} className="text-red focus:text-red">
             <Trash2 size={14} className="mr-2" /> Delete
           </DropdownMenuItem>
         </DropdownMenuContent>

@@ -1,7 +1,7 @@
 import { EditorView } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
-import { C, fonts } from '@/lib/design';
+import { C, fonts, shadows } from '@/lib/design';
 
 /**
  * Editor chrome + live-preview line styles, mirroring the `.prose`
@@ -100,7 +100,7 @@ export const editorTheme = EditorView.theme({
   '.cm-lp-wikilink': {
     color: C.accent,
     textDecoration: 'underline', textUnderlineOffset: '2px',
-    textDecorationColor: 'rgba(226, 89, 11, 0.4)',
+    textDecorationColor: `color-mix(in srgb, ${C.accent} 40%, transparent)`,
     cursor: 'pointer',
   },
 
@@ -109,7 +109,7 @@ export const editorTheme = EditorView.theme({
     border: `1px solid ${C.line}`,
     borderRadius: '8px',
     backgroundColor: C.panel,
-    boxShadow: '0 8px 28px rgba(29, 28, 26, 0.12)',
+    boxShadow: shadows.lifted,
     overflow: 'hidden',
   },
   '.cm-tooltip-autocomplete ul li': { padding: '3px 10px', fontSize: '13px' },
@@ -117,6 +117,17 @@ export const editorTheme = EditorView.theme({
     backgroundColor: C.accentSoft, color: C.ink,
   },
 });
+
+/** GitHub-light syntax colors for fenced code; not the UI palette. */
+const syntax = {
+  keyword: '#cf222e',
+  string: '#0a3069',
+  comment: '#6e7781',
+  literal: '#0550ae',
+  type: '#953800',
+  fn: '#8250df',
+  tag: '#116329',
+} as const;
 
 /** Inline markdown + code-token colors (GitHub-light-ish, warmed to match). */
 export const editorHighlighting = syntaxHighlighting(HighlightStyle.define([
@@ -137,16 +148,15 @@ export const editorHighlighting = syntaxHighlighting(HighlightStyle.define([
   { tag: t.contentSeparator, color: C.faint },
   { tag: t.quote, color: C.ink2 },
   { tag: t.labelName, color: C.blue },
-  // Code tokens inside fenced blocks
-  { tag: t.keyword, color: '#cf222e' },
-  { tag: [t.string, t.special(t.string)], color: '#0a3069' },
-  { tag: t.comment, color: '#6e7781', fontStyle: 'italic' },
-  { tag: [t.number, t.bool, t.atom], color: '#0550ae' },
-  { tag: [t.typeName, t.className, t.namespace], color: '#953800' },
-  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: '#8250df' },
-  { tag: t.propertyName, color: '#0550ae' },
-  { tag: t.operator, color: '#cf222e' },
-  { tag: t.tagName, color: '#116329' },
-  { tag: t.attributeName, color: '#0550ae' },
+  { tag: t.keyword, color: syntax.keyword },
+  { tag: [t.string, t.special(t.string)], color: syntax.string },
+  { tag: t.comment, color: syntax.comment, fontStyle: 'italic' },
+  { tag: [t.number, t.bool, t.atom], color: syntax.literal },
+  { tag: [t.typeName, t.className, t.namespace], color: syntax.type },
+  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: syntax.fn },
+  { tag: t.propertyName, color: syntax.literal },
+  { tag: t.operator, color: syntax.keyword },
+  { tag: t.tagName, color: syntax.tag },
+  { tag: t.attributeName, color: syntax.literal },
   { tag: t.heading, fontWeight: '600' },
 ]));

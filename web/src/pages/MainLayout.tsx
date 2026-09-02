@@ -1176,7 +1176,7 @@ export function MainLayout() {
             {message && (
               <div style={{
                 margin: '8px 24px 0', padding: '8px 12px', borderRadius: 6, fontSize: 12,
-                background: message.type === 'success' ? '#dafbe1' : '#ffebe9',
+                background: message.type === 'success' ? C.greenBg : C.redBg,
                 color: message.type === 'success' ? C.green : C.red,
               }}>
                 {message.text}
@@ -1440,7 +1440,7 @@ export function MainLayout() {
           <DialogHeader><DialogTitle>New Page</DialogTitle></DialogHeader>
           <form onSubmit={handleCreatePage} className="space-y-4 mt-2">
             <div>
-              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Title</label>
+              <label className="mb-1.5 block text-sm text-text-secondary">Title</label>
               <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Meeting Notes" autoFocus />
             </div>
             <div className="flex justify-end gap-2 pt-2">
@@ -1457,7 +1457,7 @@ export function MainLayout() {
           <DialogHeader><DialogTitle>Rename Space</DialogTitle></DialogHeader>
           <form onSubmit={handleRename} className="space-y-4 mt-2">
             <div>
-              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Name</label>
+              <label className="mb-1.5 block text-sm text-text-secondary">Name</label>
               <Input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} autoFocus />
             </div>
             <div className="flex justify-end gap-2 pt-2">
@@ -1474,7 +1474,7 @@ export function MainLayout() {
           <DialogHeader><DialogTitle>New Folder</DialogTitle></DialogHeader>
           <form onSubmit={handleCreateFolder} className="space-y-4 mt-2">
             <div>
-              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Name</label>
+              <label className="mb-1.5 block text-sm text-text-secondary">Name</label>
               <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Research, Projects" autoFocus />
             </div>
             <div className="flex justify-end gap-2 pt-2">
@@ -1511,7 +1511,7 @@ export function MainLayout() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>Delete Workspace</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-2">
-            <p className="text-sm text-[var(--color-text-secondary)]">
+            <p className="text-sm text-text-secondary">
               Are you sure you want to delete <strong>{showDeleteConfirm?.name}</strong>? This action cannot be undone.
             </p>
             <div className="flex justify-end gap-2">
@@ -1533,7 +1533,7 @@ export function MainLayout() {
               onKeyDown={(e) => e.key === 'Enter' && handlePathOp()}
               autoFocus
             />
-            <p className="text-xs text-[var(--color-text-secondary)]">
+            <p className="text-xs text-text-secondary">
               Renames the {pathOp?.isFolder ? 'folder path' : 'page slug'} in your draft; links to the old name will need updating.
             </p>
             <div className="flex justify-end gap-2">
@@ -1549,7 +1549,7 @@ export function MainLayout() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>Delete {pathOp?.isFolder ? 'Folder' : 'Page'}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-2">
-            <p className="text-sm text-[var(--color-text-secondary)]">
+            <p className="text-sm text-text-secondary">
               Delete <strong>{pathOp?.title}</strong>
               {pathOp?.isFolder ? ' and everything inside it' : ''}?
               {desktop
@@ -1642,12 +1642,12 @@ function CreateSpaceDialog({
               </button>
             )}
             <div>
-              <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">Space name</label>
+              <label className="mb-1.5 block text-sm text-text-secondary">Space name</label>
               <Input value={name} onChange={(event) => onNameChange(event.target.value)} placeholder="e.g. Research Notes" autoFocus />
             </div>
             {desktop ? (
               <div>
-                <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">
+                <label className="mb-1.5 block text-sm text-text-secondary">
                   {mode === 'local' ? 'Create inside' : 'Folder'}
                 </label>
                 <button type="button" onClick={onChooseFolder} className="w-full rounded-md border px-3 py-2.5 text-left text-sm hover:bg-muted/50">
@@ -1715,7 +1715,8 @@ function LocalSpaceEmptyState({
         <div style={{
           width: 68, height: 68, margin: '0 auto 28px', borderRadius: 20,
           display: 'grid', placeItems: 'center', color: C.accent,
-          background: C.accentSoft, border: '1px solid rgba(226, 89, 11, 0.2)',
+          background: C.accentSoft,
+          border: `1px solid color-mix(in srgb, ${C.accent} 20%, transparent)`,
         }}>
           <FolderOpen size={31} strokeWidth={1.8} />
         </div>
@@ -1736,15 +1737,16 @@ function LocalSpaceEmptyState({
           style={{
             minWidth: 220, height: 58, padding: '0 24px', border: 'none', borderRadius: 14,
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 18,
-            background: C.accent, color: '#fff', fontSize: 17, fontWeight: 700,
+            background: C.accent, color: C.onAccent, fontSize: 17, fontWeight: 700,
             cursor: creating ? 'default' : 'pointer', opacity: creating ? 0.7 : 1,
-            boxShadow: '0 8px 22px rgba(226, 89, 11, 0.2)',
+            boxShadow: `0 8px 22px color-mix(in srgb, ${C.accent} 20%, transparent)`,
           }}
         >
           {creating ? 'Creating…' : 'Add a Space'}
           {!creating && (
             <kbd style={{
-              padding: '2px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.2)',
+              padding: '2px 8px', borderRadius: 6,
+              background: `color-mix(in srgb, ${C.onAccent} 20%, transparent)`,
               font: '600 13px var(--font-sans)',
             }}>
               ⌘O
@@ -1831,7 +1833,7 @@ function DiscoverView() {
                 onClick={() => handleJoin(ws.slug)}
                 disabled={joining === ws.slug}
                 style={{
-                  fontSize: 12, color: '#fff', background: C.ink,
+                  fontSize: 12, color: C.onAccent, background: C.ink,
                   padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
                   opacity: joining === ws.slug ? 0.4 : 1,
                 }}

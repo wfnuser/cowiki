@@ -87,7 +87,7 @@ function KeyCard({
       <Button
         variant="ghost"
         size="icon"
-        className="h-8 w-8 shrink-0 text-muted-foreground opacity-0 transition-all hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+        className="h-8 w-8 shrink-0 text-muted-foreground opacity-0 transition-all hover:bg-red-soft hover:text-red group-hover:opacity-100"
         disabled={isRevoking}
         onClick={() => onRevoke(keyInfo.id)}
       >
@@ -188,7 +188,7 @@ function CreateKeyDialog({
                 autoFocus
               />
               {error && (
-                <p className="mt-1.5 text-xs text-red-600">{error}</p>
+                <p className="mt-1.5 text-xs text-red">{error}</p>
               )}
             </div>
             <div className="flex justify-end gap-2">
@@ -228,7 +228,7 @@ function CreateKeyDialog({
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-white"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-on-accent"
                     onClick={handleCopy}
                   >
                     <AnimatePresence mode="wait" initial={false}>
@@ -244,7 +244,7 @@ function CreateKeyDialog({
                     </AnimatePresence>
                   </motion.button>
                 </div>
-                <div className="flex items-start gap-1.5 text-xs text-amber-700">
+                <div className="flex items-start gap-1.5 text-xs text-amber">
                   <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                   <span>This key will not be shown again. Store it somewhere safe.</span>
                 </div>
@@ -410,7 +410,7 @@ export function SettingsDialog({
                           onClick={() => onDefaultAgentChange(agent)}
                           className={`rounded-lg border px-3 py-3 text-left transition-colors ${
                             selected
-                              ? 'border-orange-300 bg-orange-50 text-orange-900'
+                              ? 'border-accent/30 bg-accent-soft text-accent-ink'
                               : 'border-border bg-background hover:bg-muted/60'
                           }`}
                         >
@@ -442,15 +442,15 @@ export function SettingsDialog({
                 </div>
               ) : (
                 <div className="flex min-h-[280px] flex-col items-center justify-center text-center">
-                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-orange-50">
-                    <Cloud className="h-5 w-5 text-orange-600" />
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft">
+                    <Cloud className="h-5 w-5 text-accent" />
                   </div>
                   <p className="text-sm font-medium">Connect to CoWiki Cloud</p>
                   <p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">
                     Keep local Spaces account-free. Sign in only when you want to publish or join a shared Space.
                   </p>
                   <Button
-                    className="mt-4 bg-orange-600 text-white hover:bg-orange-700"
+                    className="mt-4 bg-accent text-on-accent hover:bg-accent-hover"
                     onClick={() => {
                       onOpenChange(false);
                       onConnectCloud();
@@ -464,7 +464,7 @@ export function SettingsDialog({
 
             {availableTabs.includes('keys') && (
               <TabsContent value="keys" className="mt-4 flex flex-col data-[state=inactive]:hidden" forceMount style={{ minHeight: 320 }}>
-              <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-sm text-amber-800 mb-4">
+              <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-amber/30 bg-amber-soft px-3.5 py-2.5 text-sm text-amber-ink">
                 <Shield className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>API keys are only shown once upon creation. Copy and store them securely.</span>
               </div>
@@ -485,8 +485,8 @@ export function SettingsDialog({
               )}
 
               {!loading && error && (
-                <div className="flex flex-col items-center gap-2 rounded-lg border border-red-200 bg-red-50 py-6 text-center">
-                  <p className="text-sm text-red-700">{error}</p>
+                <div className="flex flex-col items-center gap-2 rounded-lg border border-red/20 bg-red-soft py-6 text-center">
+                  <p className="text-sm text-red">{error}</p>
                   <Button variant="outline" size="sm" onClick={fetchKeys}>Retry</Button>
                 </div>
               )}
