@@ -5,6 +5,7 @@ import { C } from '@/lib/design';
 import { PageByline } from './PageByline';
 import { PageLineage } from './PageLineage';
 import type { PageLineage as PageLineageModel } from '@/lib/page-lineage';
+import { htmlMarkdownComponents } from './HtmlView';
 
 interface PageReaderProps {
   body: string;
@@ -70,7 +71,10 @@ export function PageReader({
                 onOpenReview={onOpenReview}
               />
             )}
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{ ...htmlMarkdownComponents, ...markdownComponents }}
+            >
               {body}
             </ReactMarkdown>
           </>
