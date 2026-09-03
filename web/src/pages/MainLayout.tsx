@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Compass,
   Pencil, FolderOpen, PanelLeft, Bot, HardDrive, FolderInput, Cloud, UserPlus, ChevronLeft,
+  ExternalLink,
 } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -79,9 +80,10 @@ import {
   saveClientSettings,
   type DefaultAgent,
 } from '@/lib/client-settings';
-import { splitSystemFrontmatter } from '@/lib/page-frontmatter';
+import { sourceUrlFromDocument, splitSystemFrontmatter } from '@/lib/page-frontmatter';
 import { sourceOrganizationTask } from '@/lib/source-ingest';
 import { resolveWorkspaceSwitchTarget } from '@/lib/workspace-navigation';
+import { openExternalUrl } from '@/external-links';
 
 type ActiveView =
   | { kind: 'page'; slug: string; path?: string; content: PageFull | null }
@@ -867,6 +869,9 @@ export function MainLayout() {
   // Determine active page/source for panel highlight
   const currentActivePage = activeView?.kind === 'page' ? activeView.slug : null;
   const currentActiveSource = activeView?.kind === 'source' ? activeView.filename : null;
+  const activeSourceUrl = activeView?.kind === 'source' && activeView.content
+    ? sourceUrlFromDocument(activeView.content.content)
+    : null;
   const selectedAgentChange = versionSelection.kind === 'agent'
     ? openAgentChanges.find((change) => change.id === versionSelection.changeId)
     : undefined;
@@ -1282,13 +1287,24 @@ export function MainLayout() {
               /* Source view */
               ) : activeView?.kind === 'source' && activeView.content ? (
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 16 }}>
                     <span style={{
                       padding: '2px 10px', fontSize: 11, borderRadius: 12,
                       background: C.blueSoft, color: C.blue, fontWeight: 500,
                     }}>
                       Source File
                     </span>
+                    {activeSourceUrl && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => { void openExternalUrl(activeSourceUrl); }}
+                      >
+                        <ExternalLink className="size-4" />
+                        View original
+                      </Button>
+                    )}
                   </div>
                   <article>
                     <h1 className="page-title page-title--compact source-title">
