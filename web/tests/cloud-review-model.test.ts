@@ -8,8 +8,22 @@ test('Cloud unified patches adapt to the shared client DiffView model', () => {
     baseOid: 'base',
     headOid: 'head',
     files: [
-      { path: 'index.md', status: 'modified', additions: 2, deletions: 1 },
-      { path: 'new.md', status: 'added', additions: 1, deletions: 0 },
+      {
+        path: 'index.md',
+        status: 'modified',
+        additions: 2,
+        deletions: 1,
+        oldContent: '# Title\n\nOld\n',
+        newContent: '# Title\n\nNew\nMore\n',
+      },
+      {
+        path: 'new.md',
+        status: 'added',
+        additions: 1,
+        deletions: 0,
+        oldContent: null,
+        newContent: 'Hello\n',
+      },
     ],
     patch: [
       'diff --git a/index.md b/index.md',
@@ -39,8 +53,8 @@ test('Cloud unified patches adapt to the shared client DiffView model', () => {
     { kind: 'add', old_line: null, new_line: 2, text: 'New' },
     { kind: 'add', old_line: null, new_line: 3, text: 'More' },
   ]);
-  assert.equal(diffs[0]?.old_content, '');
-  assert.equal(diffs[0]?.new_content, '');
+  assert.equal(diffs[0]?.old_content, '# Title\n\nOld\n');
+  assert.equal(diffs[0]?.new_content, '# Title\n\nNew\nMore\n');
   assert.equal(diffs[1]?.old_content, null);
-  assert.equal(diffs[1]?.new_content, '');
+  assert.equal(diffs[1]?.new_content, 'Hello\n');
 });
