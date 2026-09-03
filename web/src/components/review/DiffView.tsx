@@ -43,7 +43,7 @@ function CommentThread({
   };
 
   return (
-    <div style={{ background: '#f6f8fa', borderTop: `1px solid ${C.line}`, borderBottom: `1px solid ${C.line}`, padding: '8px 16px 8px 80px' }}>
+    <div style={{ background: C.diffMute, borderTop: `1px solid ${C.line}`, borderBottom: `1px solid ${C.line}`, padding: '8px 16px 8px 80px' }}>
       {comments.map((c) => (
         <div key={c.id} style={{ marginBottom: 8, padding: '8px 12px', background: C.panel, borderRadius: 6, border: `1px solid ${C.line}` }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -79,7 +79,7 @@ function CommentThread({
                 onChange={(e) => setReplyBody(e.target.value)}
                 placeholder="Reply..."
                 onKeyDown={(e) => e.key === 'Enter' && handleReply(c.id)}
-                style={{ flex: 1, fontSize: 12, padding: '4px 8px', border: `1px solid ${C.line}`, borderRadius: 4, outline: 'none', background: '#fff' }}
+                style={{ flex: 1, fontSize: 12, padding: '4px 8px', border: `1px solid ${C.line}`, borderRadius: 4, outline: 'none', background: C.panel }}
               />
               <button onClick={() => handleReply(c.id)} style={{ ...smallBtn, color: C.accent }}>
                 <Send size={11} />
@@ -110,7 +110,7 @@ function CommentComposer({
 
   return (
     <tr>
-      <td colSpan={4} style={{ padding: '8px 16px 8px 80px', background: '#f6f8fa', borderBottom: `1px solid ${C.line}` }}>
+      <td colSpan={4} style={{ padding: '8px 16px 8px 80px', background: C.diffMute, borderBottom: `1px solid ${C.line}` }}>
         <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 6, padding: 10 }}>
           <textarea
             value={body}
@@ -121,7 +121,7 @@ function CommentComposer({
             style={{
               width: '100%', fontSize: 13, fontFamily: 'inherit', padding: 8,
               border: `1px solid ${C.line}`, borderRadius: 4, resize: 'vertical',
-              outline: 'none', background: '#fff',
+              outline: 'none', background: C.panel,
             }}
           />
           <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 6 }}>
@@ -133,7 +133,7 @@ function CommentComposer({
               disabled={!body.trim()}
               style={{
                 fontSize: 12, padding: '4px 12px', borderRadius: 4, border: 'none',
-                background: C.accent, color: '#fff', cursor: body.trim() ? 'pointer' : 'default',
+                background: C.accent, color: C.onAccent, cursor: body.trim() ? 'pointer' : 'default',
                 opacity: body.trim() ? 1 : 0.5, display: 'flex', alignItems: 'center', gap: 4,
               }}
             >
@@ -181,7 +181,7 @@ function HunkView({
       {/* Hunk header */}
       <tr>
         <td colSpan={4} style={{
-          background: '#e6eef7', color: C.muted, fontSize: 12, fontFamily: mono,
+          background: C.blueSoft, color: C.muted, fontSize: 12, fontFamily: mono,
           padding: '4px 12px', borderBottom: `1px solid ${C.line}`,
         }}>
           {hunk.header}
@@ -334,7 +334,7 @@ function FileDiffCard({
   };
 
   return (
-    <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
+    <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'hidden', background: C.panel }}>
       {/* File header */}
       <div
         onClick={() => setCollapsed(!collapsed)}
@@ -365,7 +365,7 @@ function FileDiffCard({
             title="Edit this file in the review (amends the submission snapshot)"
             style={{
               display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 6,
-              border: `1px solid ${C.line}`, background: '#fff', color: C.ink2,
+              border: `1px solid ${C.line}`, background: C.panel, color: C.ink2,
               fontSize: 12, fontWeight: 550, cursor: 'pointer',
             }}
           >
@@ -385,7 +385,7 @@ function FileDiffCard({
             style={{
               display: 'block', width: '100%', minHeight: 280, padding: '12px 16px',
               border: 'none', outline: 'none', resize: 'vertical', boxSizing: 'border-box',
-              fontFamily: mono, fontSize: 13, lineHeight: 1.6, color: C.ink, background: '#fff',
+              fontFamily: mono, fontSize: 13, lineHeight: 1.6, color: C.ink, background: C.panel,
             }}
           />
           <div style={{
@@ -401,7 +401,7 @@ function FileDiffCard({
               disabled={saving}
               style={{
                 marginLeft: 'auto', padding: '5px 12px', borderRadius: 6, fontSize: 12.5, fontWeight: 550,
-                border: `1px solid ${C.line}`, background: '#fff', color: C.ink2, cursor: 'pointer',
+                border: `1px solid ${C.line}`, background: C.panel, color: C.ink2, cursor: 'pointer',
               }}
             >
               Cancel
@@ -412,7 +412,7 @@ function FileDiffCard({
               style={{
                 padding: '5px 14px', borderRadius: 6, fontSize: 12.5, fontWeight: 600,
                 border: 'none', background: draft !== (file.new_content ?? '') ? C.accent : C.faint,
-                color: '#fff', cursor: 'pointer', opacity: saving ? 0.6 : 1,
+                color: C.onAccent, cursor: 'pointer', opacity: saving ? 0.6 : 1,
               }}
             >
               {saving ? 'Saving…' : 'Save review fix'}

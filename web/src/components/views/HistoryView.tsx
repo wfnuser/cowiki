@@ -185,9 +185,9 @@ const draftCardStyle: React.CSSProperties = {
   justifyContent: 'space-between',
   gap: 22,
   padding: '20px 20px 20px 18px',
-  border: `1px solid #edcbb7`,
+  border: `1px solid ${C.accentTintBorder}`,
   borderRadius: 12,
-  background: 'linear-gradient(135deg, #fffaf5 0%, #fbeadd 100%)',
+  background: `linear-gradient(135deg, ${C.accentWash} 0%, ${C.accentSoft} 100%)`,
 };
 
 const draftIconStyle: React.CSSProperties = {
@@ -198,15 +198,15 @@ const draftIconStyle: React.CSSProperties = {
   placeItems: 'center',
   flexShrink: 0,
   color: C.accent,
-  background: '#fff8f2',
-  border: '1px solid #f0d4c4',
+  background: C.accentWashSoft,
+  border: `1px solid ${C.accentTintLine}`,
 };
 
 const currentBadgeStyle: React.CSSProperties = {
   padding: '2px 7px',
   borderRadius: 999,
   background: C.accent,
-  color: '#fff',
+  color: C.onAccent,
   fontSize: 9.5,
   fontWeight: 750,
   letterSpacing: '0.06em',
@@ -269,7 +269,7 @@ const emptyStyle: React.CSSProperties = {
   borderRadius: 9,
   color: C.muted,
   fontSize: 12.5,
-  background: 'rgba(253, 252, 251, 0.55)',
+  background: `color-mix(in srgb, ${C.panel} 55%, transparent)`,
 };
 
 const retryStyle: React.CSSProperties = {

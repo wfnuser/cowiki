@@ -17,7 +17,7 @@ import {
 import { cn } from '@/lib/utils';
 import { SUPPORTED_AGENTS } from '@/lib/agents';
 import { createLocalAgentChange } from '@/api';
-import { APP_HEADER_HEIGHT } from '@/lib/design';
+import { APP_HEADER_HEIGHT, fonts, terminalTheme } from '@/lib/design';
 
 import {
   agentDisplayName,
@@ -204,9 +204,9 @@ export function AgentTerminalPanel({
   };
 
   return (
-    <aside className={cn('flex h-full min-w-0 flex-col border-l border-border bg-[#faf9f7]', className)}>
+    <aside className={cn('flex h-full min-w-0 flex-col border-l border-border bg-bg', className)}>
       <header
-        className="flex shrink-0 items-center border-b border-border bg-[#f5f4f1] pl-1.5 pr-1"
+        className="flex shrink-0 items-center border-b border-border bg-bg-secondary pl-1.5 pr-1"
         style={{ height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT }}
       >
         <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
@@ -218,8 +218,8 @@ export function AgentTerminalPanel({
                 className={cn(
                   'group flex h-9 min-w-0 max-w-40 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs',
                   active
-                    ? 'border-border bg-[#1d1c1a] text-white'
-                    : 'border-transparent text-text-tertiary hover:bg-white/65 hover:text-text',
+                    ? 'border-border bg-text text-on-accent'
+                    : 'border-transparent text-text-tertiary hover:bg-panel/65 hover:text-text',
                 )}
               >
                 <button
@@ -227,15 +227,15 @@ export function AgentTerminalPanel({
                   className="flex min-w-0 flex-1 items-center gap-1.5"
                   onClick={() => setTabState((state) => ({ ...state, activeTabId: tab.id }))}
                 >
-                  <Bot className={cn('size-3.5 shrink-0', active ? 'text-[#e2590b]' : 'text-text-tertiary')} />
+                  <Bot className={cn('size-3.5 shrink-0', active ? 'text-accent' : 'text-text-tertiary')} />
                   <span className="truncate">{terminalTabLabel(tabState.tabs, tab)}</span>
                 </button>
                 <button
                   type="button"
                   aria-label={`Close ${terminalTabLabel(tabState.tabs, tab)}`}
                   className={cn(
-                    'rounded p-0.5 hover:bg-white/15',
-                    active ? 'text-white/55 hover:text-white' : 'text-text-faint hover:bg-black/5 hover:text-text',
+                    'rounded p-0.5 hover:bg-on-accent/15',
+                    active ? 'text-on-accent/55 hover:text-on-accent' : 'text-text-faint hover:bg-text/5 hover:text-text',
                   )}
                   onClick={() => closeTab(tab.id)}
                 >
@@ -345,8 +345,8 @@ function AgentLaunchPage({
 
   return (
     <div className="flex h-full flex-col items-center justify-center px-7 text-center">
-      <div className="mb-4 flex size-12 items-center justify-center rounded-xl border border-[#efd4c3] bg-[#fbeadd]">
-        <Bot className="size-6 text-[#e2590b]" />
+      <div className="mb-4 flex size-12 items-center justify-center rounded-xl border border-accent/20 bg-accent-soft">
+        <Bot className="size-6 text-accent" />
       </div>
       <h2 className="text-base font-semibold text-text">Work with an agent</h2>
       <p className="mt-1.5 max-w-64 text-xs leading-relaxed text-text-tertiary">
@@ -354,7 +354,7 @@ function AgentLaunchPage({
       </p>
       <AgentPicker selectedAgent={selectedAgent} onSelectAgent={setSelectedAgent} />
       <Button
-        className="mt-3 w-full max-w-72 bg-[#e2590b] text-white hover:bg-[#c94b08]"
+        className="mt-3 w-full max-w-72 bg-accent text-on-accent hover:bg-accent-hover"
         disabled={busy || (!available && !signedOut)}
         onClick={() => void onOpenAgent(
           selectedAgent,
@@ -402,9 +402,9 @@ function AgentPicker({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="mt-5 flex w-full max-w-72 items-center rounded-lg border border-border bg-white px-3 py-2.5 text-left hover:bg-bg-hover"
+          className="mt-5 flex w-full max-w-72 items-center rounded-lg border border-border bg-panel px-3 py-2.5 text-left hover:bg-bg-hover"
         >
-          <Bot className="mr-2 size-4 text-[#e2590b]" />
+          <Bot className="mr-2 size-4 text-accent" />
           <span>
             <span className="block text-[10px] font-medium uppercase tracking-wide text-text-tertiary">Agent</span>
             <span className="block text-xs font-semibold text-text">{agentDisplayName(selectedAgent)}</span>
@@ -417,7 +417,7 @@ function AgentPicker({
         {SUPPORTED_AGENTS.map((agent) => (
           <DropdownMenuItem key={agent} onSelect={() => onSelectAgent(agent)}>
             <Bot /> {agentDisplayName(agent)}
-            {agent === selectedAgent && <span className="ml-auto text-[10px] text-[#e2590b]">Selected</span>}
+            {agent === selectedAgent && <span className="ml-auto text-[10px] text-accent">Selected</span>}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -601,15 +601,10 @@ function AgentTerminalInstance({
       allowProposedApi: false,
       convertEol: true,
       cursorBlink: true,
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+      fontFamily: fonts.mono,
       fontSize: 13,
       scrollback: 10_000,
-      theme: {
-        background: '#1d1c1a',
-        foreground: '#eeeae3',
-        cursor: '#e2590b',
-        selectionBackground: '#5c5149',
-      },
+      theme: terminalTheme,
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -659,12 +654,12 @@ function AgentTerminalInstance({
 
   return (
     <section
-      className="absolute inset-0 min-h-0 flex-col bg-[#1d1c1a]"
+      className="absolute inset-0 min-h-0 flex-col bg-text"
       style={{ display: active ? 'flex' : 'none' }}
     >
-      <div className="flex h-7 shrink-0 items-center border-b border-white/8 px-2.5 text-[10px] text-white/35">
+      <div className="flex h-7 shrink-0 items-center border-b border-on-accent/8 px-2.5 text-[10px] text-on-accent/35">
         <span>{status}</span>
-        <span className="ml-2 shrink-0 text-white/55">
+        <span className="ml-2 shrink-0 text-on-accent/55">
           {tab.intent === 'login'
             ? 'Agent access'
             : tab.mode === 'background'
@@ -676,7 +671,7 @@ function AgentTerminalInstance({
           type="button"
           variant="ghost"
           size="icon-xs"
-          className="ml-auto text-white/45 hover:bg-white/10 hover:text-white"
+          className="ml-auto text-on-accent/45 hover:bg-on-accent/10 hover:text-on-accent"
           aria-label={`Restart ${agentDisplayName(tab.agent)}`}
           onClick={() => {
             const terminal = terminalRef.current;

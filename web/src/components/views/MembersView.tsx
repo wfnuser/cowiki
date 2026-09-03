@@ -10,18 +10,10 @@ import {
   listMembers, removeMember, changeMemberRole,
   type MemberInfo,
 } from '../../api';
-import { C, spaceTileColors } from '@/lib/design';
+import { AvatarBadge } from '@/components/ui/avatar-badge';
+import { C } from '@/lib/design';
 
 // ── Helpers ──
-
-function avatarColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = ((hash << 5) - hash) + name.charCodeAt(i);
-    hash |= 0;
-  }
-  return spaceTileColors[Math.abs(hash) % spaceTileColors.length];
-}
 
 function relativeTime(iso: string | null): string {
   if (!iso) return '--';
@@ -145,7 +137,7 @@ export function MembersView({ workspaceSlug, canManage, currentUserRole, current
               style={{
                 display: 'flex', alignItems: 'center', gap: 7,
                 padding: '8px 14px', borderRadius: 6, border: 'none',
-                background: C.accent, color: '#fff', fontSize: '13.5px', fontWeight: 600,
+                background: C.accent, color: C.onAccent, fontSize: '13.5px', fontWeight: 600,
                 cursor: 'pointer',
               }}
             >
@@ -191,14 +183,7 @@ export function MembersView({ workspaceSlug, canManage, currentUserRole, current
             >
               {/* Avatar + name */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                <div style={{
-                  width: 36, height: 36, borderRadius: '50%',
-                  background: avatarColor(m.name),
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 14, fontWeight: 600, color: '#fff', flexShrink: 0,
-                }}>
-                  {m.name[0]?.toUpperCase() || '?'}
-                </div>
+                <AvatarBadge name={m.name} size={36} kind="member" />
                 <div style={{ minWidth: 0 }}>
                   <div style={{
                     fontSize: '14.5px', fontWeight: 550, color: C.ink,
@@ -250,7 +235,7 @@ export function MembersView({ workspaceSlug, canManage, currentUserRole, current
                       onClick={() => handleRemove(m.id)}
                       style={{
                         padding: '2px 6px', borderRadius: 4, border: 'none',
-                        background: C.red, color: '#fff', fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                        background: C.red, color: C.onAccent, fontSize: 11, fontWeight: 500, cursor: 'pointer',
                       }}
                     >
                       Remove

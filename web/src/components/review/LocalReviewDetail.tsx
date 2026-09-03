@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, GitBranch, GitCommitHorizontal } from 'lucide-react';
+import { GitBranch, GitCommitHorizontal } from 'lucide-react';
 
 import {
   discardLocalAgentChange,
@@ -13,6 +13,7 @@ import {
 import { C, fonts } from '@/lib/design';
 import { InlineFeedback } from '@/components/ui/inline-feedback';
 import { DiffView } from './DiffView';
+import { ReviewBackButton } from './ReviewBackButton';
 import { agentMergeResult, type LocalReviewSelection } from './local-review-model';
 
 export function LocalReviewDetail({
@@ -95,9 +96,7 @@ export function LocalReviewDetail({
 
   return (
     <div>
-      <button type="button" onClick={onBack} style={backButtonStyle}>
-        <ArrowLeft size={14} /> Reviews
-      </button>
+      <ReviewBackButton onClick={onBack} />
 
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginTop: 10 }}>
         <div style={{ minWidth: 0 }}>
@@ -120,7 +119,7 @@ export function LocalReviewDetail({
               margin: '8px 0 0 28px',
               padding: '3px 7px',
               borderRadius: 999,
-              background: change.status === 'needsResolution' ? '#ffebe9' : C.panel,
+              background: change.status === 'needsResolution' ? C.redBg : C.panel,
               color: change.status === 'needsResolution' ? C.red : C.muted,
               fontSize: 11.5,
               fontWeight: 650,
@@ -212,7 +211,7 @@ function ActionButton({
         borderRadius: 7,
         padding: '8px 11px',
         background: subtle ? C.panel : C.ink,
-        color: subtle ? C.muted : '#fff',
+        color: subtle ? C.muted : C.onAccent,
         cursor: disabled ? 'default' : 'pointer',
         fontSize: 12.5,
         fontWeight: 650,
@@ -224,18 +223,6 @@ function ActionButton({
     </button>
   );
 }
-
-const backButtonStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: 0,
-  border: 0,
-  background: 'transparent',
-  color: C.muted,
-  cursor: 'pointer',
-  fontSize: 13,
-};
 
 function errorMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);

@@ -11,22 +11,11 @@ import {
   listPageComments, createPageComment, setPageCommentResolved, deletePageComment,
   listMembers, type PageComment, type MemberInfo,
 } from '@/api';
+import { AvatarBadge } from '@/components/ui/avatar-badge';
 import { buildSnapshotMaps, mapWithSurviving, type MappedAnchor } from '@/lib/comment-anchor';
-import { C, fonts } from '@/lib/design';
+import { C, fonts, shadows } from '@/lib/design';
 
 // ── identity helpers ───────────────────────────────────────────────────────
-const AVATAR_COLORS = ['#2f6bb0', '#2f8a5b', '#8b5cf6', '#c2410c', '#3f6c8c', '#9a6f93', '#5d8a6c', '#b5790f'];
-function colorFor(id: string): string {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return AVATAR_COLORS[h % AVATAR_COLORS.length];
-}
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
-}
 function relTime(iso: string): string {
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
   if (s < 60) return 'now';
@@ -45,15 +34,7 @@ function quoteOf(source: string, start: number, end: number): string {
 }
 
 function Avatar({ id, name, size = 24 }: { id: string; name: string; size?: number }) {
-  return (
-    <div style={{
-      width: size, height: size, flexShrink: 0, borderRadius: '50%', background: colorFor(id),
-      color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: size * 0.42, fontWeight: 600, letterSpacing: '-0.02em',
-    }}>
-      {initials(name)}
-    </div>
-  );
+  return <AvatarBadge name={name} identityKey={id} size={size} kind="comment" />;
 }
 
 const ghostBtn: React.CSSProperties = {
@@ -272,10 +253,10 @@ export function CommentsProvider({
         <div style={{
           position: 'fixed', zIndex: 60, top: pending.y - 46, left: pending.x - 52,
           display: 'flex', alignItems: 'center', background: C.ink, borderRadius: 9, padding: 4,
-          boxShadow: '0 10px 28px -8px rgba(0,0,0,0.4)',
+          boxShadow: shadows.comment,
         }}>
           <button onMouseDown={(e) => { e.preventDefault(); startComment(); }} style={{
-            display: 'flex', alignItems: 'center', gap: 6, height: 28, padding: '0 11px', color: '#fff',
+            display: 'flex', alignItems: 'center', gap: 6, height: 28, padding: '0 11px', color: C.onAccent,
             fontSize: 13, fontWeight: 600, borderRadius: 6, border: 'none', background: C.accent, cursor: 'pointer',
           }}>
             <MessageSquare size={14} /> Comment
@@ -325,8 +306,10 @@ function makeBlock(tag: string) {
         onClick={(e) => { e.stopPropagation(); ctx!.focusLine(line!); }}
         style={{
           cursor: 'pointer', borderRadius: 3, padding: '1px 1px',
-          background: hl.active ? 'rgba(226,89,11,0.16)' : 'rgba(226,89,11,0.07)',
-          boxShadow: hl.active ? `inset 0 -2px 0 ${C.accent}` : 'inset 0 -1.5px 0 rgba(226,89,11,0.32)',
+          background: `color-mix(in srgb, ${C.accent} ${hl.active ? 16 : 7}%, transparent)`,
+          boxShadow: hl.active
+            ? `inset 0 -2px 0 ${C.accent}`
+            : `inset 0 -1.5px 0 color-mix(in srgb, ${C.accent} 32%, transparent)`,
           transition: 'background .15s, box-shadow .15s',
           WebkitBoxDecorationBreak: 'clone', boxDecorationBreak: 'clone',
         }}
@@ -436,8 +419,8 @@ function CommentCard({
 
   if (!active) {
     return (
-      <div onClick={onActivate} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: '11px 13px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(29,28,26,0.03)' }}>
-        <div style={{ marginBottom: 9, paddingLeft: 8, borderLeft: `2.5px solid ${isOutdated ? C.amberSoft : '#f0d8c5'}` }}>
+      <div onClick={onActivate} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: '11px 13px', cursor: 'pointer', boxShadow: shadows.faint }}>
+        <div style={{ marginBottom: 9, paddingLeft: 8, borderLeft: `2.5px solid ${isOutdated ? C.amberSoft : `color-mix(in srgb, ${C.accent} 25%, ${C.panel})`}` }}>
           <span style={{ fontSize: 12, lineHeight: 1.4, color: C.faint, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
             {isOutdated && <span style={{ color: C.amber, fontStyle: 'normal', fontWeight: 600 }}>outdated · </span>}<Quote text={t.quote} />
           </span>
@@ -458,7 +441,7 @@ function CommentCard({
   }
 
   return (
-    <div onClick={onActivate} style={{ background: C.panel, border: '1px solid transparent', borderRadius: 12, padding: '13px 14px 12px', cursor: 'pointer', position: 'relative', boxShadow: `0 4px 16px -10px rgba(29,28,26,0.25), 0 0 0 1.5px ${isOutdated ? C.amber : C.accent}` }}>
+    <div onClick={onActivate} style={{ background: C.panel, border: '1px solid transparent', borderRadius: 12, padding: '13px 14px 12px', cursor: 'pointer', position: 'relative', boxShadow: `${shadows.float}, 0 0 0 1.5px ${isOutdated ? C.amber : C.accent}` }}>
       <div style={{ display: 'flex', gap: 8, marginBottom: 11, paddingLeft: 9, borderLeft: `2.5px solid ${isOutdated ? C.amber : C.accent}` }}>
         <span style={{ fontSize: 12.5, lineHeight: 1.45, color: C.muted, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
           {isOutdated && <span style={{ color: C.amber, fontStyle: 'normal', fontWeight: 600 }}>outdated · </span>}<Quote text={t.quote} />
@@ -546,7 +529,7 @@ function Composer({
       )}
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
         <Avatar id={meId} name={meName} size={22} />
-        <div style={{ flex: 1, position: 'relative', border: `1.5px solid ${C.accent}`, borderRadius: 9, background: '#fff', overflow: 'hidden' }}>
+        <div style={{ flex: 1, position: 'relative', border: `1.5px solid ${C.accent}`, borderRadius: 9, background: C.panel, overflow: 'hidden' }}>
           <textarea ref={ref} value={value} placeholder={placeholder} rows={2} autoFocus={autoFocus}
             onChange={(e) => sync(e.target.value, e.target.selectionStart)}
             style={{ width: '100%', border: 'none', outline: 'none', resize: 'none', padding: '8px 10px', fontSize: 13.5, lineHeight: 1.5, color: C.ink, fontFamily: fonts.sans, boxSizing: 'border-box', background: 'transparent' }} />
@@ -555,12 +538,12 @@ function Composer({
             <div style={{ flex: 1 }} />
             <button onClick={onCancel} style={{ ...ghostBtn, padding: '5px 9px' }}>Cancel</button>
             <button onClick={() => onSubmit(value)} disabled={!value.trim()}
-              style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 7, border: 'none', background: value.trim() ? C.accent : C.line, color: value.trim() ? '#fff' : C.faint, fontSize: 12.5, fontWeight: 600, cursor: value.trim() ? 'pointer' : 'default' }}>
+              style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 7, border: 'none', background: value.trim() ? C.accent : C.line, color: value.trim() ? C.onAccent : C.faint, fontSize: 12.5, fontWeight: 600, cursor: value.trim() ? 'pointer' : 'default' }}>
               {primaryLabel}
             </button>
           </div>
           {matches.length > 0 && (
-            <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 70, marginTop: 2, minWidth: 170, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: '0 6px 18px rgba(0,0,0,.12)', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 70, marginTop: 2, minWidth: 170, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: shadows.popover, overflow: 'hidden' }}>
               {matches.map((m) => (
                 <button key={m.id} onMouseDown={(e) => { e.preventDefault(); pick(m.name); }}
                   style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '7px 10px', border: 'none', background: 'transparent', fontSize: 12.5, color: C.ink, cursor: 'pointer' }}

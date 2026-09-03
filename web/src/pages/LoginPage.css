@@ -15,9 +15,7 @@
   border: 1px solid var(--color-border);
   border-radius: 12px;
   background: var(--color-panel);
-  box-shadow:
-    0 12px 36px rgba(29, 28, 26, 0.08),
-    0 1px 4px rgba(29, 28, 26, 0.05);
+  box-shadow: var(--shadow-login);
 }
 
 .login-brand-panel {
@@ -137,7 +135,7 @@
 .login-github-button:focus-visible,
 .login-local-button:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(226, 89, 11, 0.18);
+  box-shadow: var(--shadow-focus);
 }
 
 .login-github-button:active,

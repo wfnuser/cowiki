@@ -8,7 +8,7 @@ import {
 } from 'react';
 import type { CSSProperties } from 'react';
 import { Check, X } from 'lucide-react';
-import { C, fonts } from '@/lib/design';
+import { C, fonts, shadows } from '@/lib/design';
 import {
   LivePreviewEditor,
   type LivePreviewEditorHandle,
@@ -254,7 +254,7 @@ export const PageEditor = forwardRef<PageEditorHandle, {
         position: 'absolute', top: 12, right: 18, zIndex: 10,
         padding: '7px 11px', borderRadius: 8,
         background: C.panel, border: `1px solid ${feedback.type === 'error' ? C.redSoft : C.line}`,
-        boxShadow: '0 2px 10px rgba(29, 28, 26, 0.08)',
+        boxShadow: shadows.toast,
       }}>
         <span
           style={{
@@ -271,7 +271,7 @@ export const PageEditor = forwardRef<PageEditorHandle, {
       {externalConflict && <div style={{
         position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 12,
         display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 9,
-        background: C.panel, border: `1px solid ${C.redSoft}`, boxShadow: '0 4px 16px rgba(29,28,26,0.12)',
+        background: C.panel, border: `1px solid ${C.redSoft}`, boxShadow: shadows.overlay,
         font: `500 12px ${fonts.sans}`, color: C.ink2,
       }}>
         <span>{externalConflict.kind === 'deleted'
@@ -280,7 +280,7 @@ export const PageEditor = forwardRef<PageEditorHandle, {
         <button type="button" onClick={reloadExternal} style={conflictButtonStyle}>
           {externalConflict.kind === 'deleted' ? 'Accept deletion' : 'Reload Agent version'}
         </button>
-        <button type="button" onClick={() => { void keepHumanVersion(); }} style={{ ...conflictButtonStyle, background: C.ink, color: '#fff' }}>Keep my version</button>
+        <button type="button" onClick={() => { void keepHumanVersion(); }} style={{ ...conflictButtonStyle, background: C.ink, color: C.onAccent }}>Keep my version</button>
       </div>}
     </div>
   );

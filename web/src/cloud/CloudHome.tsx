@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from '../components/ui/select';
 import { TooltipProvider } from '../components/ui/tooltip';
+import { spaceMonogramColor } from '../lib/design';
 import {
   CloudApiError,
   type CloudClient,
@@ -274,7 +275,14 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
 }
 
 export function SpaceMonogram({ name }: { name: string }) {
-  return <div className="grid size-10 place-items-center rounded-[11px] bg-[#5d8a6c] text-sm font-bold text-white">{name[0]?.toUpperCase() || 'S'}</div>;
+  return (
+    <div
+      className="grid size-10 place-items-center rounded-[11px] text-sm font-bold text-on-accent"
+      style={{ background: spaceMonogramColor }}
+    >
+      {name[0]?.toUpperCase() || 'S'}
+    </div>
+  );
 }
 
 export function CloudNotice({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: 'neutral' | 'error' | 'success' }) {

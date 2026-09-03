@@ -8,7 +8,7 @@ import {
   markAllNotificationsRead, acceptInvitation, rejectInvitation,
   acceptTransfer, rejectTransfer, type Notification,
 } from '../../api';
-import { C } from '@/lib/design';
+import { C, spaceTileColors } from '@/lib/design';
 import { timeAgo } from '../../lib/time';
 
 type Tab = 'unread' | 'all';
@@ -19,15 +19,15 @@ function kindMeta(kind: string): { icon: typeof Bell; color: string; label: stri
     case 'invitation':
       return { icon: Mail, color: C.accent, label: 'Invitation' };
     case 'ownership_transfer':
-      return { icon: ArrowRightLeft, color: '#8250df', label: 'Ownership transfer' };
+      return { icon: ArrowRightLeft, color: C.purple, label: 'Ownership transfer' };
     case 'transfer_accepted':
       return { icon: CheckCircle2, color: C.green, label: 'Transfer accepted' };
     case 'review_request':
-      return { icon: GitPullRequest, color: '#3f6c8c', label: 'Review request' };
+      return { icon: GitPullRequest, color: spaceTileColors[0], label: 'Review request' };
     case 'review_decision':
       return { icon: CheckCircle2, color: C.green, label: 'Review decision' };
     case 'member_joined':
-      return { icon: Users, color: '#3f6c8c', label: 'Member joined' };
+      return { icon: Users, color: spaceTileColors[0], label: 'Member joined' };
     default:
       return { icon: Bell, color: C.muted, label: kind };
   }
@@ -182,7 +182,7 @@ export function NotificationsPage({ onUnreadChange }: { onUnreadChange?: (n: num
                 padding: '6px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
                 fontWeight: 550, fontSize: 13.5,
                 background: tab === t.key ? C.ink : 'transparent',
-                color: tab === t.key ? '#fff' : C.muted,
+                color: tab === t.key ? C.onAccent : C.muted,
               }}
             >
               {t.label} · {t.count}
@@ -239,7 +239,9 @@ export function NotificationsPage({ onUnreadChange }: { onUnreadChange?: (n: num
                   display: 'flex', alignItems: 'flex-start', gap: 13,
                   padding: '14px 16px',
                   borderTop: i ? `1px solid ${C.lineSoft}` : 'none',
-                  background: n.read ? C.panel : C.accentSoft + '55',
+                  background: n.read
+                    ? C.panel
+                    : `color-mix(in srgb, ${C.accentSoft} 33%, transparent)`,
                 }}
               >
                 {/* unread dot */}
@@ -252,7 +254,7 @@ export function NotificationsPage({ onUnreadChange }: { onUnreadChange?: (n: num
                 {/* kind icon */}
                 <div style={{
                   width: 32, height: 32, borderRadius: 9, flexShrink: 0,
-                  background: meta.color + '1a', color: meta.color,
+                  background: `color-mix(in srgb, ${meta.color} 10%, transparent)`, color: meta.color,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                   <Icon size={16} />
@@ -291,7 +293,7 @@ export function NotificationsPage({ onUnreadChange }: { onUnreadChange?: (n: num
                         disabled={acting === n.id}
                         style={{
                           padding: '5px 14px', borderRadius: 7, border: 'none', cursor: 'pointer',
-                          background: C.accent, color: '#fff', fontSize: 13, fontWeight: 550,
+                          background: C.accent, color: C.onAccent, fontSize: 13, fontWeight: 550,
                           opacity: acting === n.id ? 0.6 : 1,
                         }}
                       >

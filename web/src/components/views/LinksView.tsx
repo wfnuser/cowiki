@@ -167,12 +167,13 @@ const emptyStyle: React.CSSProperties = {
 
 const cleanStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 14, padding: '20px 18px', borderRadius: 11,
-  border: '1px solid #cfe3d7', background: C.greenBgSoft,
+  border: `1px solid ${C.greenTintBorder}`, background: C.greenBgSoft,
 };
 
 const cleanIconStyle: React.CSSProperties = {
   width: 38, height: 38, display: 'grid', placeItems: 'center', flexShrink: 0,
-  borderRadius: 11, color: C.green, background: '#fff', border: '1px solid #cfe3d7',
+  borderRadius: 11, color: C.green, background: C.panel,
+  border: `1px solid ${C.greenTintBorder}`,
 };
 
 const sourceCardStyle: React.CSSProperties = {

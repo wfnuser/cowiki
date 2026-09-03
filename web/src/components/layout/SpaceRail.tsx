@@ -5,11 +5,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { C, spaceTileColors } from '@/lib/design';
-
-function tileColor(index: number): string {
-  return spaceTileColors[index % spaceTileColors.length];
-}
+import { C, colorForSpaceId } from '@/lib/design';
 
 export interface SpaceRailItem {
   id: string;
@@ -87,17 +83,17 @@ export function SpaceRail<T extends SpaceRailItem>({
       {/* A local Space and a cloud-enabled Space are the same product object.
           Use a stable color + initial rather than encoding storage mode here. */}
       {workspaces.map((ws) => {
-        const colorIndex = Array.from(ws.id || ws.slug).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+        const color = colorForSpaceId(ws.id || ws.slug);
         return (
         <SpaceTile
           key={ws.id}
           workspace={ws}
           active={activeWorkspaceId === ws.id}
           onClick={() => onSelectWorkspace(ws)}
-          color={tileColor(colorIndex)}
+          color={color}
           style={{
-            background: tileColor(colorIndex),
-            color: '#fff',
+            background: color,
+            color: C.onAccent,
           }}
         />
         );
@@ -139,20 +135,20 @@ export function SpaceRail<T extends SpaceRailItem>({
                 style={{
                   width: 34, height: 34, borderRadius: 10,
                   background: showCloudActions ? C.sidebar : C.accentSoft,
-                  border: showCloudActions ? `1px solid ${C.line}` : '1px solid rgba(226, 89, 11, 0.25)',
+                  border: showCloudActions ? `1px solid ${C.line}` : `1px solid color-mix(in srgb, ${C.accent} 25%, transparent)`,
                   cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 13, fontWeight: 600, color: showCloudActions ? C.ink2 : C.accent,
                   transition: 'background 0.15s, border-color 0.15s',
                 }}
                 onMouseEnter={(e) => {
                   if (showCloudActions) return;
-                  e.currentTarget.style.background = '#f7dcc4';
-                  e.currentTarget.style.borderColor = 'rgba(226, 89, 11, 0.4)';
+                  e.currentTarget.style.background = C.accentSoftHover;
+                  e.currentTarget.style.borderColor = `color-mix(in srgb, ${C.accent} 40%, transparent)`;
                 }}
                 onMouseLeave={(e) => {
                   if (showCloudActions) return;
                   e.currentTarget.style.background = C.accentSoft;
-                  e.currentTarget.style.borderColor = 'rgba(226, 89, 11, 0.25)';
+                  e.currentTarget.style.borderColor = `color-mix(in srgb, ${C.accent} 25%, transparent)`;
                 }}
               >
                 {showCloudActions ? (userName?.[0]?.toUpperCase() || 'U') : <Cloud size={17} />}
@@ -164,7 +160,7 @@ export function SpaceRail<T extends SpaceRailItem>({
         <DropdownMenuContent side="right" align="end" sideOffset={10} className="w-[210px] rounded-xl p-1.5">
           {showCloudActions ? (
             <>
-              <div className="px-2 py-1.5 text-xs text-gray-500">{userName}</div>
+              <div className="px-2 py-1.5 text-xs text-text-tertiary">{userName}</div>
               <DropdownMenuSeparator />
             </>
           ) : (
@@ -179,7 +175,7 @@ export function SpaceRail<T extends SpaceRailItem>({
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={onConnectCloud}
-                className="rounded-lg px-2.5 py-2 font-semibold focus:bg-[#fbeadd] focus:text-[#e2590b]"
+                className="rounded-lg px-2.5 py-2 font-semibold focus:bg-accent-soft"
                 style={{ color: C.accent }}
               >
                 <Cloud size={16} />
@@ -279,7 +275,7 @@ function NotificationBell({ unread, onOpen }: { unread: number; onOpen: () => vo
             <span style={{
               position: 'absolute', top: -2, right: -2,
               minWidth: 16, height: 16, borderRadius: 8,
-              background: C.accent, color: '#fff', fontSize: 10,
+              background: C.accent, color: C.onAccent, fontSize: 10,
               fontWeight: 600, display: 'flex', alignItems: 'center',
               justifyContent: 'center', padding: '0 4px',
             }}>

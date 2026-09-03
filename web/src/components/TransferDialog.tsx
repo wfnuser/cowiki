@@ -6,17 +6,9 @@ import { Button } from '@/components/ui/button';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { AvatarBadge } from '@/components/ui/avatar-badge';
 import { listMembers, initiateTransfer, type MemberInfo } from '../api';
-import { C, spaceTileColors } from '@/lib/design';
-
-function avatarColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = ((hash << 5) - hash) + name.charCodeAt(i);
-    hash |= 0;
-  }
-  return spaceTileColors[Math.abs(hash) % spaceTileColors.length];
-}
+import { C } from '@/lib/design';
 
 interface TransferDialogProps {
   open: boolean;
@@ -82,7 +74,7 @@ export function TransferDialog({
         <div className="space-y-4 mt-2">
           {/* Member selection */}
           <div>
-            <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">
+            <label className="mb-1.5 block text-sm text-text-secondary">
               New Owner
             </label>
             <Select value={selectedId} onValueChange={setSelectedId}>
@@ -93,14 +85,7 @@ export function TransferDialog({
                 {members.map((m) => (
                   <SelectItem key={m.id} value={m.id}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        width: 22, height: 22, borderRadius: '50%',
-                        background: avatarColor(m.name),
-                        color: '#fff', fontSize: 10, fontWeight: 600,
-                      }}>
-                        {m.name[0]?.toUpperCase()}
-                      </span>
+                      <AvatarBadge name={m.name} size={22} kind="member" />
                       <span>{m.name}</span>
                       <span style={{ color: C.muted, fontSize: 11 }}>({m.role})</span>
                     </span>
@@ -117,14 +102,7 @@ export function TransferDialog({
               padding: '10px 12px', borderRadius: 8,
               background: C.sidebar, border: `1px solid ${C.line}`,
             }}>
-              <div style={{
-                width: 32, height: 32, borderRadius: '50%',
-                background: avatarColor(selectedMember.name),
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 13, fontWeight: 600, color: '#fff', flexShrink: 0,
-              }}>
-                {selectedMember.name[0]?.toUpperCase()}
-              </div>
+              <AvatarBadge name={selectedMember.name} size={32} kind="member" />
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 14, fontWeight: 550, color: C.ink }}>
                   {selectedMember.name}
@@ -138,7 +116,7 @@ export function TransferDialog({
 
           {/* Your new role */}
           <div>
-            <label className="text-sm text-[var(--color-text-secondary)] mb-1.5 block">
+            <label className="mb-1.5 block text-sm text-text-secondary">
               Your new role after transfer
             </label>
             <Select value={newRole} onValueChange={setNewRole}>

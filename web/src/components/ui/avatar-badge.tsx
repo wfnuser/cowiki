@@ -1,40 +1,55 @@
-import { C } from '@/lib/design';
+import {
+  C, avatarInitials, colorForAvatarName, colorForName, colorForUserId, radii,
+  type AvatarKind,
+} from '@/lib/design';
 
-/** Deterministic avatar palette from the design handoff (muted, warm-compatible). */
-const PALETTE = ['#2f6bb0', '#2f8a5b', '#8b5cf6', '#c2410c', '#3f6c8c', '#5d8a6c', '#9a6f93', '#b5790f'];
+interface AvatarBadgeProps {
+  name: string;
+  size?: number;
+  color?: string;
+  /** Stable key for surfaces that identify people independently of display name. */
+  identityKey?: string;
+  /**
+   * Historical identity: members show one letter + the djb2 tile palette;
+   * comments keep the two-character / user-id palette; everyone else uses
+   * AvatarBadge's original word-initials + name palette.
+   */
+  kind?: AvatarKind;
+}
 
-export function nameColor(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return PALETTE[h % PALETTE.length];
+function avatarColor(name: string, kind: AvatarKind, identityKey?: string, color?: string): string {
+  if (color) return color;
+  if (kind === 'member') return colorForName(name);
+  if (identityKey) return colorForUserId(identityKey);
+  return colorForAvatarName(name);
 }
 
 /** Colored-initials avatar matching the design (Avatar in cowiki-shell). */
-export function AvatarBadge({ name, size = 24, color }: { name: string; size?: number; color?: string }) {
-  const initials = name
-    .split(/\s+/)
-    .map((w) => w[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join('')
-    .toUpperCase() || '?';
+export function AvatarBadge({
+  name,
+  size = 24,
+  color,
+  identityKey,
+  kind = 'default',
+}: AvatarBadgeProps) {
+  const comment = kind === 'comment';
   return (
-    <div
+    <span
       title={name}
       style={{
-        width: size, height: size, borderRadius: 999,
-        background: color ?? nameColor(name), color: '#fff',
+        width: size, height: size, borderRadius: radii.full,
+        background: avatarColor(name, kind, identityKey, color),
+        color: C.onAccent,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: size * 0.4, fontWeight: 600, flexShrink: 0, letterSpacing: '0.02em',
+        fontSize: size * (comment ? 0.42 : 0.4),
+        fontWeight: 600, flexShrink: 0,
+        letterSpacing: comment ? '-0.02em' : '0.02em',
         userSelect: 'none',
       }}
     >
-      {initials}
-    </div>
+      {avatarInitials(name, kind)}
+    </span>
   );
 }
 
 export default AvatarBadge;
-
-// keep design tokens import referenced for future tints
-void C;
