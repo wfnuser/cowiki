@@ -145,7 +145,11 @@ export function AgentTerminalPanel({
         setTabState((state) => addAgentTab(state, agent, nextTerminalTabId(agent), mode));
         return true;
       }
-      const change = await createLocalAgentChange(spaceSlug, title || agentDisplayName(agent));
+      const change = await createLocalAgentChange(
+        spaceSlug,
+        title || agentDisplayName(agent),
+        agentDisplayName(agent),
+      );
       setTabState((state) => addAgentTab(
         state,
         agent,

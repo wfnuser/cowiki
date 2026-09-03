@@ -81,6 +81,7 @@ import {
   type DefaultAgent,
 } from '@/lib/client-settings';
 import { sourceUrlFromDocument, splitSystemFrontmatter } from '@/lib/page-frontmatter';
+import { pageLineage, sourceFilename } from '@/lib/page-lineage';
 import { sourceOrganizationTask } from '@/lib/source-ingest';
 import { resolveWorkspaceSwitchTarget } from '@/lib/workspace-navigation';
 import { openExternalUrl } from '@/external-links';
@@ -1352,6 +1353,13 @@ export function MainLayout() {
                   <PageReader
                     articleRef={articleRef}
                     body={renderBody(viewedPageBody)}
+                    lineage={pageLineage(
+                      viewedPageBody,
+                      versionSelection.kind === 'working' ? activeView.content.provenance : undefined,
+                    )}
+                    onOpenSource={(path) => {
+                      if (activeWorkspace) void selectSource(activeWorkspace, sourceFilename(path));
+                    }}
                     markdownComponents={commentMarkdownComponents}
                     byline={versionSelection.kind === 'working' ? {
                       name: activeView.content.edited_by,

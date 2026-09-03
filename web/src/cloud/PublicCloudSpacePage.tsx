@@ -3,6 +3,7 @@ import { Globe2 } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PageReader } from '../components/PageReader';
 import { splitSystemFrontmatter } from '../lib/page-frontmatter';
+import { pageLineage } from '../lib/page-lineage';
 import { apiOrigin } from '../runtime';
 import {
   createPublicCloudClient,
@@ -126,7 +127,10 @@ export function PublicCloudSpacePage() {
         </header>
         <div className="relative min-h-0 flex-1">
           {documentPath && content?.path === documentPath ? (
-            <PageReader body={splitSystemFrontmatter(content.content).body} />
+            <PageReader
+              body={splitSystemFrontmatter(content.content).body}
+              lineage={pageLineage(content.content, content.provenance)}
+            />
           ) : pages.length === 0 ? (
             <div className="p-10 text-sm text-text-tertiary">No published Markdown pages yet.</div>
           ) : (

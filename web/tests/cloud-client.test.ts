@@ -93,6 +93,24 @@ test('Cloud logout revokes the server credential', async () => {
   assert.equal(new Headers(calls[0].init?.headers).get('authorization'), 'Bearer cw_key_test');
 });
 
+test('Cloud Source lineage reads only the authenticated Source endpoint', async () => {
+  const calls: string[] = [];
+  const fakeFetch: CloudFetch = async (input) => {
+    calls.push(String(input));
+    return Response.json({ ref: 'main', oid: 'a'.repeat(40), path: '.cowiki/sources/interview.md', content: '# Interview' });
+  };
+  const client = createCloudClient(
+    { baseUrl: 'https://cloud.cowiki.test', apiKey: 'key', userId, userName: 'User' },
+    fakeFetch,
+  );
+
+  await client.getSourceContent(spaceId, '.cowiki/sources/interview.md');
+
+  assert.deepEqual(calls, [
+    `https://cloud.cowiki.test/api/spaces/${spaceId}/sources/content?ref=main&path=.cowiki%2Fsources%2Finterview.md`,
+  ]);
+});
+
 test('Cloud mutations serialize the current contract and surface typed failures', async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const fakeFetch: CloudFetch = async (input, init) => {

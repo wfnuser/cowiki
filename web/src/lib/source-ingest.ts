@@ -36,14 +36,18 @@ export function mergeImportedSources(
 
 export function sourceOrganizationTask(sources: SourceItem[]): string {
   const paths = sources
-    .map((source) => source.filename.startsWith('sources/')
+    .map((source) => source.filename.startsWith('.cowiki/sources/')
       ? source.filename
-      : `sources/${source.filename}`)
+      : `.cowiki/sources/${source.filename.replace(/^sources\//, '')}`)
     .map((path) => `- ${path}`)
     .join('\n');
   return [
     'Organize the newly imported OKF Source files below into durable knowledge.',
-    'Read each Source, update the appropriate Concepts and indexes, preserve provenance, and do not modify the Source files.',
+    'Read each Source, update the appropriate Concepts and indexes, and do not modify the Source files.',
+    'Preserve provenance in every knowledge page you create or update with portable frontmatter in this exact form:',
+    'sources:',
+    '  - .cowiki/sources/<source-file>.md',
+    'Use only the Source paths that support that page.',
     paths,
   ].join('\n');
 }
