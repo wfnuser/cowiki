@@ -17,8 +17,10 @@ use crate::knowledge_index::{self, SearchHit};
 use crate::okf::{self, DocumentKind};
 
 mod agent_changes;
+mod comments;
 pub use crate::knowledge_index::BrokenLink;
 pub use agent_changes::AgentChange;
+pub use comments::{CommentMember, PageComment, PageCommentsResponse};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -264,7 +266,8 @@ impl LocalEngine {
             Connection::open(metadata_dir.join("local.db")).map_err(|e| e.to_string())?;
         connection
             .execute_batch(
-                "CREATE TABLE IF NOT EXISTS spaces (
+                "PRAGMA foreign_keys = ON;
+                CREATE TABLE IF NOT EXISTS spaces (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     slug TEXT NOT NULL UNIQUE,
@@ -282,6 +285,7 @@ impl LocalEngine {
                 );",
             )
             .map_err(|e| e.to_string())?;
+        comments::initialize(&connection)?;
         knowledge_index::initialize(&mut connection)?;
         let engine = Self {
             db: Arc::new(Mutex::new(connection)),
