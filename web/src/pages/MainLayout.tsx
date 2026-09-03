@@ -88,6 +88,8 @@ import { sourceOrganizationTask } from '@/lib/source-ingest';
 import { resolveWorkspaceSwitchTarget } from '@/lib/workspace-navigation';
 import { openExternalUrl } from '@/external-links';
 import { workspaceContextStatus } from '@/lib/workspace-context';
+import { createCloudClient } from '@/cloud/client';
+import { cloudPageCommentStore, localPageCommentStore } from '@/lib/page-comment-store';
 
 type ActiveView =
   | { kind: 'page'; slug: string; path?: string; content: PageFull | null }
@@ -291,6 +293,28 @@ export function MainLayout() {
       return null;
     }
   }, [auth]);
+  const cloudClient = useMemo(
+    () => cloudSession ? createCloudClient(cloudSession) : null,
+    [cloudSession],
+  );
+  const [commentCloudSpace, setCommentCloudSpace] = useState<{ slug: string; id: string } | null>(null);
+
+  useEffect(() => {
+    if (!desktop || !activeWorkspace || !cloudSession) {
+      setCommentCloudSpace(null);
+      return;
+    }
+    let active = true;
+    void getCloudStatus(activeWorkspace.slug)
+      .then((status) => {
+        if (!active) return;
+        setCommentCloudSpace(status.cloudSpaceId
+          ? { slug: activeWorkspace.slug, id: status.cloudSpaceId }
+          : null);
+      })
+      .catch(() => { if (active) setCommentCloudSpace(null); });
+    return () => { active = false; };
+  }, [activeWorkspace, cloudSession, desktop]);
 
   // Load pages for a space.
   const loadSpacePages = useCallback(async (ws: Workspace) => {
@@ -779,8 +803,33 @@ export function MainLayout() {
   // Page-view comment context: active only when reading (not editing) a page.
   const pageView = activeView?.kind === 'page' ? activeView : null;
   const commentsActive = !!pageView?.content && !editingPage;
-  const commentPageSlug = commentsActive && pageView ? pageView.slug : '';
+  const commentPageSlug = commentsActive && pageView
+    ? (pageView.path ?? pageView.content?.path ?? '')
+    : '';
   const commentSource = commentsActive && pageView?.content ? renderBody(pageView.content.body) : '';
+  const commentStore = useMemo(() => {
+    if (!activeWorkspace) return null;
+    if (desktop) {
+      if (cloudClient && cloudSession && commentCloudSpace?.slug === activeWorkspace.slug) {
+        return cloudPageCommentStore(
+          cloudClient,
+          commentCloudSpace.id,
+          cloudSession.userId,
+          cloudSession.userName,
+        );
+      }
+      return localPageCommentStore(activeWorkspace.slug);
+    }
+    if (cloudClient && cloudSession) {
+      return cloudPageCommentStore(
+        cloudClient,
+        activeWorkspace.id,
+        cloudSession.userId,
+        cloudSession.userName,
+      );
+    }
+    return null;
+  }, [activeWorkspace, cloudClient, cloudSession, commentCloudSpace, desktop]);
 
   // Execute a pending rename/delete from the tree menus.
   const handlePathOp = async () => {
@@ -1060,13 +1109,10 @@ export function MainLayout() {
           {/* Main Content Area */}
           <main style={{ flex: 1, minWidth: 0, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
             <CommentsProvider
-              // Local Spaces never contact CoWiki Cloud implicitly. Comments
-              // become available only after the Space gains Cloud capability.
-              workspaceSlug={desktop ? '' : (activeWorkspace?.slug ?? '')}
+              store={commentStore}
               pageSlug={commentPageSlug}
               source={commentSource}
               articleRef={articleRef}
-              currentUserId={auth?.id}
             >
             {/* Top bar: breadcrumb + actions */}
             <ContentHeader>

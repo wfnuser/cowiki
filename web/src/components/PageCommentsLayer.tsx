@@ -7,13 +7,11 @@ import {
   MessageSquare, Reply, Check, RotateCcw, AtSign, ChevronsRight,
   ChevronRight, ChevronDown, CheckCircle2, Trash2, MoreHorizontal,
 } from 'lucide-react';
-import {
-  listPageComments, createPageComment, setPageCommentResolved, deletePageComment,
-  listMembers, type PageComment, type MemberInfo,
-} from '@/api';
+import type { PageComment } from '@/api';
 import { AvatarBadge } from '@/components/ui/avatar-badge';
 import { buildSnapshotMaps, mapWithSurviving, type MappedAnchor } from '@/lib/comment-anchor';
 import { C, fonts, shadows } from '@/lib/design';
+import type { CommentMember, PageCommentStore } from '@/lib/page-comment-store';
 
 // ── identity helpers ───────────────────────────────────────────────────────
 function relTime(iso: string): string {
@@ -22,6 +20,10 @@ function relTime(iso: string): string {
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
+}
+function relTimeAgo(iso: string): string {
+  const value = relTime(iso);
+  return value === 'now' ? value : `${value} ago`;
 }
 function quoteOf(source: string, start: number, end: number): string {
   const text = source
@@ -102,8 +104,9 @@ interface CommentsCtx {
   panelOpen: boolean; setPanelOpen: (b: boolean) => void;
   composing: { start: number; end: number; quote: string } | null;
   cancelCompose: () => void; submitNew: (body: string) => Promise<void>;
-  members: MemberInfo[]; nameOf: (id: string) => string;
+  members: CommentMember[]; nameOf: (id: string) => string;
   currentUserId?: string; myId: string; myName: string;
+  scopeLabel: string;
   onResolve: (id: string, r: boolean) => Promise<void>; onDelete: (id: string) => Promise<void>;
   submitReply: (parentId: string, body: string) => Promise<void>;
   /** Highlight info for a doc source line, or null if not commented. */
@@ -113,36 +116,35 @@ interface CommentsCtx {
 const Ctx = createContext<CommentsCtx | null>(null);
 
 export function CommentsProvider({
-  workspaceSlug, pageSlug, source, articleRef, currentUserId, children,
+  store, pageSlug, source, articleRef, children,
 }: {
-  workspaceSlug: string;
+  store: PageCommentStore | null;
   pageSlug: string;
   source: string;
   articleRef: React.RefObject<HTMLElement | null>;
-  currentUserId: string | undefined;
   children: React.ReactNode;
 }) {
   const [comments, setComments] = useState<PageComment[]>([]);
   const [snapshots, setSnapshots] = useState<{ content_hash: string; source: string }[]>([]);
-  const [members, setMembers] = useState<MemberInfo[]>([]);
+  const [members, setMembers] = useState<CommentMember[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [pending, setPending] = useState<{ start: number; end: number; x: number; y: number } | null>(null);
   const [composing, setComposing] = useState<{ start: number; end: number; quote: string } | null>(null);
-  const enabled = !!workspaceSlug && !!pageSlug;
+  const enabled = !!store && !!pageSlug;
 
   const reload = useCallback(async () => {
-    if (!workspaceSlug || !pageSlug) { setComments([]); setSnapshots([]); return; }
-    const res = await listPageComments(workspaceSlug, pageSlug);
+    if (!store || !pageSlug) { setComments([]); setSnapshots([]); return; }
+    const res = await store.list(pageSlug);
     setComments(res.comments);
     setSnapshots(res.snapshots);
-  }, [workspaceSlug, pageSlug]);
+  }, [store, pageSlug]);
 
   useEffect(() => { void reload(); }, [reload]);
   useEffect(() => {
-    if (!workspaceSlug) return;
-    listMembers(workspaceSlug).then(setMembers).catch(() => setMembers([]));
-  }, [workspaceSlug]);
+    if (!store) return;
+    store.listMembers().then(setMembers).catch(() => setMembers([]));
+  }, [store]);
   // Reset the focused thread when navigating to a different page.
   useEffect(() => { setActiveId(null); }, [pageSlug]);
 
@@ -214,14 +216,16 @@ export function CommentsProvider({
 
   const submitNew = async (body: string) => {
     if (!composing || !body.trim()) return;
-    await createPageComment(workspaceSlug, { slug: pageSlug, body: body.trim(), source, startLine: composing.start, endLine: composing.end });
+    if (!store) return;
+    await store.create({ pagePath: pageSlug, body: body.trim(), source, startLine: composing.start, endLine: composing.end });
     setComposing(null);
     setPending(null);
     await reload();
   };
   const submitReply = async (parentId: string, body: string) => {
     if (!body.trim()) return;
-    await createPageComment(workspaceSlug, { slug: pageSlug, body: body.trim(), parentId });
+    if (!store) return;
+    await store.create({ pagePath: pageSlug, body: body.trim(), parentId });
     await reload();
   };
 
@@ -231,9 +235,11 @@ export function CommentsProvider({
     activeId, setActive: setActiveId,
     panelOpen, setPanelOpen,
     composing, cancelCompose: () => { setComposing(null); setPending(null); }, submitNew,
-    members, nameOf, currentUserId, myId: currentUserId ?? 'me', myName: currentUserId ? nameOf(currentUserId) : 'You',
-    onResolve: async (id, r) => { await setPageCommentResolved(workspaceSlug, id, r); await reload(); },
-    onDelete: async (id) => { await deletePageComment(workspaceSlug, id); await reload(); },
+    members, nameOf, currentUserId: store?.currentUserId,
+    myId: store?.currentUserId ?? 'me', myName: store?.currentUserName ?? 'You',
+    scopeLabel: store?.scopeLabel ?? '',
+    onResolve: async (id, r) => { if (store) await store.setResolved(id, r); await reload(); },
+    onDelete: async (id) => { if (store) await store.delete(id); await reload(); },
     submitReply,
     lineHighlight: (line) => (lineToThread.has(line) ? { active: lineToThread.get(line) === activeId } : null),
     focusLine: (line) => { const id = lineToThread.get(line); if (id) { setActiveId(id); setPanelOpen(true); } },
@@ -334,7 +340,7 @@ export function CommentsPanel() {
   if (!ctx) return null;
   const { anchored, outdated, resolved, openCount, activeId, setActive, panelOpen, setPanelOpen,
     composing, cancelCompose, submitNew, members, nameOf, currentUserId, myId, myName,
-    onResolve, onDelete, submitReply } = ctx;
+    onResolve, onDelete, submitReply, scopeLabel } = ctx;
 
   // Collapsed: nothing here — the header toggle reopens the panel.
   if (!panelOpen || (openCount === 0 && resolved.length === 0 && !composing)) return null;
@@ -348,6 +354,7 @@ export function CommentsPanel() {
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
           <span style={{ fontSize: 13.5, fontWeight: 600, color: C.ink }}>Comments</span>
           <span style={{ fontSize: 12.5, color: C.faint }}>({openCount})</span>
+          <span title={scopeLabel === 'Local only' ? 'These comments stay on this device.' : 'These comments are shared with Space members.'} style={{ fontSize: 10.5, color: scopeLabel === 'Local only' ? C.amber : C.blue, fontWeight: 650 }}>{scopeLabel}</span>
         </div>
         <button onClick={() => setPanelOpen(false)} title="Collapse" style={{ ...ghostBtn, padding: 5 }}>
           <ChevronsRight size={16} />
@@ -408,7 +415,7 @@ export function CommentsPanel() {
 function CommentCard({
   t, active, members, meId, meName, currentUserId, nameOf, onActivate, onResolve, onReply, onDelete,
 }: {
-  t: Thread; active: boolean; members: MemberInfo[]; meId: string; meName: string;
+  t: Thread; active: boolean; members: CommentMember[]; meId: string; meName: string;
   currentUserId: string | undefined; nameOf: (id: string) => string;
   onActivate: () => void; onResolve: () => void;
   onReply: (body: string) => void | Promise<void>; onDelete: (id: string) => void;
@@ -451,7 +458,7 @@ function CommentCard({
         <Avatar id={t.root.user_id} name={authorName} size={26} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, color: C.ink, lineHeight: 1.2 }}>{authorName}</div>
-          <div style={{ fontSize: 11.5, color: C.faint }}>{relTime(t.root.created_at)} ago</div>
+          <div style={{ fontSize: 11.5, color: C.faint }}>{relTimeAgo(t.root.created_at)}</div>
         </div>
         {t.root.user_id === currentUserId ? (
           <button onClick={(e) => { e.stopPropagation(); onDelete(t.root.id); }} title="Delete" style={{ ...ghostBtn, padding: 4 }}><Trash2 size={14} /></button>
@@ -499,7 +506,7 @@ function CommentCard({
 function Composer({
   quote, meId, meName, members, placeholder, autoFocus, compact, onCancel, onSubmit, primaryLabel,
 }: {
-  quote?: string; meId: string; meName: string; members: MemberInfo[];
+  quote?: string; meId: string; meName: string; members: CommentMember[];
   placeholder?: string; autoFocus?: boolean; compact?: boolean;
   onCancel: () => void; onSubmit: (body: string) => void | Promise<void>; primaryLabel: string;
 }) {
@@ -512,13 +519,13 @@ function Composer({
     const m = /@([A-Za-z0-9_-]*)$/.exec(next.slice(0, caret));
     setMenu(m ? { query: m[1], at: caret - m[1].length - 1 } : null);
   };
-  const pick = (name: string) => {
+  const pick = (mention: string) => {
     if (!menu) return;
-    setValue(value.slice(0, menu.at) + '@' + name + ' ' + value.slice(menu.at + 1 + menu.query.length));
+    setValue(value.slice(0, menu.at) + '@' + mention + ' ' + value.slice(menu.at + 1 + menu.query.length));
     setMenu(null);
     ref.current?.focus();
   };
-  const matches = menu ? members.filter((m) => m.name.toLowerCase().startsWith(menu.query.toLowerCase())).slice(0, 5) : [];
+  const matches = menu ? members.filter((m) => m.mention.toLowerCase().startsWith(menu.query.toLowerCase())).slice(0, 5) : [];
 
   return (
     <div style={{ marginBottom: compact ? 0 : 14, marginTop: compact ? 4 : 0 }}>
@@ -545,11 +552,11 @@ function Composer({
           {matches.length > 0 && (
             <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 70, marginTop: 2, minWidth: 170, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: shadows.popover, overflow: 'hidden' }}>
               {matches.map((m) => (
-                <button key={m.id} onMouseDown={(e) => { e.preventDefault(); pick(m.name); }}
+                <button key={m.id} onMouseDown={(e) => { e.preventDefault(); pick(m.mention); }}
                   style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '7px 10px', border: 'none', background: 'transparent', fontSize: 12.5, color: C.ink, cursor: 'pointer' }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = C.tag; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
-                  <Avatar id={m.id} name={m.name} size={18} /> {m.name}
+                  <Avatar id={m.id} name={m.name} size={18} /> {m.name} <span style={{ color: C.faint }}>@{m.mention}</span>
                 </button>
               ))}
             </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageReader } from '../components/PageReader';
 import { splitSystemFrontmatter } from '../lib/page-frontmatter';
@@ -9,6 +9,13 @@ import { CloudQuickSetup } from './CloudQuickSetup';
 import { cloudSpaceRoute } from './routes';
 import { pageLineage } from '../lib/page-lineage';
 import { SourcePreviewDialog } from '../components/SourcePreviewDialog';
+import {
+  CommentsHeaderToggle,
+  CommentsPanel,
+  CommentsProvider,
+  commentMarkdownComponents,
+} from '../components/PageCommentsLayer';
+import { cloudPageCommentStore } from '../lib/page-comment-store';
 
 export function CloudWikiView({
   client,
@@ -17,6 +24,8 @@ export function CloudWikiView({
   treeError,
   unpublished,
   documentPath,
+  currentUserId,
+  currentUserName,
 }: {
   client: CloudClient;
   space: CloudSpace;
@@ -24,6 +33,8 @@ export function CloudWikiView({
   treeError: string;
   unpublished: boolean;
   documentPath?: string;
+  currentUserId: string;
+  currentUserName: string;
 }) {
   const navigate = useNavigate();
   const [content, setContent] = useState<CloudContent | null>(null);
@@ -34,6 +45,11 @@ export function CloudWikiView({
   const pages = useMemo(() => tree?.entries.filter((entry) => entry.kind === 'page') ?? [], [tree]);
   const currentContent = content?.path === documentPath ? content : null;
   const currentError = contentError?.path === documentPath ? contentError?.message ?? '' : '';
+  const articleRef = useRef<HTMLElement>(null);
+  const commentStore = useMemo(
+    () => cloudPageCommentStore(client, space.id, currentUserId, currentUserName),
+    [client, currentUserId, currentUserName, space.id],
+  );
 
   useEffect(() => {
     if (!tree || documentPath || unpublished) return;
@@ -83,12 +99,27 @@ export function CloudWikiView({
         ) : documentPath && !currentContent ? (
           <div className="p-10 text-sm text-text-tertiary">Loading page…</div>
         ) : currentContent ? (
-          <PageReader
-            body={splitSystemFrontmatter(currentContent.content).body}
-            lineage={pageLineage(currentContent.content, currentContent.provenance)}
-            onOpenSource={setSourcePath}
-            onOpenReview={(id) => navigate(cloudSpaceRoute(space.id, 'reviews', id))}
-          />
+          <CommentsProvider
+            store={commentStore}
+            pageSlug={currentContent.path}
+            source={splitSystemFrontmatter(currentContent.content).body}
+            articleRef={articleRef}
+          >
+            <CommentsHeaderToggle style={{
+              position: 'absolute', right: 20, top: 12, zIndex: 20,
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              border: 'none', borderRadius: 8, padding: '6px 9px', cursor: 'pointer',
+            }} />
+            <PageReader
+              body={splitSystemFrontmatter(currentContent.content).body}
+              articleRef={articleRef}
+              markdownComponents={commentMarkdownComponents}
+              lineage={pageLineage(currentContent.content, currentContent.provenance)}
+              onOpenSource={setSourcePath}
+              onOpenReview={(id) => navigate(cloudSpaceRoute(space.id, 'reviews', id))}
+              aside={<CommentsPanel />}
+            />
+          </CommentsProvider>
         ) : tree && pages.length === 0 ? (
           <CloudQuickSetup space={space} canPublish={space.role === 'owner'} />
         ) : null}

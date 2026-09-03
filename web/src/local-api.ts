@@ -3,6 +3,8 @@ import type {
   AgentChange,
   BrokenLink,
   PageFull,
+  PageComment,
+  PageCommentsResponse,
   PageMeta,
   FileDiff,
   IngestFileOutcome,
@@ -29,6 +31,39 @@ export function listPages(spaceSlug: string): Promise<PageMeta[]> {
 
 export function getPage(spaceSlug: string, conceptId: string): Promise<PageFull> {
   return invoke('local_get_page', { spaceSlug, pageSlug: conceptId });
+}
+
+export function listPageComments(spaceSlug: string, pageSlug: string): Promise<PageCommentsResponse> {
+  return invoke('local_list_page_comments', { spaceSlug, pageSlug });
+}
+
+export function createPageComment(spaceSlug: string, input: {
+  pageSlug: string;
+  userId: string;
+  userName: string;
+  body: string;
+  source?: string;
+  startLine?: number;
+  endLine?: number;
+  parentId?: string;
+}): Promise<PageComment> {
+  return invoke('local_create_page_comment', { spaceSlug, ...input });
+}
+
+export function listCommentMembers(spaceSlug: string): Promise<Array<{ id: string; name: string }>> {
+  return invoke('local_list_comment_members', { spaceSlug });
+}
+
+export function setPageCommentResolved(
+  spaceSlug: string,
+  commentId: string,
+  resolved: boolean,
+): Promise<PageComment> {
+  return invoke('local_set_page_comment_resolved', { spaceSlug, commentId, resolved });
+}
+
+export function deletePageComment(spaceSlug: string, commentId: string, userId: string): Promise<void> {
+  return invoke('local_delete_page_comment', { spaceSlug, commentId, userId });
 }
 
 export function writePage(
