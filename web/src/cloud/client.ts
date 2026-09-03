@@ -123,6 +123,8 @@ export interface CloudPullRequestDiff {
     status: string;
     additions: number;
     deletions: number;
+    oldContent?: string | null;
+    newContent?: string | null;
   }>;
   patch: string;
 }

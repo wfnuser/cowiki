@@ -13,8 +13,8 @@ export function cloudDiffToFileDiffs(diff: CloudPullRequestDiff): FileDiff[] {
     const [oldContent, newContent] = contentPresence(file.status);
     return {
       path: file.path,
-      old_content: oldContent,
-      new_content: newContent,
+      old_content: file.oldContent === undefined ? oldContent : file.oldContent,
+      new_content: file.newContent === undefined ? newContent : file.newContent,
       hunks: parsed?.hunks.map(toDiffHunk) ?? [],
       additions: file.additions,
       deletions: file.deletions,
