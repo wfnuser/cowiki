@@ -1,5 +1,5 @@
 import { canManageMembers, canMerge, type CloudRole } from './session.ts';
-import type { CloudTreeEntry } from './client.ts';
+import type { CloudSpaceCreationCapability, CloudTreeEntry } from './client.ts';
 
 export type CloudNavigationId = 'wiki' | 'reviews' | 'members';
 
@@ -45,4 +45,13 @@ export function routeScopedValue<T>(
   loaded: SpaceScopedResource<T> | null,
 ): T | null {
   return loaded?.spaceId === selectedSpaceId ? loaded.value : null;
+}
+
+export function spaceCreationPanelMode(
+  capability: CloudSpaceCreationCapability,
+): 'invite' | 'create' | 'limit' {
+  if (capability.reason === 'limit_reached' || capability.createdCount >= capability.limit) {
+    return 'limit';
+  }
+  return capability.authorized ? 'create' : 'invite';
 }
