@@ -263,9 +263,14 @@ fn local_create_agent_change(
     engine: State<'_, LocalEngine>,
     space_slug: String,
     agent_name: String,
+    title: Option<String>,
 ) -> Result<AgentChange, String> {
     let _mutation = engine.lock_mutations()?;
-    engine.create_agent_change(&space_slug, &agent_name)
+    engine.create_agent_change_with_identity(
+        &space_slug,
+        title.as_deref().unwrap_or(&agent_name),
+        &agent_name,
+    )
 }
 
 #[tauri::command]

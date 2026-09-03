@@ -3,6 +3,8 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { C } from '@/lib/design';
 import { PageByline } from './PageByline';
+import { PageLineage } from './PageLineage';
+import type { PageLineage as PageLineageModel } from '@/lib/page-lineage';
 
 interface PageReaderProps {
   body: string;
@@ -16,6 +18,9 @@ interface PageReaderProps {
   readOnlyDotColor?: string;
   missingMessage?: string;
   aside?: ReactNode;
+  lineage?: PageLineageModel;
+  onOpenSource?: (path: string) => void;
+  onOpenReview?: (id: string) => void;
 }
 
 export function PageReader({
@@ -27,6 +32,9 @@ export function PageReader({
   readOnlyDotColor = C.blue,
   missingMessage,
   aside,
+  lineage,
+  onOpenSource,
+  onOpenReview,
 }: PageReaderProps) {
   return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'stretch' }}>
@@ -55,6 +63,13 @@ export function PageReader({
         ) : (
           <>
             {byline && <PageByline name={byline.name} editedAt={byline.editedAt} />}
+            {lineage && (
+              <PageLineage
+                lineage={lineage}
+                onOpenSource={onOpenSource}
+                onOpenReview={onOpenReview}
+              />
+            )}
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
               {body}
             </ReactMarkdown>
