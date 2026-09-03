@@ -26,8 +26,6 @@
   <img src="docs/assets/cowiki-desktop.png" alt="CoWiki reviewing local Markdown changes beside an embedded Claude Code terminal" />
 </p>
 
-<img width="161" height="247" alt="IMG_0185" src="https://github.com/user-attachments/assets/e4019204-90d4-4828-961e-27be03a3b955" />
-
 <p align="center">
   <strong>A local-first, Git-based workspace where teams and their agents compile sources into a portable, reviewable, and shareable LLM Wiki.</strong>
   <br />
