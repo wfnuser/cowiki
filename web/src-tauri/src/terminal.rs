@@ -67,17 +67,12 @@ impl AgentKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TerminalIntent {
+    #[default]
     Run,
     Login,
-}
-
-impl Default for TerminalIntent {
-    fn default() -> Self {
-        Self::Run
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -964,7 +959,7 @@ fn run_probe_command(
     let command = format!(
         "exec {}{}{}",
         shell_quote(&executable.to_string_lossy()),
-        (!arguments.is_empty()).then_some(" ").unwrap_or_default(),
+        if arguments.is_empty() { "" } else { " " },
         arguments,
     );
     #[cfg(not(windows))]

@@ -304,6 +304,7 @@ fn local_discard_agent_change(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn cloud_link_space(
     engine: State<'_, LocalEngine>,
     space_slug: String,

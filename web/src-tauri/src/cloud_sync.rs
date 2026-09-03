@@ -84,6 +84,7 @@ impl CloudSyncResult {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn link_space(
     engine: &LocalEngine,
     space_slug: &str,
