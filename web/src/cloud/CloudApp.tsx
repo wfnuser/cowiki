@@ -5,6 +5,7 @@ import { apiOrigin } from '../runtime';
 import { createCloudClient } from './client';
 import { CloudHome } from './CloudHome';
 import { CloudSpaceView } from './CloudSpaceView';
+import { CloudNotificationsPage } from './CloudNotificationsPage';
 import { parseCloudRoute } from './routes';
 import { normalizeCloudSession, type CloudSession } from './session';
 
@@ -37,6 +38,9 @@ export function CloudApp({ session: injectedSession }: CloudAppProps) {
   };
   if (location.pathname === '/cloud' || location.pathname === '/cloud/') {
     return <CloudHome client={client} session={session} onSignOut={() => void signOut()} />;
+  }
+  if (location.pathname === '/cloud/notifications') {
+    return <CloudNotificationsPage client={client} session={session} onSignOut={() => void signOut()} />;
   }
   if (route) {
     return (
