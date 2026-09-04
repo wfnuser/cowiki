@@ -63,6 +63,9 @@ export function PageReader({
         ) : (
           <>
             {byline && <PageByline name={byline.name} editedAt={byline.editedAt} />}
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+              {body}
+            </ReactMarkdown>
             {lineage && (
               <PageLineage
                 lineage={lineage}
@@ -70,9 +73,6 @@ export function PageReader({
                 onOpenReview={onOpenReview}
               />
             )}
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-              {body}
-            </ReactMarkdown>
           </>
         )}
       </article>
