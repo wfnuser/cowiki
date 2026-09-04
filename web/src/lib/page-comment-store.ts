@@ -113,7 +113,17 @@ function cloudComment(comment: CloudComment, workspaceSlug: string): PageComment
     body: comment.body,
     parent_id: comment.parentId,
     resolved: comment.resolved,
-    created_at: comment.createdAt,
-    updated_at: comment.updatedAt,
+    created_at: normalizeCloudCommentTimestamp(comment.createdAt),
+    updated_at: normalizeCloudCommentTimestamp(comment.updatedAt),
   };
+}
+
+export function normalizeCloudCommentTimestamp(value: CloudComment['createdAt']): string {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value) || value.length < 6) return '';
+  const [year, ordinalDay, hour, minute, second, nanosecond, offsetHour = 0, offsetMinute = 0, offsetSecond = 0] = value;
+  if (![year, ordinalDay, hour, minute, second, nanosecond, offsetHour, offsetMinute, offsetSecond].every(Number.isFinite)) return '';
+  const offset = (offsetHour * 3600 + Math.sign(offsetHour || offsetMinute || offsetSecond) * (Math.abs(offsetMinute) * 60 + Math.abs(offsetSecond))) * 1000;
+  const timestamp = Date.UTC(year, 0, ordinalDay, hour, minute, second, Math.floor(nanosecond / 1_000_000)) - offset;
+  return new Date(timestamp).toISOString();
 }

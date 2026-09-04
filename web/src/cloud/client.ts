@@ -86,8 +86,8 @@ export interface CloudComment {
   body: string;
   parentId: string | null;
   resolved: boolean;
-  createdAt: string;
-  updatedAt: string;
+  createdAt: string | number[];
+  updatedAt: string | number[];
 }
 
 export interface CloudCommentsResponse {
