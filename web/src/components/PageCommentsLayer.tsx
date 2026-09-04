@@ -15,7 +15,9 @@ import type { CommentMember, PageCommentStore } from '@/lib/page-comment-store';
 
 // ── identity helpers ───────────────────────────────────────────────────────
 function relTime(iso: string): string {
-  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  const timestamp = new Date(iso).getTime();
+  if (!Number.isFinite(timestamp)) return 'recently';
+  const s = Math.max(0, (Date.now() - timestamp) / 1000);
   if (s < 60) return 'now';
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
@@ -23,7 +25,7 @@ function relTime(iso: string): string {
 }
 function relTimeAgo(iso: string): string {
   const value = relTime(iso);
-  return value === 'now' ? value : `${value} ago`;
+  return value === 'now' || value === 'recently' ? value : `${value} ago`;
 }
 function quoteOf(source: string, start: number, end: number): string {
   const text = source
@@ -128,7 +130,7 @@ export function CommentsProvider({
   const [snapshots, setSnapshots] = useState<{ content_hash: string; source: string }[]>([]);
   const [members, setMembers] = useState<CommentMember[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [pending, setPending] = useState<{ start: number; end: number; x: number; y: number } | null>(null);
   const [composing, setComposing] = useState<{ start: number; end: number; quote: string } | null>(null);
   const enabled = !!store && !!pageSlug;
@@ -283,6 +285,8 @@ export function CommentsHeaderToggle({ style }: { style?: React.CSSProperties })
     <button
       onClick={() => ctx.setPanelOpen(!ctx.panelOpen)}
       title={ctx.panelOpen ? 'Hide comments' : 'Show comments'}
+      aria-controls="page-comments-panel"
+      aria-expanded={ctx.panelOpen}
       style={{
         ...style, fontWeight: 600,
         background: ctx.panelOpen ? C.accentSoft : (style?.background ?? 'transparent'),
@@ -346,7 +350,7 @@ export function CommentsPanel() {
   if (!panelOpen || (openCount === 0 && resolved.length === 0 && !composing)) return null;
 
   return (
-    <aside style={{
+    <aside id="page-comments-panel" style={{
       width: 360, flexShrink: 0, alignSelf: 'stretch', borderLeft: `1px solid ${C.line}`,
       background: C.panel, display: 'flex', flexDirection: 'column', minHeight: 0,
     }}>
@@ -354,7 +358,7 @@ export function CommentsPanel() {
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
           <span style={{ fontSize: 13.5, fontWeight: 600, color: C.ink }}>Comments</span>
           <span style={{ fontSize: 12.5, color: C.faint }}>({openCount})</span>
-          <span title={scopeLabel === 'Local only' ? 'These comments stay on this device.' : 'These comments are shared with Space members.'} style={{ fontSize: 10.5, color: scopeLabel === 'Local only' ? C.amber : C.blue, fontWeight: 650 }}>{scopeLabel}</span>
+          <span title={scopeLabel === 'Local only' ? 'These comments stay on this device.' : 'These comments are shared with Space members.'} style={{ fontSize: 10.5, color: C.faint, fontWeight: 500 }}>{scopeLabel}</span>
         </div>
         <button onClick={() => setPanelOpen(false)} title="Collapse" style={{ ...ghostBtn, padding: 5 }}>
           <ChevronsRight size={16} />
@@ -426,7 +430,7 @@ function CommentCard({
 
   if (!active) {
     return (
-      <div onClick={onActivate} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: '11px 13px', cursor: 'pointer', boxShadow: shadows.faint }}>
+      <div onClick={onActivate} style={{ background: 'transparent', borderBottom: `1px solid ${C.lineSoft}`, padding: '12px 4px', cursor: 'pointer' }}>
         <div style={{ marginBottom: 9, paddingLeft: 8, borderLeft: `2.5px solid ${isOutdated ? C.amberSoft : `color-mix(in srgb, ${C.accent} 25%, ${C.panel})`}` }}>
           <span style={{ fontSize: 12, lineHeight: 1.4, color: C.faint, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
             {isOutdated && <span style={{ color: C.amber, fontStyle: 'normal', fontWeight: 600 }}>outdated · </span>}<Quote text={t.quote} />
@@ -448,7 +452,7 @@ function CommentCard({
   }
 
   return (
-    <div onClick={onActivate} style={{ background: C.panel, border: '1px solid transparent', borderRadius: 12, padding: '13px 14px 12px', cursor: 'pointer', position: 'relative', boxShadow: `${shadows.float}, 0 0 0 1.5px ${isOutdated ? C.amber : C.accent}` }}>
+    <div onClick={onActivate} style={{ background: C.sidebar, borderLeft: `2px solid ${isOutdated ? C.amber : C.accent}`, borderRadius: 6, padding: '12px 12px 11px', cursor: 'pointer', position: 'relative' }}>
       <div style={{ display: 'flex', gap: 8, marginBottom: 11, paddingLeft: 9, borderLeft: `2.5px solid ${isOutdated ? C.amber : C.accent}` }}>
         <span style={{ fontSize: 12.5, lineHeight: 1.45, color: C.muted, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
           {isOutdated && <span style={{ color: C.amber, fontStyle: 'normal', fontWeight: 600 }}>outdated · </span>}<Quote text={t.quote} />
