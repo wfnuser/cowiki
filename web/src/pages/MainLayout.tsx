@@ -56,6 +56,8 @@ import { C } from '@/lib/design';
 import { apiOrigin, isDesktopClient } from '@/runtime';
 import { normalizeCloudSession } from '@/cloud/session';
 import { CloudSpaceDialog } from '@/components/cloud/CloudSpaceDialog';
+import { WorkspaceContextBadge } from '@/components/layout/WorkspaceContextBadge';
+import { getCloudStatus, type CloudSyncState } from '@/local-api';
 import { chooseLocalSpaceDirectory, localSpaceIdentityFromPath } from '@/local-space';
 import {
   AgentTerminalPanel,
@@ -82,6 +84,7 @@ import {
 import { splitSystemFrontmatter } from '@/lib/page-frontmatter';
 import { sourceOrganizationTask } from '@/lib/source-ingest';
 import { resolveWorkspaceSwitchTarget } from '@/lib/workspace-navigation';
+import { workspaceContextStatus } from '@/lib/workspace-context';
 
 type ActiveView =
   | { kind: 'page'; slug: string; path?: string; content: PageFull | null }
@@ -146,6 +149,11 @@ export function MainLayout() {
   const [versionSelection, setVersionSelection] = useState<VersionSelection>({ kind: 'working' });
   const [openAgentChanges, setOpenAgentChanges] = useState<AgentChange[]>([]);
   const [workingDiffs, setWorkingDiffs] = useState<FileDiff[]>([]);
+  const [workingDiffsSpaceSlug, setWorkingDiffsSpaceSlug] = useState<string | null>(null);
+  const [desktopCloudStatus, setDesktopCloudStatus] = useState<{
+    spaceSlug: string;
+    state: CloudSyncState | 'unavailable';
+  } | null>(null);
   const [sidebarLayout, setSidebarLayout] = useState(() => loadSidebarLayout(window.localStorage));
   const [resizingSidebar, setResizingSidebar] = useState(false);
   const sidebarResizeStart = useRef({ pointerX: 0, width: sidebarLayout.width });
@@ -431,6 +439,7 @@ export function MainLayout() {
       const task = window.setTimeout(() => {
         setOpenAgentChanges([]);
         setWorkingDiffs([]);
+        setWorkingDiffsSpaceSlug(null);
         setVersionSelection({ kind: 'working' });
       }, 0);
       return () => window.clearTimeout(task);
@@ -444,6 +453,7 @@ export function MainLayout() {
       const openChanges = changes.filter((change) => change.status === 'open');
       setOpenAgentChanges(openChanges);
       setWorkingDiffs(diffs);
+      setWorkingDiffsSpaceSlug(activeWorkspace.slug);
       setVersionSelection((current) => (
         current.kind === 'agent' && !openChanges.some((change) => change.id === current.changeId)
           ? { kind: 'working' }
@@ -453,8 +463,26 @@ export function MainLayout() {
       if (cancelled) return;
       setOpenAgentChanges([]);
       setWorkingDiffs([]);
+      setWorkingDiffsSpaceSlug(activeWorkspace.slug);
       setVersionSelection({ kind: 'working' });
     });
+    return () => { cancelled = true; };
+  }, [activeWorkspace?.localPath, activeWorkspace?.slug, desktop, reviewRefreshKey]);
+
+  useEffect(() => {
+    if (!desktop || !activeWorkspace?.localPath) {
+      const task = window.setTimeout(() => setDesktopCloudStatus(null), 0);
+      return () => window.clearTimeout(task);
+    }
+    let cancelled = false;
+    const spaceSlug = activeWorkspace.slug;
+    getCloudStatus(spaceSlug)
+      .then((status) => {
+        if (!cancelled) setDesktopCloudStatus({ spaceSlug, state: status.state });
+      })
+      .catch(() => {
+        if (!cancelled) setDesktopCloudStatus({ spaceSlug, state: 'unavailable' });
+      });
     return () => { cancelled = true; };
   }, [activeWorkspace?.localPath, activeWorkspace?.slug, desktop, reviewRefreshKey]);
 
@@ -863,6 +891,16 @@ export function MainLayout() {
 
   const personal = activeWorkspace ? isPersonalSpace(activeWorkspace) : false;
   const isOwner = activeWorkspace?.role === 'owner';
+  const activeWorkingDiffs = workingDiffsSpaceSlug === activeWorkspace?.slug ? workingDiffs : [];
+  const activeCloudState = desktopCloudStatus && desktopCloudStatus.spaceSlug === activeWorkspace?.slug
+    ? desktopCloudStatus.state
+    : null;
+  const workspaceContext = workspaceContextStatus({
+    desktop,
+    state: activeCloudState,
+    hasLocalChanges: activeWorkingDiffs.length > 0,
+    statusKnown: !desktop || !!activeCloudState,
+  });
 
   // Determine active page/source for panel highlight
   const currentActivePage = activeView?.kind === 'page' ? activeView.slug : null;
@@ -873,7 +911,7 @@ export function MainLayout() {
   const activePagePath = activeView?.kind === 'page'
     ? (activeView.path || conceptPath(activeView.slug))
     : null;
-  const workingPageDiff = activePagePath ? findDiffForPath(workingDiffs, activePagePath) : undefined;
+  const workingPageDiff = activePagePath ? findDiffForPath(activeWorkingDiffs, activePagePath) : undefined;
   const agentPageDiff = activePagePath && selectedAgentChange
     ? findDiffForPath(selectedAgentChange.diffs, activePagePath)
     : undefined;
@@ -1112,8 +1150,9 @@ export function MainLayout() {
               <ContentHeaderActions>
 
                 {desktop && activeWorkspace?.localPath && (
-                  <button
-                    type="button"
+                  <WorkspaceContextBadge
+                    context={workspaceContext}
+                    connected={workspaceContext.kind === 'linked'}
                     onClick={() => {
                       if (!cloudSession) {
                         navigate('/login');
@@ -1122,10 +1161,7 @@ export function MainLayout() {
                       setCloudDialogOpen(true);
                     }}
                     style={headerBtnStyle}
-                    title={cloudSession ? 'Publish, sync, or submit this Space' : 'Publish to Cloud'}
-                  >
-                    <Cloud size={14} /> {cloudSession ? 'Cloud' : 'Publish to Cloud'}
-                  </button>
+                  />
                 )}
 
                 {desktop && activeWorkspace?.localPath && !editingPage && (
@@ -1582,7 +1618,7 @@ export function MainLayout() {
           onOpenChange={setCloudDialogOpen}
           space={activeWorkspace ? { name: activeWorkspace.name, slug: activeWorkspace.slug } : null}
           session={cloudSession}
-          hasLocalChanges={workingDiffs.length > 0}
+          hasLocalChanges={activeWorkingDiffs.length > 0}
           onChanged={() => setReviewRefreshKey((key) => key + 1)}
         />
       )}
