@@ -1,42 +1,44 @@
-import { Cloud, HardDrive } from 'lucide-react';
+import { Cloud } from 'lucide-react';
 import { C } from '@/lib/design';
 import type { WorkspaceContextStatus } from '@/lib/workspace-context';
 
 export function WorkspaceContextBadge({
   context,
   onClick,
+  connected = true,
+  style,
 }: {
   context: WorkspaceContextStatus;
   onClick?: () => void;
+  connected?: boolean;
+  style?: React.CSSProperties;
 }) {
-  const content = (
-    <>
-      {context.kind === 'cloud' ? <Cloud size={11} /> : <HardDrive size={11} />}
-      <span>{context.label}</span>
-    </>
-  );
-  const style: React.CSSProperties = {
+  const actionStyle: React.CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
     flexShrink: 0,
-    padding: '3px 7px',
-    border: `1px solid ${context.attention ? C.accentTintBorder : C.line}`,
-    borderRadius: 999,
-    background: context.attention ? C.accentSoft : C.sidebar,
-    color: context.attention ? C.accent : C.muted,
-    fontSize: 10.5,
-    fontWeight: 650,
-    lineHeight: 1,
+    padding: '6px 9px',
+    border: 'none',
+    borderRadius: 8,
+    background: 'transparent',
+    color: C.muted,
+    fontSize: 12.5,
+    fontWeight: 500,
     whiteSpace: 'nowrap',
+    cursor: 'pointer',
+    ...style,
   };
 
-  if (onClick) {
-    return (
-      <button type="button" onClick={onClick} title={context.detail} style={{ ...style, cursor: 'pointer' }}>
-        {content}
-      </button>
-    );
-  }
-  return <span title={context.detail} style={style}>{content}</span>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={connected ? context.detail : 'Publish to Cloud'}
+      style={actionStyle}
+    >
+      <Cloud size={14} />
+      <span>{connected ? 'Cloud' : 'Publish to Cloud'}</span>
+    </button>
+  );
 }
