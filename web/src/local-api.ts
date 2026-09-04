@@ -91,8 +91,8 @@ export function createCheckpoint(spaceSlug: string, name?: string): Promise<Chec
   return invoke('local_create_checkpoint', { spaceSlug, name });
 }
 
-export function createAgentChange(spaceSlug: string, agentName: string): Promise<AgentChange> {
-  return invoke('local_create_agent_change', { spaceSlug, agentName });
+export function createAgentChange(spaceSlug: string, title: string, agentName = title): Promise<AgentChange> {
+  return invoke('local_create_agent_change', { spaceSlug, title, agentName });
 }
 
 export function probeAgent(agent: AgentKind): Promise<AgentReadiness> {

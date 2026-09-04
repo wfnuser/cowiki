@@ -186,6 +186,31 @@ pub struct PageFull {
     pub body: String,
     pub edited_by: Option<String>,
     pub edited_at: Option<i64>,
+    pub provenance: Option<PageProvenance>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PageProvenance {
+    pub commit: Option<CommitProvenance>,
+    pub agents: Vec<AgentProvenance>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitProvenance {
+    pub oid: String,
+    pub summary: String,
+    pub author: String,
+    pub committed_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProvenance {
+    pub name: String,
+    pub change_id: String,
+    pub task: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -847,6 +872,10 @@ impl LocalEngine {
                 .to_string_lossy()
                 .to_string()
         });
+        let provenance = page_provenance(
+            &Repository::open(&space.local_path).map_err(|e| e.to_string())?,
+            &relative,
+        )?;
         Ok(PageFull {
             meta: PageMeta {
                 slug: slug.to_string(),
@@ -860,6 +889,7 @@ impl LocalEngine {
             body,
             edited_by: None,
             edited_at: None,
+            provenance,
         })
     }
 
@@ -1067,6 +1097,10 @@ impl LocalEngine {
             DocumentKind::Concept if normalized.starts_with(".cowiki/sources/") => "source",
             _ => "page",
         };
+        let provenance = page_provenance(
+            &Repository::open(&space.local_path).map_err(|e| e.to_string())?,
+            relative,
+        )?;
         Ok(PageFull {
             meta: PageMeta {
                 slug,
@@ -1080,6 +1114,7 @@ impl LocalEngine {
             body,
             edited_by: None,
             edited_at: None,
+            provenance,
         })
     }
 
@@ -1261,17 +1296,24 @@ impl LocalEngine {
         let signature = Signature::now(author_name.trim(), author_email.trim())
             .map_err(|e| format!("invalid commit identity: {e}"))?;
         let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
-        if let Err(error) = repo.commit(
+        let agent_contributions =
+            agent_changes::pending_merged_agent_contributions(&repo, parent.as_ref(), &tree)?;
+        let commit_message = commit_message_with_agent_trailers(message, &agent_contributions);
+        let commit_oid = match repo.commit(
             Some("HEAD"),
             &signature,
             &signature,
-            message,
+            &commit_message,
             &tree,
             &parents,
         ) {
-            rollback_migration(&repo, root, &backup)?;
-            return Err(error.to_string());
-        }
+            Ok(oid) => oid,
+            Err(error) => {
+                rollback_migration(&repo, root, &backup)?;
+                return Err(error.to_string());
+            }
+        };
+        agent_changes::mark_agent_contributions_committed(&repo, commit_oid, &agent_contributions);
         delete_migration_backup(&repo, &backup.reference)?;
         Ok(SubmitResult { committed: true })
     }
@@ -1458,15 +1500,20 @@ fn commit_index(repo: &Repository, index: &mut git2::Index) -> Result<SubmitResu
     let signature =
         Signature::now("CoWiki Local", "local@cowiki.app").map_err(|error| error.to_string())?;
     let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
-    repo.commit(
-        Some("HEAD"),
-        &signature,
-        &signature,
-        "Update local Space",
-        &tree,
-        &parents,
-    )
-    .map_err(|error| error.to_string())?;
+    let contributions =
+        agent_changes::pending_merged_agent_contributions(repo, parent.as_ref(), &tree)?;
+    let message = commit_message_with_agent_trailers("Update local Space", &contributions);
+    let commit_oid = repo
+        .commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            &message,
+            &tree,
+            &parents,
+        )
+        .map_err(|error| error.to_string())?;
+    agent_changes::mark_agent_contributions_committed(repo, commit_oid, &contributions);
     Ok(SubmitResult { committed: true })
 }
 
@@ -2229,6 +2276,118 @@ fn normalize_path(path: &Path) -> String {
         .map(|component| component.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+fn page_provenance(repo: &Repository, relative: &Path) -> Result<Option<PageProvenance>, String> {
+    let Some(commit) = last_commit_for_path(repo, relative)? else {
+        return Ok(None);
+    };
+    let message = commit.message().unwrap_or_default();
+    let author = commit.author().name().unwrap_or("Unknown").to_string();
+    Ok(Some(PageProvenance {
+        commit: Some(CommitProvenance {
+            oid: commit.id().to_string(),
+            summary: commit.summary().unwrap_or("Update Space").to_string(),
+            author,
+            committed_at: commit.time().seconds(),
+        }),
+        agents: agent_provenance_from_message(message),
+    }))
+}
+
+fn last_commit_for_path<'repo>(
+    repo: &'repo Repository,
+    relative: &Path,
+) -> Result<Option<git2::Commit<'repo>>, String> {
+    let mut walk = repo.revwalk().map_err(|error| error.to_string())?;
+    if walk.push_head().is_err() {
+        return Ok(None);
+    }
+    walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)
+        .map_err(|error| error.to_string())?;
+    for oid in walk {
+        let commit = repo
+            .find_commit(oid.map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?;
+        let current = tree_blob_oid(&commit.tree().map_err(|error| error.to_string())?, relative);
+        if current.is_none() {
+            continue;
+        }
+        let previous = if commit.parent_count() == 0 {
+            None
+        } else {
+            let parent = commit.parent(0).map_err(|error| error.to_string())?;
+            tree_blob_oid(&parent.tree().map_err(|error| error.to_string())?, relative)
+        };
+        if current != previous {
+            return Ok(Some(commit));
+        }
+    }
+    Ok(None)
+}
+
+fn tree_blob_oid(tree: &git2::Tree<'_>, relative: &Path) -> Option<Oid> {
+    tree.get_path(relative)
+        .ok()
+        .filter(|entry| entry.kind() == Some(git2::ObjectType::Blob))
+        .map(|entry| entry.id())
+}
+
+fn commit_message_with_agent_trailers(message: &str, agents: &[AgentProvenance]) -> String {
+    if agents.is_empty() {
+        return message.to_string();
+    }
+    let mut result = message.trim_end().to_string();
+    result.push_str("\n\n");
+    for agent in agents {
+        result.push_str(&format!(
+            "CoWiki-Agent: {}\nCoWiki-Agent-Change: {}\nCoWiki-Agent-Task: {}\n",
+            trailer_value(&agent.name),
+            trailer_value(&agent.change_id),
+            trailer_value(&agent.task),
+        ));
+    }
+    result
+}
+
+fn agent_provenance_from_message(message: &str) -> Vec<AgentProvenance> {
+    let lines = message.lines().collect::<Vec<_>>();
+    let mut result = Vec::new();
+    let mut index = 0;
+    while index < lines.len() {
+        let Some(name) = lines[index].strip_prefix("CoWiki-Agent: ") else {
+            index += 1;
+            continue;
+        };
+        let change_id = lines
+            .get(index + 1)
+            .and_then(|line| line.strip_prefix("CoWiki-Agent-Change: "));
+        let task = lines
+            .get(index + 2)
+            .and_then(|line| line.strip_prefix("CoWiki-Agent-Task: "));
+        if let (Some(change_id), Some(task)) = (change_id, task) {
+            result.push(AgentProvenance {
+                name: name.to_string(),
+                change_id: change_id.to_string(),
+                task: task.to_string(),
+            });
+            index += 3;
+        } else {
+            index += 1;
+        }
+    }
+    result
+}
+
+fn trailer_value(value: &str) -> String {
+    value
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .chars()
+        .take(160)
+        .collect()
 }
 
 /// Reads one flat `key: value` frontmatter field, unquoting it the same
@@ -3636,6 +3795,96 @@ mod tests {
             .unwrap();
         assert!(diff.old_content.is_none());
         assert_eq!(diff.new_content.as_deref(), Some("# Background result\n"));
+    }
+
+    #[test]
+    fn merged_agent_identity_and_commit_are_portable_page_provenance() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        let change = engine
+            .create_agent_change_with_identity(&space.slug, "Organize interview", "Codex")
+            .unwrap();
+        std::fs::write(
+            change.worktree_path.join("interview.md"),
+            "---\ntype: Note\nsources:\n  - .cowiki/sources/interview.md\n---\n\n# Interview\n",
+        )
+        .unwrap();
+
+        engine.merge_agent_change(&space.slug, &change.id).unwrap();
+        engine.submit(&space.slug, &[]).unwrap();
+
+        let page = engine.get_page(&space.slug, "interview").unwrap();
+        let provenance = page.provenance.expect("page provenance");
+        let commit = provenance.commit.expect("last page commit");
+        assert_eq!(commit.oid.len(), 40);
+        assert_eq!(commit.summary, "Update local Space");
+        assert_eq!(provenance.agents.len(), 1);
+        assert_eq!(provenance.agents[0].name, "Codex");
+        assert_eq!(provenance.agents[0].change_id, change.id);
+        assert_eq!(provenance.agents[0].task, "Organize interview");
+
+        let repo = Repository::open(&folder).unwrap();
+        let message = repo
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .message()
+            .unwrap()
+            .to_string();
+        assert!(message.contains("CoWiki-Agent: Codex"));
+        assert!(message.contains(&format!("CoWiki-Agent-Change: {}", change.id)));
+        assert!(message.contains("CoWiki-Agent-Task: Organize interview"));
+        drop(repo);
+
+        let clone_path = temp.path().join("clone");
+        Repository::clone(folder.to_str().unwrap(), &clone_path).unwrap();
+        let clone_engine = LocalEngine::open(&temp.path().join("clone-metadata")).unwrap();
+        let cloned_space = clone_engine
+            .add_space("Cloned Notes", "cloned-notes", &clone_path)
+            .unwrap();
+        let cloned = clone_engine
+            .get_page(&cloned_space.slug, "interview")
+            .unwrap()
+            .provenance
+            .unwrap();
+        assert_eq!(cloned.commit.unwrap().oid, commit.oid);
+        assert_eq!(cloned.agents[0].name, "Codex");
+        assert_eq!(cloned.agents[0].task, "Organize interview");
+    }
+
+    #[test]
+    fn keeping_reviewed_agent_change_preserves_agent_provenance() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        let change = engine
+            .create_agent_change_with_identity(&space.slug, "Compile notes", "Claude")
+            .unwrap();
+        std::fs::write(
+            change.worktree_path.join("compiled.md"),
+            "---\ntype: Note\n---\n\n# Compiled\n",
+        )
+        .unwrap();
+
+        engine.merge_agent_change(&space.slug, &change.id).unwrap();
+        let reviewed = engine.working_diff(&space.slug).unwrap();
+        engine.keep_working_diff(&space.slug, &reviewed).unwrap();
+
+        let provenance = engine
+            .get_page(&space.slug, "compiled")
+            .unwrap()
+            .provenance
+            .expect("page provenance");
+        assert_eq!(provenance.agents.len(), 1);
+        assert_eq!(provenance.agents[0].name, "Claude");
+        assert_eq!(provenance.agents[0].change_id, change.id);
+        assert_eq!(provenance.agents[0].task, "Compile notes");
     }
 
     #[test]

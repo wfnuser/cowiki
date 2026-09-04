@@ -5,6 +5,7 @@ import {
   type CloudSession,
   type CloudVisibility,
 } from './session.ts';
+import type { DocumentProvenance } from '../lib/page-lineage';
 
 export type CloudFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -63,6 +64,7 @@ export interface CloudContent {
   oid: string;
   path: string;
   content: string;
+  provenance?: DocumentProvenance | null;
 }
 
 export interface CloudMember {
@@ -151,6 +153,7 @@ export interface CloudClient {
   getSpace(spaceId: string): Promise<CloudSpace>;
   getTree(spaceId: string): Promise<CloudTree>;
   getContent(spaceId: string, path: string): Promise<CloudContent>;
+  getSourceContent(spaceId: string, path: string): Promise<CloudContent>;
   listMembers(spaceId: string): Promise<CloudMember[]>;
   setMember(spaceId: string, handle: string, role: CloudRole): Promise<CloudMember>;
   removeMember(spaceId: string, memberId: string): Promise<void>;
@@ -227,6 +230,10 @@ export function createCloudClient(
     getContent: (spaceId, path) => {
       const query = new URLSearchParams({ ref: 'main', path });
       return request(`${spacePath(spaceId, '/content')}?${query}`);
+    },
+    getSourceContent: (spaceId, path) => {
+      const query = new URLSearchParams({ ref: 'main', path });
+      return request(`${spacePath(spaceId, '/sources/content')}?${query}`);
     },
     listMembers: (spaceId) => request(spacePath(spaceId, '/members')),
     setMember: (spaceId, handle, role) => request(spacePath(spaceId, '/members'), {
