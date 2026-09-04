@@ -1,4 +1,7 @@
-use super::{file_diff_from_bytes, safe_repo_path, FileDiff, LocalEngine};
+use super::{
+    agent_provenance_from_message, file_diff_from_bytes, safe_repo_path, AgentProvenance, FileDiff,
+    LocalEngine,
+};
 use git2::{Oid, Repository, Signature, StatusOptions};
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -10,6 +13,7 @@ const BRANCH_REF_PREFIX: &str = "refs/heads/agent/";
 const CONFLICT_REF_PREFIX: &str = "refs/cowiki/agent-conflicts/";
 const MERGED_REF_PREFIX: &str = "refs/cowiki/agent-merged/";
 const DISCARDED_REF_PREFIX: &str = "refs/cowiki/agent-discarded/";
+const INTEGRATED_REF_PREFIX: &str = "refs/cowiki/agent-integrated/";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -23,9 +27,19 @@ pub struct AgentChange {
 }
 
 impl LocalEngine {
+    #[cfg(test)]
     pub fn create_agent_change(
         &self,
         space_slug: &str,
+        agent_name: &str,
+    ) -> Result<AgentChange, String> {
+        self.create_agent_change_with_identity(space_slug, agent_name, agent_name)
+    }
+
+    pub fn create_agent_change_with_identity(
+        &self,
+        space_slug: &str,
+        title: &str,
         agent_name: &str,
     ) -> Result<AgentChange, String> {
         let space = self.find_space(space_slug)?;
@@ -39,14 +53,18 @@ impl LocalEngine {
         let signature = Signature::now("CoWiki Agent", "agent@cowiki.app")
             .map_err(|error| error.to_string())?;
         let id = uuid::Uuid::new_v4().to_string();
-        let title = clean_agent_name(agent_name);
+        let title = clean_agent_name(title);
+        let agent_name = clean_agent_name(agent_name);
         let base_ref = base_ref(&id);
+        let message = format!(
+            "CoWiki Agent Change: {title}\n\nCoWiki-Agent: {agent_name}\nCoWiki-Agent-Change: {id}\nCoWiki-Agent-Task: {title}"
+        );
         let base_id = repo
             .commit(
                 Some(&base_ref),
                 &signature,
                 &signature,
-                &format!("CoWiki Agent Change: {title}"),
+                &message,
                 &tree,
                 &[&parent],
             )
@@ -452,6 +470,95 @@ impl LocalEngine {
             Err(error) => Err(error.to_string()),
         }
     }
+}
+
+pub(super) fn pending_merged_agent_contributions(
+    repo: &Repository,
+    parent: Option<&git2::Commit<'_>>,
+    committed_tree: &git2::Tree<'_>,
+) -> Result<Vec<AgentProvenance>, String> {
+    let parent_tree = parent
+        .map(|commit| commit.tree().map_err(|error| error.to_string()))
+        .transpose()?;
+    let committed_paths = changed_paths(repo, parent_tree.as_ref(), committed_tree)?;
+    if committed_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut contributions = Vec::new();
+    let references = repo
+        .references_glob(&format!("{MERGED_REF_PREFIX}*"))
+        .map_err(|error| error.to_string())?;
+    for reference in references {
+        let reference = reference.map_err(|error| error.to_string())?;
+        let Some(name) = reference.name() else {
+            continue;
+        };
+        let Some(change_id) = name.strip_prefix(MERGED_REF_PREFIX) else {
+            continue;
+        };
+        if repo.find_reference(&integrated_ref(change_id)).is_ok() {
+            continue;
+        }
+        let base = reference_commit(repo, &base_ref(change_id))?;
+        let result = reference
+            .peel_to_commit()
+            .map_err(|error| error.to_string())?;
+        let base_tree = base.tree().map_err(|error| error.to_string())?;
+        let result_tree = result.tree().map_err(|error| error.to_string())?;
+        let agent_paths = changed_paths(repo, Some(&base_tree), &result_tree)?;
+        if !agent_paths
+            .iter()
+            .any(|path| committed_paths.contains(path))
+        {
+            continue;
+        }
+        let mut agents = agent_provenance_from_message(base.message().unwrap_or_default());
+        if let Some(agent) = agents.pop() {
+            contributions.push(agent);
+        }
+    }
+    contributions.sort_by(|left, right| left.change_id.cmp(&right.change_id));
+    Ok(contributions)
+}
+
+pub(super) fn mark_agent_contributions_committed(
+    repo: &Repository,
+    commit_oid: Oid,
+    contributions: &[AgentProvenance],
+) {
+    for contribution in contributions {
+        if let Err(error) = repo.reference(
+            &integrated_ref(&contribution.change_id),
+            commit_oid,
+            true,
+            "Record portable CoWiki Agent provenance",
+        ) {
+            eprintln!(
+                "CoWiki committed Agent Change '{}' but could not record its local integration marker: {error}",
+                contribution.change_id
+            );
+        }
+    }
+}
+
+fn changed_paths(
+    repo: &Repository,
+    old_tree: Option<&git2::Tree<'_>>,
+    new_tree: &git2::Tree<'_>,
+) -> Result<BTreeSet<PathBuf>, String> {
+    let diff = repo
+        .diff_tree_to_tree(old_tree, Some(new_tree), None)
+        .map_err(|error| error.to_string())?;
+    let mut paths = BTreeSet::new();
+    for delta in diff.deltas() {
+        if let Some(path) = delta.old_file().path() {
+            paths.insert(path.to_path_buf());
+        }
+        if let Some(path) = delta.new_file().path() {
+            paths.insert(path.to_path_buf());
+        }
+    }
+    Ok(paths)
 }
 
 fn warn_cleanup_failure(change_id: &str, error: &str) {
@@ -888,6 +995,10 @@ fn merged_ref(change_id: &str) -> String {
 
 fn discarded_ref(change_id: &str) -> String {
     format!("{DISCARDED_REF_PREFIX}{change_id}")
+}
+
+fn integrated_ref(change_id: &str) -> String {
+    format!("{INTEGRATED_REF_PREFIX}{change_id}")
 }
 
 fn worktree_name(change_id: &str) -> String {

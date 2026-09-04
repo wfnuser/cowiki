@@ -93,6 +93,59 @@ test('Cloud logout revokes the server credential', async () => {
   assert.equal(new Headers(calls[0].init?.headers).get('authorization'), 'Bearer cw_key_test');
 });
 
+test('Cloud Source lineage reads only the authenticated Source endpoint', async () => {
+  const calls: string[] = [];
+  const fakeFetch: CloudFetch = async (input) => {
+    calls.push(String(input));
+    return Response.json({ ref: 'main', oid: 'a'.repeat(40), path: '.cowiki/sources/interview.md', content: '# Interview' });
+  };
+  const client = createCloudClient(
+    { baseUrl: 'https://cloud.cowiki.test', apiKey: 'key', userId, userName: 'User' },
+    fakeFetch,
+  );
+
+  await client.getSourceContent(spaceId, '.cowiki/sources/interview.md');
+
+  assert.deepEqual(calls, [
+    `https://cloud.cowiki.test/api/spaces/${spaceId}/sources/content?ref=main&path=.cowiki%2Fsources%2Finterview.md`,
+  ]);
+});
+
+test('Cloud comment and notification methods use the shared authenticated contract', async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const fakeFetch: CloudFetch = async (input, init) => {
+    calls.push({ url: String(input), init });
+    return init?.method === 'DELETE' || String(input).endsWith('/read-all')
+      ? new Response(null, { status: 204 })
+      : Response.json({ comments: [], snapshots: [] });
+  };
+  const client = createCloudClient(
+    { baseUrl: 'https://cloud.cowiki.test', apiKey: 'key', userId, userName: 'User' },
+    fakeFetch,
+  );
+
+  await client.listComments(spaceId, 'wiki/roadmap.md');
+  await client.createComment(spaceId, {
+    path: 'wiki/roadmap.md', body: '@reviewer check this', source: '# Roadmap', startLine: 1, endLine: 1,
+  });
+  await client.setCommentResolved(spaceId, 'comment-id', true);
+  await client.deleteComment(spaceId, 'comment-id');
+  await client.listNotifications();
+  await client.notificationUnreadCount();
+  await client.markAllNotificationsRead();
+
+  assert.equal(calls[0].url, `https://cloud.cowiki.test/api/spaces/${spaceId}/comments?path=wiki%2Froadmap.md`);
+  assert.deepEqual(JSON.parse(String(calls[1].init?.body)), {
+    path: 'wiki/roadmap.md', body: '@reviewer check this', source: '# Roadmap', startLine: 1, endLine: 1,
+  });
+  assert.equal(calls[2].init?.method, 'PATCH');
+  assert.deepEqual(JSON.parse(String(calls[2].init?.body)), { resolved: true });
+  assert.equal(calls[3].init?.method, 'DELETE');
+  assert.equal(calls[4].url, 'https://cloud.cowiki.test/api/notifications');
+  assert.equal(calls[5].url, 'https://cloud.cowiki.test/api/notifications/unread-count');
+  assert.equal(calls[6].url, 'https://cloud.cowiki.test/api/notifications/read-all');
+});
+
 test('Cloud mutations serialize the current contract and surface typed failures', async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const fakeFetch: CloudFetch = async (input, init) => {
