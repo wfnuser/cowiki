@@ -1085,19 +1085,7 @@ export function MainLayout() {
                   </button>
                 )}
                 {activeWorkspace && (
-                  <>
-                    <span style={{ color: C.ink2 }}>{activeWorkspace.name}</span>
-                    <WorkspaceContextBadge
-                      context={workspaceContext}
-                      onClick={desktop && activeWorkspace.localPath ? () => {
-                        if (!cloudSession) {
-                          navigate('/login');
-                          return;
-                        }
-                        setCloudDialogOpen(true);
-                      } : undefined}
-                    />
-                  </>
+                  <span style={{ color: C.ink2 }}>{activeWorkspace.name}</span>
                 )}
                 {activeView?.kind === 'page' && activeView.content && (
                   <>
@@ -1162,8 +1150,9 @@ export function MainLayout() {
               <ContentHeaderActions>
 
                 {desktop && activeWorkspace?.localPath && (
-                  <button
-                    type="button"
+                  <WorkspaceContextBadge
+                    context={workspaceContext}
+                    connected={workspaceContext.kind === 'linked'}
                     onClick={() => {
                       if (!cloudSession) {
                         navigate('/login');
@@ -1172,10 +1161,7 @@ export function MainLayout() {
                       setCloudDialogOpen(true);
                     }}
                     style={headerBtnStyle}
-                    title={cloudSession ? 'Publish, sync, or submit this Space' : 'Publish to Cloud'}
-                  >
-                    <Cloud size={14} /> {cloudSession ? 'Cloud' : 'Publish to Cloud'}
-                  </button>
+                  />
                 )}
 
                 {desktop && activeWorkspace?.localPath && !editingPage && (
