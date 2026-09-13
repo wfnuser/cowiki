@@ -11,6 +11,7 @@ import { isDesktopClient } from '../runtime';
 import { chooseSourceFiles, ingestFiles } from '../local-api';
 import {
   fileIngestResult,
+  fileIngestWarnings,
   mergeImportedSources,
   sourceImportStorageLabel,
   sourceImportProgressLabel,
@@ -47,6 +48,8 @@ export function AddSourceDialog({
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [allowLocalTools, setAllowLocalTools] = useState(false);
   const [importedSources, setImportedSources] = useState<SourceItem[]>([]);
 
   const reset = () => {
@@ -54,6 +57,8 @@ export function AddSourceDialog({
     setSelectedFiles([]);
     setError('');
     setImportedSources([]);
+    setWarnings([]);
+    setAllowLocalTools(false);
   };
 
   const handleOpenChange = (isOpen: boolean) => {
@@ -78,8 +83,9 @@ export function AddSourceDialog({
     setLoading(true);
     setError('');
     try {
-      const outcomes = await ingestFiles(workspaceSlug, selectedFiles);
+      const outcomes = await ingestFiles(workspaceSlug, selectedFiles, allowLocalTools);
       const result = fileIngestResult(outcomes);
+      setWarnings((current) => [...new Set([...current, ...fileIngestWarnings(outcomes)])]);
       const imported = outcomes.flatMap((outcome) => outcome.source ? [outcome.source] : []);
       if (imported.length) {
         setImportedSources((current) => mergeImportedSources(current, imported));
@@ -123,6 +129,12 @@ export function AddSourceDialog({
 
   const canSubmit = activeTab === 'file' ? selectedFiles.length > 0 : !!content.trim();
   const defaultAgentName = agentDisplayName(defaultAgent);
+  const localToolsChoice = (
+    <label className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
+                  <input type="checkbox" checked={allowLocalTools} disabled={loading} onChange={(event) => setAllowLocalTools(event.target.checked)} />
+                  <span>Use installed local extraction tools for images, scanned PDFs and legacy Word files. Files stay on this device; Tesseract, Poppler or antiword must be installed.</span>
+                </label>
+  );
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -147,6 +159,14 @@ export function AddSourceDialog({
                 </p>
               </div>
             </div>
+            {warnings.length > 0 && (
+              <div role="status" className="rounded-lg border bg-muted/35 p-3 text-sm">
+                <p className="font-medium">Review extracted content before organizing</p>
+                <ul className="mt-2 list-disc space-y-2 pl-4 text-xs leading-relaxed text-muted-foreground">
+                  {warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                </ul>
+              </div>
+            )}
             {error && (
               <div className="rounded-lg border border-red/20 bg-red-soft p-3 text-sm text-red">
                 <p className="font-medium">Some files still need attention</p>
@@ -161,6 +181,7 @@ export function AddSourceDialog({
                 </p>
               </div>
             )}
+            {error && selectedFiles.length > 0 && localToolsChoice}
             <div className="flex flex-wrap gap-2">
               {error && selectedFiles.length > 0 && (
                 <Button
@@ -244,6 +265,7 @@ export function AddSourceDialog({
                   <FileUp className="h-4 w-4" />
                   Choose files…
                 </Button>
+                {localToolsChoice}
                 {selectedFiles.length > 0 && (
                   <ul className="max-h-40 space-y-1 overflow-y-auto rounded-md border p-1.5">
                     {selectedFiles.map((path) => (

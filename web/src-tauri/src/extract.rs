@@ -6,7 +6,12 @@
 //! error rather than silently degraded — a source that failed to extract
 //! should never enter the wiki looking like it succeeded.
 
-use std::io::Read;
+mod local_tools;
+mod quality;
+pub use quality::{ExtractionReport, ExtractionResult, QualityStatus};
+
+use sha2::{Digest, Sha256};
+use std::io::{Read, Write};
 use std::path::Path;
 
 use calamine::{open_workbook_auto, Data, Reader as _};
@@ -82,7 +87,10 @@ fn validate_extracted_text(text: &str, max_bytes: usize) -> Result<(), String> {
 }
 
 /// Binary formats this module knows how to convert to text.
-pub const BINARY_EXTENSIONS: &[&str] = &["pdf", "docx", "xlsx", "xls", "ods", "pptx", "odt", "odp"];
+pub const BINARY_EXTENSIONS: &[&str] = &[
+    "pdf", "docx", "xlsx", "xls", "ods", "pptx", "odt", "odp", "doc", "png", "jpg", "jpeg", "tif",
+    "tiff", "bmp", "webp",
+];
 
 /// Formats that are already text and only need reading, not parsing.
 pub const PLAIN_TEXT_EXTENSIONS: &[&str] = &[
@@ -107,16 +115,163 @@ pub fn is_supported(path: &Path) -> bool {
     })
 }
 
-/// Read a source file into text, dispatching on extension: plain-text
-/// formats are read directly, binary formats go through their parser.
-pub fn read_source_file(path: &Path) -> Result<String, String> {
-    let extension = extension_of(path)
-        .ok_or_else(|| "file has no extension to identify its format".to_string())?;
+/// Extract one file with a portable quality report. Failed candidates never carry
+/// Markdown that a caller could accidentally persist as a successful Source.
+pub fn read_source_file(path: &Path, allow_local_tools: bool) -> ExtractionResult {
+    let format = extension_of(path).unwrap_or_default();
+    let snapshot = (|| -> Result<_, String> {
+        if !is_supported(path) {
+            return Err(format!("'.{format}' is not a supported source format"));
+        }
+        validate_file_size(path, MAX_SOURCE_FILE_BYTES)?;
+        if !std::fs::metadata(path)
+            .map_err(|error| error.to_string())?
+            .is_file()
+        {
+            return Err("Source must be a regular file.".to_string());
+        }
+        let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+        let filename = directory.path().join(format!("source.{format}"));
+        let mut source = std::fs::File::open(path)
+            .map_err(|error| error.to_string())?
+            .take(MAX_SOURCE_FILE_BYTES + 1);
+        let mut destination =
+            std::fs::File::create(&filename).map_err(|error| error.to_string())?;
+        let mut digest = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        let mut total = 0;
+        loop {
+            let bytes = source
+                .read(&mut buffer)
+                .map_err(|error| error.to_string())?;
+            if bytes == 0 {
+                break;
+            }
+            total += bytes as u64;
+            if total > MAX_SOURCE_FILE_BYTES {
+                return Err("Source file grew beyond the size limit.".to_string());
+            }
+            destination
+                .write_all(&buffer[..bytes])
+                .map_err(|error| error.to_string())?;
+            digest.update(&buffer[..bytes]);
+        }
+        Ok((directory, filename, format!("{:x}", digest.finalize())))
+    })();
+    match snapshot {
+        Ok((_directory, path, content_hash)) => {
+            let mut result = extract_snapshot(&path, allow_local_tools);
+            result.content_hash = content_hash;
+            result
+        }
+        Err(error) => {
+            let mut report = ExtractionReport::new(&format);
+            report.status = QualityStatus::Fail;
+            report.diagnostics.push(error);
+            ExtractionResult {
+                content_hash: String::new(),
+                markdown: String::new(),
+                report,
+            }
+        }
+    }
+}
+
+fn extract_snapshot(path: &Path, allow_local_tools: bool) -> ExtractionResult {
+    let format = extension_of(path).unwrap_or_default();
+    let mut report = ExtractionReport::new(&format);
+    let native = extract_native(path, &format, &mut report);
+    let validation = native.as_ref().map_err(Clone::clone).and_then(|text| {
+        validate_extracted_text(text, MAX_EXTRACTED_TEXT_BYTES)?;
+        quality::assess_text(text, &mut report.clone())
+    });
+    let needs_fallback = validation.is_err()
+        || native
+            .as_ref()
+            .is_ok_and(|text| text.chars().any(quality::suspicious_character));
+    let mut candidate = native;
+    // Resource-limit failures must never trigger a converter on the rejected input.
+    let can_convert = validate_file_size(path, MAX_SOURCE_FILE_BYTES).is_ok()
+        && matches!(
+            format.as_str(),
+            "pdf" | "doc" | "png" | "jpg" | "jpeg" | "tif" | "tiff" | "bmp" | "webp"
+        );
+    if allow_local_tools && needs_fallback && can_convert {
+        match local_tools::convert(path, &format, &mut report.attempts) {
+            Ok(local_tools::Conversion {
+                text,
+                extractor,
+                pages,
+            }) => {
+                let mut check = ExtractionReport::new(&format);
+                if quality::assess_text(&text, &mut check).is_ok() {
+                    if let Err(error) = &validation {
+                        report.warn(format!("Native extraction: {error}"));
+                    }
+                    report.warn("The native extraction was unavailable or unreliable; a local converter was used. Compare the result with the original.");
+                    report.fallback(extractor);
+                    if let Some(pages) = pages {
+                        report.coverage(pages, pages, "PDF pages");
+                    }
+                    candidate = Ok(text);
+                } else {
+                    report.warn("The local converter also returned unreadable text.");
+                }
+            }
+            Err(error) => report.warn(error),
+        }
+    }
+    let result = candidate.and_then(|text| {
+        validate_extracted_text(&text, MAX_EXTRACTED_TEXT_BYTES)?;
+        quality::assess_text(&text, &mut report)?;
+        let clean: String = text
+            .replace("\r\n", "\n")
+            .replace('\r', "\n")
+            .chars()
+            .map(|ch| {
+                if ch.is_control() && !matches!(ch, '\n' | '\t') {
+                    '\u{fffd}'
+                } else {
+                    ch
+                }
+            })
+            .collect();
+        validate_extracted_text(&clean, MAX_EXTRACTED_TEXT_BYTES)?;
+        let markdown = clean.trim().to_string();
+        report.characters = markdown.chars().count();
+        Ok(markdown)
+    });
+    match result {
+        Ok(markdown) => ExtractionResult {
+            content_hash: String::new(),
+            markdown,
+            report,
+        },
+        Err(error) => {
+            report.status = QualityStatus::Fail;
+            report.diagnostics.push(error);
+            ExtractionResult {
+                content_hash: String::new(),
+                markdown: String::new(),
+                report,
+            }
+        }
+    }
+}
+
+fn extract_native(
+    path: &Path,
+    extension: &str,
+    report: &mut ExtractionReport,
+) -> Result<String, String> {
+    if !is_supported(path) {
+        return Err(format!(
+            "'.{extension}' is not a supported source format (supported: {})",
+            all_supported_extensions().join(", ")
+        ));
+    }
     validate_file_size(path, MAX_SOURCE_FILE_BYTES)?;
-    if matches!(
-        extension.as_str(),
-        "docx" | "xlsx" | "ods" | "pptx" | "odt" | "odp"
-    ) {
+    if matches!(extension, "docx" | "xlsx" | "ods" | "pptx" | "odt" | "odp") {
         validate_archive_limits(
             path,
             MAX_ARCHIVE_ENTRY_BYTES,
@@ -124,29 +279,64 @@ pub fn read_source_file(path: &Path) -> Result<String, String> {
             MAX_ARCHIVE_ENTRIES,
         )?;
     }
-    let text = if PLAIN_TEXT_EXTENSIONS.contains(&extension.as_str()) {
-        std::fs::read_to_string(path).map_err(|error| format!("cannot read file: {error}"))?
-    } else {
-        match extension.as_str() {
-            "pdf" => extract_pdf(path)?,
-            "docx" => extract_docx(path)?,
-            "xlsx" | "xls" | "ods" => extract_spreadsheet(path)?,
-            "pptx" => extract_slides(path)?,
-            "odt" | "odp" => extract_zip_xml_part(path, "content.xml")?,
-            other => {
-                return Err(format!(
-                    "'.{other}' is not a supported source format (supported: {})",
-                    all_supported_extensions().join(", ")
-                ))
+    if PLAIN_TEXT_EXTENSIONS.contains(&extension) {
+        let text =
+            std::fs::read_to_string(path).map_err(|error| format!("cannot read file: {error}"))?;
+        if matches!(
+            extension,
+            "json" | "yaml" | "yml" | "xml" | "csv" | "tsv" | "html" | "htm"
+        ) {
+            // Keep structured input readable without interpreting its tags as Markdown/HTML.
+            quality::assess_text(&text, report)?;
+            let fence = "`".repeat(
+                text.split(|ch| ch != '`')
+                    .map(str::len)
+                    .max()
+                    .unwrap_or(0)
+                    .max(2)
+                    + 1,
+            );
+            if matches!(extension, "html" | "htm") {
+                report.warn("This is a local HTML source listing. Use URL capture for readable web-page extraction.");
             }
+            let language = if matches!(extension, "html" | "htm") {
+                "text"
+            } else {
+                extension
+            };
+            return Ok(format!("{fence}{language}\n{}\n{fence}", text.trim()));
         }
-    };
-    validate_extracted_text(&text, MAX_EXTRACTED_TEXT_BYTES)?;
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return Err("no extractable text found in this file".to_string());
+        return Ok(text);
     }
-    Ok(trimmed.to_string())
+    match extension {
+        "pdf" => {
+            report.warn("PDF layout and reading order are not verified. Check columns, tables and image-only pages against the original.");
+            extract_pdf(path, report)
+        }
+        "docx" => {
+            let xml = extract_zip_xml_part(path, "word/document.xml")?;
+            let parsed = extract_docx(path);
+            let expected = xml.chars().filter(|ch| ch.is_alphanumeric()).count();
+            let actual = parsed.as_ref().map(|text| text.chars().filter(|ch| ch.is_alphanumeric()).count()).unwrap_or(0);
+            if parsed.is_err() || actual * 100 < expected * 95 {
+                report.attempts.push("cowiki-docx-xml".to_string());
+                report.warn("The DOCX parser omitted document text. The XML fallback preserves text, but flattens document formatting.");
+                report.fallback("cowiki-docx-xml");
+                return Ok(xml);
+            }
+            parsed
+        }
+        "xlsx" | "xls" | "ods" => extract_spreadsheet(path, report),
+        "pptx" => extract_slides(path, report),
+        "odt" | "odp" => {
+            report.warn("ODF text is extracted in XML order; layout, embedded images and complex tables need review.");
+            extract_zip_xml_part(path, "content.xml")
+        }
+        "doc" | "png" | "jpg" | "jpeg" | "tif" | "tiff" | "bmp" | "webp" => {
+            Err("This format needs local extraction tools. Enable them and install Tesseract for images or antiword for legacy DOC files.".to_string())
+        }
+        _ => Err(format!("'.{extension}' is not a supported source format (supported: {})", all_supported_extensions().join(", "))),
+    }
 }
 
 fn extension_of(path: &Path) -> Option<String> {
@@ -155,9 +345,83 @@ fn extension_of(path: &Path) -> Option<String> {
         .map(str::to_ascii_lowercase)
 }
 
-fn extract_pdf(path: &Path) -> Result<String, String> {
-    pdf_extract::extract_text(path)
-        .map_err(|error| format!("cannot extract text from PDF: {error}"))
+fn extract_pdf(path: &Path, report: &mut ExtractionReport) -> Result<String, String> {
+    let pages = pdf_extract::extract_text_by_pages(path)
+        .map_err(|error| format!("cannot extract text from PDF: {error}"))?;
+    let extracted = pages
+        .iter()
+        .filter(|text| quality::assess_text(text, &mut ExtractionReport::new("pdf")).is_ok())
+        .count();
+    report.coverage(pages.len(), extracted, "PDF pages");
+    if pages.is_empty() || extracted != pages.len() {
+        return Err(format!("Only {extracted} of {} PDF pages contain readable text. Blank or scanned pages require local OCR or a text export; no partial PDF was imported.", pages.len()));
+    }
+    Ok(pages.join("\n\n"))
+}
+
+#[cfg(test)]
+mod mixed_pdf_tests {
+    use super::*;
+
+    fn fixture() -> (tempfile::TempDir, std::path::PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("Mixed 中文 source.pdf");
+        std::fs::write(
+            &path,
+            include_bytes!("../tests/fixtures/mixed-text-scan.pdf"),
+        )
+        .unwrap();
+        (root, path)
+    }
+
+    #[test]
+    fn mixed_pdf_never_succeeds_with_only_its_text_page() {
+        let (_root, path) = fixture();
+        let pages = pdf_extract::extract_text_by_pages(&path).unwrap();
+        assert_eq!(pages.len(), 2);
+        assert!(pages[0].contains("DIGITAL PAGE EVIDENCE"));
+        assert!(pages[1].trim().is_empty());
+        let result = read_source_file(&path, false);
+        assert_eq!(result.report.status, QualityStatus::Fail);
+        assert_eq!(result.report.expected_units, Some(2));
+        assert_eq!(result.report.extracted_units, Some(1));
+        assert!(result.markdown.is_empty());
+        assert!(result
+            .report
+            .diagnostics
+            .iter()
+            .any(|message| message.contains("no partial PDF")));
+    }
+
+    #[test]
+    #[ignore = "requires installed Poppler and Tesseract; run explicitly for converter validation"]
+    fn mixed_pdf_recovers_scanned_page_with_local_tools() {
+        let (_root, path) = fixture();
+        let result = read_source_file(&path, true);
+        assert_eq!(
+            result.report.status,
+            QualityStatus::Fallback,
+            "{:?}",
+            result.report
+        );
+        assert_eq!(result.report.expected_units, Some(2));
+        assert_eq!(result.report.extracted_units, Some(2));
+        assert!(result.markdown.contains("DIGITAL PAGE EVIDENCE"));
+        assert!(
+            result.markdown.contains("SCANNED PAGE EVIDENCE"),
+            "{}",
+            result.markdown
+        );
+        assert_eq!(
+            result
+                .report
+                .attempts
+                .iter()
+                .filter(|tool| *tool == "tesseract")
+                .count(),
+            1
+        );
+    }
 }
 
 fn extract_docx(path: &Path) -> Result<String, String> {
@@ -254,14 +518,29 @@ fn docx_table_text(table: &docx_rs::Table) -> String {
 }
 
 /// Renders every sheet as a Markdown table under its own heading.
-fn extract_spreadsheet(path: &Path) -> Result<String, String> {
+fn extract_spreadsheet(path: &Path, report: &mut ExtractionReport) -> Result<String, String> {
     let mut workbook =
         open_workbook_auto(path).map_err(|error| format!("cannot open spreadsheet: {error}"))?;
     let mut sections = Vec::new();
-    for (name, range) in workbook.worksheets() {
-        if range.is_empty() {
+    let names = workbook.sheet_names().to_vec();
+    let mut nonempty = 0;
+    for name in &names {
+        let range = match workbook.worksheet_range(name) {
+            Ok(range) => range,
+            Err(error) => {
+                report.warn(format!("Cannot read sheet '{name}': {error}"));
+                continue;
+            }
+        };
+        if range.is_empty()
+            || range.rows().flatten().all(|cell| {
+                matches!(cell, Data::Empty)
+                    || matches!(cell, Data::String(value) if value.trim().is_empty())
+            })
+        {
             continue;
         }
+        nonempty += 1;
         let mut rows = range.rows().map(spreadsheet_row_to_markdown);
         let Some(header) = rows.next() else {
             continue;
@@ -272,6 +551,7 @@ fn extract_spreadsheet(path: &Path) -> Result<String, String> {
         table.extend(rows);
         sections.push(format!("## {name}\n\n{}", table.join("\n")));
     }
+    report.coverage(names.len(), nonempty, "sheets");
     Ok(sections.join("\n\n"))
 }
 
@@ -294,7 +574,7 @@ fn spreadsheet_row_to_markdown(row: &[Data]) -> String {
 /// PPTX keeps each slide as its own `ppt/slides/slideN.xml` part. Walk the
 /// archive for that pattern (there's no index of slide count elsewhere in
 /// the package) and read them back in slide order.
-fn extract_slides(path: &Path) -> Result<String, String> {
+fn extract_slides(path: &Path, report: &mut ExtractionReport) -> Result<String, String> {
     let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
     let mut archive =
         zip::ZipArchive::new(file).map_err(|error| format!("cannot open PPTX archive: {error}"))?;
@@ -310,6 +590,7 @@ fn extract_slides(path: &Path) -> Result<String, String> {
     }
     slide_numbers.sort_unstable();
 
+    let expected = slide_numbers.len();
     let mut slides = Vec::new();
     for number in slide_numbers {
         let name = format!("ppt/slides/slide{number}.xml");
@@ -325,6 +606,9 @@ fn extract_slides(path: &Path) -> Result<String, String> {
             slides.push(format!("## Slide {number}\n\n{text}"));
         }
     }
+    report.coverage(expected, slides.len(), "slides");
+    report
+        .warn("Slide images, diagrams and speaker notes are not included in this text extraction.");
     Ok(slides.join("\n\n"))
 }
 
@@ -357,7 +641,7 @@ fn extract_zip_xml_part(path: &Path, part_name: &str) -> Result<String, String> 
 /// it does not attempt to preserve every structural nuance.
 fn xml_visible_text(xml: &str) -> Result<String, String> {
     let mut reader = XmlReader::from_str(xml);
-    reader.config_mut().trim_text(true);
+    reader.config_mut().trim_text(false);
     let mut out = String::new();
     let mut buffer = Vec::new();
     loop {
@@ -370,6 +654,13 @@ fn xml_visible_text(xml: &str) -> Result<String, String> {
                     .decode()
                     .map_err(|error| format!("malformed XML text: {error}"))?;
                 push_xml_text(&mut out, &decoded);
+            }
+            Event::GeneralRef(reference) => {
+                let name = reference.decode().map_err(|error| error.to_string())?;
+                let entity = format!("&{name};");
+                let decoded =
+                    quick_xml::escape::unescape(&entity).map_err(|error| error.to_string())?;
+                out.push_str(&decoded);
             }
             Event::CData(text) => {
                 let decoded = text
@@ -394,13 +685,10 @@ fn xml_visible_text(xml: &str) -> Result<String, String> {
 }
 
 fn push_xml_text(out: &mut String, decoded: &str) {
-    if decoded.trim().is_empty() {
+    if decoded.trim().is_empty() && decoded.contains(['\n', '\r']) {
         return;
     }
-    if !out.is_empty() && !out.ends_with(['\n', ' ']) {
-        out.push(' ');
-    }
-    out.push_str(decoded.trim());
+    out.push_str(decoded);
 }
 
 #[cfg(test)]
@@ -410,9 +698,11 @@ mod tests {
     #[test]
     fn rejects_unsupported_extensions_with_a_clear_message() {
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("legacy.doc");
+        let path = temp.path().join("unknown.xyz");
         std::fs::write(&path, b"not really a doc").unwrap();
-        let error = read_source_file(&path).unwrap_err();
+        let result = read_source_file(&path, false);
+        assert_eq!(result.report.status, QualityStatus::Fail);
+        let error = result.report.diagnostics.join(" ");
         assert!(error.contains("not a supported source format"));
         assert!(!is_supported(&path));
     }
@@ -423,7 +713,7 @@ mod tests {
         let path = temp.path().join("notes.txt");
         std::fs::write(&path, "Plain notes.").unwrap();
         assert!(is_supported(&path));
-        assert_eq!(read_source_file(&path).unwrap(), "Plain notes.");
+        assert_eq!(read_source_file(&path, false).markdown, "Plain notes.");
     }
 
     #[test]
@@ -431,7 +721,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("book.xlsx");
         write_minimal_xlsx(&path, "Sheet1", &[["Name", "Score"], ["Ada", "10"]]);
-        let text = read_source_file(&path).unwrap();
+        let text = read_source_file(&path, false).markdown;
         assert!(text.contains("## Sheet1"));
         assert!(text.contains("| Name | Score |"));
         assert!(text.contains("| Ada | 10 |"));
@@ -448,7 +738,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("deck.pptx");
         write_minimal_pptx(&path, &["First slide title", "Second slide title"]);
-        let text = read_source_file(&path).unwrap();
+        let text = read_source_file(&path, false).markdown;
         let first = text.find("First slide title").unwrap();
         let second = text.find("Second slide title").unwrap();
         assert!(first < second);
@@ -467,8 +757,116 @@ mod tests {
              <text:p>Hello from an ODF document.</text:p>\
              </office:text></office:body></office:document-content>",
         );
-        let text = read_source_file(&path).unwrap();
+        let text = read_source_file(&path, false).markdown;
         assert_eq!(text, "Hello from an ODF document.");
+    }
+
+    #[test]
+    fn quality_reports_partial_slide_coverage_instead_of_silent_success() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("partial.pptx");
+        write_minimal_pptx(&path, &["Readable slide", ""]);
+        let extracted = read_source_file(&path, false);
+        assert_eq!(extracted.report.status, QualityStatus::Warn);
+        assert_eq!(extracted.report.expected_units, Some(2));
+        assert_eq!(extracted.report.extracted_units, Some(1));
+        assert!(extracted
+            .report
+            .diagnostics
+            .iter()
+            .any(|message| message.contains("1 of 2")));
+    }
+
+    #[test]
+    fn quality_rejects_garbled_nonempty_text_and_keeps_fail_body_empty() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("broken.txt");
+        std::fs::write(&path, "\u{fffd}\u{e000}\u{e001}text").unwrap();
+        let extracted = read_source_file(&path, false);
+        assert_eq!(extracted.report.status, QualityStatus::Fail);
+        assert!(extracted.markdown.is_empty());
+    }
+
+    #[test]
+    fn local_ocr_is_explicitly_opted_in() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("scan.png");
+        std::fs::write(&path, b"invalid image").unwrap();
+        let extracted = read_source_file(&path, false);
+        assert_eq!(extracted.report.status, QualityStatus::Fail);
+        assert_eq!(extracted.report.attempts, ["cowiki-native"]);
+        assert!(extracted
+            .report
+            .diagnostics
+            .iter()
+            .any(|message| message.contains("Enable")));
+    }
+
+    #[test]
+    fn docx_fallback_recovers_text_nested_in_hyperlinks() {
+        use std::io::Write;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("linked.docx");
+        let mut archive = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        archive
+            .start_file(
+                "word/document.xml",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+        archive.write_all(br#"<w:document xmlns:w="urn:w"><w:body><w:p><w:hyperlink><w:r><w:t>Important linked text &amp; evidence</w:t></w:r></w:hyperlink></w:p></w:body></w:document>"#).unwrap();
+        archive.finish().unwrap();
+        let extracted = read_source_file(&path, false);
+        assert_eq!(extracted.report.status, QualityStatus::Fallback);
+        assert_eq!(extracted.report.extractor, "cowiki-docx-xml");
+        assert!(extracted
+            .markdown
+            .contains("Important linked text & evidence"));
+    }
+
+    #[test]
+    fn docx_quality_detects_silent_loss_in_a_valid_document() {
+        use docx_rs::{Docx, Hyperlink, HyperlinkType, Paragraph, Run};
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("valid.docx");
+        Docx::new()
+            .add_paragraph(
+                Paragraph::new()
+                    .add_run(Run::new().add_text("Short intro. "))
+                    .add_hyperlink(
+                        Hyperlink::new("https://example.com", HyperlinkType::External).add_run(
+                            Run::new().add_text(
+                                "Essential evidence that the native paragraph reader omits.",
+                            ),
+                        ),
+                    ),
+            )
+            .build()
+            .pack(std::fs::File::create(&path).unwrap())
+            .unwrap();
+        let native = extract_docx(&path).unwrap();
+        assert!(!native.contains("Essential evidence"));
+        let extracted = read_source_file(&path, false);
+        assert_eq!(extracted.report.status, QualityStatus::Fallback);
+        assert!(extracted.markdown.contains("Essential evidence"));
+    }
+
+    #[test]
+    fn xml_recovery_preserves_spaces_between_text_runs() {
+        let text = xml_visible_text("<p><t>one</t><t> </t><t>two</t><t>&amp;</t><t>three</t></p>")
+            .unwrap();
+        assert_eq!(text, "one two&three");
+    }
+
+    #[test]
+    fn structured_text_is_fenced_without_breaking_embedded_fences() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("data.json");
+        std::fs::write(&path, r#"{"example":"```"}"#).unwrap();
+        let extracted = read_source_file(&path, false);
+        assert_eq!(extracted.report.status, QualityStatus::Pass);
+        assert!(extracted.markdown.starts_with("````json\n"));
+        assert!(extracted.markdown.ends_with("\n````"));
     }
 
     #[test]

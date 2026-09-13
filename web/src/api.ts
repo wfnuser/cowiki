@@ -183,10 +183,23 @@ export interface SourceContent {
   content: string;
 }
 
+export interface ExtractionReport {
+  status: 'pass' | 'warn' | 'fallback' | 'fail';
+  format: string;
+  extractor: string;
+  version: number;
+  characters: number;
+  expectedUnits: number | null;
+  extractedUnits: number | null;
+  diagnostics: string[];
+  attempts: string[];
+}
+
 export interface IngestFileOutcome {
   sourcePath: string;
   source: SourceItem | null;
   error: string | null;
+  extraction?: ExtractionReport;
 }
 
 // ── Workspaces ──

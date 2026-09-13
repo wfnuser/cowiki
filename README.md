@@ -121,6 +121,8 @@ CoWiki is early, and the collaboration model is still an open design problem.
 Issues, product criticism, experiments, and code are welcome. See
 [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
+File imports include [extraction quality reports and optional local OCR](docs/source-extraction.md), so partial or recovered content can be reviewed before Agent organization.
+
 ## License
 
 CoWiki is licensed under the [Apache License 2.0](LICENSE).

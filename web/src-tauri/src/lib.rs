@@ -232,11 +232,16 @@ async fn local_ingest_files(
     engine: State<'_, LocalEngine>,
     space_slug: String,
     source_paths: Vec<String>,
+    allow_local_tools: Option<bool>,
 ) -> Result<Vec<IngestFileOutcome>, String> {
     let engine = engine.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _mutation = engine.lock_mutations()?;
-        engine.ingest_files(&space_slug, &source_paths)
+        engine.ingest_files_with_options(
+            &space_slug,
+            &source_paths,
+            allow_local_tools.unwrap_or(false),
+        )
     })
     .await
     .map_err(|error| format!("local source import task failed: {error}"))?

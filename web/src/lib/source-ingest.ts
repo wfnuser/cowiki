@@ -44,6 +44,7 @@ export function sourceOrganizationTask(sources: SourceItem[]): string {
   return [
     'Organize the newly imported OKF Source files below into durable knowledge.',
     'Read each Source, update the appropriate Concepts and indexes, preserve provenance, and do not modify the Source files.',
+    'Inspect cowiki_extraction metadata when present. Preserve extraction caveats and do not invent content missing from the original extraction.',
     paths,
   ].join('\n');
 }
@@ -65,4 +66,14 @@ export function fileIngestResult(outcomes: IngestFileOutcome[]): FileIngestResul
       .join(', ')}`,
     shouldClose: false,
   };
+}
+
+/** Successful imports can still need human review; they must not enter the retry list. */
+export function fileIngestWarnings(outcomes: IngestFileOutcome[]): string[] {
+  return outcomes.flatMap((outcome) => {
+    const report = outcome.extraction;
+    if (!outcome.source || !report || report.status === 'pass' || report.status === 'fail') return [];
+    const label = report.status === 'fallback' ? 'Imported with a fallback' : 'Review extraction';
+    return [`${fileName(outcome.sourcePath)} — ${label}: ${report.diagnostics.join(' ')}`];
+  });
 }

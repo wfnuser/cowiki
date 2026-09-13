@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   fileIngestResult,
+  fileIngestWarnings,
   mergeImportedSources,
   sourceImportStorageLabel,
   sourceImportProgressLabel,
@@ -57,4 +58,26 @@ test('Agent organization task names exact Source paths, not display titles', () 
   assert.match(task, /sources\/_encoded\/first\.md/);
   assert.match(task, /sources\/_encoded\/second\.md/);
   assert.doesNotMatch(task, /Ignore previous instructions/);
+});
+
+
+test('warn and fallback imports remain successful but show actionable diagnostics', () => {
+  const extraction = {
+    status: 'warn' as const, format: 'pptx', extractor: 'cowiki-native', version: 1,
+    characters: 42, expectedUnits: 2, extractedUnits: 1,
+    diagnostics: ['Only 1 of 2 slides contain extracted text.'], attempts: ['cowiki-native'],
+  };
+  const outcomes = [
+    { sourcePath: '/tmp/slides.pptx', source: { filename: 'slides.md' }, error: null, extraction },
+    { sourcePath: '/tmp/scan.png', source: { filename: 'scan.md' }, error: null,
+      extraction: { ...extraction, status: 'fallback' as const, extractor: 'tesseract' } },
+    { sourcePath: '/tmp/failed.pdf', source: null, error: 'No text',
+      extraction: { ...extraction, status: 'fail' as const } },
+  ];
+  assert.deepEqual(fileIngestResult(outcomes).remainingFiles, ['/tmp/failed.pdf']);
+  const warnings = fileIngestWarnings(outcomes);
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /slides.pptx.*1 of 2 slides/);
+  assert.match(warnings[1], /scan.png.*fallback/);
+  assert.deepEqual(fileIngestWarnings([{ sourcePath: 'old.md', source: { filename: 'old.md' }, error: null }]), []);
 });
