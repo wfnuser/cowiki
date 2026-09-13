@@ -1,0 +1,661 @@
+{
+  "schema_version": 1,
+  "node": "v24.20.0",
+  "os": "linux",
+  "arch": "x64",
+  "scope": "Node timings of production navigation helpers and PageReader SSR; excludes browser layout, paint, IPC and PTY.",
+  "corpora": [
+    {
+      "documents": 100,
+      "visible_page_tree": {
+        "unit": "ms",
+        "samples": 30,
+        "p50": 1.2945060000001831,
+        "p95": 2.40788799999973,
+        "values": [0.9590780000003178, 0.9783229999998184, 0.9825449999998455, 0.9850420000002487, 0.9850489999998899, 0.9925159999997959, 1.0072730000001684, 1.059744000000137, 1.0834569999997257, 1.0891960000003564, 1.0893779999996696, 1.1404389999997875, 1.1601720000003297, 1.244995999999901, 1.2945060000001831, 1.3556010000002061, 1.4553679999999076, 1.5260480000001735, 1.6137570000000778, 1.619162000000415, 1.6856680000000779, 1.7428979999999683, 1.7593509999996968, 1.7955179999999018, 1.843623000000207, 1.9703389999999672, 2.044507000000067, 2.259397000000263, 2.40788799999973, 2.4627439999999297]
+      },
+      "find_last_concept": {
+        "unit": "ms",
+        "samples": 30,
+        "p50": 0.030632999999852473,
+        "p95": 0.08526599999959217,
+        "values": [0.020623999999770604, 0.02091500000005908, 0.020993999999973312, 0.021123000000443426, 0.021240000000034343, 0.021454000000176165, 0.02153199999975186, 0.022474000000329397, 0.022714000000178203, 0.02354299999979048, 0.02976300000000265, 0.030005999999957567, 0.030213999999887164, 0.030248000000028696, 0.030632999999852473, 0.030755999999655614, 0.030826000000161002, 0.03089799999997922, 0.030925999999908527, 0.03146400000014182, 0.03209699999979421, 0.03266499999972439, 0.03368799999998373, 0.034575000000131695, 0.036371000000144704, 0.043184000000110245, 0.05547400000023117, 0.05566799999996874, 0.08526599999959217, 0.10712199999989025]
+      },
+      "collect_submit_paths": {
+        "unit": "ms",
+        "samples": 30,
+        "p50": 0.014822999999978492,
+        "p95": 0.054275999999845226,
+        "values": [0.013306000000284257, 0.013320999999905325, 0.013376999999763939, 0.013452000000143016, 0.01353800000015326, 0.01372399999991103, 0.013762999999926251, 0.013830999999754567, 0.01390399999991132, 0.013908000000355969, 0.013995000000250002, 0.014008000000103493, 0.014060999999855994, 0.014216000000033091, 0.014822999999978492, 0.014842000000044209, 0.014869000000089727, 0.015375000000403816, 0.01548400000001493, 0.016073999999662192, 0.018920999999863852, 0.019682000000102562, 0.02095499999995809, 0.022754000000077212, 0.0247309999999743, 0.03477900000007139, 0.03772900000012669, 0.04286099999990256, 0.054275999999845226, 0.06298699999979362]
+      }
+    },
+    {
+      "documents": 1000,
+      "visible_page_tree": {
+        "unit": "ms",
+        "samples": 30,
+        "p50": 10.33755999999994,
+        "p95": 16.85234599999967,
+        "values": [8.475954999999885, 8.64229400000022, 8.670937000000322, 8.781400000000303, 8.793337999999949, 8.835066999999981, 9.051530999999613, 9.162671000000046, 9.184399000000212, 9.256610000000364, 9.681068000000323, 9.894089999999778, 9.995331999999962, 10.293255000000045, 10.33755999999994, 11.059925000000021, 11.110729999999876, 11.58248999999978, 11.778992000000017, 11.951602999999977, 12.059415000000172, 12.250968999999714, 12.423789999999826, 12.547689999999875, 12.77214099999992, 12.916372999999567, 14.670346999999765, 15.78086600000006, 16.85234599999967, 21.208341999999902]
+      },
+      "find_last_concept": {
+        "unit": "ms",
+        "samples": 30,
+        "p50": 0.26228100000025734,
+        "p95": 0.4433880000001409,
+        "values": [0.22420499999998356, 0.2301690000003873, 0.23270400000001246, 0.23365899999998874, 0.2384279999996579, 0.2392810000001191, 0.24126200000000608, 0.2418999999999869, 0.24322200000005978, 0.24376499999971202, 0.2472819999998137, 0.2493690000001152, 0.25724499999978434, 0.2576860000003762, 0.26228100000025734, 0.26236500000004526, 0.26334399999996094, 0.26733999999987645, 0.2685260000002927, 0.295006000000285, 0.30606600000010076, 0.32759400000031746, 0.33676299999979165, 0.3390599999997903, 0.3480139999996936, 0.4054369999998926, 0.42964500000016415, 0.4327800000000934, 0.4433880000001409, 0.4732920000001286]
+      },
+      "collect_submit_paths": {
+        "unit": "ms",
+        "samples": 30,
+        "p50": 0.1328840000001037,
+        "p95": 0.1833560000000034,
+        "values": [0.12745799999993324, 0.12810399999989386, 0.12854299999980867, 0.12856700000020282, 0.12876999999980399, 0.12946599999986574, 0.12965600000006816, 0.12966800000003786, 0.12970499999983076, 0.12972799999988638, 0.12981799999988652, 0.12995300000011412, 0.13122800000019197, 0.13168300000006639, 0.1328840000001037, 0.13304799999968964, 0.13412799999969138, 0.13447100000030332, 0.13485800000034942, 0.13612499999999272, 0.13795699999991484, 0.14180100000021412, 0.14182499999969878, 0.14292299999988245, 0.1491150000001653, 0.14964000000009037, 0.15196400000013455, 0.16067999999995664, 0.1833560000000034, 0.25430099999994127]
+      }
+    },
+    {
+      "documents": 10000,
+      "visible_page_tree": {
+        "unit": "ms",
+        "samples": 30,
+        "p50": 87.73508800000036,
+        "p95": 125.97928699999966,
+        "values": [67.6036180000001, 73.23534899999959, 74.03272399999969, 75.8307190000005, 77.63896300000033, 78.1404849999999, 78.48281600000064, 79.45369000000028, 79.56089499999962, 79.82971999999972, 81.24727500000017, 82.94599499999958, 85.61483500000031, 86.48148500000025, 87.73508800000036, 88.52581499999997, 95.68507999999974, 95.7615679999999, 96.58304399999997, 99.81734000000006, 99.97524300000077, 101.86725500000011, 102.52687699999933, 109.62596500000018, 111.07494399999996, 114.13790999999947, 120.37043799999992, 121.25427200000013, 125.97928699999966, 131.24138500000026]
+      },
+      "find_last_concept": {
+        "unit": "ms",
+        "samples": 30,
+        "p50": 2.4382070000001477,
+        "p95": 5.246979000000465,
+        "values": [2.194234999999935, 2.2276389999997264, 2.248640000000705, 2.264879000000292, 2.2714330000007976, 2.284045999999762, 2.289557000000059, 2.2913870000002134, 2.320056999999906, 2.3821930000003704, 2.4124769999998534, 2.4210339999999633, 2.4220550000000003, 2.4359519999998156, 2.4382070000001477, 2.463713999999527, 2.502230999999483, 2.5331149999992704, 2.5336409999999887, 2.5731660000001284, 2.6789319999998042, 2.708458000000064, 2.725140000000465, 2.7656440000000657, 2.9923509999998714, 3.5130740000004153, 3.891827000000376, 4.74527500000022, 5.246979000000465, 23.578292000000147]
+      },
+      "collect_submit_paths": {
+        "unit": "ms",
+        "samples": 30,
+        "p50": 1.3483679999999367,
+        "p95": 2.547595000000001,
+        "values": [1.10057500000039, 1.1016959999997198, 1.1039559999999256, 1.1102660000005926, 1.122352000000319, 1.129468999999517, 1.1301240000002508, 1.15362499999992, 1.1617420000002312, 1.1768709999996645, 1.1991990000005899, 1.2208160000000134, 1.221853999999439, 1.2799220000006244, 1.3483679999999367, 1.3805019999999786, 1.3977489999997488, 1.4553289999994377, 1.4580340000002252, 1.4640119999994567, 1.5155639999993582, 1.8198510000001988, 1.9392250000000786, 2.213966000000255, 2.2367670000003272, 2.26385399999981, 2.2889769999992495, 2.3629339999997683, 2.547595000000001, 25.00680900000043]
+      }
+    }
+  ],
+  "page_reader_ssr": {
+    "unit": "ms",
+    "samples": 30,
+    "p50": 3.273863999999776,
+    "p95": 6.348842999999761,
+    "values": [2.2212549999994735, 2.261996000000181, 2.3238120000005438, 2.3525530000006256, 2.6443410000001677, 2.666946999999709, 2.688114000000496, 2.6929139999992913, 2.911240999999791, 2.9708739999996396, 2.9985080000005837, 3.029504000000088, 3.157094000000143, 3.2199940000000424, 3.273863999999776, 3.2806000000000495, 3.3681210000004285, 3.593022000000019, 3.8038040000001274, 4.142472999999882, 4.275391000000127, 4.345597999999882, 4.407538999999815, 4.41541799999959, 4.8184110000001965, 4.853743000000577, 5.259814000000006, 5.643398000000161, 6.348842999999761, 7.072392000000036]
+  },
+  "assets": [
+    {
+      "filename": "apl-BK70zBuJ.js",
+      "bytes": 2292,
+      "gzip_bytes": 1223
+    },
+    {
+      "filename": "asciiarmor-B8ArWv07.js",
+      "bytes": 792,
+      "gzip_bytes": 405
+    },
+    {
+      "filename": "asn1-CAMdHIDN.js",
+      "bytes": 3956,
+      "gzip_bytes": 1947
+    },
+    {
+      "filename": "asterisk-8UjU3f4R.js",
+      "bytes": 4079,
+      "gzip_bytes": 1740
+    },
+    {
+      "filename": "brainfuck-BGmmBqQz.js",
+      "bytes": 599,
+      "gzip_bytes": 319
+    },
+    {
+      "filename": "clike-M0zcv0lv.js",
+      "bytes": 22061,
+      "gzip_bytes": 7718
+    },
+    {
+      "filename": "clojure-CgVgnCSF.js",
+      "bytes": 9406,
+      "gzip_bytes": 4005
+    },
+    {
+      "filename": "cmake-C3B-i0Qa.js",
+      "bytes": 780,
+      "gzip_bytes": 464
+    },
+    {
+      "filename": "cobol-D3zIkywS.js",
+      "bytes": 6223,
+      "gzip_bytes": 3010
+    },
+    {
+      "filename": "coffeescript-DPQSX5_4.js",
+      "bytes": 3855,
+      "gzip_bytes": 1689
+    },
+    {
+      "filename": "commonlisp-Cu7Yvs6h.js",
+      "bytes": 2320,
+      "gzip_bytes": 1099
+    },
+    {
+      "filename": "crystal-BenaA7mf.js",
+      "bytes": 5020,
+      "gzip_bytes": 2101
+    },
+    {
+      "filename": "css-h8jJsBXg.js",
+      "bytes": 24708,
+      "gzip_bytes": 8216
+    },
+    {
+      "filename": "cypher-CuLxR47A.js",
+      "bytes": 3182,
+      "gzip_bytes": 1484
+    },
+    {
+      "filename": "d-1LjQ9qIz.js",
+      "bytes": 3673,
+      "gzip_bytes": 1666
+    },
+    {
+      "filename": "diff-BF5J_cjP.js",
+      "bytes": 302,
+      "gzip_bytes": 234
+    },
+    {
+      "filename": "dist-B0uitb6C.js",
+      "bytes": 22895,
+      "gzip_bytes": 10300
+    },
+    {
+      "filename": "dist-BqrTXdBZ.js",
+      "bytes": 4835,
+      "gzip_bytes": 2298
+    },
+    {
+      "filename": "dist-BrqAVpbu.js",
+      "bytes": 40678,
+      "gzip_bytes": 16717
+    },
+    {
+      "filename": "dist-C0Dh_dc0.js",
+      "bytes": 20640,
+      "gzip_bytes": 9202
+    },
+    {
+      "filename": "dist-CKO3kV2q.js",
+      "bytes": 103868,
+      "gzip_bytes": 34341
+    },
+    {
+      "filename": "dist-COkIQfMo.js",
+      "bytes": 16166,
+      "gzip_bytes": 7379
+    },
+    {
+      "filename": "dist-Ck5aeKWK.js",
+      "bytes": 14306,
+      "gzip_bytes": 5756
+    },
+    {
+      "filename": "dist-Cq1UVsce.js",
+      "bytes": 70760,
+      "gzip_bytes": 25819
+    },
+    {
+      "filename": "dist-Cth09xUT.js",
+      "bytes": 30658,
+      "gzip_bytes": 12574
+    },
+    {
+      "filename": "dist-DDYR91i5.js",
+      "bytes": 11526,
+      "gzip_bytes": 5133
+    },
+    {
+      "filename": "dist-DGUl_Bf0.js",
+      "bytes": 2578,
+      "gzip_bytes": 1478
+    },
+    {
+      "filename": "dist-DUJEjbUZ.js",
+      "bytes": 20894,
+      "gzip_bytes": 9578
+    },
+    {
+      "filename": "dist-DlXi8xqE.js",
+      "bytes": 97676,
+      "gzip_bytes": 28371
+    },
+    {
+      "filename": "dist-DoHjVMpi.js",
+      "bytes": 44529,
+      "gzip_bytes": 19021
+    },
+    {
+      "filename": "dist-DpzW78C_.js",
+      "bytes": 1960,
+      "gzip_bytes": 1245
+    },
+    {
+      "filename": "dist-uoXZnuXL.js",
+      "bytes": 3229,
+      "gzip_bytes": 1653
+    },
+    {
+      "filename": "dist-wZbJxaIu.js",
+      "bytes": 34091,
+      "gzip_bytes": 12936
+    },
+    {
+      "filename": "dockerfile-Vy7vyh8a.js",
+      "bytes": 1906,
+      "gzip_bytes": 653
+    },
+    {
+      "filename": "dtd-Bcs7v-1r.js",
+      "bytes": 2092,
+      "gzip_bytes": 869
+    },
+    {
+      "filename": "dylan-BbH88FUZ.js",
+      "bytes": 4041,
+      "gzip_bytes": 1628
+    },
+    {
+      "filename": "ebnf-BfkPfK0C.js",
+      "bytes": 1979,
+      "gzip_bytes": 798
+    },
+    {
+      "filename": "ecl-DchwyjoF.js",
+      "bytes": 5092,
+      "gzip_bytes": 2297
+    },
+    {
+      "filename": "eiffel-BsWmahAQ.js",
+      "bytes": 1692,
+      "gzip_bytes": 908
+    },
+    {
+      "filename": "elm-Cqhinqwl.js",
+      "bytes": 1866,
+      "gzip_bytes": 811
+    },
+    {
+      "filename": "erlang-BkJgmTOG.js",
+      "bytes": 7846,
+      "gzip_bytes": 2893
+    },
+    {
+      "filename": "factor-CXKaotZ6.js",
+      "bytes": 1669,
+      "gzip_bytes": 608
+    },
+    {
+      "filename": "fcl-wdaYc9AF.js",
+      "bytes": 2029,
+      "gzip_bytes": 946
+    },
+    {
+      "filename": "forth-Ba00b93U.js",
+      "bytes": 2541,
+      "gzip_bytes": 1319
+    },
+    {
+      "filename": "fortran-Bp5oIPoJ.js",
+      "bytes": 3862,
+      "gzip_bytes": 1926
+    },
+    {
+      "filename": "gas-CbghHik_.js",
+      "bytes": 4550,
+      "gzip_bytes": 1267
+    },
+    {
+      "filename": "gherkin-CZLFtNJE.js",
+      "bytes": 10156,
+      "gzip_bytes": 5086
+    },
+    {
+      "filename": "groovy-DsiF8HW_.js",
+      "bytes": 4103,
+      "gzip_bytes": 1744
+    },
+    {
+      "filename": "haskell-Ctb2yUqo.js",
+      "bytes": 4159,
+      "gzip_bytes": 1888
+    },
+    {
+      "filename": "haxe-DI5RJco4.js",
+      "bytes": 7862,
+      "gzip_bytes": 2922
+    },
+    {
+      "filename": "http-Cih68tzy.js",
+      "bytes": 845,
+      "gzip_bytes": 424
+    },
+    {
+      "filename": "idl-D1ThVMra.js",
+      "bytes": 9826,
+      "gzip_bytes": 4378
+    },
+    {
+      "filename": "index-B-R_Pn38.js",
+      "bytes": 1833281,
+      "gzip_bytes": 551244
+    },
+    {
+      "filename": "index-rlg0uNDu.css",
+      "bytes": 85714,
+      "gzip_bytes": 15237
+    },
+    {
+      "filename": "javascript-CioCT25R.js",
+      "bytes": 17020,
+      "gzip_bytes": 5708
+    },
+    {
+      "filename": "julia-qO0NmqGa.js",
+      "bytes": 5263,
+      "gzip_bytes": 2163
+    },
+    {
+      "filename": "livescript-BGVsv9fV.js",
+      "bytes": 4081,
+      "gzip_bytes": 1624
+    },
+    {
+      "filename": "lua-DvomzuT3.js",
+      "bytes": 3130,
+      "gzip_bytes": 1397
+    },
+    {
+      "filename": "mathematica-B5nwbDO_.js",
+      "bytes": 1899,
+      "gzip_bytes": 806
+    },
+    {
+      "filename": "mbox-DquXlnRS.js",
+      "bytes": 1386,
+      "gzip_bytes": 650
+    },
+    {
+      "filename": "mirc-usPhfujx.js",
+      "bytes": 5917,
+      "gzip_bytes": 2683
+    },
+    {
+      "filename": "mllike-DbWzw58i.js",
+      "bytes": 4823,
+      "gzip_bytes": 1562
+    },
+    {
+      "filename": "modelica-DFNnN39Q.js",
+      "bytes": 2795,
+      "gzip_bytes": 1285
+    },
+    {
+      "filename": "mscgen-CxA8c-5E.js",
+      "bytes": 3499,
+      "gzip_bytes": 973
+    },
+    {
+      "filename": "mumps-JylzLIF3.js",
+      "bytes": 1836,
+      "gzip_bytes": 955
+    },
+    {
+      "filename": "nginx-BJpTWvL6.js",
+      "bytes": 7409,
+      "gzip_bytes": 2716
+    },
+    {
+      "filename": "nsis-qiyRqcQu.js",
+      "bytes": 6804,
+      "gzip_bytes": 2982
+    },
+    {
+      "filename": "ntriples-8P-OuE-u.js",
+      "bytes": 2077,
+      "gzip_bytes": 734
+    },
+    {
+      "filename": "octave-Bndxeq-f.js",
+      "bytes": 2101,
+      "gzip_bytes": 1077
+    },
+    {
+      "filename": "oz-Df-PJoMD.js",
+      "bytes": 2881,
+      "gzip_bytes": 1269
+    },
+    {
+      "filename": "pascal-H2xGndwr.js",
+      "bytes": 2256,
+      "gzip_bytes": 1174
+    },
+    {
+      "filename": "perl-CuAPF61Q.js",
+      "bytes": 9750,
+      "gzip_bytes": 3454
+    },
+    {
+      "filename": "pig-DuQV-RJ4.js",
+      "bytes": 2513,
+      "gzip_bytes": 1373
+    },
+    {
+      "filename": "powershell-Bdq-8fxe.js",
+      "bytes": 7699,
+      "gzip_bytes": 3283
+    },
+    {
+      "filename": "properties-BdJ5Xito.js",
+      "bytes": 664,
+      "gzip_bytes": 342
+    },
+    {
+      "filename": "protobuf-BB5BJbg_.js",
+      "bytes": 802,
+      "gzip_bytes": 507
+    },
+    {
+      "filename": "pug-42FZfq4N.js",
+      "bytes": 6670,
+      "gzip_bytes": 1962
+    },
+    {
+      "filename": "puppet-ClPTL2mw.js",
+      "bytes": 2540,
+      "gzip_bytes": 1203
+    },
+    {
+      "filename": "python-DcGlaVlT.js",
+      "bytes": 6284,
+      "gzip_bytes": 2673
+    },
+    {
+      "filename": "q-CgomPxgZ.js",
+      "bytes": 3691,
+      "gzip_bytes": 1691
+    },
+    {
+      "filename": "r-CEXwld9S.js",
+      "bytes": 3008,
+      "gzip_bytes": 1342
+    },
+    {
+      "filename": "rpm-DLgjfhgY.js",
+      "bytes": 1597,
+      "gzip_bytes": 818
+    },
+    {
+      "filename": "ruby-C2IgO1Iq.js",
+      "bytes": 5104,
+      "gzip_bytes": 2151
+    },
+    {
+      "filename": "sas-RV7lAMho.js",
+      "bytes": 9331,
+      "gzip_bytes": 4105
+    },
+    {
+      "filename": "scheme-zrufBkLR.js",
+      "bytes": 6363,
+      "gzip_bytes": 2382
+    },
+    {
+      "filename": "shell-CPGri-V8.js",
+      "bytes": 2449,
+      "gzip_bytes": 1203
+    },
+    {
+      "filename": "sieve-T3jVzViK.js",
+      "bytes": 1615,
+      "gzip_bytes": 770
+    },
+    {
+      "filename": "simple-mode-CfPVNBQ1.js",
+      "bytes": 2295,
+      "gzip_bytes": 1094
+    },
+    {
+      "filename": "smalltalk-unbFF26X.js",
+      "bytes": 1996,
+      "gzip_bytes": 847
+    },
+    {
+      "filename": "solr-D6k9TkTz.js",
+      "bytes": 863,
+      "gzip_bytes": 453
+    },
+    {
+      "filename": "sparql-BUzpNdU0.js",
+      "bytes": 3331,
+      "gzip_bytes": 1594
+    },
+    {
+      "filename": "spreadsheet-DuaAaHPX.js",
+      "bytes": 1135,
+      "gzip_bytes": 533
+    },
+    {
+      "filename": "sql-BlRI686q.js",
+      "bytes": 36858,
+      "gzip_bytes": 10812
+    },
+    {
+      "filename": "stex-B4GWcMtu.js",
+      "bytes": 3121,
+      "gzip_bytes": 1179
+    },
+    {
+      "filename": "stylus-mH8AqIG9.js",
+      "bytes": 23526,
+      "gzip_bytes": 8510
+    },
+    {
+      "filename": "swift-D-UovBCd.js",
+      "bytes": 3762,
+      "gzip_bytes": 1814
+    },
+    {
+      "filename": "tcl-BVwA_Cc5.js",
+      "bytes": 2353,
+      "gzip_bytes": 1215
+    },
+    {
+      "filename": "textile-42GyO5L8.js",
+      "bytes": 6772,
+      "gzip_bytes": 2441
+    },
+    {
+      "filename": "tiddlywiki-CFKt_eg0.js",
+      "bytes": 2760,
+      "gzip_bytes": 1071
+    },
+    {
+      "filename": "tiki-DVIbrCSt.js",
+      "bytes": 3235,
+      "gzip_bytes": 1261
+    },
+    {
+      "filename": "toml-CrE7307U.js",
+      "bytes": 1190,
+      "gzip_bytes": 539
+    },
+    {
+      "filename": "troff-egxjbO92.js",
+      "bytes": 957,
+      "gzip_bytes": 435
+    },
+    {
+      "filename": "ttcn-Bif4PbYY.js",
+      "bytes": 4824,
+      "gzip_bytes": 2133
+    },
+    {
+      "filename": "ttcn-cfg-HF6YYF9m.js",
+      "bytes": 4078,
+      "gzip_bytes": 1723
+    },
+    {
+      "filename": "turtle-rIxNyn7P.js",
+      "bytes": 1957,
+      "gzip_bytes": 882
+    },
+    {
+      "filename": "vb-BKri_QdP.js",
+      "bytes": 3650,
+      "gzip_bytes": 1807
+    },
+    {
+      "filename": "vbscript-942Vq-oZ.js",
+      "bytes": 5431,
+      "gzip_bytes": 2547
+    },
+    {
+      "filename": "velocity-CtiYJhpF.js",
+      "bytes": 2703,
+      "gzip_bytes": 1110
+    },
+    {
+      "filename": "verilog-DS5Aimhi.js",
+      "bytes": 8435,
+      "gzip_bytes": 3520
+    },
+    {
+      "filename": "vhdl-_Fr0R5ju.js",
+      "bytes": 3312,
+      "gzip_bytes": 1494
+    },
+    {
+      "filename": "webidl-CHu7Ju6Y.js",
+      "bytes": 2449,
+      "gzip_bytes": 1247
+    },
+    {
+      "filename": "xquery-DsnvKsij.js",
+      "bytes": 6225,
+      "gzip_bytes": 2561
+    },
+    {
+      "filename": "yacas-D0JtPqFj.js",
+      "bytes": 2141,
+      "gzip_bytes": 1084
+    },
+    {
+      "filename": "z80-xc9iG3nA.js",
+      "bytes": 1755,
+      "gzip_bytes": 792
+    }
+  ],
+  "max_rss_bytes": 1123123200
+}

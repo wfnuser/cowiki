@@ -57,6 +57,8 @@ cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 ```
 
+For optional scale measurements, see the [desktop benchmark guide](docs/desktop-performance.md) and its recorded baseline.
+
 ## Pull request workflow
 
 1. Create a feature/bugfix branch from `dev`.

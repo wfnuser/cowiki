@@ -18,6 +18,8 @@ use crate::okf::{self, DocumentKind};
 use crate::web_source::{self, WebSourceSnapshot};
 
 mod agent_changes;
+#[cfg(test)]
+mod benchmarks;
 mod comments;
 pub use crate::knowledge_index::BrokenLink;
 pub use agent_changes::AgentChange;

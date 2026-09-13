@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "test:browser": "playwright test",
     "preview": "vite preview",
-    "test": "npm run test:auth-flow && npm run test:versioned-document && npm run test:local-space && npm run test:sidebar-layout && npm run test:client-settings && npm run test:design-system && npm run test:page-frontmatter && npm run test:page-comments-ui && npm run test:agent-terminal && npm run test:agent-contract && npm run test:okf-pages && npm run test:workspace-navigation && npm run test:workspace-context && npm run test:window-chrome && npm run test:page-header && npm run test:source-ingest && npm run test:html-view && npm run test:desktop-workflow && npm run test:history && npm run test:link-diagnostics && npm run test:cloud-sync && npm run test:cloud-client && npm run test:cloud-shell && npm run test:cloud-review-model && npm run test:review-preview && npm run test:skill-hosting && npm run test:cloud-space-dialog",
+    "test": "npm run test:auth-flow && npm run test:versioned-document && npm run test:local-space && npm run test:sidebar-layout && npm run test:client-settings && npm run test:design-system && npm run test:page-frontmatter && npm run test:page-comments-ui && npm run test:agent-terminal && npm run test:agent-contract && npm run test:okf-pages && npm run test:workspace-navigation && npm run test:workspace-context && npm run test:window-chrome && npm run test:page-header && npm run test:source-ingest && npm run test:html-view && npm run test:desktop-workflow && npm run test:history && npm run test:link-diagnostics && npm run test:cloud-sync && npm run test:cloud-client && npm run test:cloud-shell && npm run test:cloud-review-model && npm run test:review-preview && npm run test:skill-hosting && npm run test:cloud-space-dialog && npm run test:benchmark-provenance",
     "test:auth-flow": "node --experimental-strip-types --test tests/auth-flow.test.ts",
     "test:versioned-document": "node --experimental-strip-types --test tests/versioned-document.test.ts",
     "test:local-space": "node --experimental-strip-types --test tests/local-space.test.ts",
@@ -40,7 +40,9 @@
     "test:cloud-space-dialog": "node --experimental-strip-types --test tests/cloud-space-dialog.test.ts",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build"
+    "desktop:build": "tauri build",
+    "bench:ui": "node scripts/benchmark-ui.mjs",
+    "test:benchmark-provenance": "node --test tests/benchmark-provenance.test.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
