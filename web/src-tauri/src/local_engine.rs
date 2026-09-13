@@ -1753,6 +1753,49 @@ struct MigrationBackup {
     directories: Vec<PathBuf>,
 }
 
+// Temporary snapshots represent filesystem bytes, independent of a user's Git
+// clean/smudge or core.autocrlf settings. The caller never writes this index.
+fn add_worktree_bytes_to_index(
+    repo: &Repository,
+    index: &mut git2::Index,
+    root: &Path,
+    relative: &Path,
+) -> Result<(), String> {
+    index
+        .add_path(relative)
+        .map_err(|error| error.to_string())?;
+    let mut entry = index
+        .get_path(relative, 0)
+        .ok_or("snapshot entry is missing")?;
+    if entry.mode & 0o170000 == 0o100000 {
+        let path = checked_space_path(root, relative)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.custom_flags(0x00200000); // FILE_FLAG_OPEN_REPARSE_POINT
+        }
+        let mut file = options.open(path).map_err(|error| error.to_string())?;
+        let metadata = file.metadata().map_err(|error| error.to_string())?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err("snapshot path is not a regular file".to_string());
+        }
+        // No hint path: libgit2 otherwise applies clean filters even to its
+        // create-from-disk API when the file happens to be in the worktree.
+        let mut writer = repo.blob_writer(None).map_err(|error| error.to_string())?;
+        std::io::copy(&mut file, &mut writer).map_err(|error| error.to_string())?;
+        entry.id = writer.commit().map_err(|error| error.to_string())?;
+        index.add(&entry).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 fn create_migration_backup(repo: &Repository, root: &Path) -> Result<MigrationBackup, String> {
     let original_index = std::fs::read(repo.path().join("index")).ok();
     let mut index = repo.index().map_err(|error| error.to_string())?;
@@ -1781,9 +1824,7 @@ fn create_migration_backup(repo: &Repository, root: &Path) -> Result<MigrationBa
         if entry.file_type().is_dir() {
             directories.push(relative.to_path_buf());
         } else if entry.file_type().is_file() || entry.file_type().is_symlink() {
-            index
-                .add_path(relative)
-                .map_err(|error| error.to_string())?;
+            add_worktree_bytes_to_index(repo, &mut index, root, relative)?;
         }
     }
     let tree_id = index.write_tree().map_err(|error| error.to_string())?;
@@ -1825,7 +1866,8 @@ fn rollback_migration(
             CheckoutBuilder::new()
                 .force()
                 .remove_untracked(true)
-                .remove_ignored(true),
+                .remove_ignored(true)
+                .disable_filters(true),
         ),
     )
     .map_err(|error| error.to_string())?;
@@ -2319,6 +2361,78 @@ mod tests {
     use std::sync::{mpsc, Arc, Barrier};
     use std::thread;
     use std::time::Duration;
+
+    #[test]
+    fn unicode_space_paths_survive_review_background_merge_and_reopen() {
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join("用户资料 & metadata");
+        let folder = temp.path().join("知识库 & Space (1)");
+        std::fs::create_dir_all(&folder).unwrap();
+        let engine = LocalEngine::open(&metadata).unwrap();
+        let space = engine
+            .add_space("知识库", "unicode-space", &folder)
+            .unwrap();
+        engine
+            .write_page(
+                &space.slug,
+                "中文笔记",
+                "# 中文笔记\n\nPortable evidence.\n",
+            )
+            .unwrap();
+        engine
+            .rename_path(&space.slug, "中文笔记.md", "分类/中文 笔记.md")
+            .unwrap();
+        assert_eq!(
+            engine.search_pages(&space.slug, "portable", 10).unwrap()[0].path,
+            "分类/中文 笔记.md"
+        );
+        engine.submit(&space.slug, &[]).unwrap();
+        let change = engine.create_agent_change(&space.slug, "Codex").unwrap();
+        std::fs::write(
+            change.worktree_path.join("分类/中文 笔记.md"),
+            "# 中文笔记\n\nMerged evidence.\n",
+        )
+        .unwrap();
+        engine.list_agent_changes(&space.slug).unwrap();
+        engine.merge_agent_change(&space.slug, &change.id).unwrap();
+        assert!(std::fs::read_to_string(folder.join("分类/中文 笔记.md"))
+            .unwrap()
+            .contains("Merged evidence"));
+        drop(engine);
+        let reopened = LocalEngine::open(&metadata).unwrap();
+        assert_eq!(
+            reopened.find_space(&space.slug).unwrap().local_path,
+            folder.canonicalize().unwrap()
+        );
+        assert_eq!(
+            reopened.search_pages(&space.slug, "merged", 10).unwrap()[0].path,
+            "分类/中文 笔记.md"
+        );
+        reopened
+            .delete_path(&space.slug, "分类/中文 笔记.md")
+            .unwrap();
+        assert!(!folder.join("分类/中文 笔记.md").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_drive_and_unc_paths_cannot_be_used_as_relative_content_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        for path in [
+            r"C:\outside.md",
+            r"C:outside.md",
+            r"\\server\share\outside.md",
+            r"..\outside.md",
+            r"\outside.md",
+        ] {
+            assert!(super::ui_path(temp.path(), path).is_err(), "{path}");
+            assert!(super::safe_repo_path(path).is_err(), "{path}");
+        }
+        assert_eq!(
+            super::normalize_path(std::path::Path::new(r"分类\中文 笔记.md")),
+            "分类/中文 笔记.md"
+        );
+    }
 
     #[test]
     fn fresh_local_engine_waits_for_a_folder() {
@@ -3464,6 +3578,10 @@ mod tests {
         std::fs::create_dir_all(folder.join("sources")).unwrap();
         std::fs::write(folder.join("sources/raw.md"), [0xff, 0x00, 0xfe]).unwrap();
         let repo = git2::Repository::init(&folder).unwrap();
+        repo.config()
+            .unwrap()
+            .set_bool("core.autocrlf", true)
+            .unwrap();
         let mut index = repo.index().unwrap();
         index.add_path(std::path::Path::new(".gitignore")).unwrap();
         index.add_path(std::path::Path::new("index.md")).unwrap();
@@ -3504,6 +3622,12 @@ mod tests {
         let malformed = "---\nokf_version: \"0.1\"\n---\n\n# Knowledge\n\n<!-- cowiki:generated-index:start -->\n";
         std::fs::write(folder.join("index.md"), malformed).unwrap();
 
+        git2::Repository::init(&folder)
+            .unwrap()
+            .config()
+            .unwrap()
+            .set_bool("core.autocrlf", true)
+            .unwrap();
         assert!(engine.add_space("Knowledge", "knowledge", &folder).is_err());
         assert_eq!(
             std::fs::read_to_string(folder.join("sources/raw.md")).unwrap(),
@@ -3633,6 +3757,21 @@ mod tests {
         let folder = temp.path().join("notes");
         std::fs::create_dir_all(&folder).unwrap();
         let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        Repository::open(&folder)
+            .unwrap()
+            .config()
+            .unwrap()
+            .set_bool("core.autocrlf", true)
+            .unwrap();
+        let crlf = "---\r\ntype: Note\r\n---\r\n\r\nKeep CRLF.\r\n";
+        std::fs::write(folder.join("crlf.md"), crlf).unwrap();
+        engine
+            .submit(&space.slug, &["crlf.md".to_string()])
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(folder.join("crlf.md")).unwrap(),
+            crlf
+        );
         std::fs::write(folder.join("draft.md"), "# Draft at dispatch\n").unwrap();
         let index_before = std::fs::read(folder.join(".git/index")).unwrap();
 
@@ -3652,6 +3791,10 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(change.worktree_path.join("draft.md")).unwrap(),
             "# Draft at dispatch\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(change.worktree_path.join("crlf.md")).unwrap(),
+            crlf
         );
         std::fs::write(
             change.worktree_path.join("agent.md"),

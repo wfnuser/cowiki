@@ -1,4 +1,6 @@
-use super::{file_diff_from_bytes, safe_repo_path, FileDiff, LocalEngine};
+use super::{
+    add_worktree_bytes_to_index, file_diff_from_bytes, safe_repo_path, FileDiff, LocalEngine,
+};
 use git2::{Oid, Repository, Signature, StatusOptions};
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -76,6 +78,16 @@ impl LocalEngine {
             delete_reference_if_present(&repo, &branch_ref);
             delete_reference_if_present(&repo, &base_ref);
             return Err(error.to_string());
+        }
+
+        // The fresh worktree is still private to this startup. Restore raw
+        // snapshot bytes before exposing it to an Agent (Git may default to CRLF).
+        let checkout = restore_agent_snapshot_bytes(&worktree_path);
+        if let Err(error) = checkout {
+            let _ = self.cleanup_agent_worktree(&repo, &space.id, &id);
+            delete_reference_if_present(&repo, &branch_ref);
+            delete_reference_if_present(&repo, &base_ref);
+            return Err(format!("cannot restore Agent snapshot bytes: {error}"));
         }
 
         self.agent_change(space_slug, &id)
@@ -460,43 +472,71 @@ fn warn_cleanup_failure(change_id: &str, error: &str) {
     );
 }
 
+fn restore_agent_snapshot_bytes(root: &Path) -> Result<(), String> {
+    let repo = Repository::open(root).map_err(|error| error.to_string())?;
+    let index = repo.index().map_err(|error| error.to_string())?;
+    for entry in index.iter() {
+        if entry.mode & 0o170000 != 0o100000 {
+            continue;
+        }
+        let Some(relative) = std::str::from_utf8(&entry.path)
+            .ok()
+            .and_then(|path| safe_repo_path(path).ok())
+        else {
+            continue;
+        };
+        let actual = read_optional_file_no_follow(root, relative)?;
+        let blob = repo
+            .find_blob(entry.id)
+            .map_err(|error| error.to_string())?;
+        if actual.as_deref() != Some(blob.content()) {
+            write_optional_file_cas(root, relative, actual.as_deref(), Some(blob.content()))?;
+        }
+    }
+    Ok(())
+}
+
 fn snapshot_worktree(repo: &Repository) -> Result<Oid, String> {
     let root = repo
         .workdir()
-        .ok_or_else(|| "Git worktree has no working directory".to_string())?;
-    let head = repo
+        .ok_or("Git worktree has no working directory")?;
+    let head_tree = repo
         .head()
-        .and_then(|head| head.peel_to_commit())
-        .map_err(|error| error.to_string())?;
-    let head_tree = head.tree().map_err(|error| error.to_string())?;
-    // This is a detached in-memory view of the repository's index. It is
-    // deliberately never written, so staged user state remains byte-for-byte
-    // untouched while libgit2 writes only new blob/tree objects.
-    let mut index = repo.index().map_err(|error| error.to_string())?;
-    index
-        .read_tree(&head_tree)
+        .and_then(|head| head.peel_to_tree())
         .map_err(|error| error.to_string())?;
     let mut options = StatusOptions::new();
     options
         .include_untracked(true)
         .recurse_untracked_dirs(true)
         .include_ignored(false);
-    let statuses = repo
+    // Status can refresh libgit2's cached index. Collect it before constructing
+    // the temporary raw-byte index; never write that index over user staging.
+    let mut paths = repo
         .statuses(Some(&mut options))
+        .map_err(|error| error.to_string())?
+        .iter()
+        .filter_map(|status| {
+            status
+                .path()
+                .and_then(|path| safe_repo_path(path).ok())
+                .map(Path::to_path_buf)
+        })
+        .collect::<BTreeSet<_>>();
+    let mut index = repo.index().map_err(|error| error.to_string())?;
+    index
+        .read_tree(&head_tree)
         .map_err(|error| error.to_string())?;
-    for status in statuses.iter() {
-        let Some(relative) = status.path() else {
-            continue;
-        };
-        let Ok(relative) = safe_repo_path(relative) else {
-            continue;
-        };
-        if std::fs::symlink_metadata(root.join(relative)).is_ok() {
-            index
-                .add_path(relative)
-                .map_err(|error| error.to_string())?;
+    paths.extend(
+        index
+            .iter()
+            .filter_map(|entry| String::from_utf8(entry.path).ok())
+            .filter_map(|path| safe_repo_path(&path).ok().map(Path::to_path_buf)),
+    );
+    for relative in paths {
+        if std::fs::symlink_metadata(root.join(&relative)).is_ok() {
+            add_worktree_bytes_to_index(repo, &mut index, root, &relative)?;
         } else {
-            let _ = index.remove_path(relative);
+            let _ = index.remove_path(&relative);
         }
     }
     index.write_tree().map_err(|error| error.to_string())

@@ -31,8 +31,8 @@ where
     let space_slug = value_after("--space")
         .ok_or_else(|| "CoWiki MCP mode requires --space <local-space-slug>".to_string())?;
     let metadata_dir = value_after("--metadata-dir")
-        .map(PathBuf::from)
-        .unwrap_or_else(default_metadata_dir);
+        .map(|value| Ok(PathBuf::from(value)))
+        .unwrap_or_else(crate::platform::metadata_dir)?;
     Ok(Some(McpLaunch {
         space_slug,
         metadata_dir,
@@ -45,13 +45,6 @@ pub fn run_from_process_args() -> Result<bool, String> {
     };
     run_stdio(&launch.metadata_dir, &launch.space_slug)?;
     Ok(true)
-}
-
-fn default_metadata_dir() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("cowiki/.cowiki")
 }
 
 pub fn handle_request(engine: &LocalEngine, space_slug: &str, request: Value) -> Value {

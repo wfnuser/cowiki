@@ -778,7 +778,7 @@ fn migrate_legacy_sources(root: &Path) -> Result<(), String> {
         } else {
             let digest = format!(
                 "{:x}",
-                Sha256::digest(relative.to_string_lossy().as_bytes())
+                Sha256::digest(display_relative_path(&relative).as_bytes())
             );
             Path::new("_encoded").join(format!("{digest}.md"))
         };
@@ -852,13 +852,21 @@ fn declared_root_version(root: &Path) -> Result<Option<String>, String> {
         .and_then(|value| value.as_str().map(str::to_string)))
 }
 
+// Markdown paths and migration identifiers are portable across host platforms.
+fn display_relative_path(path: &Path) -> String {
+    path.components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 fn normalize_migrated_encoded_source(
     root: &Path,
     original_relative: &Path,
     destination: &Path,
 ) -> Result<(), String> {
     let bytes = std::fs::read(destination).map_err(|error| error.to_string())?;
-    let original_name = original_relative.to_string_lossy();
+    let original_name = display_relative_path(original_relative);
     let body = match std::str::from_utf8(&bytes) {
         Ok(content) => content.to_string(),
         Err(_) => {
@@ -871,10 +879,7 @@ fn normalize_migrated_encoded_source(
             )?;
             format!(
                 "The original non-UTF-8 Source bytes are preserved at `{}`.\n",
-                archive
-                    .strip_prefix(root)
-                    .unwrap_or(&archive)
-                    .to_string_lossy()
+                display_relative_path(archive.strip_prefix(root).unwrap_or(&archive))
             )
         }
     };

@@ -32,6 +32,8 @@ bugfix/*   ──PR──▶ dev ──PR──▶ main (release)
 - Rust stable
 - Platform dependencies required by Tauri 2
 - Xcode Command Line Tools when building on macOS
+- MSVC C++ Build Tools, Windows SDK, and WebView2 when building on Windows; see
+  [Windows setup and native validation](docs/windows-desktop.md)
 
 ### Desktop app
 

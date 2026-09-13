@@ -4,6 +4,9 @@
 //! kill that session. Commands are intentionally restricted to supported
 //! agents; arbitrary command execution is left to the interactive shell.
 
+#[cfg(any(windows, test))]
+mod windows_process;
+
 use crate::local_engine::LocalEngine;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -530,9 +533,21 @@ fn terminal_create_blocking(
     let pair = native_pty_system()
         .openpty(size)
         .map_err(|error| format!("failed to create terminal: {error}"))?;
-    let shell = resolve_shell();
-    let mut command = CommandBuilder::new(&shell);
-    add_shell_command_args(&mut command, &shell, &agent_launch.shell_command);
+    #[cfg(not(windows))]
+    let mut command = {
+        let shell = resolve_shell();
+        let mut command = CommandBuilder::new(&shell);
+        add_shell_command_args(&mut command, &shell, &agent_launch.shell_command);
+        command
+    };
+    #[cfg(windows)]
+    let mut command = {
+        let invocation = windows_process::resolve(&agent_executable, agent_search_directories())?;
+        let mut command = CommandBuilder::new(&invocation.program);
+        command.args(&invocation.arguments);
+        command.args(&agent_launch.arguments);
+        command
+    };
     command.cwd(&cwd);
     for (key, value) in &agent_launch.environment {
         command.env(key, value);
@@ -541,7 +556,7 @@ fn terminal_create_blocking(
     let child = pair
         .slave
         .spawn_command(command)
-        .map_err(|error| format!("failed to start terminal shell: {error}"))?;
+        .map_err(|error| format!("failed to start Agent terminal: {error}"))?;
     drop(pair.slave);
 
     let reader = pair
@@ -603,12 +618,55 @@ const CODEX_MCP_ARGS_ENV: &str = "COWIKI_CODEX_MCP_ARGS";
 const HERMES_EPHEMERAL_SYSTEM_PROMPT_ENV: &str = "HERMES_EPHEMERAL_SYSTEM_PROMPT";
 
 struct AgentLaunchCommand {
+    #[cfg(any(not(windows), test))]
     shell_command: String,
+    #[cfg(any(windows, test))]
+    arguments: Vec<String>,
     environment: Vec<(&'static str, String)>,
 }
 
-#[cfg(test)]
 impl AgentLaunchCommand {
+    // All tokens are fixed flags or environment keys, never renderer input.
+    // Unix keeps prompts out of the shell command (macOS MAX_CANON); Windows
+    // receives literal argv through ConPTY without cmd/PowerShell expansion.
+    fn new(program: &Path, tokens: &[&str], environment: Vec<(&'static str, String)>) -> Self {
+        #[cfg(windows)]
+        let _ = program;
+        #[cfg(any(not(windows), test))]
+        let shell_command = format!(
+            "exec {}{}",
+            shell_quote(&program.to_string_lossy()),
+            tokens
+                .iter()
+                .map(|token| {
+                    if environment.iter().any(|(key, _)| key == token) {
+                        format!(" \"${token}\"")
+                    } else {
+                        format!(" {token}")
+                    }
+                })
+                .collect::<String>()
+        );
+        #[cfg(any(windows, test))]
+        let arguments = tokens
+            .iter()
+            .map(|token| {
+                environment
+                    .iter()
+                    .find(|(key, _)| key == token)
+                    .map_or_else(|| (*token).to_string(), |(_, value)| value.clone())
+            })
+            .collect();
+        Self {
+            #[cfg(any(not(windows), test))]
+            shell_command,
+            #[cfg(any(windows, test))]
+            arguments,
+            environment,
+        }
+    }
+
+    #[cfg(test)]
     fn environment_value(&self, key: &str) -> Option<&str> {
         self.environment
             .iter()
@@ -625,12 +683,8 @@ fn build_agent_command(
     executable: &Path,
     task_prompt: Option<&str>,
 ) -> AgentLaunchCommand {
-    let agent_command = shell_quote(&agent_executable.to_string_lossy());
     if intent == TerminalIntent::Login {
-        return AgentLaunchCommand {
-            shell_command: format!("exec {agent_command} login"),
-            environment: Vec::new(),
-        };
+        return AgentLaunchCommand::new(agent_executable, &["login"], Vec::new());
     }
     let executable_text = executable.to_string_lossy();
     let mcp_args = vec!["--mcp", "--space", space_slug];
@@ -653,16 +707,19 @@ fn build_agent_command(
                     }
                 }
             });
-            AgentLaunchCommand {
-                shell_command: format!(
-                    "exec {agent_command} --mcp-config \"${CLAUDE_MCP_CONFIG_ENV}\" \
-                     --append-system-prompt \"${AGENT_PROMPT_ENV}\""
-                ),
-                environment: vec![
+            AgentLaunchCommand::new(
+                agent_executable,
+                &[
+                    "--mcp-config",
+                    CLAUDE_MCP_CONFIG_ENV,
+                    "--append-system-prompt",
+                    AGENT_PROMPT_ENV,
+                ],
+                vec![
                     (AGENT_PROMPT_ENV, prompt),
                     (CLAUDE_MCP_CONFIG_ENV, config.to_string()),
                 ],
-            }
+            )
         }
         AgentKind::Codex => {
             let command_toml = toml_string(&executable_text);
@@ -674,12 +731,17 @@ fn build_agent_command(
                     .collect::<Vec<_>>()
                     .join(",")
             );
-            AgentLaunchCommand {
-                shell_command: format!(
-                    "exec {agent_command} --no-alt-screen -c \"${CODEX_MCP_COMMAND_ENV}\" \
-                     -c \"${CODEX_MCP_ARGS_ENV}\" \"${AGENT_PROMPT_ENV}\""
-                ),
-                environment: vec![
+            AgentLaunchCommand::new(
+                agent_executable,
+                &[
+                    "--no-alt-screen",
+                    "-c",
+                    CODEX_MCP_COMMAND_ENV,
+                    "-c",
+                    CODEX_MCP_ARGS_ENV,
+                    AGENT_PROMPT_ENV,
+                ],
+                vec![
                     (AGENT_PROMPT_ENV, prompt),
                     (
                         CODEX_MCP_COMMAND_ENV,
@@ -690,29 +752,33 @@ fn build_agent_command(
                         format!("mcp_servers.cowiki.args={args_toml}"),
                     ),
                 ],
-            }
+            )
         }
-        AgentKind::Grok => AgentLaunchCommand {
-            shell_command: format!("exec {agent_command} --rules \"${AGENT_PROMPT_ENV}\""),
-            environment: prompt_environment(),
-        },
-        AgentKind::Antigravity => AgentLaunchCommand {
-            shell_command: format!(
-                "exec {agent_command} --dangerously-skip-permissions --prompt-interactive \"${AGENT_PROMPT_ENV}\""
-            ),
-            environment: prompt_environment(),
-        },
-        AgentKind::OpenCode => AgentLaunchCommand {
-            shell_command: format!("exec {agent_command} --prompt \"${AGENT_PROMPT_ENV}\""),
-            environment: prompt_environment(),
-        },
-        // Hermes supports an ephemeral, session-only system prompt through
-        // this environment variable. It avoids mutating the user's global
-        // skills or writing Agent instructions into their Space.
-        AgentKind::Hermes => AgentLaunchCommand {
-            shell_command: format!("exec {agent_command} chat"),
-            environment: vec![(HERMES_EPHEMERAL_SYSTEM_PROMPT_ENV, prompt)],
-        },
+        AgentKind::Grok => AgentLaunchCommand::new(
+            agent_executable,
+            &["--rules", AGENT_PROMPT_ENV],
+            prompt_environment(),
+        ),
+        AgentKind::Antigravity => AgentLaunchCommand::new(
+            agent_executable,
+            &[
+                "--dangerously-skip-permissions",
+                "--prompt-interactive",
+                AGENT_PROMPT_ENV,
+            ],
+            prompt_environment(),
+        ),
+        AgentKind::OpenCode => AgentLaunchCommand::new(
+            agent_executable,
+            &["--prompt", AGENT_PROMPT_ENV],
+            prompt_environment(),
+        ),
+        // Hermes' session-only system prompt avoids mutating global skills.
+        AgentKind::Hermes => AgentLaunchCommand::new(
+            agent_executable,
+            &["chat"],
+            vec![(HERMES_EPHEMERAL_SYSTEM_PROMPT_ENV, prompt)],
+        ),
     }
 }
 
@@ -724,7 +790,10 @@ fn readiness_error(readiness: &AgentReadiness) -> String {
 }
 
 fn probe_agent(agent: AgentKind) -> AgentReadiness {
+    #[cfg(not(windows))]
     let shell = resolve_agent_lookup_shell();
+    #[cfg(windows)]
+    let shell = PathBuf::new();
     #[cfg(not(windows))]
     let lookup = run_shell_command(
         &shell,
@@ -747,7 +816,7 @@ fn probe_agent(agent: AgentKind) -> AgentReadiness {
     probe_resolved_agent(agent, executable, &shell)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn probe_agent_in(
     agent: AgentKind,
     directories: impl IntoIterator<Item = PathBuf>,
@@ -880,11 +949,18 @@ fn resolve_agent_executable_in(
     agent: AgentKind,
     directories: impl IntoIterator<Item = PathBuf>,
 ) -> Option<PathBuf> {
-    directories
-        .into_iter()
-        .filter(|directory| directory.is_absolute())
-        .filter_map(|directory| directory.join(agent.command()).canonicalize().ok())
-        .find(|candidate| is_executable_file(candidate))
+    #[cfg(windows)]
+    {
+        windows_process::find_executable(agent.command(), directories)
+    }
+    #[cfg(not(windows))]
+    {
+        directories
+            .into_iter()
+            .filter(|directory| directory.is_absolute())
+            .filter_map(|directory| directory.join(agent.command()).canonicalize().ok())
+            .find(|candidate| is_executable_file(candidate))
+    }
 }
 
 fn is_executable_file(candidate: &Path) -> bool {
@@ -908,17 +984,23 @@ fn agent_search_directories() -> Vec<PathBuf> {
     let mut directories = std::env::var_os("PATH")
         .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
         .unwrap_or_default();
+    #[cfg(not(windows))]
     directories.extend([
         PathBuf::from("/opt/homebrew/bin"),
         PathBuf::from("/usr/local/bin"),
         PathBuf::from("/usr/bin"),
     ]);
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+    if let Some(home) = crate::platform::home_dir() {
         directories.extend([
             home.join(".local/bin"),
             home.join(".cargo/bin"),
             home.join(".npm-global/bin"),
+            home.join(".bun/bin"),
         ]);
+    }
+    #[cfg(windows)]
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        directories.push(PathBuf::from(appdata).join("npm"));
     }
     let mut unique = Vec::new();
     for directory in directories {
@@ -933,39 +1015,41 @@ fn agent_search_directories() -> Vec<PathBuf> {
 }
 
 fn run_probe_command(
-    shell: &Path,
+    _shell: &Path,
     executable: &Path,
     arguments: &[&str],
     timeout: Duration,
 ) -> Result<Output, String> {
     #[cfg(windows)]
     {
-        let mut command = Command::new(executable);
-        command.args(arguments);
+        let invocation = windows_process::resolve(executable, agent_search_directories())?;
+        let mut command = Command::new(&invocation.program);
+        command.args(&invocation.arguments).args(arguments);
         prepare_probe_command(&mut command);
-        return run_command_with_timeout(
+        run_command_with_timeout(
             command,
             timeout,
             format!("{} readiness check timed out", executable.display()),
-        );
+        )
     }
-
     #[cfg(not(windows))]
-    let arguments = arguments
-        .iter()
-        .map(|argument| shell_quote(argument))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let command = format!(
-        "exec {}{}{}",
-        shell_quote(&executable.to_string_lossy()),
-        if arguments.is_empty() { "" } else { " " },
-        arguments,
-    );
-    #[cfg(not(windows))]
-    return run_shell_command(shell, &command, timeout);
+    {
+        let arguments = arguments
+            .iter()
+            .map(|argument| shell_quote(argument))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let command = format!(
+            "exec {}{}{}",
+            shell_quote(&executable.to_string_lossy()),
+            if arguments.is_empty() { "" } else { " " },
+            arguments
+        );
+        run_shell_command(_shell, &command, timeout)
+    }
 }
 
+#[cfg(not(windows))]
 fn run_shell_command(
     shell: &Path,
     shell_command: &str,
@@ -982,6 +1066,11 @@ fn run_shell_command(
 }
 
 fn prepare_probe_command(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
     command
         .env("TERM", "dumb")
         .env("NO_COLOR", "1")
@@ -1010,24 +1099,12 @@ fn run_command_with_timeout(
     }
 }
 
+#[cfg(not(windows))]
 fn add_process_shell_command_args(command: &mut Command, shell: &Path, shell_command: &str) {
-    #[cfg(not(windows))]
-    {
-        if is_known_shell(shell) {
-            command.arg("-l");
-            command.arg("-i");
-        }
-        command.arg("-c");
-        command.arg(shell_command);
+    if is_known_shell(shell) {
+        command.args(["-l", "-i"]);
     }
-
-    #[cfg(windows)]
-    {
-        let _ = shell;
-        command.arg("-NoLogo");
-        command.arg("-Command");
-        command.arg(shell_command);
-    }
+    command.args(["-c", shell_command]);
 }
 
 fn probe_output_text(output: &Output) -> String {
@@ -1072,6 +1149,7 @@ fn first_nonempty_line(value: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+#[cfg(any(not(windows), test))]
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
@@ -1316,22 +1394,15 @@ fn normalized_pty_size(cols: Option<u16>, rows: Option<u16>) -> PtySize {
     }
 }
 
+#[cfg(not(windows))]
 fn resolve_shell() -> PathBuf {
-    #[cfg(windows)]
-    {
-        std::env::var_os("COMSPEC")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("powershell.exe"))
-    }
-    #[cfg(not(windows))]
-    {
-        std::env::var_os("SHELL")
-            .map(PathBuf::from)
-            .filter(|path| path.is_file())
-            .unwrap_or_else(|| PathBuf::from("/bin/sh"))
-    }
+    std::env::var_os("SHELL")
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from("/bin/sh"))
 }
 
+#[cfg(not(windows))]
 fn resolve_agent_lookup_shell() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
@@ -1356,37 +1427,27 @@ fn is_known_shell(shell: &Path) -> bool {
         })
 }
 
+#[cfg(not(windows))]
 fn add_shell_command_args(command: &mut CommandBuilder, shell: &Path, agent_command: &str) {
-    #[cfg(not(windows))]
-    {
-        if is_known_shell(shell) {
-            command.arg("-l");
-            command.arg("-i");
-        }
-        command.arg("-c");
-        command.arg(agent_command);
+    if is_known_shell(shell) {
+        command.args(["-l", "-i"]);
     }
-
-    #[cfg(windows)]
-    {
-        let _ = shell;
-        command.arg("-NoLogo");
-        command.arg("-Command");
-        command.arg(agent_command);
-    }
+    command.args(["-c", agent_command]);
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        build_agent_command, ensure_antigravity_mcp_config, normalized_pty_size, probe_agent_in,
-        resolve_agent_executable_from_lookup, resolve_agent_executable_in, resolve_terminal_cwd,
-        validate_initial_command, validate_session_id, validate_task_prompt, AgentKind,
-        AgentReadinessStatus, TerminalIdentity, TerminalIntent, TerminalMode, TerminalState,
+        build_agent_command, ensure_antigravity_mcp_config, normalized_pty_size,
+        resolve_terminal_cwd, validate_initial_command, validate_session_id, validate_task_prompt,
+        AgentKind, TerminalIdentity, TerminalIntent, TerminalMode, TerminalState,
         MAX_TASK_PROMPT_BYTES,
     };
     #[cfg(unix)]
-    use super::{TerminalPhase, TerminalSession};
+    use super::{
+        probe_agent_in, resolve_agent_executable_from_lookup, resolve_agent_executable_in,
+        AgentReadinessStatus, TerminalPhase, TerminalSession,
+    };
     use crate::local_engine::LocalEngine;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -1662,6 +1723,52 @@ mod tests {
             config["mcpServers"]["cowiki"]["args"],
             serde_json::json!(["--mcp", "--space", "research-space"])
         );
+    }
+
+    #[test]
+    fn native_arguments_preserve_prompts_and_mcp_configuration() {
+        let task = "知识库 & %PATH% \"quotes\"\n$(whoami)";
+        let executable = Path::new(r"C:\Users\名字\CoWiki app\CoWiki.exe");
+        for agent in [
+            AgentKind::Codex,
+            AgentKind::Claude,
+            AgentKind::Grok,
+            AgentKind::Antigravity,
+            AgentKind::OpenCode,
+            AgentKind::Hermes,
+        ] {
+            let launch = build_agent_command(
+                agent,
+                TerminalMode::Live,
+                TerminalIntent::Run,
+                "notes",
+                Path::new(r"C:\Agent files\agent.exe"),
+                executable,
+                Some(task),
+            );
+            if agent != AgentKind::Hermes {
+                assert!(launch.arguments.last().unwrap().ends_with(task));
+            } else {
+                assert_eq!(launch.arguments, ["chat"]);
+            }
+            if agent == AgentKind::Claude {
+                let config: serde_json::Value = serde_json::from_str(&launch.arguments[1]).unwrap();
+                assert_eq!(
+                    config["mcpServers"]["cowiki"]["command"],
+                    executable.to_string_lossy().as_ref()
+                );
+            }
+        }
+        let login = build_agent_command(
+            AgentKind::Codex,
+            TerminalMode::Live,
+            TerminalIntent::Login,
+            "notes",
+            Path::new("codex.exe"),
+            executable,
+            None,
+        );
+        assert_eq!(login.arguments, ["login"]);
     }
 
     #[test]

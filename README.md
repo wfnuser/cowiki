@@ -32,7 +32,7 @@
   <sub>Bring your own agents. Turn files and URLs into linked OKF knowledge, review every diff, and keep only what you trust.</sub>
 </p>
 
-> **macOS-first alpha:** local Spaces work today. Cloud collaboration comes next.
+> **Desktop alpha:** local Spaces work today. Windows x64 setup and build instructions are in the [Windows guide](docs/windows-desktop.md). Cloud collaboration comes next.
 
 ## Features
 
@@ -84,9 +84,10 @@ review, and reusable remote MCP—without changing its portable source format.
 
 ## Run from source
 
-Requires macOS, Xcode Command Line Tools, [Node.js 24+](https://nodejs.org/),
-and [Rust stable](https://rustup.rs/). Install Codex CLI and/or Claude Code to
-use the embedded Agent panel.
+Requires [Node.js 24+](https://nodejs.org/), [Rust stable](https://rustup.rs/),
+and platform build tools: Xcode Command Line Tools on macOS, or MSVC C++ Build
+Tools and WebView2 on [Windows x64](docs/windows-desktop.md). Install a supported
+native Agent CLI to use the embedded Agent panel.
 
 ```bash
 git clone https://github.com/wfnuser/cowiki.git
@@ -104,8 +105,9 @@ and edit the Space's Markdown files directly. The
 for external Agents; local work never requires a CoWiki account, API key, or
 backend.
 
-Before launch, the Agent panel checks the selected local CLI in the user's login
-shell environment and delegates authentication to that CLI, so CoWiki never
+Before launch, the Agent panel checks the selected local CLI using the login
+shell on macOS/Linux or native executable/npm discovery on Windows, and
+delegates authentication to that CLI, so CoWiki never
 reads or stores Agent credentials. Available Agents start in the Current Draft.
 
 ## Roadmap

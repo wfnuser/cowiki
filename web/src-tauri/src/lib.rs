@@ -4,6 +4,7 @@ mod knowledge_index;
 mod local_engine;
 mod mcp;
 mod okf;
+mod platform;
 mod terminal;
 mod web_source;
 
@@ -552,14 +553,13 @@ pub fn run() {
             // Keep the small, rebuildable index beside the previous local
             // metadata so repositories opened by older CoWiki builds can be
             // recovered automatically on upgrade.
-            let home = std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| app.path().app_data_dir().unwrap_or_default());
-            let cowiki_home = home.join("cowiki");
-            let engine = LocalEngine::open(&cowiki_home.join(".cowiki"))
+            let metadata_dir = platform::metadata_dir()
+                .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
+            let cowiki_home = metadata_dir.parent().expect("metadata has a parent");
+            let engine = LocalEngine::open(&metadata_dir)
                 .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
             engine
-                .import_legacy_spaces(&cowiki_home)
+                .import_legacy_spaces(cowiki_home)
                 .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
             app.manage(engine);
             app.manage(terminal::TerminalState::default());
@@ -686,13 +686,10 @@ fn exchange_desktop_oauth_code(
         .map_err(|error| format!("Cloud sign-in response was invalid: {error}"))
 }
 
+#[cfg(not(windows))]
 fn open_system_browser(url: &str) -> Result<(), String> {
     let status = if cfg!(target_os = "macos") {
         std::process::Command::new("open").arg(url).status()
-    } else if cfg!(target_os = "windows") {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .status()
     } else {
         std::process::Command::new("xdg-open").arg(url).status()
     }
@@ -701,6 +698,37 @@ fn open_system_browser(url: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("browser opener exited with {status}"))
+    }
+}
+
+#[cfg(windows)]
+fn open_system_browser(url: &str) -> Result<(), String> {
+    use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+    // ShellExecute opens the complete URL with the registered browser, including
+    // OAuth query parameters and percent escapes, without shell interpretation.
+    let url: Vec<u16> = validate_external_url(url)?
+        .as_str()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let operation: Vec<u16> = "open".encode_utf16().chain(std::iter::once(0)).collect();
+    // Both strings are NUL-terminated and stay alive for this synchronous call.
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            url.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    } as isize;
+    if result > 32 {
+        Ok(())
+    } else {
+        Err(format!(
+            "Windows could not open the browser (code {result})"
+        ))
     }
 }
 
