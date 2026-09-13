@@ -1,0 +1,32 @@
+import { test, expect } from '@playwright/test';
+import { createServer, type ViteDevServer } from 'vite';
+import { fileURLToPath } from 'node:url';
+let server: ViteDevServer;
+let origin: string;
+test.beforeAll(async () => {
+  server = await createServer({ root: fileURLToPath(new URL('../../', import.meta.url)), logLevel: 'silent', server: { host: '127.0.0.1', port: 0 } });
+  await server.listen();
+  const address = server.httpServer!.address();
+  if (!address || typeof address === 'string') throw Error('Missing port');
+  origin = `http://127.0.0.1:${address.port}`;
+});
+test.afterAll(async () => { await server.close(); });
+test('HTML file loads local CSS and deferred scripts without leaking pre-sandbox requests', async ({ page }) => {
+  const requests: string[] = [];
+  page.on('request', request => { if (request.url().includes('/tracking')) requests.push(request.url()); });
+  await page.goto(origin + '/tests/fixtures/html-file.html');
+  const inner = page.frameLocator('iframe[title="Local HTML document"]').frameLocator('iframe');
+  await expect(inner.getByRole('heading', { name: 'Real HTML file' })).toHaveCSS('color', 'rgb(220, 10, 20)');
+  await inner.getByRole('button', { name: 'Run demo' }).click();
+  await expect(inner.locator('output')).toHaveText('Working');
+  expect(requests).toEqual([]);
+  await expect(inner.locator('body')).toHaveClass('presentation');
+  await expect(inner.getByText('Jump target', { exact: true })).not.toBeInViewport();
+  await inner.getByRole('link', { name: 'Jump', exact: true }).click();
+  await expect(inner.getByText('Jump target', { exact: true })).toBeInViewport();
+  await page.getByRole('button', { name: 'Source', exact: true }).click();
+  await expect(page.locator('pre')).toContainText('src="app.js"');
+  await expect(page.locator('iframe')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(inner.getByRole('heading')).toBeVisible();
+});

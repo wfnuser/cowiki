@@ -1,11 +1,25 @@
 import { parsePatch } from 'diff';
 
 import type { DiffHunk, DiffLine, FileDiff } from '../api';
+import { CloudApiError } from './client.ts';
 import type { CloudPullRequestDiff } from './client';
+
+export function cloudMergeErrorMessage(error: unknown): string {
+  if (error instanceof CloudApiError && error.code === 'stale_head') {
+    return 'This pull request changed. Review the latest head before merging.';
+  }
+  if (error instanceof CloudApiError && error.code === 'merge_conflict') {
+    const paths = error.conflicts?.join(', ');
+    return paths
+      ? `This pull request conflicts with the latest Cloud main in: ${paths}.`
+      : 'This pull request conflicts with the latest Cloud main.';
+  }
+  return error instanceof Error ? error.message : 'Merge failed.';
+}
 
 export function cloudDiffToFileDiffs(diff: CloudPullRequestDiff): FileDiff[] {
   const parsedByPath = new Map(
-    parsePatch(diff.patch).map((file) => [cleanPath(file.newFileName ?? file.oldFileName), file]),
+    parsePatch(diff.patch).map((file) => [cleanPath(file.newFileName) || cleanPath(file.oldFileName), file]),
   );
 
   return diff.files.map((file) => {
@@ -13,8 +27,8 @@ export function cloudDiffToFileDiffs(diff: CloudPullRequestDiff): FileDiff[] {
     const [oldContent, newContent] = contentPresence(file.status);
     return {
       path: file.path,
-      old_content: oldContent,
-      new_content: newContent,
+      old_content: file.oldContent === undefined ? oldContent : file.oldContent,
+      new_content: file.newContent === undefined ? newContent : file.newContent,
       hunks: parsed?.hunks.map(toDiffHunk) ?? [],
       additions: file.additions,
       deletions: file.deletions,

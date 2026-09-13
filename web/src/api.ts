@@ -1,6 +1,7 @@
 import { authHeaders } from './auth';
 import { apiBase, isDesktopClient } from './runtime';
 import * as localApi from './local-api';
+import type { DocumentProvenance } from './lib/page-lineage';
 
 const BASE = apiBase();
 
@@ -28,6 +29,7 @@ export interface PageFull extends PageMeta {
   edited_by?: string | null;
   /** Unix timestamp (seconds) of that last edit. */
   edited_at?: number | null;
+  provenance?: DocumentProvenance | null;
 }
 
 export interface Submission {
@@ -488,10 +490,11 @@ export async function createLocalCheckpoint(workspaceSlug: string, name?: string
 
 export async function createLocalAgentChange(
   workspaceSlug: string,
-  agentName: string,
+  title: string,
+  agentName = title,
 ): Promise<AgentChange> {
   if (!isDesktopClient()) throw new Error('Local Agent Changes are available only in the desktop app');
-  return localApi.createAgentChange(workspaceSlug, agentName);
+  return localApi.createAgentChange(workspaceSlug, title, agentName);
 }
 
 export async function listLocalAgentChanges(workspaceSlug: string): Promise<AgentChange[]> {

@@ -7,21 +7,25 @@ import {
   MessageSquare, Reply, Check, RotateCcw, AtSign, ChevronsRight,
   ChevronRight, ChevronDown, CheckCircle2, Trash2, MoreHorizontal,
 } from 'lucide-react';
-import {
-  listPageComments, createPageComment, setPageCommentResolved, deletePageComment,
-  listMembers, type PageComment, type MemberInfo,
-} from '@/api';
+import type { PageComment } from '@/api';
 import { AvatarBadge } from '@/components/ui/avatar-badge';
 import { buildSnapshotMaps, mapWithSurviving, type MappedAnchor } from '@/lib/comment-anchor';
 import { C, fonts, shadows } from '@/lib/design';
+import type { CommentMember, PageCommentStore } from '@/lib/page-comment-store';
 
 // ── identity helpers ───────────────────────────────────────────────────────
 function relTime(iso: string): string {
-  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  const timestamp = new Date(iso).getTime();
+  if (!Number.isFinite(timestamp)) return 'recently';
+  const s = Math.max(0, (Date.now() - timestamp) / 1000);
   if (s < 60) return 'now';
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
+}
+function relTimeAgo(iso: string): string {
+  const value = relTime(iso);
+  return value === 'now' || value === 'recently' ? value : `${value} ago`;
 }
 function quoteOf(source: string, start: number, end: number): string {
   const text = source
@@ -100,10 +104,13 @@ interface CommentsCtx {
   anchored: Thread[]; outdated: Thread[]; resolved: Thread[]; openCount: number;
   activeId: string | null; setActive: (id: string) => void;
   panelOpen: boolean; setPanelOpen: (b: boolean) => void;
+  lineageOpen: boolean; setLineageOpen: (b: boolean) => void;
   composing: { start: number; end: number; quote: string } | null;
   cancelCompose: () => void; submitNew: (body: string) => Promise<void>;
-  members: MemberInfo[]; nameOf: (id: string) => string;
+  members: CommentMember[]; nameOf: (id: string) => string;
   currentUserId?: string; myId: string; myName: string;
+  scopeLabel: string;
+  loading: boolean; error: string; retry: () => void;
   onResolve: (id: string, r: boolean) => Promise<void>; onDelete: (id: string) => Promise<void>;
   submitReply: (parentId: string, body: string) => Promise<void>;
   /** Highlight info for a doc source line, or null if not commented. */
@@ -112,37 +119,68 @@ interface CommentsCtx {
 }
 const Ctx = createContext<CommentsCtx | null>(null);
 
-export function CommentsProvider({
-  workspaceSlug, pageSlug, source, articleRef, currentUserId, children,
-}: {
-  workspaceSlug: string;
+/** Share the right-hand slot with comments; standalone/public readers need no provider. */
+export function useReaderLineagePanel(): [boolean, (open: boolean) => void] {
+  const ctx = useContext(Ctx);
+  const local = useState(false);
+  return ctx ? [ctx.lineageOpen, ctx.setLineageOpen] : local;
+}
+
+interface CommentsProviderProps {
+  store: PageCommentStore | null;
   pageSlug: string;
   source: string;
   articleRef: React.RefObject<HTMLElement | null>;
-  currentUserId: string | undefined;
   children: React.ReactNode;
-}) {
+}
+
+export function CommentsProvider(props: CommentsProviderProps) {
+  return <CommentsSession key={`${props.store?.key ?? 'none'}:${props.pageSlug}`} {...props} />;
+}
+
+function CommentsSession({ store, pageSlug, source, articleRef, children }: CommentsProviderProps) {
   const [comments, setComments] = useState<PageComment[]>([]);
   const [snapshots, setSnapshots] = useState<{ content_hash: string; source: string }[]>([]);
-  const [members, setMembers] = useState<MemberInfo[]>([]);
+  const [members, setMembers] = useState<CommentMember[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpenState] = useState(false);
+  const [lineageOpen, setLineageOpenState] = useState(false);
+  const setPanelOpen = (open: boolean) => { setPanelOpenState(open); if (open) setLineageOpenState(false); };
+  const setLineageOpen = (open: boolean) => { setLineageOpenState(open); if (open) setPanelOpenState(false); };
   const [pending, setPending] = useState<{ start: number; end: number; x: number; y: number } | null>(null);
   const [composing, setComposing] = useState<{ start: number; end: number; quote: string } | null>(null);
-  const enabled = !!workspaceSlug && !!pageSlug;
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const requestId = useRef(0);
+  const enabled = !!store && !!pageSlug;
 
   const reload = useCallback(async () => {
-    if (!workspaceSlug || !pageSlug) { setComments([]); setSnapshots([]); return; }
-    const res = await listPageComments(workspaceSlug, pageSlug);
-    setComments(res.comments);
-    setSnapshots(res.snapshots);
-  }, [workspaceSlug, pageSlug]);
+    if (!store || !pageSlug) { setComments([]); setSnapshots([]); return; }
+    const id = ++requestId.current;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await store.list(pageSlug);
+      if (id !== requestId.current) return;
+      setComments(res.comments);
+      setSnapshots(res.snapshots);
+    } catch (cause) {
+      if (id === requestId.current) setError(cause instanceof Error ? cause.message : 'Could not load comments.');
+    } finally {
+      if (id === requestId.current) setLoading(false);
+    }
+  }, [store, pageSlug]);
 
-  useEffect(() => { void reload(); }, [reload]);
   useEffect(() => {
-    if (!workspaceSlug) return;
-    listMembers(workspaceSlug).then(setMembers).catch(() => setMembers([]));
-  }, [workspaceSlug]);
+    void reload();
+    return () => { requestId.current += 1; };
+  }, [reload]);
+  useEffect(() => {
+    if (!store) return;
+    let active = true;
+    store.listMembers().then((next) => { if (active) setMembers(next); }).catch(() => { if (active) setMembers([]); });
+    return () => { active = false; };
+  }, [store]);
   // Reset the focused thread when navigating to a different page.
   useEffect(() => { setActiveId(null); }, [pageSlug]);
 
@@ -214,15 +252,25 @@ export function CommentsProvider({
 
   const submitNew = async (body: string) => {
     if (!composing || !body.trim()) return;
-    await createPageComment(workspaceSlug, { slug: pageSlug, body: body.trim(), source, startLine: composing.start, endLine: composing.end });
+    if (!store) return;
+    await store.create({ pagePath: pageSlug, body: body.trim(), source, startLine: composing.start, endLine: composing.end });
     setComposing(null);
     setPending(null);
     await reload();
   };
   const submitReply = async (parentId: string, body: string) => {
     if (!body.trim()) return;
-    await createPageComment(workspaceSlug, { slug: pageSlug, body: body.trim(), parentId });
+    if (!store) return;
+    await store.create({ pagePath: pageSlug, body: body.trim(), parentId });
     await reload();
+  };
+  const updateThread = async (operation: () => Promise<unknown>) => {
+    try {
+      await operation();
+      await reload();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not update comment.');
+    }
   };
 
   const value: CommentsCtx = {
@@ -230,10 +278,14 @@ export function CommentsProvider({
     anchored, outdated, resolved, openCount,
     activeId, setActive: setActiveId,
     panelOpen, setPanelOpen,
+    lineageOpen, setLineageOpen,
     composing, cancelCompose: () => { setComposing(null); setPending(null); }, submitNew,
-    members, nameOf, currentUserId, myId: currentUserId ?? 'me', myName: currentUserId ? nameOf(currentUserId) : 'You',
-    onResolve: async (id, r) => { await setPageCommentResolved(workspaceSlug, id, r); await reload(); },
-    onDelete: async (id) => { await deletePageComment(workspaceSlug, id); await reload(); },
+    members, nameOf, currentUserId: store?.currentUserId,
+    myId: store?.currentUserId ?? 'me', myName: store?.currentUserName ?? 'You',
+    scopeLabel: store?.scopeLabel ?? '',
+    loading, error, retry: () => { void reload(); },
+    onResolve: async (id, r) => { if (store) await updateThread(() => store.setResolved(id, r)); },
+    onDelete: async (id) => { if (store) await updateThread(() => store.delete(id)); },
     submitReply,
     lineHighlight: (line) => (lineToThread.has(line) ? { active: lineToThread.get(line) === activeId } : null),
     focusLine: (line) => { const id = lineToThread.get(line); if (id) { setActiveId(id); setPanelOpen(true); } },
@@ -277,6 +329,8 @@ export function CommentsHeaderToggle({ style }: { style?: React.CSSProperties })
     <button
       onClick={() => ctx.setPanelOpen(!ctx.panelOpen)}
       title={ctx.panelOpen ? 'Hide comments' : 'Show comments'}
+      aria-controls="page-comments-panel"
+      aria-expanded={ctx.panelOpen}
       style={{
         ...style, fontWeight: 600,
         background: ctx.panelOpen ? C.accentSoft : (style?.background ?? 'transparent'),
@@ -334,13 +388,13 @@ export function CommentsPanel() {
   if (!ctx) return null;
   const { anchored, outdated, resolved, openCount, activeId, setActive, panelOpen, setPanelOpen,
     composing, cancelCompose, submitNew, members, nameOf, currentUserId, myId, myName,
-    onResolve, onDelete, submitReply } = ctx;
+    onResolve, onDelete, submitReply, scopeLabel, loading, error, retry } = ctx;
 
   // Collapsed: nothing here — the header toggle reopens the panel.
-  if (!panelOpen || (openCount === 0 && resolved.length === 0 && !composing)) return null;
+  if (!panelOpen) return null;
 
   return (
-    <aside style={{
+    <aside id="page-comments-panel" style={{
       width: 360, flexShrink: 0, alignSelf: 'stretch', borderLeft: `1px solid ${C.line}`,
       background: C.panel, display: 'flex', flexDirection: 'column', minHeight: 0,
     }}>
@@ -348,6 +402,7 @@ export function CommentsPanel() {
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
           <span style={{ fontSize: 13.5, fontWeight: 600, color: C.ink }}>Comments</span>
           <span style={{ fontSize: 12.5, color: C.faint }}>({openCount})</span>
+          <span title={scopeLabel === 'Local only' ? 'These comments stay on this device.' : 'These comments are shared with Space members.'} style={{ fontSize: 10.5, color: C.faint, fontWeight: 500 }}>{scopeLabel}</span>
         </div>
         <button onClick={() => setPanelOpen(false)} title="Collapse" style={{ ...ghostBtn, padding: 5 }}>
           <ChevronsRight size={16} />
@@ -355,6 +410,11 @@ export function CommentsPanel() {
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', padding: '4px 16px 24px' }}>
+        {error && <div role="alert" style={{ color: C.red, fontSize: 13, padding: '12px 0' }}>{error} <button onClick={retry} style={ghostBtn}>Retry</button></div>}
+        {loading && <p role="status" style={{ color: C.muted, fontSize: 13 }}>Loading comments…</p>}
+        {!loading && !error && openCount === 0 && resolved.length === 0 && !composing && (
+          <p style={{ color: C.muted, fontSize: 13 }}>No comments yet. Select text in the page to start a discussion.</p>
+        )}
         {composing && (
           <Composer quote={composing.quote} meId={myId} meName={myName} members={members}
             placeholder="Add a comment…  use @ to mention" autoFocus
@@ -362,7 +422,7 @@ export function CommentsPanel() {
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {[...anchored, ...outdated].map((t) => (
+          {[...anchored, ...(showOutdated ? outdated : [])].map((t) => (
             <CommentCard key={t.root.id} t={t} active={t.root.id === activeId} members={members}
               meId={myId} meName={myName} currentUserId={currentUserId} nameOf={nameOf}
               onActivate={() => setActive(t.root.id)}
@@ -408,7 +468,7 @@ export function CommentsPanel() {
 function CommentCard({
   t, active, members, meId, meName, currentUserId, nameOf, onActivate, onResolve, onReply, onDelete,
 }: {
-  t: Thread; active: boolean; members: MemberInfo[]; meId: string; meName: string;
+  t: Thread; active: boolean; members: CommentMember[]; meId: string; meName: string;
   currentUserId: string | undefined; nameOf: (id: string) => string;
   onActivate: () => void; onResolve: () => void;
   onReply: (body: string) => void | Promise<void>; onDelete: (id: string) => void;
@@ -419,7 +479,7 @@ function CommentCard({
 
   if (!active) {
     return (
-      <div onClick={onActivate} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: '11px 13px', cursor: 'pointer', boxShadow: shadows.faint }}>
+      <div onClick={onActivate} style={{ background: 'transparent', borderBottom: `1px solid ${C.lineSoft}`, padding: '12px 4px', cursor: 'pointer' }}>
         <div style={{ marginBottom: 9, paddingLeft: 8, borderLeft: `2.5px solid ${isOutdated ? C.amberSoft : `color-mix(in srgb, ${C.accent} 25%, ${C.panel})`}` }}>
           <span style={{ fontSize: 12, lineHeight: 1.4, color: C.faint, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
             {isOutdated && <span style={{ color: C.amber, fontStyle: 'normal', fontWeight: 600 }}>outdated · </span>}<Quote text={t.quote} />
@@ -441,7 +501,7 @@ function CommentCard({
   }
 
   return (
-    <div onClick={onActivate} style={{ background: C.panel, border: '1px solid transparent', borderRadius: 12, padding: '13px 14px 12px', cursor: 'pointer', position: 'relative', boxShadow: `${shadows.float}, 0 0 0 1.5px ${isOutdated ? C.amber : C.accent}` }}>
+    <div onClick={onActivate} style={{ background: C.sidebar, borderLeft: `2px solid ${isOutdated ? C.amber : C.accent}`, borderRadius: 6, padding: '12px 12px 11px', cursor: 'pointer', position: 'relative' }}>
       <div style={{ display: 'flex', gap: 8, marginBottom: 11, paddingLeft: 9, borderLeft: `2.5px solid ${isOutdated ? C.amber : C.accent}` }}>
         <span style={{ fontSize: 12.5, lineHeight: 1.45, color: C.muted, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
           {isOutdated && <span style={{ color: C.amber, fontStyle: 'normal', fontWeight: 600 }}>outdated · </span>}<Quote text={t.quote} />
@@ -451,7 +511,7 @@ function CommentCard({
         <Avatar id={t.root.user_id} name={authorName} size={26} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, color: C.ink, lineHeight: 1.2 }}>{authorName}</div>
-          <div style={{ fontSize: 11.5, color: C.faint }}>{relTime(t.root.created_at)} ago</div>
+          <div style={{ fontSize: 11.5, color: C.faint }}>{relTimeAgo(t.root.created_at)}</div>
         </div>
         {t.root.user_id === currentUserId ? (
           <button onClick={(e) => { e.stopPropagation(); onDelete(t.root.id); }} title="Delete" style={{ ...ghostBtn, padding: 4 }}><Trash2 size={14} /></button>
@@ -499,11 +559,14 @@ function CommentCard({
 function Composer({
   quote, meId, meName, members, placeholder, autoFocus, compact, onCancel, onSubmit, primaryLabel,
 }: {
-  quote?: string; meId: string; meName: string; members: MemberInfo[];
+  quote?: string; meId: string; meName: string; members: CommentMember[];
   placeholder?: string; autoFocus?: boolean; compact?: boolean;
   onCancel: () => void; onSubmit: (body: string) => void | Promise<void>; primaryLabel: string;
 }) {
   const [value, setValue] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const submitting = useRef(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const [menu, setMenu] = useState<{ query: string; at: number } | null>(null);
 
@@ -512,13 +575,28 @@ function Composer({
     const m = /@([A-Za-z0-9_-]*)$/.exec(next.slice(0, caret));
     setMenu(m ? { query: m[1], at: caret - m[1].length - 1 } : null);
   };
-  const pick = (name: string) => {
+  const pick = (mention: string) => {
     if (!menu) return;
-    setValue(value.slice(0, menu.at) + '@' + name + ' ' + value.slice(menu.at + 1 + menu.query.length));
+    setValue(value.slice(0, menu.at) + '@' + mention + ' ' + value.slice(menu.at + 1 + menu.query.length));
     setMenu(null);
     ref.current?.focus();
   };
-  const matches = menu ? members.filter((m) => m.name.toLowerCase().startsWith(menu.query.toLowerCase())).slice(0, 5) : [];
+  const matches = menu ? members.filter((m) => m.mention.toLowerCase().startsWith(menu.query.toLowerCase())).slice(0, 5) : [];
+  const submit = async () => {
+    if (submitting.current || !value.trim()) return;
+    submitting.current = true;
+    setSending(true);
+    setError('');
+    setMenu(null);
+    try {
+      await onSubmit(value);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not save comment. Try again.');
+    } finally {
+      submitting.current = false;
+      setSending(false);
+    }
+  };
 
   return (
     <div style={{ marginBottom: compact ? 0 : 14, marginTop: compact ? 4 : 0 }}>
@@ -529,27 +607,28 @@ function Composer({
       )}
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
         <Avatar id={meId} name={meName} size={22} />
-        <div style={{ flex: 1, position: 'relative', border: `1.5px solid ${C.accent}`, borderRadius: 9, background: C.panel, overflow: 'hidden' }}>
-          <textarea ref={ref} value={value} placeholder={placeholder} rows={2} autoFocus={autoFocus}
+        <div style={{ flex: 1, position: 'relative', border: `1.5px solid ${C.accent}`, borderRadius: 9, background: C.panel }}>
+          <textarea ref={ref} value={value} placeholder={placeholder} rows={2} autoFocus={autoFocus} disabled={sending}
             onChange={(e) => sync(e.target.value, e.target.selectionStart)}
             style={{ width: '100%', border: 'none', outline: 'none', resize: 'none', padding: '8px 10px', fontSize: 13.5, lineHeight: 1.5, color: C.ink, fontFamily: fonts.sans, boxSizing: 'border-box', background: 'transparent' }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderTop: `1px solid ${C.lineSoft}` }}>
             <AtSign size={15} color={C.faint} />
             <div style={{ flex: 1 }} />
-            <button onClick={onCancel} style={{ ...ghostBtn, padding: '5px 9px' }}>Cancel</button>
-            <button onClick={() => onSubmit(value)} disabled={!value.trim()}
+            <button onClick={onCancel} disabled={sending} style={{ ...ghostBtn, padding: '5px 9px' }}>Cancel</button>
+            <button onClick={() => void submit()} disabled={!value.trim() || sending}
               style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 7, border: 'none', background: value.trim() ? C.accent : C.line, color: value.trim() ? C.onAccent : C.faint, fontSize: 12.5, fontWeight: 600, cursor: value.trim() ? 'pointer' : 'default' }}>
-              {primaryLabel}
+              {sending ? 'Sending…' : primaryLabel}
             </button>
           </div>
+          {error && <p role="alert" style={{ color: C.red, fontSize: 12, padding: '0 10px 8px' }}>{error}</p>}
           {matches.length > 0 && (
             <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 70, marginTop: 2, minWidth: 170, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: shadows.popover, overflow: 'hidden' }}>
               {matches.map((m) => (
-                <button key={m.id} onMouseDown={(e) => { e.preventDefault(); pick(m.name); }}
+                <button key={m.id} onMouseDown={(e) => { e.preventDefault(); pick(m.mention); }}
                   style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '7px 10px', border: 'none', background: 'transparent', fontSize: 12.5, color: C.ink, cursor: 'pointer' }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = C.tag; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
-                  <Avatar id={m.id} name={m.name} size={18} /> {m.name}
+                  <Avatar id={m.id} name={m.name} size={18} /> {m.name} <span style={{ color: C.faint }}>@{m.mention}</span>
                 </button>
               ))}
             </div>

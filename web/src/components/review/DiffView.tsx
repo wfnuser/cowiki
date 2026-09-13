@@ -1,7 +1,10 @@
 import { useState, useCallback } from 'react';
 import { MessageSquare, Check, ChevronDown, ChevronRight, Send, X, FileText, Pencil } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { FileDiff, DiffHunk, DiffLine, ReviewComment } from '../../api';
 import { C, fonts } from '@/lib/design';
+import { reviewPreviewPanes, type ReviewPreviewPane } from '@/lib/review-preview';
 import { timeAgo } from '../../lib/time';
 
 const mono = fonts.mono;
@@ -282,6 +285,7 @@ function renderLineText(text: string): React.ReactNode {
 /* ── FileDiffCard ── */
 function FileDiffCard({
   file,
+  mode,
   comments,
   onAddComment,
   onResolve,
@@ -290,6 +294,7 @@ function FileDiffCard({
   onEditSave,
 }: {
   file: FileDiff;
+  mode: 'source' | 'rendered';
   comments: ReviewComment[];
   onAddComment?: (filePath: string, lineNumber: number, body: string) => void;
   onResolve?: (id: string) => void;
@@ -306,6 +311,7 @@ function FileDiffCard({
   const status = fileStatus(file);
   const sc = statusColors[status];
   const fileComments = comments.filter((c) => c.file_path === file.path);
+  const previewPanes = reviewPreviewPanes(file);
 
   const handleSubmitComment = useCallback((body: string, lineNumber: number) => {
     onAddComment?.(file.path, lineNumber, body);
@@ -422,7 +428,15 @@ function FileDiffCard({
       )}
       {/* Diff body */}
       {!collapsed && (
-        <div style={{ overflowX: 'auto' }}>
+        mode === 'rendered' ? (
+          previewPanes.length ? (
+            <RenderedPreview panes={previewPanes} />
+          ) : (
+            <div style={{ padding: 22, textAlign: 'center', color: C.muted, fontSize: 13 }}>
+              Rendered preview is available for text Markdown files.
+            </div>
+          )
+        ) : <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
             <colgroup>
               <col style={{ width: 46 }} />
@@ -462,6 +476,44 @@ function FileDiffCard({
   );
 }
 
+function RenderedPreview({ panes }: { panes: ReviewPreviewPane[] }) {
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: panes.length === 2 ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)',
+      minWidth: panes.length === 2 ? 720 : 0,
+      overflowX: 'auto',
+    }}>
+      {panes.map((pane, index) => (
+        <section
+          key={pane.key}
+          aria-label={`${pane.label} rendered Markdown`}
+          style={{
+            minWidth: 0,
+            borderLeft: index > 0 ? `1px solid ${C.line}` : undefined,
+            background: pane.key === 'before' ? C.redBgSoft : C.greenBgSoft,
+          }}
+        >
+          <div style={{
+            padding: '7px 14px',
+            borderBottom: `1px solid ${C.line}`,
+            color: pane.key === 'before' ? C.red : C.green,
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+          }}>
+            {pane.label}
+          </div>
+          <article className="prose" style={{ maxWidth: 'none', padding: '22px 26px 30px' }}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{pane.content}</ReactMarkdown>
+          </article>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 /* ── Exports ── */
 export function DiffView({
   diffs,
@@ -480,16 +532,30 @@ export function DiffView({
   onReply?: (body: string, parentId: string) => void;
   onEditSave?: (path: string, content: string) => Promise<void>;
 }) {
+  const [mode, setMode] = useState<'source' | 'rendered'>('source');
   if (!diffs.length) {
     return <p style={{ color: C.muted, fontSize: 14 }}>No file changes.</p>;
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div
+        role="group"
+        aria-label="Review display"
+        style={{ alignSelf: 'flex-end', display: 'inline-flex', padding: 3, borderRadius: 8, background: C.rail }}
+      >
+        <ViewModeButton active={mode === 'source'} onClick={() => setMode('source')}>
+          Source diff
+        </ViewModeButton>
+        <ViewModeButton active={mode === 'rendered'} onClick={() => setMode('rendered')}>
+          Rendered preview
+        </ViewModeButton>
+      </div>
       {diffs.map((f) => (
         <FileDiffCard
           key={f.path}
           file={f}
+          mode={mode}
           comments={comments}
           onAddComment={onAddComment}
           onResolve={onResolve}
@@ -499,6 +565,37 @@ export function DiffView({
         />
       ))}
     </div>
+  );
+}
+
+function ViewModeButton({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      style={{
+        border: 0,
+        borderRadius: 6,
+        padding: '6px 10px',
+        background: active ? C.panel : 'transparent',
+        boxShadow: active ? `0 0 0 1px ${C.line}` : 'none',
+        color: active ? C.ink : C.muted,
+        cursor: 'pointer',
+        fontSize: 12,
+        fontWeight: 650,
+      }}
+    >
+      {children}
+    </button>
   );
 }
 

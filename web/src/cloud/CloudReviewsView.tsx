@@ -7,14 +7,13 @@ import { ReviewBackButton } from '../components/review/ReviewBackButton';
 import { ReviewInbox, ReviewInboxRow } from '../components/review/ReviewInbox';
 import { AvatarBadge } from '../components/ui/avatar-badge';
 import { C, fonts } from '../lib/design';
-import { CloudApiError } from './client';
 import type {
   CloudClient,
   CloudPullRequest,
   CloudPullRequestDiff,
   CloudSpace,
 } from './client';
-import { cloudDiffToFileDiffs } from './cloud-review-model';
+import { cloudDiffToFileDiffs, cloudMergeErrorMessage } from './cloud-review-model';
 import { mergeActionVisible } from './cloud-shell-model';
 import { CloudNotice } from './CloudHome';
 import { cloudSpaceRoute } from './routes';
@@ -128,10 +127,7 @@ export function CloudReviewsView({
         message: `Pull request #${pullRequest.number} merged into Cloud main.`,
       });
     } catch (cause) {
-      const message = cause instanceof CloudApiError && cause.status === 409
-        ? 'This pull request changed. Review the latest head before merging.'
-        : cause instanceof Error ? cause.message : 'Merge failed.';
-      setNotice({ tone: 'error', message });
+      setNotice({ tone: 'error', message: cloudMergeErrorMessage(cause) });
     } finally {
       await loadPullRequests();
       setPending('');

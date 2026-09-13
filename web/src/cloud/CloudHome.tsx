@@ -48,6 +48,7 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
   const [slug, setSlug] = useState('');
   const [slugEdited, setSlugEdited] = useState(false);
   const [visibility, setVisibility] = useState<CloudVisibility>('private');
+  const [unread, setUnread] = useState(0);
   const panel = panelFromSearch(location.search);
 
   useEffect(() => {
@@ -61,6 +62,10 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
+  }, [client]);
+
+  useEffect(() => {
+    void client.notificationUnreadCount().then((value) => setUnread(value.count)).catch(() => undefined);
   }, [client]);
 
   useEffect(() => {
@@ -143,9 +148,9 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
           onDiscover={() => undefined}
           onLogout={onSignOut}
           onConnectCloud={() => undefined}
-          notifUnread={0}
-          onShowNotifications={() => undefined}
-          showBell={false}
+          notifUnread={unread}
+          onShowNotifications={() => navigate('/cloud/notifications')}
+          showBell
           showCloudActions
           showSettings={false}
           showDiscover={false}

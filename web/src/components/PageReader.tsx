@@ -1,8 +1,13 @@
-import type { Ref, ReactNode } from 'react';
+import { useId, useRef, type Ref, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { C } from '@/lib/design';
 import { PageByline } from './PageByline';
+import { PageLineage, PageLineagePanel, type LoadLineageSource } from './PageLineage';
+import { useReaderLineagePanel } from './PageCommentsLayer';
+import type { PageLineage as PageLineageModel } from '@/lib/page-lineage';
+import { withHtmlMarkdownComponents } from './HtmlView';
+import { useMemo } from 'react';
 
 interface PageReaderProps {
   body: string;
@@ -16,6 +21,11 @@ interface PageReaderProps {
   readOnlyDotColor?: string;
   missingMessage?: string;
   aside?: ReactNode;
+  toolbar?: ReactNode;
+  lineage?: PageLineageModel;
+  onOpenSource?: (path: string) => void;
+  onOpenReview?: (id: string) => void;
+  loadSource?: LoadLineageSource;
 }
 
 export function PageReader({
@@ -27,9 +37,21 @@ export function PageReader({
   readOnlyDotColor = C.blue,
   missingMessage,
   aside,
+  toolbar,
+  lineage,
+  onOpenSource,
+  onOpenReview,
+  loadSource,
 }: PageReaderProps) {
+  const [lineageOpen, setLineageOpen] = useReaderLineagePanel();
+  const lineageId = useId();
+  const lineageTrigger = useRef<HTMLButtonElement>(null);
+  const closeLineage = () => { setLineageOpen(false); lineageTrigger.current?.focus(); };
+  const components = useMemo(() => withHtmlMarkdownComponents(markdownComponents), [markdownComponents]);
   return (
-    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'stretch' }}>
+    <div className="page-reader" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
+      {toolbar && <div style={{ height: 44, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '0 20px' }}>{toolbar}</div>}
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'stretch', flex: 1, minHeight: 0 }}>
       <article
         ref={articleRef}
         className="prose"
@@ -55,13 +77,30 @@ export function PageReader({
         ) : (
           <>
             {byline && <PageByline name={byline.name} editedAt={byline.editedAt} />}
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={components}
+            >
               {body}
             </ReactMarkdown>
+            {lineage && (
+              <PageLineage
+                lineage={lineage}
+                open={lineageOpen}
+                onToggle={() => setLineageOpen(!lineageOpen)}
+                panelId={lineageId}
+                triggerRef={lineageTrigger}
+              />
+            )}
           </>
         )}
       </article>
+      {lineage && lineageOpen && !missingMessage && <PageLineagePanel
+        lineage={lineage} panelId={lineageId} onClose={closeLineage}
+        onOpenSource={onOpenSource} onOpenReview={onOpenReview} loadSource={loadSource}
+      />}
       {aside}
+      </div>
     </div>
   );
 }

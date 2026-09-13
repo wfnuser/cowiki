@@ -5,7 +5,10 @@ import type { PageMeta, Workspace } from '../api';
 import {
   ContentBreadcrumb,
   ContentHeader,
+  ContentHeaderActions,
 } from '../components/layout/ContentHeader';
+import { WorkspaceContextBadge } from '../components/layout/WorkspaceContextBadge';
+import { workspaceContextStatus } from '../lib/workspace-context';
 import { SpacePanel, type NavTab } from '../components/layout/SpacePanel';
 import { SpaceRail } from '../components/layout/SpaceRail';
 import { TooltipProvider } from '../components/ui/tooltip';
@@ -42,6 +45,7 @@ export function CloudSpaceView({ client, session, route, onSignOut }: CloudSpace
   const [treeErrorState, setTreeErrorState] = useState<SpaceScopedResource<string> | null>(null);
   const [unpublishedState, setUnpublishedState] = useState<SpaceScopedResource<boolean> | null>(null);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const [unread, setUnread] = useState(0);
   const space = routeScopedValue(route.spaceId, loadedSpace);
   const tree = routeScopedValue(route.spaceId, loadedTree);
   const spaceError = routeScopedValue(route.spaceId, spaceErrorState) ?? '';
@@ -103,6 +107,10 @@ export function CloudSpaceView({ client, session, route, onSignOut }: CloudSpace
     return () => { active = false; };
   }, [client]);
 
+  useEffect(() => {
+    void client.notificationUnreadCount().then((value) => setUnread(value.count)).catch(() => undefined);
+  }, [client]);
+
   const changeTab = (tab: NavTab) => {
     if (tab === 'wiki' || tab === 'reviews' || tab === 'members') {
       navigate(cloudSpaceRoute(route.spaceId, tab));
@@ -122,9 +130,9 @@ export function CloudSpaceView({ client, session, route, onSignOut }: CloudSpace
           onDiscover={() => undefined}
           onLogout={onSignOut}
           onConnectCloud={() => undefined}
-          notifUnread={0}
-          onShowNotifications={() => undefined}
-          showBell={false}
+          notifUnread={unread}
+          onShowNotifications={() => navigate('/cloud/notifications')}
+          showBell
           showCloudActions
           showSettings={false}
           showDiscover={false}
@@ -188,6 +196,9 @@ export function CloudSpaceView({ client, session, route, onSignOut }: CloudSpace
                 </>
               )}
             </ContentBreadcrumb>
+            <ContentHeaderActions>
+              <WorkspaceContextBadge context={workspaceContextStatus({ desktop: false })} />
+            </ContentHeaderActions>
           </ContentHeader>
 
           <div className="relative min-h-0 flex-1">
@@ -203,6 +214,8 @@ export function CloudSpaceView({ client, session, route, onSignOut }: CloudSpace
                 treeError={treeError}
                 unpublished={unpublished}
                 documentPath={route.documentPath}
+                currentUserId={session.userId}
+                currentUserName={session.userName}
               />
             ) : route.view === 'reviews' ? (
               <CloudReviewsView client={client} space={space} pullRequestId={route.documentPath} />

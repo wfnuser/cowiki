@@ -4,6 +4,7 @@ import test from 'node:test';
 import type { PageMeta } from '../src/api.ts';
 import {
   conceptIdFromPath,
+  conceptPath,
   findConcept,
   firstConcept,
   isSearchableConceptPath,
@@ -25,6 +26,15 @@ function folder(path: string, children: PageMeta[]): PageMeta {
     slug: path, path, title: path.split('/').at(-1) || path, summary: '', branch: 'local', kind: 'folder', children,
   };
 }
+
+test('HTML pages keep their extension and coexist with Markdown names', () => {
+  const tree = visiblePageTree([page('paper/index.html'), page('paper/index.md')]);
+  assert.equal(tree.length, 2);
+  assert.equal(conceptPath('paper/index.html'), 'paper/index.html');
+  assert.equal(findConcept(tree, 'paper/index.html')?.path, 'paper/index.html');
+  assert.equal(findConcept(tree, 'paper/index')?.path, 'paper/index.md');
+  assert.equal(isSearchableConceptPath('paper/index.html'), false);
+});
 
 test('an OKF bundle is one arbitrary hierarchy and legacy names stay ordinary folders', () => {
   const tree = visiblePageTree([

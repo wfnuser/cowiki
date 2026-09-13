@@ -234,7 +234,7 @@ export function AddSourceDialog({
                 placeholder="https://example.com/article"
               />
               <p className="text-xs text-muted-foreground">
-                The URL is kept as an OKF source. Codex or Claude can read it and organize durable knowledge.
+                The page is captured as Markdown with its URL and capture time. Codex or Claude can then organize durable knowledge.
               </p>
             </TabsContent>
 

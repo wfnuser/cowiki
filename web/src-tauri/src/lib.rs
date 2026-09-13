@@ -1,14 +1,17 @@
 mod cloud_sync;
 mod extract;
+mod html_assets;
 mod knowledge_index;
 mod local_engine;
 mod mcp;
 mod okf;
 mod terminal;
+mod web_source;
 
 use local_engine::{
-    AgentChange, BrokenLink, Checkpoint, FileDiff, IngestFileOutcome, LocalEngine, PageFull,
-    PageMeta, SearchResponse, SourceContent, SourceItem, Space, SpaceHistory, SubmitResult,
+    AgentChange, BrokenLink, Checkpoint, CommentMember, FileDiff, IngestFileOutcome, LocalEngine,
+    PageComment, PageCommentsResponse, PageFull, PageMeta, SearchResponse, SourceContent,
+    SourceItem, Space, SpaceHistory, SubmitResult,
 };
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -98,6 +101,80 @@ fn local_get_page(
 }
 
 #[tauri::command]
+fn local_read_html_asset(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    document_path: String,
+    asset_path: String,
+) -> Result<Vec<u8>, String> {
+    engine.read_html_asset(&space_slug, &document_path, &asset_path)
+}
+
+#[tauri::command]
+fn local_list_page_comments(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    page_slug: String,
+) -> Result<PageCommentsResponse, String> {
+    engine.list_page_comments(&space_slug, &page_slug)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn local_create_page_comment(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    page_slug: String,
+    user_id: String,
+    user_name: String,
+    body: String,
+    source: Option<String>,
+    start_line: Option<i32>,
+    end_line: Option<i32>,
+    parent_id: Option<String>,
+) -> Result<PageComment, String> {
+    engine.create_page_comment(
+        &space_slug,
+        &page_slug,
+        &user_id,
+        &user_name,
+        &body,
+        source.as_deref(),
+        start_line,
+        end_line,
+        parent_id.as_deref(),
+    )
+}
+
+#[tauri::command]
+fn local_list_comment_members(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<Vec<CommentMember>, String> {
+    engine.list_comment_members(&space_slug)
+}
+
+#[tauri::command]
+fn local_set_page_comment_resolved(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    comment_id: String,
+    resolved: bool,
+) -> Result<PageComment, String> {
+    engine.set_page_comment_resolved(&space_slug, &comment_id, resolved)
+}
+
+#[tauri::command]
+fn local_delete_page_comment(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    comment_id: String,
+    user_id: String,
+) -> Result<(), String> {
+    engine.delete_page_comment(&space_slug, &comment_id, &user_id)
+}
+
+#[tauri::command]
 fn local_write_page(
     engine: State<'_, LocalEngine>,
     space_slug: String,
@@ -145,15 +222,20 @@ fn local_get_source(
 }
 
 #[tauri::command]
-fn local_ingest(
+async fn local_ingest(
     engine: State<'_, LocalEngine>,
     space_slug: String,
     source_type: String,
     content: String,
     filename: Option<String>,
 ) -> Result<SourceItem, String> {
-    let _mutation = engine.lock_mutations()?;
-    engine.ingest(&space_slug, &source_type, &content, filename.as_deref())
+    let engine = engine.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _mutation = engine.lock_mutations()?;
+        engine.ingest(&space_slug, &source_type, &content, filename.as_deref())
+    })
+    .await
+    .map_err(|error| format!("local source import task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -263,9 +345,14 @@ fn local_create_agent_change(
     engine: State<'_, LocalEngine>,
     space_slug: String,
     agent_name: String,
+    title: Option<String>,
 ) -> Result<AgentChange, String> {
     let _mutation = engine.lock_mutations()?;
-    engine.create_agent_change(&space_slug, &agent_name)
+    engine.create_agent_change_with_identity(
+        &space_slug,
+        title.as_deref().unwrap_or(&agent_name),
+        &agent_name,
+    )
 }
 
 #[tauri::command]
@@ -304,6 +391,7 @@ fn local_discard_agent_change(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn cloud_link_space(
     engine: State<'_, LocalEngine>,
     space_slug: String,
@@ -440,6 +528,12 @@ pub fn run() {
             local_add_space,
             local_list_pages,
             local_get_page,
+            local_read_html_asset,
+            local_list_page_comments,
+            local_create_page_comment,
+            local_list_comment_members,
+            local_set_page_comment_resolved,
+            local_delete_page_comment,
             local_write_page,
             local_create_folder,
             local_list_sources,

@@ -54,7 +54,8 @@ test('Agent organization task names exact Source paths, not display titles', () 
     { filename: 'sources/_encoded/second.md', title: 'Another title' },
   ]);
 
-  assert.match(task, /sources\/_encoded\/first\.md/);
-  assert.match(task, /sources\/_encoded\/second\.md/);
+  assert.match(task, /\.cowiki\/sources\/_encoded\/first\.md/);
+  assert.match(task, /\.cowiki\/sources\/_encoded\/second\.md/);
+  assert.match(task, /sources:\n {2}- \.cowiki\/sources\//);
   assert.doesNotMatch(task, /Ignore previous instructions/);
 });

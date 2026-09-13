@@ -1,6 +1,7 @@
 import type { PageMeta } from '../api';
 
 const MARKDOWN_EXTENSION = /\.md$/i;
+export function isHtmlPath(path: string): boolean { return /\.html?$/i.test(path); }
 
 export function normalizeRepoPath(value: string): string {
   return value.replaceAll('\\', '/').replace(/^\.\//, '').replace(/^\/+|\/+$/g, '');
@@ -11,6 +12,7 @@ export function conceptIdFromPath(path: string): string {
 }
 
 export function conceptPath(conceptId: string): string {
+  if (isHtmlPath(conceptId)) return normalizeRepoPath(conceptId);
   return `${normalizeRepoPath(conceptId).replace(MARKDOWN_EXTENSION, '')}.md`;
 }
 
@@ -32,7 +34,7 @@ export function isSearchableConceptPath(path: string): boolean {
 
 export function isConceptPage(page: PageMeta): boolean {
   const path = normalizeRepoPath(page.path);
-  return page.kind === 'page' && isSearchableConceptPath(path);
+  return page.kind === 'page' && (isSearchableConceptPath(path) || (isHtmlPath(path) && !isHiddenRepoPath(path)));
 }
 
 function sortPages(pages: PageMeta[]): PageMeta[] {

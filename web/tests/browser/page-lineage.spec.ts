@@ -1,0 +1,68 @@
+import { test, expect } from '@playwright/test';
+import { createServer, type ViteDevServer } from 'vite';
+import { fileURLToPath } from 'node:url';
+let vite: ViteDevServer;
+let origin: string;
+test.beforeAll(async () => {
+  vite = await createServer({ root: fileURLToPath(new URL('../../', import.meta.url)), logLevel: 'silent', server: { host: '127.0.0.1', port: 0 } });
+  await vite.listen();
+  const address = vite.httpServer!.address();
+  if (!address || typeof address === 'string') throw new Error('Missing test port');
+  origin = 'http://127.0.0.1:' + address.port;
+});
+test.afterAll(async () => { await vite.close(); });
+
+test('real reader keeps lineage beside prose, coordinates comments and isolates HTML', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(origin + '/tests/fixtures/lineage-reader.html');
+  const trigger = page.getByRole('button', { name: /Sources & records/ });
+  await expect(page.getByRole('complementary', { name: 'Sources & records' })).toHaveCount(0);
+  await trigger.click();
+  const panel = page.getByRole('complementary', { name: 'Sources & records' });
+  await expect(panel.getByText('Team discussion: knowledge ownership')).toBeVisible();
+  const articleBox = await page.locator('article.prose').boundingBox();
+  const panelBox = await panel.boundingBox();
+  expect(panelBox!.x).toBeGreaterThanOrEqual(articleBox!.x + articleBox!.width - 1);
+  const commentToggleBox = await page.getByTitle('Show comments').boundingBox();
+  expect(commentToggleBox!.y + commentToggleBox!.height).toBeLessThanOrEqual(panelBox!.y);
+  await panel.getByRole('tab', { name: 'Records' }).click();
+  await expect(panel.getByText('Organize the team discussion into portable knowledge.')).toBeVisible();
+  await panel.getByRole('button', { name: /Review: Knowledge/ }).click();
+  await expect(page.locator('output')).toHaveText('review-1');
+  await panel.getByRole('tabpanel', { name: 'Records' }).getByText('Technical details').click();
+  await expect(panel.getByText('0123456789abcdef')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(panel).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await page.getByTitle('Show comments').click();
+  await expect(page.locator('#page-comments-panel')).toBeVisible();
+  await trigger.click();
+  await expect(page.locator('#page-comments-panel')).toHaveCount(0);
+  await expect(panel).toBeVisible();
+  await page.getByTitle('Show comments').click();
+  await expect(panel).toHaveCount(0);
+  await page.getByTitle('Hide comments').click();
+  await expect(panel).toHaveCount(0);
+  const html = page.frameLocator('iframe[title="Sandboxed HTML preview"]').frameLocator('iframe');
+  await html.getByRole('button', { name: 'Try HTML' }).click();
+  await expect(html.getByRole('button', { name: 'Interactive success' })).toBeVisible();
+  await trigger.click();
+  await page.getByRole('button', { name: 'Switch document' }).click();
+  await expect(panel).toHaveCount(0);
+  await page.getByRole('button', { name: /Sources & records/ }).click();
+  await expect(page.getByText(/No sources linked/)).toBeVisible();
+  await expect(page.getByText('Team discussion: knowledge ownership')).toHaveCount(0);
+});
+
+test('narrow reader keeps close and tabs reachable without horizontal overflow', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(origin + '/tests/fixtures/lineage-reader.html');
+  await page.getByRole('button', { name: /Sources & records/ }).click();
+  const panel = page.getByRole('complementary', { name: 'Sources & records' });
+  const box = await panel.boundingBox();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  await expect(panel.getByRole('button', { name: 'Close sources and records' })).toBeVisible();
+  await panel.getByRole('tab', { name: 'Records' }).click();
+  await expect(panel.getByText('Codex', { exact: true })).toBeVisible();
+});

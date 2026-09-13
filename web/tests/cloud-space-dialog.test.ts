@@ -85,6 +85,6 @@ test('conflicts stop safely without exposing Git recovery jargon', () => {
 
 test('desktop shell exposes one Space-scoped Cloud entry', () => {
   assert.match(mainLayout, /CloudSpaceDialog/);
-  assert.match(mainLayout, /Publish to Cloud/);
+  assert.match(mainLayout, /WorkspaceContextBadge/);
   assert.doesNotMatch(dialog, /API key|api key/i);
 });
