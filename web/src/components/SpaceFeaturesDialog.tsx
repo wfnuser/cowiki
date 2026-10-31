@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { C, fonts } from '@/lib/design';
 import { journalPagePath } from '@/lib/journal';
+import { reviewPagePath } from '@/lib/weekly-review';
 import {
   MODULES,
   setModuleHidden,
@@ -53,6 +54,14 @@ export function SpaceFeaturesDialog({
     }
   })();
 
+  const reviewPreview = (() => {
+    try {
+      return reviewPagePath(draft.review, new Date());
+    } catch {
+      return '';
+    }
+  })();
+
   const setModule = (id: ModuleId, enabled: boolean) => {
     setDraft((previous) => ({ ...previous, modules: { ...previous.modules, [id]: enabled } }));
   };
@@ -72,7 +81,7 @@ export function SpaceFeaturesDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
-      <DialogContent style={{ maxWidth: 560 }}>
+      <DialogContent style={{ maxWidth: 560, maxHeight: "88vh", overflowY: "auto" }}>
         <DialogHeader>
           <DialogTitle>Modules & journal</DialogTitle>
         </DialogHeader>
@@ -144,6 +153,44 @@ export function SpaceFeaturesDialog({
           </div>
           <p style={{ margin: '8px 0 0', fontSize: 11.5, color: C.muted }}>
             Today’s entry: <code style={{ fontFamily: fonts.mono }}>{preview || '—'}</code>. Formats use Obsidian/moment tokens such as <code>YYYY-MM-DD</code> or <code>YYYY/MM/YYYY-MM-DD</code>; templates support <code>{'{{date}}'}</code>, <code>{'{{title}}'}</code> and <code>{'{{time}}'}</code>.
+          </p>
+        </section>
+
+        <section style={{ ...sectionStyle, opacity: draft.modules.review ? 1 : 0.55 }}>
+          <h3 style={headingStyle}>Weekly review</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px 12px', alignItems: 'center' }}>
+            <label htmlFor="review-folder" style={labelStyle}>Folder</label>
+            <input
+              id="review-folder"
+              value={draft.review.folder}
+              placeholder="Space root"
+              disabled={!draft.modules.review}
+              onChange={(event) => setDraft((previous) => ({ ...previous, review: { ...previous.review, folder: event.target.value } }))}
+              style={inputStyle}
+            />
+            <label htmlFor="review-format" style={labelStyle}>Week format</label>
+            <input
+              id="review-format"
+              value={draft.review.format}
+              disabled={!draft.modules.review}
+              onChange={(event) => setDraft((previous) => ({ ...previous, review: { ...previous.review, format: event.target.value } }))}
+              style={{ ...inputStyle, fontFamily: fonts.mono }}
+            />
+            <label htmlFor="review-template" style={labelStyle}>Template page</label>
+            <input
+              id="review-template"
+              value={draft.review.template ?? ''}
+              placeholder="Optional, e.g. Templates/Weekly.md"
+              disabled={!draft.modules.review}
+              onChange={(event) => setDraft((previous) => ({
+                ...previous,
+                review: { ...previous.review, template: event.target.value.trim() ? event.target.value : null },
+              }))}
+              style={inputStyle}
+            />
+          </div>
+          <p style={{ margin: '8px 0 0', fontSize: 11.5, color: C.muted }}>
+            This week: <code style={{ fontFamily: fonts.mono }}>{reviewPreview || '—'}</code>. <code>GGGG</code> and <code>WW</code> are the ISO week year and number. A new review lists the week&apos;s finished and open tasks and journal entries; a template replaces the reflection sections.
           </p>
         </section>
 

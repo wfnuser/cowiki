@@ -95,10 +95,11 @@ import { cloudPageCommentStore, desktopPageCommentStore } from '@/lib/page-comme
 import { openExternalUrl } from '@/external-links';
 import { TasksView } from '../components/views/TasksView';
 import { JournalNav } from '../components/JournalNav';
+import { WeekNav } from '../components/WeekNav';
 import { SpaceFeaturesDialog } from '../components/SpaceFeaturesDialog';
 import { ObsidianImportDialog } from '../components/ObsidianImportDialog';
 import { ObsidianReaderContext, withObsidianReader, type ReaderCallbacks } from '../components/ObsidianReader';
-import { readAsset, readSpaceConfig, writeSpaceConfig } from '@/local-api';
+import { listTaskSources, readAsset, readSpaceConfig, writeSpaceConfig } from '@/local-api';
 import {
   DEFAULT_SPACE_FEATURES,
   loadPersonalPreferences,
@@ -110,10 +111,12 @@ import {
   type SpaceFeatures,
 } from '@/lib/space-features';
 import { dateKey, journalDateFromPath, journalEntryKeys, journalPagePath, newJournalBody } from '@/lib/journal';
-import { applyTaskToggle, insertTaskLine, type TaskItem } from '@/lib/tasks';
+import { applyTaskToggle, extractTasks, insertTaskLine, type TaskItem } from '@/lib/tasks';
+import { newReviewBody, reviewPagePath, reviewWeekFromPath } from '@/lib/weekly-review';
 import { flattenPages, parseWikilink, resolveWikilinkPath } from '@/lib/wikilinks';
 import { obsidianToReaderMarkdown, renderedLineOffset } from '@/lib/obsidian-markdown';
 import { pageFileName } from '@/lib/page-names';
+import { BUILT_IN_TEMPLATES, newPageBody, templatePagePaths } from '@/lib/page-templates';
 
 const LAST_SPACE_STORAGE_KEY = 'cowiki.lastSpace';
 const READER_COMPONENTS = withObsidianReader(commentMarkdownComponents);
@@ -304,6 +307,8 @@ export function MainLayout() {
   const [showNewPage, setShowNewPage] = useState<Workspace | null>(null);
   const [showNewFolder, setShowNewFolder] = useState<Workspace | null>(null);
   const [newPageFolder, setNewPageFolder] = useState<string | null>(null);
+  // '' (blank), 'builtin:<id>' or 'page:<path>'
+  const [newPageTemplate, setNewPageTemplate] = useState('');
   const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [newSlug, setNewSlug] = useState('');
@@ -794,6 +799,54 @@ export function MainLayout() {
     }
   };
 
+  /** Create the weekly review for the week of `date` when missing, with a snapshot of the week. */
+  const ensureReviewEntry = async (ws: Workspace, date: Date): Promise<{ conceptId: string; path: string }> => {
+    const features = spaceFeatures[ws.id] ?? await loadSpaceFeatures(ws);
+    const path = reviewPagePath(features.review, date);
+    const conceptId = conceptIdFromPath(path);
+    try {
+      await getPage(conceptId, userBranch, ws.slug, 'wiki');
+      return { conceptId, path };
+    } catch {
+      // Missing: create it below.
+    }
+    let template: string | null = null;
+    if (features.review.template) {
+      try {
+        template = (await getPage(conceptIdFromPath(features.review.template), userBranch, ws.slug, 'wiki')).body;
+      } catch {
+        template = null;
+      }
+    }
+    const sources = await listTaskSources(ws.slug).catch(() => []);
+    const tasks = sources.flatMap((source) => {
+      const day = journalDateFromPath(features.journal, source.path);
+      return extractTasks(source.path, source.content, day ? dateKey(day) : null);
+    });
+    const journal = flattenPages(spacePages[ws.id] || []).flatMap((page) => {
+      const day = journalDateFromPath(features.journal, page.path);
+      return day ? [{ key: dateKey(day), path: page.path }] : [];
+    });
+    try {
+      await writePage(conceptId, newReviewBody({ date, tasks, journal, template }), userBranch, ws.slug, 'wiki', undefined, true);
+    } catch (error) {
+      if (!String(error instanceof Error ? error.message : error).includes('already exists')) throw error;
+    }
+    await loadSpacePages(ws);
+    return { conceptId, path };
+  };
+
+  const openReviewWeek = async (ws: Workspace, date: Date) => {
+    try {
+      const entry = await ensureReviewEntry(ws, date);
+      await selectPage(ws, entry.conceptId, entry.path);
+      setActiveTab('review');
+      setEditingPage(true);
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : 'Could not open the weekly review', type: 'error' });
+    }
+  };
+
   // Open today's journal at startup when this person asked for it and the
   // app was launched without a deep link.
   useEffect(() => {
@@ -923,6 +976,9 @@ export function MainLayout() {
   const journalDay = activeWorkspace && activeView?.kind === 'page' && activeModules.includes('journal')
     ? journalDateFromPath(activeFeatures.journal, activeView.path ?? conceptPath(activeView.slug))
     : null;
+  const reviewWeek = activeWorkspace && activeView?.kind === 'page' && activeModules.includes('review')
+    ? reviewWeekFromPath(activeFeatures.review, activeView.path ?? conceptPath(activeView.slug))
+    : null;
 
   // Create page in a workspace
   const handleCreatePage = async (e: React.FormEvent) => {
@@ -935,20 +991,31 @@ export function MainLayout() {
       : newName.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim())
       || `page-${crypto.randomUUID().slice(0, 8)}`;
     const conceptId = newPageFolder ? `${newPageFolder}/${baseSlug}` : baseSlug;
-    const body = `---\ntype: Note\ntitle: "${newName.trim().replaceAll('"', '\\"')}"\ndescription: ""\n---\n\n`;
     try {
+      let template: { body: string; type?: string } | null = null;
+      if (newPageTemplate.startsWith('builtin:')) {
+        template = BUILT_IN_TEMPLATES.find((item) => `builtin:${item.id}` === newPageTemplate) ?? null;
+      } else if (newPageTemplate.startsWith('page:')) {
+        const templatePath = newPageTemplate.slice('page:'.length);
+        template = { body: (await getPage(conceptIdFromPath(templatePath), userBranch, ws.slug, 'wiki')).body };
+      }
+      const body = newPageBody(newName.trim(), template);
       await writePage(conceptId, body, userBranch, ws.slug, 'wiki', undefined, true);
       const title = newName.trim();
       setShowNewPage(null);
       setNewName('');
       setNewPageFolder(null);
+      setNewPageTemplate('');
       await loadSpacePages(ws);
       const newPath = conceptPath(conceptId);
-      persistedPageBody.current = body;
-      setActiveView({ kind: 'page', slug: conceptId, path: newPath, content: { slug: conceptId, path: newPath, title, summary: '', body, branch: userBranch, kind: 'page', children: [] } });
+      // The engine may normalize properties; edit what was actually saved.
+      const saved = await getPage(conceptId, userBranch, ws.slug, 'wiki')
+        .catch(() => ({ slug: conceptId, path: newPath, title, summary: '', body, branch: userBranch, kind: 'page' as const, children: [] }));
+      persistedPageBody.current = saved.body;
+      setActiveView({ kind: 'page', slug: conceptId, path: newPath, content: saved });
       navigate(pageRoute(ws.slug, conceptId), { replace: true });
-    } catch {
-      setMessage({ text: 'Failed to create page', type: 'error' });
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? `Failed to create page: ${error.message}` : 'Failed to create page', type: 'error' });
     }
   };
 
@@ -1002,6 +1069,9 @@ export function MainLayout() {
         break;
       case 'journal':
         void openJournalDay(activeWorkspace, new Date());
+        break;
+      case 'review':
+        void openReviewWeek(activeWorkspace, new Date());
         break;
       case 'tasks':
         setEditingPage(false);
@@ -1501,6 +1571,9 @@ export function MainLayout() {
 
               {/* Right: actions */}
               <ContentHeaderActions>
+                {activeWorkspace && reviewWeek && (
+                  <WeekNav week={reviewWeek} onOpenWeek={(date) => { void openReviewWeek(activeWorkspace, date); }} />
+                )}
                 {activeWorkspace && journalDay && (
                   <JournalNav
                     date={journalDay}
@@ -1885,6 +1958,36 @@ export function MainLayout() {
             <div>
               <label className="mb-1.5 block text-sm text-text-secondary">Title</label>
               <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Meeting Notes" autoFocus />
+            </div>
+            <div>
+              <label htmlFor="new-page-template" className="mb-1.5 block text-sm text-text-secondary">Template</label>
+              <select
+                id="new-page-template"
+                value={newPageTemplate}
+                onChange={(e) => setNewPageTemplate(e.target.value)}
+                className="w-full rounded-md border bg-transparent px-3 py-2 text-sm"
+              >
+                <option value="">Blank page</option>
+                <optgroup label="Built in">
+                  {BUILT_IN_TEMPLATES.map((template) => (
+                    <option key={template.id} value={`builtin:${template.id}`}>{template.name}</option>
+                  ))}
+                </optgroup>
+                {showNewPage && (() => {
+                  const features = spaceFeatures[showNewPage.id] ?? DEFAULT_SPACE_FEATURES;
+                  const pages = templatePagePaths(
+                    flattenPages(spacePages[showNewPage.id] || []).map((page) => page.path),
+                    [features.journal.template, features.review.template],
+                  );
+                  return pages.length > 0 ? (
+                    <optgroup label="This Space">
+                      {pages.map((path) => (
+                        <option key={path} value={`page:${path}`}>{path.replace(/\.md$/i, '')}</option>
+                      ))}
+                    </optgroup>
+                  ) : null;
+                })()}
+              </select>
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" type="button" onClick={() => setShowNewPage(null)}>Cancel</Button>

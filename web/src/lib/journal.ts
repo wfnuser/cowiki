@@ -29,7 +29,8 @@ const MONTHS = [
 ];
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-const TOKEN = /\[([^\]]*)\]|YYYY|YY|MMMM|MMM|MM|M|Do|DD|D|dddd|ddd|HH|H|mm|ss|A|a/g;
+// Week tokens (GGGG/gggg, WW/ww, W/w) use ISO weeks starting on Monday.
+const TOKEN = /\[([^\]]*)\]|GGGG|gggg|WW|ww|W|w|YYYY|YY|MMMM|MMM|MM|M|Do|DD|D|dddd|ddd|HH|H|mm|ss|A|a/g;
 
 function pad(value: number, width = 2): string {
   return String(value).padStart(width, '0');
@@ -51,6 +52,9 @@ export function formatDate(date: Date, format: string): string {
   return format.replace(TOKEN, (match, literal: string | undefined) => {
     if (literal !== undefined) return literal;
     switch (match) {
+      case 'GGGG': case 'gggg': return String(isoWeek(date).year);
+      case 'WW': case 'ww': return pad(isoWeek(date).week);
+      case 'W': case 'w': return String(isoWeek(date).week);
       case 'YYYY': return String(date.getFullYear());
       case 'YY': return pad(date.getFullYear() % 100);
       case 'MMMM': return MONTHS[date.getMonth()];
@@ -96,7 +100,9 @@ function datePattern(format: string): DatePattern {
     const token = match[0];
     parts.push(token);
     switch (token) {
-      case 'YYYY': source += '(\\d{4})'; break;
+      case 'YYYY': case 'GGGG': case 'gggg': source += '(\\d{4})'; break;
+      case 'WW': case 'ww': source += '(\\d{2})'; break;
+      case 'W': case 'w': source += '(\\d{1,2})'; break;
       case 'YY': source += '(\\d{2})'; break;
       case 'MMMM': source += `(${MONTHS.join('|')})`; break;
       case 'MMM': source += `(${MONTHS.map((m) => m.slice(0, 3)).join('|')})`; break;
@@ -120,9 +126,13 @@ export function parseDate(value: string, format: string): Date | null {
   let year: number | null = null;
   let month: number | null = null;
   let day: number | null = null;
+  let weekYear: number | null = null;
+  let week: number | null = null;
   parts.forEach((token, index) => {
     const raw = match[index + 1];
     switch (token) {
+      case 'GGGG': case 'gggg': weekYear = Number(raw); break;
+      case 'WW': case 'ww': case 'W': case 'w': week = Number(raw); break;
       case 'YYYY': year = Number(raw); break;
       case 'YY': year = 2000 + Number(raw); break;
       case 'MMMM': month = MONTHS.findIndex((m) => m.toLowerCase() === raw.toLowerCase()); break;
@@ -132,6 +142,7 @@ export function parseDate(value: string, format: string): Date | null {
       default: break;
     }
   });
+  if (weekYear !== null && week !== null && day === null) return isoWeekStart(weekYear, week);
   if (year === null || month === null || day === null || month < 0) return null;
   const date = new Date(year, month, day);
   if (date.getFullYear() !== year || date.getMonth() !== month || date.getDate() !== day) return null;
@@ -153,6 +164,29 @@ export function addDays(date: Date, days: number): Date {
 
 export function startOfDay(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+/** ISO 8601 week: weeks start on Monday; week 1 contains January 4th. */
+export function isoWeek(date: Date): { year: number; week: number } {
+  const thursday = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  thursday.setUTCDate(thursday.getUTCDate() + 4 - (thursday.getUTCDay() || 7));
+  const yearStart = Date.UTC(thursday.getUTCFullYear(), 0, 1);
+  return {
+    year: thursday.getUTCFullYear(),
+    week: Math.ceil(((thursday.getTime() - yearStart) / 86_400_000 + 1) / 7),
+  };
+}
+
+export function startOfIsoWeek(date: Date): Date {
+  return addDays(startOfDay(date), 1 - (date.getDay() || 7));
+}
+
+/** Monday of an ISO week, or null when the week does not exist that year. */
+export function isoWeekStart(year: number, week: number): Date | null {
+  if (week < 1 || week > 53) return null;
+  const monday = addDays(startOfIsoWeek(new Date(year, 0, 4)), (week - 1) * 7);
+  const check = isoWeek(monday);
+  return check.year === year && check.week === week ? monday : null;
 }
 
 function normalizeFolder(folder: string): string {

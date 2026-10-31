@@ -108,7 +108,13 @@ export function planImport(scan: VaultScan): ImportPlan {
     journal,
     journalSource,
     journalEntries: journalEntryKeys(journal, scan.markdownPaths).length,
-    features: { ...DEFAULT_SPACE_FEATURES, modules: { ...DEFAULT_SPACE_FEATURES.modules }, journal },
+    features: {
+      ...DEFAULT_SPACE_FEATURES,
+      modules: { ...DEFAULT_SPACE_FEATURES.modules },
+      journal,
+      // Weekly reviews sit next to the daily notes.
+      review: { ...DEFAULT_SPACE_FEATURES.review, folder: journal.folder },
+    },
   };
 }
 

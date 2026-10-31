@@ -79,6 +79,7 @@ test('the Space config enables modules and records the import', () => {
   const plan = planImport(scan());
   const config = importSpaceConfig(plan, scan());
   assert.deepEqual(parseSpaceFeatures(config).journal, plan.journal);
+  assert.equal(parseSpaceFeatures(config).review.folder, plan.journal.folder);
   assert.equal((config.import as Record<string, unknown>).vaultName, 'TheVault');
 });
 

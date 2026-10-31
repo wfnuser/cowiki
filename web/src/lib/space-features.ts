@@ -1,10 +1,11 @@
 import { DEFAULT_JOURNAL_CONFIG, type JournalConfig } from './journal.ts';
+import { DEFAULT_REVIEW_CONFIG, type ReviewConfig } from './weekly-review.ts';
 
 /**
  * Optional modules a Space can turn on. Turning a module off only hides its
  * entry points; journal pages and task lines stay ordinary Markdown files.
  */
-export type ModuleId = 'journal' | 'tasks';
+export type ModuleId = 'journal' | 'tasks' | 'review';
 
 export const MODULES: Array<{ id: ModuleId; label: string; description: string }> = [
   {
@@ -17,6 +18,11 @@ export const MODULES: Array<{ id: ModuleId; label: string; description: string }
     label: 'Tasks',
     description: 'Collects checkbox tasks from every page into Today, Upcoming and Done lists.',
   },
+  {
+    id: 'review',
+    label: 'Weekly review',
+    description: 'A "Review" entry that opens this week\'s review page, pre-filled with finished and open tasks and the week\'s journal entries.',
+  },
 ];
 
 /**
@@ -26,11 +32,13 @@ export const MODULES: Array<{ id: ModuleId; label: string; description: string }
 export interface SpaceFeatures {
   modules: Record<ModuleId, boolean>;
   journal: JournalConfig;
+  review: ReviewConfig;
 }
 
 export const DEFAULT_SPACE_FEATURES: SpaceFeatures = {
-  modules: { journal: true, tasks: true },
+  modules: { journal: true, tasks: true, review: true },
   journal: { ...DEFAULT_JOURNAL_CONFIG },
+  review: { ...DEFAULT_REVIEW_CONFIG },
 };
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -64,15 +72,19 @@ export function parseSpaceFeatures(config: unknown): SpaceFeatures {
   const features = record(root?.features);
   const modules = record(features?.modules);
   const journal = record(features?.journal);
+  const review = record(features?.review);
+  const flag = (id: ModuleId) => (typeof modules?.[id] === 'boolean' ? modules[id] as boolean : DEFAULT_SPACE_FEATURES.modules[id]);
   return {
-    modules: {
-      journal: typeof modules?.journal === 'boolean' ? modules.journal : DEFAULT_SPACE_FEATURES.modules.journal,
-      tasks: typeof modules?.tasks === 'boolean' ? modules.tasks : DEFAULT_SPACE_FEATURES.modules.tasks,
-    },
+    modules: { journal: flag('journal'), tasks: flag('tasks'), review: flag('review') },
     journal: {
       folder: cleanFolder(journal?.folder, DEFAULT_JOURNAL_CONFIG.folder),
       format: cleanFormat(journal?.format, DEFAULT_JOURNAL_CONFIG.format),
       template: cleanTemplate(journal?.template),
+    },
+    review: {
+      folder: cleanFolder(review?.folder, DEFAULT_REVIEW_CONFIG.folder),
+      format: cleanFormat(review?.format, DEFAULT_REVIEW_CONFIG.format),
+      template: cleanTemplate(review?.template),
     },
   };
 }
@@ -86,6 +98,11 @@ export function withSpaceFeatures(config: unknown, features: SpaceFeatures): Rec
       folder: features.journal.folder,
       format: features.journal.format,
       template: features.journal.template,
+    },
+    review: {
+      folder: features.review.folder,
+      format: features.review.format,
+      template: features.review.template,
     },
   };
   return root;
@@ -113,7 +130,7 @@ export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
 };
 
 function isModuleId(value: unknown): value is ModuleId {
-  return value === 'journal' || value === 'tasks';
+  return value === 'journal' || value === 'tasks' || value === 'review';
 }
 
 export function loadPersonalPreferences(storage: PreferenceStorage): PersonalPreferences {
