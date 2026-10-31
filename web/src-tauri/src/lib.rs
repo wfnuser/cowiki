@@ -4,7 +4,9 @@ mod html_assets;
 mod knowledge_index;
 mod local_engine;
 mod mcp;
+mod obsidian;
 mod okf;
+mod personal;
 mod terminal;
 mod web_source;
 
@@ -98,6 +100,68 @@ fn local_get_page(
     page_slug: String,
 ) -> Result<PageFull, String> {
     engine.get_page(&space_slug, &page_slug)
+}
+
+#[tauri::command]
+fn local_read_space_config(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<Option<serde_json::Value>, String> {
+    engine.read_space_config(&space_slug)
+}
+
+#[tauri::command]
+fn local_write_space_config(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    config: serde_json::Value,
+) -> Result<(), String> {
+    let _mutation = engine.lock_mutations()?;
+    engine.write_space_config(&space_slug, &config)
+}
+
+#[tauri::command(async)]
+fn local_list_task_sources(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<Vec<personal::TaskSource>, String> {
+    engine.task_sources(&space_slug)
+}
+
+#[tauri::command(async)]
+fn local_read_asset(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    from_path: String,
+    target: String,
+) -> Result<personal::AssetBytes, String> {
+    engine.read_asset(&space_slug, &from_path, &target)
+}
+
+#[tauri::command(async)]
+fn obsidian_scan_vault(vault_path: String) -> Result<obsidian::VaultReport, String> {
+    obsidian::scan_vault(&PathBuf::from(vault_path))
+}
+
+#[tauri::command(async)]
+fn obsidian_import_vault(
+    engine: State<'_, LocalEngine>,
+    name: String,
+    slug: String,
+    source_path: String,
+    destination_path: String,
+    space_config: serde_json::Value,
+    report_markdown: String,
+) -> Result<Space, String> {
+    let _mutation = engine.lock_mutations()?;
+    engine.import_obsidian_vault(
+        &name,
+        &slug,
+        &PathBuf::from(source_path),
+        &PathBuf::from(destination_path),
+        &space_config,
+        &report_markdown,
+    )
 }
 
 #[tauri::command]
@@ -529,6 +593,12 @@ pub fn run() {
             local_list_pages,
             local_get_page,
             local_read_html_asset,
+            local_read_space_config,
+            local_write_space_config,
+            local_list_task_sources,
+            local_read_asset,
+            obsidian_scan_vault,
+            obsidian_import_vault,
             local_list_page_comments,
             local_create_page_comment,
             local_list_comment_members,
@@ -572,7 +642,12 @@ pub fn run() {
             let home = std::env::var_os("HOME")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| app.path().app_data_dir().unwrap_or_default());
-            let cowiki_home = home.join("cowiki");
+            // COWIKI_HOME lets a second profile (tests, demos) keep its own
+            // Space registry instead of sharing ~/cowiki.
+            let cowiki_home = std::env::var_os("COWIKI_HOME")
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join("cowiki"));
             let engine = LocalEngine::open(&cowiki_home.join(".cowiki"))
                 .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
             engine

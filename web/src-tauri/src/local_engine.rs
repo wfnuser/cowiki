@@ -614,12 +614,83 @@ impl LocalEngine {
         } else {
             std::fs::rename(&temporary, &path).map_err(|e| e.to_string())?;
         }
-        okf::refresh_progressive_indexes(&space.local_path)?;
+        // Only the written page and the folder listings above it can change.
+        okf::refresh_indexes_for(&space.local_path, &relative)?;
+        let mut changed = vec![relative.clone()];
+        let mut directory = relative.clone();
+        while directory.pop() {
+            changed.push(directory.join("index.md"));
+            if directory.as_os_str().is_empty() {
+                break;
+            }
+        }
         let mut db = self
             .db
             .lock()
             .map_err(|_| "local database lock poisoned".to_string())?;
-        knowledge_index::rebuild_space(&mut db, &space.id, &space.local_path)
+        knowledge_index::index_paths(&mut db, &space.id, &space.local_path, &changed)
+    }
+
+    pub fn read_space_config(&self, space_slug: &str) -> Result<Option<serde_json::Value>, String> {
+        let space = self.find_space(space_slug)?;
+        crate::personal::read_space_config(&space.local_path)
+    }
+
+    pub fn write_space_config(
+        &self,
+        space_slug: &str,
+        config: &serde_json::Value,
+    ) -> Result<(), String> {
+        let space = self.find_space(space_slug)?;
+        crate::personal::write_space_config(&space.local_path, config)
+    }
+
+    pub fn task_sources(
+        &self,
+        space_slug: &str,
+    ) -> Result<Vec<crate::personal::TaskSource>, String> {
+        let space = self.find_space(space_slug)?;
+        crate::personal::task_sources(&space.local_path)
+    }
+
+    pub fn read_asset(
+        &self,
+        space_slug: &str,
+        from_path: &str,
+        target: &str,
+    ) -> Result<crate::personal::AssetBytes, String> {
+        let space = self.find_space(space_slug)?;
+        crate::personal::read_asset(&space.local_path, from_path, target)
+    }
+
+    /// Copy an Obsidian vault into `destination`, seed its Space settings and
+    /// import report, then register the copy as a Space. The vault itself is
+    /// only read.
+    pub fn import_obsidian_vault(
+        &self,
+        name: &str,
+        slug: &str,
+        source: &Path,
+        destination: &Path,
+        space_config: &serde_json::Value,
+        report_markdown: &str,
+    ) -> Result<Space, String> {
+        validate_slug(slug)?;
+        if self.list_spaces()?.iter().any(|space| space.slug == slug) {
+            return Err(format!("a Space named '{slug}' already exists"));
+        }
+        crate::obsidian::copy_vault(source, destination)?;
+        if space_config.is_object() {
+            crate::personal::write_space_config(destination, space_config)?;
+        }
+        if !report_markdown.trim().is_empty() {
+            let report = destination.join("CoWiki Import Report.md");
+            std::fs::write(&report, report_markdown).map_err(|error| error.to_string())?;
+        }
+        // Record the untouched copy first, so the later OKF normalization is a
+        // separate, reviewable commit instead of thousands of loose drafts.
+        commit_imported_copy(destination, name)?;
+        self.add_space(name, slug, destination)
     }
 
     pub fn create_folder(
@@ -1681,6 +1752,51 @@ fn safe_repo_path(value: &str) -> Result<&Path, String> {
         return Err("invalid reviewed path".to_string());
     }
     Ok(path)
+}
+
+/// Commit every file of a freshly imported copy as one "Import" commit. A
+/// retried import that already has history gets a follow-up commit only when
+/// files changed.
+fn commit_imported_copy(root: &Path, name: &str) -> Result<(), String> {
+    let repo = match Repository::open(root) {
+        Ok(repo) => repo,
+        Err(_) => {
+            let mut options = RepositoryInitOptions::new();
+            options.initial_head("main");
+            Repository::init_opts(root, &options)
+                .map_err(|e| format!("cannot initialize local Git repository: {e}"))?
+        }
+    };
+    let mut index = repo.index().map_err(|error| error.to_string())?;
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .map_err(|error| error.to_string())?;
+    index
+        .update_all(["*"].iter(), None)
+        .map_err(|error| error.to_string())?;
+    index.write().map_err(|error| error.to_string())?;
+    let tree_id = index.write_tree().map_err(|error| error.to_string())?;
+    let parent = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
+    if parent
+        .as_ref()
+        .is_some_and(|commit| commit.tree_id() == tree_id)
+    {
+        return Ok(());
+    }
+    let tree = repo.find_tree(tree_id).map_err(|error| error.to_string())?;
+    let signature =
+        Signature::now("CoWiki Local", "local@cowiki.app").map_err(|error| error.to_string())?;
+    let parents = parent.iter().collect::<Vec<_>>();
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        &format!("Import Obsidian vault \"{}\"", name.trim()),
+        &tree,
+        &parents,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn commit_initial_okf_indexes(repo: &Repository, root: &Path) -> Result<(), String> {

@@ -646,6 +646,28 @@ pub fn refresh_progressive_indexes(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Refresh only the progressive indexes that list `relative`: its folder and
+/// every ancestor up to the Space root. A page write cannot change any other
+/// folder's listing, so walking the whole tree on every save is unnecessary.
+pub fn refresh_indexes_for(root: &Path, relative: &Path) -> Result<(), String> {
+    if is_hidden_relative(root, &root.join(relative)) {
+        return Ok(());
+    }
+    let mut directory = root.join(relative);
+    while directory.pop() {
+        if !directory.starts_with(root) {
+            break;
+        }
+        if directory.is_dir() {
+            refresh_directory_index(root, &directory)?;
+        }
+        if directory == root {
+            break;
+        }
+    }
+    Ok(())
+}
+
 fn refresh_directory_index(root: &Path, directory: &Path) -> Result<(), String> {
     let index_path = directory.join("index.md");
     let existing = if index_path.is_file() {

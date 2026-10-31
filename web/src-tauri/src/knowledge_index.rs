@@ -9,7 +9,7 @@ use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const SCHEMA_VERSION: i64 = 1;
 
@@ -255,6 +255,46 @@ pub fn refresh_space(
                 params![space_id, deleted],
             )
             .map_err(|e| e.to_string())?;
+    }
+    transaction.commit().map_err(|e| e.to_string())
+}
+
+/// Re-index only the given Space-relative Markdown paths. A product write
+/// touches one page, so re-reading every page in a large vault on each save
+/// would make autosave cost grow with the vault size. Missing files are
+/// removed from the index.
+pub fn index_paths(
+    connection: &mut Connection,
+    space_id: &str,
+    root: &Path,
+    paths: &[PathBuf],
+) -> Result<(), String> {
+    if !root.is_dir() {
+        return Ok(());
+    }
+    let transaction = connection.transaction().map_err(|e| e.to_string())?;
+    for relative in paths {
+        let path = root.join(relative);
+        if !is_markdown(&path) || !should_walk(&path, root) {
+            continue;
+        }
+        if path.is_file() {
+            index_file_in(&transaction, space_id, root, &path)?;
+        } else {
+            let relative = normalize_path(relative);
+            transaction
+                .execute(
+                    "DELETE FROM page_links WHERE space_id = ?1 AND source_path = ?2",
+                    params![space_id, relative],
+                )
+                .map_err(|e| e.to_string())?;
+            transaction
+                .execute(
+                    "DELETE FROM indexed_pages WHERE space_id = ?1 AND path = ?2",
+                    params![space_id, relative],
+                )
+                .map_err(|e| e.to_string())?;
+        }
     }
     transaction.commit().map_err(|e| e.to_string())
 }
