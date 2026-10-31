@@ -36,7 +36,7 @@ export interface TaskItem {
   journalDate: string | null;
 }
 
-const CHECKBOX = /^(\s*(?:[-*+]|\d+[.)])\s+)\[([ xX/\-])\]\s?(.*)$/;
+const CHECKBOX = /^(\s*(?:[-*+]|\d+[.)])\s+)\[([ xX/-])\]\s?(.*)$/;
 const LOGSEQ = /^(\s*[-*+]\s+)(TODO|DOING|NOW|LATER|DONE|CANCELED|CANCELLED)\s+(.*)$/;
 const DATE = '(\\d{4}-\\d{2}-\\d{2})';
 const EMOJI_FIELDS: Array<[keyof Pick<TaskItem, 'due' | 'scheduled' | 'start' | 'doneDate'>, string]> = [
@@ -179,8 +179,9 @@ export function extractTasks(path: string, content: string, journalDate: string 
 export function toggledTaskLine(line: string, today: string): string {
   const checkbox = CHECKBOX.exec(line);
   if (checkbox) {
-    const done = checkbox[2] === 'x' || checkbox[2] === 'X';
-    if (done) {
+    // Done and cancelled tasks both show as checked, so either one reopens.
+    const closed = checkbox[2] === 'x' || checkbox[2] === 'X' || checkbox[2] === '-';
+    if (closed) {
       const reopened = checkbox[3].replace(new RegExp(`\\s*✅\\uFE0F?\\s*${DATE}`, 'u'), '');
       return `${checkbox[1]}[ ] ${reopened}`.replace(/\s+$/, '');
     }
@@ -190,8 +191,8 @@ export function toggledTaskLine(line: string, today: string): string {
   }
   const logseq = LOGSEQ.exec(line);
   if (logseq) {
-    const done = logseq[2] === 'DONE';
-    return `${logseq[1]}${done ? 'TODO' : 'DONE'} ${logseq[3]}`;
+    const closed = logseq[2] === 'DONE' || logseq[2].startsWith('CANCEL');
+    return `${logseq[1]}${closed ? 'TODO' : 'DONE'} ${logseq[3]}`;
   }
   throw new Error('This line is no longer a task.');
 }

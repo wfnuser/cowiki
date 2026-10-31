@@ -238,3 +238,89 @@ export function continueCloudRebase(spaceSlug: string): Promise<CloudSyncResult>
 export function abortCloudRebase(spaceSlug: string): Promise<CloudSyncResult> {
   return invoke<CloudSyncResult>('cloud_rebase_abort', { spaceSlug });
 }
+
+export function readSpaceConfig(spaceSlug: string): Promise<unknown | null> {
+  return invoke('local_read_space_config', { spaceSlug });
+}
+
+export function writeSpaceConfig(spaceSlug: string, config: Record<string, unknown>): Promise<void> {
+  return invoke('local_write_space_config', { spaceSlug, config });
+}
+
+export interface TaskSource {
+  path: string;
+  content: string;
+}
+
+export function listTaskSources(spaceSlug: string): Promise<TaskSource[]> {
+  return invoke('local_list_task_sources', { spaceSlug });
+}
+
+export interface AssetBytes {
+  path: string;
+  mime: string;
+  bytes: number[];
+}
+
+export function readAsset(spaceSlug: string, fromPath: string, target: string): Promise<AssetBytes> {
+  return invoke('local_read_asset', { spaceSlug, fromPath, target });
+}
+
+export interface ObsidianVaultReport {
+  vaultPath: string;
+  vaultName: string;
+  markdownFiles: number;
+  attachmentFiles: number;
+  otherFiles: number;
+  folders: number;
+  totalBytes: number;
+  attachmentTypes: Record<string, number>;
+  wikilinks: number;
+  markdownLinks: number;
+  embeds: number;
+  headingLinks: number;
+  blockLinks: number;
+  blockIds: number;
+  unresolvedLinks: number;
+  unresolvedExamples: string[];
+  tags: number;
+  taskLines: number;
+  filesWithFrontmatter: number;
+  invalidFrontmatter: string[];
+  callouts: number;
+  dataviewBlocks: number;
+  tasksQueryBlocks: number;
+  templaterFiles: string[];
+  excalidrawFiles: number;
+  canvasFiles: number;
+  duplicateNames: Array<{ name: string; paths: string[] }>;
+  duplicateNameCount: number;
+  reservedNames: string[];
+  nonUtf8Files: string[];
+  topLevelSourcesFolder: boolean;
+  symlinksSkipped: number;
+  largeFiles: number;
+  largeFileBytes: number;
+  largeFileExamples: string[];
+  markdownPaths: string[];
+  dailyNotes: unknown | null;
+  templatesFolder: string | null;
+  attachmentFolder: string | null;
+  linkFormat: string | null;
+  communityPlugins: string[];
+}
+
+export function scanObsidianVault(vaultPath: string): Promise<ObsidianVaultReport> {
+  return invoke('obsidian_scan_vault', { vaultPath });
+}
+
+export function importObsidianVault(options: {
+  name: string;
+  slug: string;
+  sourcePath: string;
+  destinationPath: string;
+  spaceConfig: Record<string, unknown>;
+  reportMarkdown: string;
+}): Promise<Workspace> {
+  return invoke('obsidian_import_vault', options);
+}

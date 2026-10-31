@@ -8,7 +8,12 @@ import type { SyntaxNode } from '@lezer/common';
 /** Editor-level callbacks the host app provides (wikilink navigation). */
 export interface LivePreviewConfig {
   onWikilink?: (target: string) => void;
+  /** Resolve a local attachment (relative path or `![[name]]`) to a displayable URL. */
+  loadImage?: (src: string) => Promise<string>;
 }
+
+const REMOTE_IMAGE = /^(https?:|data:|blob:)/i;
+const IMAGE_EXTENSION = /\.(png|jpe?g|gif|webp|svg|bmp|avif|ico|tiff?)$/i;
 
 export const livePreviewConfig = Facet.define<LivePreviewConfig, LivePreviewConfig>({
   combine: (values) => values[0] ?? {},
@@ -53,11 +58,20 @@ class ImageWidget extends WidgetType {
   src: string;
   alt: string;
   constructor(src: string, alt: string) { super(); this.src = src; this.alt = alt; }
-  toDOM() {
+  toDOM(view: EditorView) {
     const img = document.createElement('img');
-    img.src = this.src;
     img.alt = this.alt;
     img.className = 'cm-lp-image';
+    const loadImage = view.state.facet(livePreviewConfig).loadImage;
+    if (REMOTE_IMAGE.test(this.src) || !loadImage) {
+      img.src = this.src;
+    } else {
+      img.dataset.lpPending = 'true';
+      loadImage(this.src).then(
+        (url) => { img.src = url; delete img.dataset.lpPending; },
+        () => { img.alt = `Attachment not found: ${this.src}`; img.dataset.lpMissing = 'true'; },
+      );
+    }
     return img;
   }
   eq(other: ImageWidget) { return other.src === this.src && other.alt === this.alt; }
@@ -183,10 +197,20 @@ function buildDecorations(view: EditorView): DecorationSet {
           }
 
           case 'WikiLink': {
-            if (reveal(nFrom, nTo)) return;
+            const embedded = nFrom > 0 && state.sliceDoc(nFrom - 1, nFrom) === '!';
+            if (reveal(embedded ? nFrom - 1 : nFrom, nTo)) return;
             const inner = state.sliceDoc(nFrom + 2, nTo - 2);
             const pipe = inner.indexOf('|');
             const target = (pipe >= 0 ? inner.slice(0, pipe) : inner).trim();
+            const page = target.split('#')[0].trim();
+            if (embedded && IMAGE_EXTENSION.test(page)) {
+              const alias = pipe >= 0 ? inner.slice(pipe + 1).trim() : '';
+              decos.push(Decoration.replace({
+                widget: new ImageWidget(page, /^\d+(x\d+)?$/.test(alias) ? '' : alias),
+              }).range(nFrom - 1, nTo));
+              return false;
+            }
+            if (embedded) decos.push(hide.range(nFrom - 1, nFrom));
             // Hide `[[` plus, for aliased links, the `target|` part.
             decos.push(hide.range(nFrom, nFrom + 2 + (pipe >= 0 ? pipe + 1 : 0)));
             decos.push(hide.range(nTo - 2, nTo));

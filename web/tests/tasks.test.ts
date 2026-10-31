@@ -109,3 +109,9 @@ test('groups open tasks by day and keeps journal tasks on their day', () => {
   assert.deepEqual(groups.someday.map((task) => task.text), ['someday idea']);
   assert.deepEqual(groups.done.map((task) => task.text), ['done today']);
 });
+
+test('cancelled tasks reopen instead of being marked done', () => {
+  assert.equal(toggledTaskLine('- [-] Dropped idea', '2026-10-31'), '- [ ] Dropped idea');
+  assert.equal(toggledTaskLine('- CANCELLED Old plan', '2026-10-31'), '- TODO Old plan');
+  assert.equal(toggledTaskLine('- [/] Drafting', '2026-10-31'), '- [x] Drafting ✅ 2026-10-31');
+});

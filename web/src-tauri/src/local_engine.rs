@@ -680,6 +680,7 @@ impl LocalEngine {
             return Err(format!("a Space named '{slug}' already exists"));
         }
         crate::obsidian::copy_vault(source, destination)?;
+        crate::obsidian::exclude_large_files_from_git(destination)?;
         if space_config.is_object() {
             crate::personal::write_space_config(destination, space_config)?;
         }
@@ -690,7 +691,35 @@ impl LocalEngine {
         // Record the untouched copy first, so the later OKF normalization is a
         // separate, reviewable commit instead of thousands of loose drafts.
         commit_imported_copy(destination, name)?;
-        self.add_space(name, slug, destination)
+        self.register_imported_copy(name, slug, destination)
+    }
+
+    /// Like `add_space`, but for a fresh import copy. The vault it came from
+    /// is the backup, so OKF normalization runs in place without the
+    /// full-tree snapshot that protects folders opened in place (that
+    /// snapshot would also put every large attachment into Git).
+    fn register_imported_copy(
+        &self,
+        name: &str,
+        slug: &str,
+        folder: &Path,
+    ) -> Result<Space, String> {
+        let local_path = folder.canonicalize().map_err(|e| e.to_string())?;
+        if let Some(existing) = self.space_by_path(&local_path)? {
+            return Ok(existing);
+        }
+        let repo = Repository::open(&local_path)
+            .map_err(|error| format!("cannot open the imported copy: {error}"))?;
+        ensure_local_main(&repo)?;
+        if okf::needs_migration(&local_path)? {
+            okf::ensure_bundle(&local_path).map_err(|error| {
+                format!("cannot prepare the imported copy: {error}. Import again to retry.")
+            })?;
+            commit_okf_migration(&repo)?;
+        }
+        let space = self.insert_space(name, slug, &local_path)?;
+        self.rebuild_search_index(&space.slug)?;
+        Ok(space)
     }
 
     pub fn create_folder(
@@ -5318,6 +5347,189 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(folder.join("page.md")).unwrap(),
             page
+        );
+    }
+
+    /// Regression run against a real Obsidian vault. It imports a copy and
+    /// exercises listing, search, tasks, attachments and saving; the vault is
+    /// only read. Run with:
+    /// `COWIKI_REAL_VAULT=/path/to/vault cargo test --lib real_obsidian_vault -- --ignored --nocapture`
+    #[test]
+    #[ignore = "needs COWIKI_REAL_VAULT"]
+    fn real_obsidian_vault_round_trip() {
+        use std::time::Instant;
+        let Ok(vault) = std::env::var("COWIKI_REAL_VAULT") else {
+            eprintln!("COWIKI_REAL_VAULT is not set; skipping");
+            return;
+        };
+        let vault = std::path::PathBuf::from(vault);
+        let fingerprint = |root: &std::path::Path| {
+            let mut files = 0usize;
+            let mut bytes = 0u64;
+            let mut newest = std::time::SystemTime::UNIX_EPOCH;
+            let mut stack = vec![root.to_path_buf()];
+            while let Some(dir) = stack.pop() {
+                for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                    let meta = entry.metadata().unwrap();
+                    if meta.is_dir() {
+                        stack.push(entry.path());
+                    } else {
+                        files += 1;
+                        bytes += meta.len();
+                        newest = newest.max(meta.modified().unwrap());
+                    }
+                }
+            }
+            (files, bytes, newest)
+        };
+        let before = fingerprint(&vault);
+
+        let work = std::env::var("COWIKI_REAL_VAULT_WORKDIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::env::temp_dir().join("cowiki-real-vault"));
+        let _ = std::fs::remove_dir_all(&work);
+        std::fs::create_dir_all(&work).unwrap();
+        let engine = LocalEngine::open(&work.join("metadata")).unwrap();
+
+        let started = Instant::now();
+        let report = crate::obsidian::scan_vault(&vault).unwrap();
+        eprintln!(
+            "scan: {:?} — {} notes, {} attachments, {} wikilinks ({} unresolved), {} tasks, {} duplicate names",
+            started.elapsed(),
+            report.markdown_files,
+            report.attachment_files,
+            report.wikilinks,
+            report.unresolved_links,
+            report.task_lines,
+            report.duplicate_name_count
+        );
+
+        let started = Instant::now();
+        let destination = work.join("vault-copy");
+        let space = engine
+            .import_obsidian_vault(
+                "Real vault",
+                "real-vault",
+                &vault,
+                &destination,
+                &serde_json::json!({ "features": { "modules": { "journal": true, "tasks": true } } }),
+                "---\ntype: Note\ntitle: \"CoWiki Import Report\"\n---\n\n# Report\n",
+            )
+            .unwrap();
+        eprintln!(
+            "import (copy + commit + OKF + index): {:?}",
+            started.elapsed()
+        );
+        let git_bytes: u64 = walkdir::WalkDir::new(destination.join(".git"))
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.metadata().ok())
+            .filter(|metadata| metadata.is_file())
+            .map(|metadata| metadata.len())
+            .sum();
+        eprintln!(
+            "git history: {} MB ({} large files, {} MB, kept out)",
+            git_bytes / 1_048_576,
+            report.large_files,
+            report.large_file_bytes / 1_048_576
+        );
+        let repo = Repository::open(&destination).unwrap();
+        let mut status = git2::StatusOptions::new();
+        status.include_untracked(true).recurse_untracked_dirs(true);
+        assert!(
+            repo.statuses(Some(&mut status)).unwrap().is_empty(),
+            "an imported copy starts with no drafts"
+        );
+
+        let started = Instant::now();
+        let tree = engine.list_pages(&space.slug).unwrap();
+        eprintln!(
+            "list_pages: {:?} ({} top-level entries)",
+            started.elapsed(),
+            tree.len()
+        );
+
+        let started = Instant::now();
+        let hits = engine.search(&space.slug, "agent", 20).unwrap();
+        eprintln!(
+            "search: {:?} ({} hits)",
+            started.elapsed(),
+            hits.keyword.len()
+        );
+        assert!(!hits.keyword.is_empty());
+
+        let started = Instant::now();
+        let sources = engine.task_sources(&space.slug).unwrap();
+        eprintln!(
+            "task_sources: {:?} ({} files with tasks)",
+            started.elapsed(),
+            sources.len()
+        );
+
+        // Find a note that embeds an image and load that image.
+        let image_embed = |text: &str| -> Option<String> {
+            text.split("![[").skip(1).find_map(|rest| {
+                let target = rest.split([']', '|', '#']).next()?.trim();
+                let lower = target.to_lowercase();
+                [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]
+                    .iter()
+                    .any(|extension| lower.ends_with(extension))
+                    .then(|| target.to_string())
+            })
+        };
+        let mut checked_asset = false;
+        for path in &report.markdown_paths {
+            let Ok(text) = std::fs::read_to_string(destination.join(path)) else {
+                continue;
+            };
+            if let Some(target) = image_embed(&text) {
+                let started = Instant::now();
+                let asset = engine.read_asset(&space.slug, path, &target).unwrap();
+                eprintln!(
+                    "read_asset: {:?} ({} from {path}, {} bytes)",
+                    started.elapsed(),
+                    asset.path,
+                    asset.bytes.len()
+                );
+                checked_asset = true;
+                break;
+            }
+        }
+        assert!(checked_asset || report.embeds == 0);
+
+        // Save an existing page twice the way the editor does.
+        let page_path = report
+            .markdown_paths
+            .iter()
+            .find(|path| path.contains('/'))
+            .unwrap()
+            .clone();
+        let concept = page_path.trim_end_matches(".md").to_string();
+        let current = std::fs::read_to_string(destination.join(&page_path)).unwrap();
+        for round in 0..2 {
+            let started = Instant::now();
+            let body = std::fs::read_to_string(destination.join(&page_path)).unwrap();
+            let edited = format!("{body}\n- [ ] regression edit {round}\n");
+            engine
+                .write_page_checked(&space.slug, &concept, &edited, Some(&body), false)
+                .unwrap();
+            eprintln!("save {round}: {:?} ({page_path})", started.elapsed());
+        }
+        assert_ne!(
+            std::fs::read_to_string(destination.join(&page_path)).unwrap(),
+            current
+        );
+        assert!(engine
+            .search(&space.slug, "regression edit", 5)
+            .unwrap()
+            .keyword
+            .iter()
+            .any(|hit| hit.path.ends_with(&page_path)));
+
+        assert_eq!(
+            fingerprint(&vault),
+            before,
+            "the original vault must not change"
         );
     }
 }

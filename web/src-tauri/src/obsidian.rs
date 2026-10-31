@@ -10,6 +10,13 @@ use std::path::{Path, PathBuf};
 const EXAMPLE_LIMIT: usize = 20;
 pub const IMPORT_MARKER_PATH: &str = ".cowiki/obsidian-import.json";
 const SKIPPED_NAMES: &[&str] = &[".git", ".trash", "node_modules", ".DS_Store", ".cowiki"];
+/// Non-Markdown files at least this large stay in the imported folder but are
+/// kept out of Git history, so importing a vault full of PDFs, recordings or
+/// datasets does not double its size on disk.
+pub const LARGE_FILE_BYTES: u64 = 5 * 1024 * 1024;
+const LARGE_FILES_BEGIN: &str =
+    "# >>> CoWiki import: large files stay in this folder but out of version history";
+const LARGE_FILES_END: &str = "# <<< CoWiki import";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct DuplicateName {
@@ -52,6 +59,9 @@ pub struct VaultReport {
     pub non_utf8_files: Vec<String>,
     pub top_level_sources_folder: bool,
     pub symlinks_skipped: usize,
+    pub large_files: usize,
+    pub large_file_bytes: u64,
+    pub large_file_examples: Vec<String>,
     pub markdown_paths: Vec<String>,
     pub daily_notes: Option<serde_json::Value>,
     pub templates_folder: Option<String>,
@@ -300,6 +310,11 @@ pub fn scan_vault(root: &Path) -> Result<VaultReport, String> {
         report.total_bytes += size;
         let name = entry.file_name().to_string_lossy().to_string();
         let lower = name.to_lowercase();
+        if size >= LARGE_FILE_BYTES && !lower.ends_with(".md") {
+            report.large_files += 1;
+            report.large_file_bytes += size;
+            push_example(&mut report.large_file_examples, relative.clone());
+        }
         files.insert(lower.clone());
         if lower.ends_with(".md") {
             report.markdown_files += 1;
@@ -517,6 +532,90 @@ pub fn copy_vault(source: &Path, destination: &Path) -> Result<CopyOutcome, Stri
     Ok(outcome)
 }
 
+/// Escape a path for an anchored `.gitignore` pattern.
+fn gitignore_pattern(relative: &str) -> String {
+    let mut pattern = String::from("/");
+    for character in relative.chars() {
+        if matches!(character, '\\' | '*' | '?' | '[' | ']' | '!' | '#') {
+            pattern.push('\\');
+        }
+        pattern.push(character);
+    }
+    let trimmed = pattern.trim_end_matches(' ');
+    let trailing = pattern.len() - trimmed.len();
+    let mut escaped = trimmed.to_string();
+    for _ in 0..trailing {
+        escaped.push_str("\\ ");
+    }
+    escaped
+}
+
+/// List non-Markdown files of [`LARGE_FILE_BYTES`] or more in an imported
+/// copy in a marked `.gitignore` block, replacing any earlier block. Returns
+/// how many files the block lists.
+pub fn exclude_large_files_from_git(root: &Path) -> Result<usize, String> {
+    let mut patterns = Vec::new();
+    for entry in walkdir::WalkDir::new(root)
+        .sort_by_file_name()
+        .into_iter()
+        .filter_entry(|entry| {
+            entry.path() == root || !matches!(entry.file_name().to_str(), Some(".git" | ".cowiki"))
+        })
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let lower = entry.file_name().to_string_lossy().to_lowercase();
+        let size = entry.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+        if size >= LARGE_FILE_BYTES && !lower.ends_with(".md") {
+            patterns.push(gitignore_pattern(&relative_string(root, entry.path())));
+        }
+    }
+    let path = root.join(".gitignore");
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(format!("cannot read .gitignore: {error}")),
+    };
+    let mut kept = String::new();
+    let mut inside = false;
+    for line in existing.lines() {
+        if line == LARGE_FILES_BEGIN {
+            inside = true;
+        } else if inside && line == LARGE_FILES_END {
+            inside = false;
+        } else if !inside {
+            kept.push_str(line);
+            kept.push('\n');
+        }
+    }
+    // Drop the blank separator line written before the block.
+    let mut kept = match kept.trim_end_matches('\n') {
+        "" => String::new(),
+        text => format!("{text}\n"),
+    };
+    if patterns.is_empty() {
+        if kept != existing {
+            std::fs::write(&path, kept).map_err(|error| error.to_string())?;
+        }
+        return Ok(0);
+    }
+    if !kept.is_empty() {
+        kept.push('\n');
+    }
+    kept.push_str(LARGE_FILES_BEGIN);
+    kept.push('\n');
+    for pattern in &patterns {
+        kept.push_str(pattern);
+        kept.push('\n');
+    }
+    kept.push_str(LARGE_FILES_END);
+    kept.push('\n');
+    std::fs::write(&path, kept).map_err(|error| format!("cannot write .gitignore: {error}"))?;
+    Ok(patterns.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -637,5 +736,55 @@ mod tests {
         assert!(copy_vault(dir.path(), &other).is_err());
         // The copy cannot live inside the vault.
         assert!(copy_vault(dir.path(), &dir.path().join("inside")).is_err());
+    }
+
+    #[test]
+    fn large_attachments_are_kept_out_of_git_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let large = vec![0u8; LARGE_FILE_BYTES as usize];
+        std::fs::create_dir_all(root.join("Papers")).unwrap();
+        std::fs::write(root.join("Papers/a [draft] #1*.pdf"), &large).unwrap();
+        std::fs::write(root.join("big note.md"), &large).unwrap();
+        std::fs::write(root.join("small.png"), b"png").unwrap();
+        std::fs::write(root.join(".gitignore"), "workspace.json\n").unwrap();
+
+        assert_eq!(exclude_large_files_from_git(root).unwrap(), 1);
+        let first = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert!(first.starts_with("workspace.json\n"));
+        assert!(first.contains(r"/Papers/a \[draft\] \#1\*.pdf"));
+        // Running again replaces the block instead of adding another one.
+        assert_eq!(exclude_large_files_from_git(root).unwrap(), 1);
+        assert_eq!(
+            std::fs::read_to_string(root.join(".gitignore")).unwrap(),
+            first
+        );
+
+        let repo = git2::Repository::init(root).unwrap();
+        assert!(repo.is_path_ignored("Papers/a [draft] #1*.pdf").unwrap());
+        assert!(!repo.is_path_ignored("big note.md").unwrap());
+        assert!(!repo.is_path_ignored("small.png").unwrap());
+
+        // Once the large file is gone, the block is removed.
+        std::fs::remove_file(root.join("Papers/a [draft] #1*.pdf")).unwrap();
+        assert_eq!(exclude_large_files_from_git(root).unwrap(), 0);
+        assert_eq!(
+            std::fs::read_to_string(root.join(".gitignore")).unwrap(),
+            "workspace.json\n"
+        );
+    }
+
+    #[test]
+    fn scan_counts_large_attachments() {
+        let dir = vault();
+        std::fs::write(
+            dir.path().join("attachments/talk.wav"),
+            vec![0u8; LARGE_FILE_BYTES as usize],
+        )
+        .unwrap();
+        let report = scan_vault(dir.path()).unwrap();
+        assert_eq!(report.large_files, 1);
+        assert_eq!(report.large_file_bytes, LARGE_FILE_BYTES);
+        assert_eq!(report.large_file_examples, vec!["attachments/talk.wav"]);
     }
 }
