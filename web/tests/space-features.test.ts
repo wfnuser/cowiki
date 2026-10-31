@@ -30,7 +30,7 @@ test('Space config keeps valid values and rejects unsafe paths', () => {
     },
   });
   assert.deepEqual(features, {
-    modules: { journal: false, tasks: true, review: true },
+    modules: { journal: false, tasks: true, review: true, flashcards: true },
     journal: { folder: 'Daily', format: 'YYYY/MM/DD', template: 'Templates/Daily.md' },
     review: { folder: 'journal', format: 'GGGG-[W]WW', template: null },
   });
@@ -58,10 +58,10 @@ test('personal preferences hide modules per Space without changing the Space', (
 
   const loaded = loadPersonalPreferences(storage);
   assert.equal(loaded.openJournalOnStartup, true);
-  assert.deepEqual(visibleModules(DEFAULT_SPACE_FEATURES, loaded, 'space-a'), ['journal', 'review']);
-  assert.deepEqual(visibleModules(DEFAULT_SPACE_FEATURES, loaded, 'space-b'), ['journal', 'tasks', 'review']);
+  assert.deepEqual(visibleModules(DEFAULT_SPACE_FEATURES, loaded, 'space-a'), ['journal', 'review', 'flashcards']);
+  assert.deepEqual(visibleModules(DEFAULT_SPACE_FEATURES, loaded, 'space-b'), ['journal', 'tasks', 'review', 'flashcards']);
 
-  const disabled = { ...DEFAULT_SPACE_FEATURES, modules: { journal: false, tasks: true, review: false } };
+  const disabled = { ...DEFAULT_SPACE_FEATURES, modules: { journal: false, tasks: true, review: false, flashcards: false } };
   assert.deepEqual(visibleModules(disabled, loaded, 'space-b'), ['tasks']);
 
   storage.setItem('cowiki.personal.preferences', '{broken');

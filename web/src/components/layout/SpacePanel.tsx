@@ -3,7 +3,7 @@ import {
   ChevronRight, FileText, Folder,
   MoreHorizontal, Plus, FolderPlus, Settings, BookOpen, GitPullRequest, Users, History,
   FileCode, Pencil, Trash2, Search, Unlink,
-  PanelLeft, CalendarDays, CheckSquare, SlidersHorizontal, NotebookPen,
+  PanelLeft, CalendarDays, CheckSquare, SlidersHorizontal, NotebookPen, Layers,
 } from 'lucide-react';
 import type { Workspace, PageMeta, SourceItem } from '../../api';
 import { SearchModal } from '../SearchModal';
@@ -14,7 +14,7 @@ import { APP_HEADER_HEIGHT, C, colorForSpaceId, shadows } from '@/lib/design';
 import { conceptIdFromPath, visiblePageTree } from '@/lib/okf-pages';
 import type { ModuleId } from '@/lib/space-features';
 
-export type NavTab = 'wiki' | 'journal' | 'tasks' | 'review' | 'reviews' | 'members' | 'history' | 'links';
+export type NavTab = 'wiki' | 'journal' | 'tasks' | 'review' | 'flashcards' | 'reviews' | 'members' | 'history' | 'links';
 
 interface SpacePanelProps {
   workspace: Workspace | null;
@@ -113,6 +113,7 @@ export function SpacePanel({
     { tab: 'journal', icon: <CalendarDays size={16} />, label: 'Today', hide: !modules.includes('journal') },
     { tab: 'tasks', icon: <CheckSquare size={16} />, label: 'Tasks', hide: !modules.includes('tasks') },
     { tab: 'review', icon: <NotebookPen size={16} />, label: 'Weekly review', hide: !modules.includes('review') },
+    { tab: 'flashcards', icon: <Layers size={16} />, label: 'Flashcards', hide: !modules.includes('flashcards') },
     { tab: 'reviews', icon: <GitPullRequest size={16} />, label: 'Reviews', badge: reviewCount || undefined, hide: !showReviews },
     { tab: 'members', icon: <Users size={16} />, label: 'Members & roles', hide: isPersonal },
     { tab: 'history', icon: <History size={16} />, label: 'History', hide: !showHistory },

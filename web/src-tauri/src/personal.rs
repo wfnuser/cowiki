@@ -114,6 +114,19 @@ pub fn is_task_candidate(line: &str) -> bool {
 
 /// Every visible Markdown page that contains a task-like line, with its text.
 pub fn task_sources(root: &Path) -> Result<Vec<TaskSource>, String> {
+    markdown_sources(root, |content| content.lines().any(is_task_candidate))
+}
+
+/// Pages that can hold flashcards: Obsidian Spaced Repetition decks (tagged
+/// `flashcards`) and Logseq `#card` blocks. The front end parses the cards.
+pub fn card_sources(root: &Path) -> Result<Vec<TaskSource>, String> {
+    markdown_sources(root, |content| {
+        let lower = content.to_lowercase();
+        lower.contains("flashcards") || lower.contains("#card")
+    })
+}
+
+fn markdown_sources(root: &Path, wanted: impl Fn(&str) -> bool) -> Result<Vec<TaskSource>, String> {
     let mut sources = Vec::new();
     for entry in walkdir::WalkDir::new(root)
         .into_iter()
@@ -134,7 +147,7 @@ pub fn task_sources(root: &Path) -> Result<Vec<TaskSource>, String> {
         let Ok(content) = std::fs::read_to_string(path) else {
             continue;
         };
-        if !content.lines().any(is_task_candidate) {
+        if !wanted(&content) {
             continue;
         }
         let relative = path
@@ -151,6 +164,56 @@ pub fn task_sources(root: &Path) -> Result<Vec<TaskSource>, String> {
     }
     sources.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(sources)
+}
+
+const MAX_REVIEW_STATE_BYTES: usize = 16 * 1024 * 1024;
+
+fn review_state_path(metadata_dir: &Path, space_id: &str) -> Result<PathBuf, String> {
+    if space_id.is_empty()
+        || !space_id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-')
+    {
+        return Err("invalid Space id".to_string());
+    }
+    Ok(metadata_dir
+        .join("flashcards")
+        .join(format!("{space_id}.json")))
+}
+
+/// Personal flashcard review history for a Space. It lives with the app's
+/// own data, not in the Space, so it is never shared with other members.
+pub fn read_review_state(
+    metadata_dir: &Path,
+    space_id: &str,
+) -> Result<Option<serde_json::Value>, String> {
+    let path = review_state_path(metadata_dir, space_id)?;
+    match std::fs::read(&path) {
+        Ok(bytes) => Ok(serde_json::from_slice(&bytes).ok()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+pub fn write_review_state(
+    metadata_dir: &Path,
+    space_id: &str,
+    value: &serde_json::Value,
+) -> Result<(), String> {
+    if !value.is_object() {
+        return Err("review state must be an object".to_string());
+    }
+    let bytes = serde_json::to_vec(value).map_err(|error| error.to_string())?;
+    if bytes.len() > MAX_REVIEW_STATE_BYTES {
+        return Err("review history is too large".to_string());
+    }
+    let path = review_state_path(metadata_dir, space_id)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let temporary = path.with_extension(format!("json.{}.tmp", uuid::Uuid::new_v4().simple()));
+    std::fs::write(&temporary, bytes).map_err(|error| error.to_string())?;
+    std::fs::rename(&temporary, &path).map_err(|error| error.to_string())
 }
 
 /// An attachment resolved inside a Space.
@@ -396,5 +459,30 @@ mod tests {
         assert!(read_asset(root, "notes/page.md", "../../etc/passwd").is_err());
         assert!(read_asset(root, "notes/page.md", "https://example.com/x.png").is_err());
         assert!(read_asset(root, "notes/page.md", "missing.png").is_err());
+    }
+
+    #[test]
+    fn card_sources_and_personal_review_state() {
+        let space = tempfile::tempdir().unwrap();
+        std::fs::write(space.path().join("Deck.md"), "#flashcards\nQ :: A\n").unwrap();
+        std::fs::write(space.path().join("Logseq.md"), "- What? #card\n  - This\n").unwrap();
+        std::fs::write(space.path().join("Plain.md"), "key:: value\n").unwrap();
+        let paths = card_sources(space.path())
+            .unwrap()
+            .into_iter()
+            .map(|source| source.path)
+            .collect::<Vec<_>>();
+        assert_eq!(paths, vec!["Deck.md", "Logseq.md"]);
+
+        let metadata = tempfile::tempdir().unwrap();
+        assert_eq!(read_review_state(metadata.path(), "space-1").unwrap(), None);
+        let state = serde_json::json!({ "cards": { "a": { "due": "2026-11-01" } } });
+        write_review_state(metadata.path(), "space-1", &state).unwrap();
+        assert_eq!(
+            read_review_state(metadata.path(), "space-1").unwrap(),
+            Some(state)
+        );
+        assert!(write_review_state(metadata.path(), "../x", &serde_json::json!({})).is_err());
+        assert!(write_review_state(metadata.path(), "space-1", &serde_json::json!([])).is_err());
     }
 }

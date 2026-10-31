@@ -325,3 +325,17 @@ export function importObsidianVault(options: {
 }): Promise<Workspace> {
   return invoke('obsidian_import_vault', options);
 }
+
+/** Pages that may contain flashcards (decks tagged #flashcards, Logseq #card blocks). */
+export function listCardSources(spaceSlug: string): Promise<TaskSource[]> {
+  return invoke('local_list_card_sources', { spaceSlug });
+}
+
+/** This person's review history for a Space; stored with the app, not in the Space. */
+export function readCardReviews(spaceSlug: string): Promise<unknown> {
+  return invoke('local_read_card_reviews', { spaceSlug });
+}
+
+export function writeCardReviews(spaceSlug: string, state: object): Promise<void> {
+  return invoke('local_write_card_reviews', { spaceSlug, state });
+}

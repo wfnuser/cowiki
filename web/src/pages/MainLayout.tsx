@@ -94,6 +94,8 @@ import { createCloudClient } from '@/cloud/client';
 import { cloudPageCommentStore, desktopPageCommentStore } from '@/lib/page-comment-store';
 import { openExternalUrl } from '@/external-links';
 import { TasksView } from '../components/views/TasksView';
+import { FlashcardsView } from '../components/views/FlashcardsView';
+import { appendCard } from '@/lib/flashcards';
 import { JournalNav } from '../components/JournalNav';
 import { WeekNav } from '../components/WeekNav';
 import { SpaceFeaturesDialog } from '../components/SpaceFeaturesDialog';
@@ -146,6 +148,7 @@ type ActiveView =
   | { kind: 'history'; workspaceSlug: string }
   | { kind: 'links'; workspaceSlug: string }
   | { kind: 'tasks'; workspaceSlug: string }
+  | { kind: 'flashcards'; workspaceSlug: string }
   | { kind: 'notifications' }
   | null;
 
@@ -942,6 +945,23 @@ export function MainLayout() {
     await writePage(entry.conceptId, insertTaskLine(page.body, line), userBranch, ws.slug, 'wiki', page.body);
   };
 
+  /** Append a card to the Space's "Flashcards" deck page, creating it if needed. */
+  const addCardToInbox = async (front: string, back: string) => {
+    const ws = activeWorkspace;
+    if (!ws) return;
+    const conceptId = 'Flashcards';
+    const current = await getPage(conceptId, userBranch, ws.slug, 'wiki')
+      .then((page) => page.body)
+      .catch(() => null);
+    if (current === null) {
+      const body = appendCard('---\ntype: Note\ntitle: "Flashcards"\ntags: [flashcards]\n---\n\n# Flashcards\n', front, back);
+      await writePage(conceptId, body, userBranch, ws.slug, 'wiki', undefined, true);
+      await loadSpacePages(ws);
+      return;
+    }
+    await writePage(conceptId, appendCard(current, front, back), userBranch, ws.slug, 'wiki', current);
+  };
+
   const saveModules = async (features: SpaceFeatures, nextPreferences: PersonalPreferences) => {
     const ws = activeWorkspace;
     if (!ws) return;
@@ -1072,6 +1092,11 @@ export function MainLayout() {
         break;
       case 'review':
         void openReviewWeek(activeWorkspace, new Date());
+        break;
+      case 'flashcards':
+        setEditingPage(false);
+        setActiveView({ kind: 'flashcards', workspaceSlug: activeWorkspace.slug });
+        navigate('/', { replace: true });
         break;
       case 'tasks':
         setEditingPage(false);
@@ -1564,6 +1589,12 @@ export function MainLayout() {
                     <span style={{ color: C.ink }}>Tasks</span>
                   </>
                 )}
+                {activeView?.kind === 'flashcards' && (
+                  <>
+                    <span style={{ color: C.faint }}>/</span>
+                    <span style={{ color: C.ink }}>Flashcards</span>
+                  </>
+                )}
                 {activeView?.kind === 'notifications' && (
                   <span style={{ color: C.ink }}>Notifications</span>
                 )}
@@ -1759,6 +1790,17 @@ export function MainLayout() {
                     onToggleTask={toggleTaskInPage}
                     onAddTask={addTaskToToday}
                   />
+                </div>
+              ) : activeView?.kind === 'flashcards' && activeWorkspace ? (
+                <div style={{ position: 'absolute', inset: 0, overflow: 'auto', padding: '36px 32px 56px' }}>
+                  <ObsidianReaderContext.Provider value={readerCallbacks}>
+                    <FlashcardsView
+                      key={activeWorkspace.slug}
+                      workspaceSlug={activeWorkspace.slug}
+                      onOpenSource={(path) => { void selectPage(activeWorkspace, conceptIdFromPath(path), path); }}
+                      onAddCard={addCardToInbox}
+                    />
+                  </ObsidianReaderContext.Provider>
                 </div>
               ) : activeView?.kind === 'links' && activeWorkspace ? (
                 <LinksView

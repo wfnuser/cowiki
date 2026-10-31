@@ -130,6 +130,31 @@ fn local_list_task_sources(
 }
 
 #[tauri::command(async)]
+fn local_list_card_sources(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<Vec<personal::TaskSource>, String> {
+    engine.card_sources(&space_slug)
+}
+
+#[tauri::command]
+fn local_read_card_reviews(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<Option<serde_json::Value>, String> {
+    engine.read_card_reviews(&space_slug)
+}
+
+#[tauri::command]
+fn local_write_card_reviews(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    state: serde_json::Value,
+) -> Result<(), String> {
+    engine.write_card_reviews(&space_slug, &state)
+}
+
+#[tauri::command(async)]
 fn local_read_asset(
     engine: State<'_, LocalEngine>,
     space_slug: String,
@@ -597,6 +622,9 @@ pub fn run() {
             local_read_space_config,
             local_write_space_config,
             local_list_task_sources,
+            local_list_card_sources,
+            local_read_card_reviews,
+            local_write_card_reviews,
             local_read_asset,
             obsidian_scan_vault,
             obsidian_import_vault,

@@ -5,7 +5,7 @@ import { DEFAULT_REVIEW_CONFIG, type ReviewConfig } from './weekly-review.ts';
  * Optional modules a Space can turn on. Turning a module off only hides its
  * entry points; journal pages and task lines stay ordinary Markdown files.
  */
-export type ModuleId = 'journal' | 'tasks' | 'review';
+export type ModuleId = 'journal' | 'tasks' | 'review' | 'flashcards';
 
 export const MODULES: Array<{ id: ModuleId; label: string; description: string }> = [
   {
@@ -23,6 +23,11 @@ export const MODULES: Array<{ id: ModuleId; label: string; description: string }
     label: 'Weekly review',
     description: 'A "Review" entry that opens this week\'s review page, pre-filled with finished and open tasks and the week\'s journal entries.',
   },
+  {
+    id: 'flashcards',
+    label: 'Flashcards',
+    description: 'Spaced repetition for cards written in notes (Obsidian "Q :: A" decks tagged #flashcards, Logseq #card blocks). Review history stays on your device.',
+  },
 ];
 
 /**
@@ -36,7 +41,7 @@ export interface SpaceFeatures {
 }
 
 export const DEFAULT_SPACE_FEATURES: SpaceFeatures = {
-  modules: { journal: true, tasks: true, review: true },
+  modules: { journal: true, tasks: true, review: true, flashcards: true },
   journal: { ...DEFAULT_JOURNAL_CONFIG },
   review: { ...DEFAULT_REVIEW_CONFIG },
 };
@@ -75,7 +80,7 @@ export function parseSpaceFeatures(config: unknown): SpaceFeatures {
   const review = record(features?.review);
   const flag = (id: ModuleId) => (typeof modules?.[id] === 'boolean' ? modules[id] as boolean : DEFAULT_SPACE_FEATURES.modules[id]);
   return {
-    modules: { journal: flag('journal'), tasks: flag('tasks'), review: flag('review') },
+    modules: { journal: flag('journal'), tasks: flag('tasks'), review: flag('review'), flashcards: flag('flashcards') },
     journal: {
       folder: cleanFolder(journal?.folder, DEFAULT_JOURNAL_CONFIG.folder),
       format: cleanFormat(journal?.format, DEFAULT_JOURNAL_CONFIG.format),
@@ -130,7 +135,7 @@ export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
 };
 
 function isModuleId(value: unknown): value is ModuleId {
-  return value === 'journal' || value === 'tasks' || value === 'review';
+  return value === 'journal' || value === 'tasks' || value === 'review' || value === 'flashcards';
 }
 
 export function loadPersonalPreferences(storage: PreferenceStorage): PersonalPreferences {

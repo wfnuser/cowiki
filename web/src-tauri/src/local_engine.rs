@@ -653,6 +653,28 @@ impl LocalEngine {
         crate::personal::task_sources(&space.local_path)
     }
 
+    pub fn card_sources(
+        &self,
+        space_slug: &str,
+    ) -> Result<Vec<crate::personal::TaskSource>, String> {
+        let space = self.find_space(space_slug)?;
+        crate::personal::card_sources(&space.local_path)
+    }
+
+    pub fn read_card_reviews(&self, space_slug: &str) -> Result<Option<serde_json::Value>, String> {
+        let space = self.find_space(space_slug)?;
+        crate::personal::read_review_state(&self.metadata_dir, &space.id)
+    }
+
+    pub fn write_card_reviews(
+        &self,
+        space_slug: &str,
+        state: &serde_json::Value,
+    ) -> Result<(), String> {
+        let space = self.find_space(space_slug)?;
+        crate::personal::write_review_state(&self.metadata_dir, &space.id, state)
+    }
+
     pub fn read_asset(
         &self,
         space_slug: &str,
