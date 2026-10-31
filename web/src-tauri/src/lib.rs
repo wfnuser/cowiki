@@ -2,6 +2,7 @@ mod cloud_sync;
 mod extract;
 mod html_assets;
 mod knowledge_index;
+mod link_rewrite;
 mod local_engine;
 mod mcp;
 mod obsidian;
@@ -323,7 +324,7 @@ fn local_rename_path(
     space_slug: String,
     from: String,
     to: String,
-) -> Result<(), String> {
+) -> Result<usize, String> {
     let _mutation = engine.lock_mutations()?;
     engine.rename_path(&space_slug, &from, &to)
 }

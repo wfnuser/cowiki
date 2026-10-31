@@ -53,3 +53,7 @@ test('flattens folders and recognises images', () => {
   assert.equal(isImagePath('assets/diagram.PNG'), true);
   assert.equal(isImagePath('paper.pdf'), false);
 });
+
+test('escaped table pipes do not end up in the target', () => {
+  assert.deepEqual(parseWikilink('Paper.pdf\\|the paper'), { page: 'Paper.pdf', heading: null, block: null, alias: 'the paper' });
+});

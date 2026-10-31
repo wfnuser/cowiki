@@ -805,8 +805,11 @@ export async function syncBranch(workspaceSlug: string, branch: string): Promise
   return res.json();
 }
 
-/** Rename/move a file or folder using stable bundle-relative paths. */
-export async function renamePath(workspaceSlug: string, branch: string, from: string, to: string): Promise<void> {
+/**
+ * Rename/move a file or folder using stable bundle-relative paths. On desktop
+ * it resolves to the number of pages whose links were updated.
+ */
+export async function renamePath(workspaceSlug: string, branch: string, from: string, to: string): Promise<number | void> {
   if (isDesktopClient()) return localApi.renamePath(workspaceSlug, from, to);
   const res = await fetch(`${BASE}/workspaces/${workspaceSlug}/paths/rename`, {
     method: 'POST',

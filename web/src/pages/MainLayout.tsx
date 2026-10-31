@@ -113,6 +113,7 @@ import { dateKey, journalDateFromPath, journalEntryKeys, journalPagePath, newJou
 import { applyTaskToggle, insertTaskLine, type TaskItem } from '@/lib/tasks';
 import { flattenPages, parseWikilink, resolveWikilinkPath } from '@/lib/wikilinks';
 import { obsidianToReaderMarkdown, renderedLineOffset } from '@/lib/obsidian-markdown';
+import { pageFileName } from '@/lib/page-names';
 
 const LAST_SPACE_STORAGE_KEY = 'cowiki.lastSpace';
 const READER_COMPONENTS = withObsidianReader(commentMarkdownComponents);
@@ -928,7 +929,10 @@ export function MainLayout() {
     e.preventDefault();
     if (!newName.trim() || !showNewPage) return;
     const ws = showNewPage;
-    const baseSlug = newName.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim()
+    // Local Spaces keep readable file names so [[Name]] links find the page.
+    const baseSlug = (isLocalSpace(ws)
+      ? pageFileName(newName)
+      : newName.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim())
       || `page-${crypto.randomUUID().slice(0, 8)}`;
     const conceptId = newPageFolder ? `${newPageFolder}/${baseSlug}` : baseSlug;
     const body = `---\ntype: Note\ntitle: "${newName.trim().replaceAll('"', '\\"')}"\ndescription: ""\n---\n\n`;
@@ -1112,18 +1116,25 @@ export function MainLayout() {
     const ws = activeWorkspace;
     try {
       if (pathOp.kind === 'rename') {
-        const slugified = pathOp.value
-          .toLowerCase()
-          .replace(/[^a-z0-9\s-]/g, '')
-          .trim()
-          .replace(/\s+/g, '-') || `item-${crypto.randomUUID().slice(0, 8)}`;
+        const slugified = (isLocalSpace(ws)
+          ? pageFileName(pathOp.value)
+          : pathOp.value
+            .toLowerCase()
+            .replace(/[^a-z0-9\s-]/g, '')
+            .trim()
+            .replace(/\s+/g, '-')) || `item-${crypto.randomUUID().slice(0, 8)}`;
         const separator = pathOp.path.lastIndexOf('/');
         const parent = separator === -1 ? '' : pathOp.path.slice(0, separator);
         const renamed = pathOp.isFolder ? slugified : `${slugified}.md`;
         const to = parent ? `${parent}/${renamed}` : renamed;
         if (to === pathOp.path) { setPathOp(null); return; }
-        await renamePath(ws.slug, userBranch, pathOp.path, to);
-        setMessage({ text: 'Renamed in your draft.', type: 'success' });
+        const updatedLinks = await renamePath(ws.slug, userBranch, pathOp.path, to);
+        setMessage({
+          text: updatedLinks
+            ? `Renamed in your draft and updated links in ${updatedLinks} ${updatedLinks === 1 ? 'page' : 'pages'}.`
+            : 'Renamed in your draft.',
+          type: 'success',
+        });
       } else {
         await deletePath(ws.slug, userBranch, pathOp.path);
         setMessage({ text: `Deleted ${pathOp.isFolder ? 'folder' : 'page'} from your draft.`, type: 'success' });

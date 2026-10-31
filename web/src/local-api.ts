@@ -158,7 +158,8 @@ export function listBrokenLinks(spaceSlug: string): Promise<BrokenLink[]> {
   return invoke('local_list_broken_links', { spaceSlug });
 }
 
-export function renamePath(spaceSlug: string, from: string, to: string): Promise<void> {
+/** Resolves to the number of pages whose links were updated. */
+export function renamePath(spaceSlug: string, from: string, to: string): Promise<number> {
   return invoke('local_rename_path', { spaceSlug, from, to });
 }
 

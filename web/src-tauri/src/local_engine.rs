@@ -939,7 +939,9 @@ impl LocalEngine {
         knowledge_index::refresh_space(&mut db, &space.id, &space.local_path)
     }
 
-    pub fn rename_path(&self, space_slug: &str, from: &str, to: &str) -> Result<(), String> {
+    /// Rename or move a page or folder and update links to it (and relative
+    /// links inside it) in other pages. Returns how many pages were updated.
+    pub fn rename_path(&self, space_slug: &str, from: &str, to: &str) -> Result<usize, String> {
         let space = self.find_space(space_slug)?;
         okf::ensure_supported_for_write(&space.local_path)?;
         let from = ui_path(&space.local_path, from)?;
@@ -961,9 +963,41 @@ impl LocalEngine {
         if let Some(parent) = to.parent() {
             std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
+        let before = knowledge_index::FileIndex::scan(&space.local_path)?;
         std::fs::rename(&from, &to).map_err(|error| format!("cannot rename item: {error}"))?;
+        let relative = |path: &Path| {
+            path.strip_prefix(&space.local_path)
+                .unwrap_or(path)
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/")
+        };
+        if to.is_file() {
+            retitle_renamed_page(&from, &to)?;
+        }
+        let after = knowledge_index::FileIndex::scan(&space.local_path)?;
+        let pages = after
+            .files()
+            .iter()
+            // Folder listings are regenerated below.
+            .filter(|path| {
+                !path.starts_with(".cowiki/")
+                    && !matches!(path.rsplit('/').next(), Some("index.md" | "log.md"))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let updated = crate::link_rewrite::update_links_after_move(
+            &space.local_path,
+            &relative(&from),
+            &relative(&to),
+            &before,
+            &after,
+            &pages,
+        )?;
         okf::refresh_progressive_indexes(&space.local_path)?;
-        self.rebuild_search_index(space_slug)
+        self.rebuild_search_index(space_slug)?;
+        Ok(updated.len())
     }
 
     pub fn delete_path(&self, space_slug: &str, value: &str) -> Result<(), String> {
@@ -1204,7 +1238,7 @@ impl LocalEngine {
             .map_err(|_| "local database lock poisoned".to_string())?;
         self.refresh_search_index(&mut db, &space)?;
         self.prepare_backlinks(&mut db, &space.id)?;
-        knowledge_index::backlinks(&db, &space.id, target_path)
+        knowledge_index::backlinks(&db, &space.id, &space.local_path, target_path)
     }
 
     pub fn list_broken_links(&self, space_slug: &str) -> Result<Vec<BrokenLink>, String> {
@@ -2628,6 +2662,48 @@ fn frontmatter_field(body: &str, key: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// A page's `title` property usually mirrors its file name (Obsidian has no
+/// separate title; imports and new pages copy the name). When it still does,
+/// renaming the file renames the title too, so the tree shows the new name.
+fn retitle_renamed_page(from: &Path, to: &Path) -> Result<(), String> {
+    let stem = |path: &Path| {
+        path.file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    };
+    let (old_name, new_name) = (stem(from), stem(to));
+    if old_name == new_name {
+        return Ok(());
+    }
+    let Ok(body) = std::fs::read_to_string(to) else {
+        return Ok(());
+    };
+    let Some(rest) = body.strip_prefix("---\n") else {
+        return Ok(());
+    };
+    let Some(end) = rest.find("\n---") else {
+        return Ok(());
+    };
+    let mut changed = false;
+    let frontmatter = rest[..end]
+        .lines()
+        .map(|line| match line.strip_prefix("title:") {
+            Some(value) if value.trim().trim_matches(['"', '\'']) == old_name => {
+                changed = true;
+                format!("title: {}", yaml_string(&new_name))
+            }
+            _ => line.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !changed {
+        return Ok(());
+    }
+    let updated = format!("---\n{frontmatter}{}", &rest[end..]);
+    std::fs::write(to, updated).map_err(|error| error.to_string())
 }
 
 pub(crate) fn markdown_title(body: &str) -> Option<String> {
@@ -5350,6 +5426,77 @@ mod tests {
         );
     }
 
+    #[test]
+    fn obsidian_name_links_resolve_for_backlinks_diagnostics_and_renames() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("vault");
+        std::fs::create_dir_all(folder.join("Resources/Papers")).unwrap();
+        std::fs::create_dir_all(folder.join("Projects/assets")).unwrap();
+        std::fs::write(
+            folder.join("Resources/Papers/Attention.md"),
+            "# Attention\n",
+        )
+        .unwrap();
+        std::fs::write(
+            folder.join("Projects/assets/figure.png"),
+            [0x89, b'P', b'N', b'G'],
+        )
+        .unwrap();
+        std::fs::write(
+            folder.join("Projects/Plan.md"),
+            "# Plan\n\nRead [[attention|the paper]] and [[Attention#Results]].\n\n![[figure.png]] [[Nowhere]]\n",
+        )
+        .unwrap();
+        let space = engine.add_space("Vault", "vault", &folder).unwrap();
+
+        let backlinks = engine
+            .list_backlinks(&space.slug, "Resources/Papers/Attention.md")
+            .unwrap();
+        assert_eq!(
+            backlinks
+                .iter()
+                .map(|hit| hit.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Projects/Plan.md"]
+        );
+        let broken = engine.list_broken_links(&space.slug).unwrap();
+        assert_eq!(
+            broken
+                .iter()
+                .map(|link| link.target.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Nowhere.md"]
+        );
+
+        let updated = engine
+            .rename_path(
+                &space.slug,
+                "Resources/Papers/Attention.md",
+                "Resources/Papers/Attention Is All You Need.md",
+            )
+            .unwrap();
+        assert_eq!(updated, 1);
+        let renamed =
+            std::fs::read_to_string(folder.join("Resources/Papers/Attention Is All You Need.md"))
+                .unwrap();
+        assert!(
+            renamed.contains("title: \"Attention Is All You Need\""),
+            "{renamed}"
+        );
+        let plan = std::fs::read_to_string(folder.join("Projects/Plan.md")).unwrap();
+        assert!(plan.contains(
+            "[[Attention Is All You Need|the paper]] and [[Attention Is All You Need#Results]]"
+        ));
+        assert_eq!(
+            engine
+                .list_backlinks(&space.slug, "Resources/Papers/Attention Is All You Need.md")
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
     /// Regression run against a real Obsidian vault. It imports a copy and
     /// exercises listing, search, tasks, attachments and saving; the vault is
     /// only read. Run with:
@@ -5525,6 +5672,84 @@ mod tests {
             .keyword
             .iter()
             .any(|hit| hit.path.ends_with(&page_path)));
+
+        // An edit made outside CoWiki (Obsidian, an Agent, git) is picked up.
+        let outside = destination.join(&page_path);
+        let mut text = std::fs::read_to_string(&outside).unwrap();
+        text.push_str("\nexternal-edit-sentinel\n");
+        std::fs::write(&outside, text).unwrap();
+        assert!(!engine
+            .search(&space.slug, "external-edit-sentinel", 5)
+            .unwrap()
+            .keyword
+            .is_empty());
+
+        // Name-style links resolve: only links Obsidian also cannot resolve
+        // are reported as broken.
+        let started = Instant::now();
+        let broken = engine.list_broken_links(&space.slug).unwrap();
+        eprintln!(
+            "broken links: {} (scan found {} unresolved) in {:?}",
+            broken.len(),
+            report.unresolved_links,
+            started.elapsed()
+        );
+        for link in broken.iter().take(5) {
+            eprintln!("  {} -> {}", link.source_path, link.target);
+        }
+        std::fs::write(
+            work.join("broken-links.txt"),
+            broken
+                .iter()
+                .map(|link| format!("{}\t{}\n", link.source_path, link.target))
+                .collect::<String>(),
+        )
+        .unwrap();
+
+        // Rename the most linked-to page and check every link follows it.
+        let target = report
+            .markdown_paths
+            .iter()
+            .filter(|path| !path.ends_with("index.md") && path.contains('/'))
+            .map(|path| {
+                let count = engine.list_backlinks(&space.slug, path).unwrap().len();
+                (count, path.clone())
+            })
+            .max()
+            .unwrap();
+        eprintln!("most linked page: {} ({} backlinks)", target.1, target.0);
+        let renamed = format!(
+            "{}/{} (renamed).md",
+            target.1.rsplit_once('/').unwrap().0,
+            target.1.rsplit('/').next().unwrap().trim_end_matches(".md")
+        );
+        let started = Instant::now();
+        let updated = engine
+            .rename_path(&space.slug, &target.1, &renamed)
+            .unwrap();
+        eprintln!("rename: {:?}, {updated} pages updated", started.elapsed());
+        assert_eq!(
+            engine.list_backlinks(&space.slug, &renamed).unwrap().len(),
+            target.0
+        );
+        assert_eq!(
+            engine.list_broken_links(&space.slug).unwrap().len(),
+            broken.len()
+        );
+
+        // Restart: a fresh engine on the same metadata finds the Space and its index.
+        drop(engine);
+        let reopened = LocalEngine::open(&work.join("metadata")).unwrap();
+        assert!(reopened
+            .list_spaces()
+            .unwrap()
+            .iter()
+            .any(|space| space.slug == "real-vault"));
+        assert!(!reopened
+            .search("real-vault", "external-edit-sentinel", 5)
+            .unwrap()
+            .keyword
+            .is_empty());
 
         assert_eq!(
             fingerprint(&vault),

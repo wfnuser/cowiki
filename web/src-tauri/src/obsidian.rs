@@ -168,6 +168,7 @@ fn link_resolves(target: &str, targets: &LinkTargets) -> bool {
         .split('|')
         .next()
         .unwrap_or_default()
+        .trim_end_matches('\\')
         .split('#')
         .next()
         .unwrap_or_default()

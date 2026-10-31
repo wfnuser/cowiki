@@ -38,7 +38,8 @@ export function parseWikilink(raw: string): WikilinkTarget {
   const pipe = value.indexOf('|');
   if (pipe >= 0) {
     alias = value.slice(pipe + 1).trim() || null;
-    value = value.slice(0, pipe);
+    // Inside tables Obsidian escapes the alias pipe: [[Note\|alias]].
+    value = value.slice(0, pipe).replace(/\\$/, '');
   }
   let heading: string | null = null;
   let block: string | null = null;
