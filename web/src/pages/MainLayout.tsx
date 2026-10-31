@@ -200,6 +200,9 @@ export function MainLayout() {
   const assetUrls = useRef(new Map<string, string>());
   const initialPathname = useRef(location.pathname);
   const startupJournalHandled = useRef(false);
+  // loadWorkspaces re-runs on every navigation; opening the first page at '/'
+  // is a startup default and must not replace a view chosen later (Links, Tasks).
+  const homePageOpened = useRef(false);
   const [reviewCount, setReviewCount] = useState(0);
   const [versionSelection, setVersionSelection] = useState<VersionSelection>({ kind: 'working' });
   const [openAgentChanges, setOpenAgentChanges] = useState<AgentChange[]>([]);
@@ -426,6 +429,8 @@ export function MainLayout() {
     const ws = await listWorkspaces();
     setWorkspaces(ws);
     setWorkspacesLoaded(true);
+    const firstLoad = !homePageOpened.current;
+    homePageOpened.current = true;
 
     const reviewLocation = parseReviewRoute(location.pathname, ws.map((workspace) => workspace.slug));
     if (reviewLocation) {
@@ -472,7 +477,7 @@ export function MainLayout() {
           // Page not found, just show home
         }
       }
-    } else if (personal) {
+    } else if (personal && firstLoad) {
       const personalPages = visiblePageTree(await listPages(userBranch, personal.slug, 'all'));
       const firstPage = firstConcept(personalPages);
       if (firstPage) {
@@ -997,9 +1002,7 @@ export function MainLayout() {
       case 'tasks':
         setEditingPage(false);
         setActiveView({ kind: 'tasks', workspaceSlug: activeWorkspace.slug });
-        // Not '/': navigating there re-runs the startup restore, which opens
-        // the first page and replaces this view.
-        navigate(`/${owner}/${activeWorkspace.slug}/tasks`);
+        navigate('/', { replace: true });
         break;
     }
   };
