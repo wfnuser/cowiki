@@ -18,6 +18,8 @@ export interface LivePreviewEditorProps {
   /** Cmd/Ctrl+S — the host flushes its pending save. */
   onRequestSave?: () => void;
   onWikilink?: (target: string) => void;
+  /** Resolve a local attachment to a displayable URL. */
+  loadImage?: (src: string) => Promise<string>;
   /** Candidate slugs for `[[` autocompletion. */
   getPageSlugs?: () => string[];
   className?: string;
@@ -39,6 +41,7 @@ export const LivePreviewEditor = forwardRef<LivePreviewEditorHandle, LivePreview
   onDocChanged,
   onRequestSave,
   onWikilink,
+  loadImage,
   getPageSlugs,
   className,
   style,
@@ -48,9 +51,9 @@ export const LivePreviewEditor = forwardRef<LivePreviewEditorHandle, LivePreview
   const applyingExternalDoc = useRef(false);
 
   // Keep callbacks fresh without recreating the editor.
-  const callbacks = useRef({ onDocChanged, onRequestSave, onWikilink, getPageSlugs });
+  const callbacks = useRef({ onDocChanged, onRequestSave, onWikilink, loadImage, getPageSlugs });
   useEffect(() => {
-    callbacks.current = { onDocChanged, onRequestSave, onWikilink, getPageSlugs };
+    callbacks.current = { onDocChanged, onRequestSave, onWikilink, loadImage, getPageSlugs };
   });
 
   useEffect(() => {
@@ -98,6 +101,9 @@ export const LivePreviewEditor = forwardRef<LivePreviewEditorHandle, LivePreview
           livePreview,
           livePreviewConfig.of({
             onWikilink: (target) => callbacks.current.onWikilink?.(target),
+            loadImage: (src) => (callbacks.current.loadImage
+              ? callbacks.current.loadImage(src)
+              : Promise.reject(new Error('Attachments are not available here'))),
           }),
           autocompletion({ override: [wikilinkCompletion], icons: false }),
           Prec.high(keymap.of([

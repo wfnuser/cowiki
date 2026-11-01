@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useState, useEffect, useEffectEvent, useCallback, useMemo, useRef } from 'react';
+import { useNavigate, useLocation, useNavigationType } from 'react-router-dom';
 import {
   Compass,
   Pencil, FolderOpen, PanelLeft, Bot, HardDrive, FolderInput, Cloud, UserPlus, ChevronLeft,
-  ExternalLink,
+  ExternalLink, BookMarked,
 } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -61,6 +61,9 @@ import { CloudSpaceDialog } from '@/components/cloud/CloudSpaceDialog';
 import { WorkspaceContextBadge } from '@/components/layout/WorkspaceContextBadge';
 import { getCloudStatus, readHtmlAsset, type CloudSyncState } from '@/local-api';
 import { HtmlFileReader } from '../components/HtmlFileReader';
+import { ExcalidrawReader } from '../components/ExcalidrawDrawing';
+import { isExcalidrawPage } from '../lib/excalidraw';
+import { showsRoute, viewForRoute } from '../lib/route-view';
 import { isHtmlPath } from '../lib/okf-pages';
 import { chooseLocalSpaceDirectory, localSpaceIdentityFromPath } from '@/local-space';
 import {
@@ -93,6 +96,49 @@ import { workspaceContextStatus } from '@/lib/workspace-context';
 import { createCloudClient } from '@/cloud/client';
 import { cloudPageCommentStore, desktopPageCommentStore } from '@/lib/page-comment-store';
 import { openExternalUrl } from '@/external-links';
+import { TasksView } from '../components/views/TasksView';
+import { FlashcardsView } from '../components/views/FlashcardsView';
+import { SpaceFeaturesDialog } from '../components/SpaceFeaturesDialog';
+import { ObsidianImportDialog } from '../components/ObsidianImportDialog';
+import { ObsidianReaderContext, withObsidianReader, type ReaderCallbacks } from '../components/ObsidianReader';
+import { autoCheckpoint, readAsset, readSpaceConfig, setAutoCheckpoint, writeSpaceConfig } from '@/local-api';
+import {
+  DEFAULT_SPACE_FEATURES,
+  loadPersonalPreferences,
+  parseSpaceFeatures,
+  savePersonalPreferences,
+  visibleModules,
+  withSpaceFeatures,
+  type PersonalPreferences,
+  type SpaceFeatures,
+} from '@/lib/space-features';
+import { dateKey, journalPagePath, newJournalBody } from '@/lib/journal';
+import { applyTaskStatus, applyTaskToggle, insertTaskLine, type BoardStatus, type TaskItem } from '@/lib/tasks';
+import { flattenPages, parseWikilink, resolveWikilinkPath } from '@/lib/wikilinks';
+import { obsidianToReaderMarkdown, renderedLineOffset } from '@/lib/obsidian-markdown';
+import { pageFileName } from '@/lib/page-names';
+import { newPageBody, templatePagePaths } from '@/lib/page-templates';
+
+/** An automatic checkpoint waits until the draft has been quiet this long. */
+const AUTO_CHECKPOINT_SETTLE_SECONDS = 5 * 60;
+const LAST_SPACE_STORAGE_KEY = 'cowiki.lastSpace';
+const READER_COMPONENTS = withObsidianReader(commentMarkdownComponents);
+
+function readLastSpaceSlug(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_SPACE_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function safePreferences(): PersonalPreferences {
+  try {
+    return loadPersonalPreferences(window.localStorage);
+  } catch {
+    return loadPersonalPreferences({ getItem: () => null, setItem: () => undefined });
+  }
+}
 
 type ActiveView =
   | { kind: 'page'; slug: string; path?: string; content: PageFull | null }
@@ -102,6 +148,8 @@ type ActiveView =
   | { kind: 'members'; workspaceSlug: string }
   | { kind: 'history'; workspaceSlug: string }
   | { kind: 'links'; workspaceSlug: string }
+  | { kind: 'tasks'; workspaceSlug: string }
+  | { kind: 'flashcards'; workspaceSlug: string }
   | { kind: 'notifications' }
   | null;
 
@@ -133,6 +181,7 @@ export function MainLayout() {
   const desktop = isDesktopClient();
   const navigate = useNavigate();
   const location = useLocation();
+  const navigationType = useNavigationType();
 
   // Data
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -153,6 +202,18 @@ export function MainLayout() {
   const externalConflictNotified = useRef(false);
   const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<NavTab>('wiki');
+  const [spaceFeatures, setSpaceFeatures] = useState<Record<string, SpaceFeatures>>({});
+  const [preferences, setPreferences] = useState<PersonalPreferences>(safePreferences);
+  // Bumped when an automatic checkpoint lands, so an open History view reloads.
+  const [checkpointTick, setCheckpointTick] = useState(0);
+  const [modulesDialogOpen, setModulesDialogOpen] = useState(false);
+  const [obsidianImportOpen, setObsidianImportOpen] = useState(false);
+  const assetUrls = useRef(new Map<string, string>());
+  const initialPathname = useRef(location.pathname);
+  const startupJournalHandled = useRef(false);
+  // loadWorkspaces re-runs on every navigation; opening the first page at '/'
+  // is a startup default and must not replace a view chosen later (Links, Tasks).
+  const homePageOpened = useRef(false);
   const [reviewCount, setReviewCount] = useState(0);
   const [versionSelection, setVersionSelection] = useState<VersionSelection>({ kind: 'working' });
   const [openAgentChanges, setOpenAgentChanges] = useState<AgentChange[]>([]);
@@ -253,6 +314,8 @@ export function MainLayout() {
   const [showNewPage, setShowNewPage] = useState<Workspace | null>(null);
   const [showNewFolder, setShowNewFolder] = useState<Workspace | null>(null);
   const [newPageFolder, setNewPageFolder] = useState<string | null>(null);
+  // '' (blank), 'builtin:<id>' or 'page:<path>'
+  const [newPageTemplate, setNewPageTemplate] = useState('');
   const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [newSlug, setNewSlug] = useState('');
@@ -379,8 +442,13 @@ export function MainLayout() {
     const ws = await listWorkspaces();
     setWorkspaces(ws);
     setWorkspacesLoaded(true);
+    const firstLoad = !homePageOpened.current;
+    homePageOpened.current = true;
 
-    const reviewLocation = parseReviewRoute(location.pathname, ws.map((workspace) => workspace.slug));
+    // Read the URL at call time: depending on location.pathname re-ran this
+    // whole startup load (Space list, full page tree, page) on every click.
+    const pathname = window.location.pathname;
+    const reviewLocation = parseReviewRoute(pathname, ws.map((workspace) => workspace.slug));
     if (reviewLocation) {
       const targetWs = ws.find((workspace) => workspace.slug === reviewLocation.workspaceSlug);
       if (targetWs) {
@@ -396,7 +464,9 @@ export function MainLayout() {
     }
 
     // Auto-expand personal space and load its pages
-    const personal = ws.find((w) => w.visibility === 'private' && w.role === 'owner');
+    const lastSpaceSlug = desktop ? readLastSpaceSlug() : null;
+    const personal = (lastSpaceSlug ? ws.find((w) => w.slug === lastSpaceSlug && w.visibility === 'private') : undefined)
+      ?? ws.find((w) => w.visibility === 'private' && w.role === 'owner');
     if (personal) {
       setActiveWorkspace(personal);
       await loadSpacePages(personal);
@@ -405,7 +475,7 @@ export function MainLayout() {
 
     // Restore a Concept from its stable bundle-relative ID:
     // /:workspaceSlug/:folder/:concept (the .md suffix is not exposed).
-    const pathParts = location.pathname.split('/').filter(Boolean);
+    const pathParts = pathname.split('/').filter(Boolean);
     if (pathParts.length >= 2) {
       const [wsSlug, ...pageParts] = pathParts;
       const conceptId = pageParts.map((part) => decodeURIComponent(part)).join('/');
@@ -423,7 +493,7 @@ export function MainLayout() {
           // Page not found, just show home
         }
       }
-    } else if (personal) {
+    } else if (personal && firstLoad) {
       const personalPages = visiblePageTree(await listPages(userBranch, personal.slug, 'all'));
       const firstPage = firstConcept(personalPages);
       if (firstPage) {
@@ -438,13 +508,39 @@ export function MainLayout() {
         }
       }
     }
-  }, [auth, desktop, loadSpacePages, loadSpaceSources, location.pathname, navigate, userBranch]);
+  }, [auth, desktop, loadSpacePages, loadSpaceSources, navigate, userBranch]);
 
+  // Load once per sign-in. `navigate` changes identity on every route change,
+  // so depending on loadWorkspaces re-ran the whole startup load per click.
+  const loadWorkspacesOnce = useEffectEvent(() => { void loadWorkspaces(); });
   useEffect(() => {
     if (!auth) return;
-    const task = window.setTimeout(() => { void loadWorkspaces(); }, 0);
+    const task = window.setTimeout(() => loadWorkspacesOnce(), 0);
     return () => window.clearTimeout(task);
-  }, [auth, loadWorkspaces]);
+  }, [auth]);
+
+  // Automatic checkpoints for local Spaces: ask the engine once a minute; it
+  // saves after five quiet minutes, and again when the app quits.
+  const localSpaceSlugs = desktop ? workspaces.filter((ws) => !!ws.localPath).map((ws) => ws.slug).join('\n') : '';
+  const onAutoCheckpointTick = useEffectEvent((slugs: string[]) => {
+    for (const slug of slugs) {
+      autoCheckpoint(slug, AUTO_CHECKPOINT_SETTLE_SECONDS)
+        .then((saved) => {
+          if (saved && activeWorkspace?.slug === slug) setCheckpointTick((tick) => tick + 1);
+        })
+        .catch(() => {
+          // A Space that cannot be read right now is retried on the next tick.
+        });
+    }
+  });
+  useEffect(() => {
+    if (!desktop) return;
+    setAutoCheckpoint(preferences.autoCheckpoint).catch(() => {});
+    if (!preferences.autoCheckpoint || !localSpaceSlugs) return;
+    const slugs = localSpaceSlugs.split('\n');
+    const timer = window.setInterval(() => onAutoCheckpointTick(slugs), 60_000);
+    return () => window.clearInterval(timer);
+  }, [desktop, preferences.autoCheckpoint, localSpaceSlugs]);
 
   // Load review count when workspace changes
   useEffect(() => {
@@ -550,7 +646,7 @@ export function MainLayout() {
   };
 
   // Select a page
-  const selectPage = async (ws: Workspace, slug: string, path?: string) => {
+  const selectPage = async (ws: Workspace, slug: string, path?: string, updateUrl = true) => {
     const conceptId = path ? conceptIdFromPath(path) : conceptIdFromPath(slug);
     const repoPath = path ? conceptPath(conceptIdFromPath(path)) : conceptPath(conceptId);
     if (isReservedDocument(repoPath)) return;
@@ -560,7 +656,7 @@ export function MainLayout() {
     persistedPageBody.current = null;
     externalConflictNotified.current = false;
     setActiveView({ kind: 'page', slug: conceptId, path: repoPath, content: null });
-    navigate(pageRoute(ws.slug, conceptId), { replace: true });
+    if (updateUrl) navigate(pageRoute(ws.slug, conceptId), { replace: true });
     const setContent = (content: PageFull | null) => {
       persistedPageBody.current = content?.body ?? null;
       setActiveView(prev => prev?.kind === 'page' ? { ...prev, content } : prev);
@@ -589,6 +685,32 @@ export function MainLayout() {
       }
     }
   };
+
+  // Back/forward change only the URL; show the view it stands for without
+  // reloading the Space. The first URL is handled by the startup load above.
+  const syncViewWithRoute = useEffectEvent((pathname: string) => {
+    if (!homePageOpened.current) return;
+    const route = viewForRoute(pathname, workspaces.map((workspace) => workspace.slug));
+    if (!route || showsRoute(activeView, activeWorkspace?.slug ?? null, route)) return;
+    const ws = workspaces.find((workspace) => workspace.slug === route.workspaceSlug);
+    if (!ws) return;
+    if (route.kind === 'page') {
+      void selectPage(ws, route.conceptId, undefined, false);
+      return;
+    }
+    if (activeWorkspace?.slug !== ws.slug) {
+      setActiveWorkspace(ws);
+      void loadSpacePages(ws);
+    }
+    setActiveTab('reviews');
+    setEditingPage(false);
+    setActiveView(route);
+  });
+  useEffect(() => {
+    if (navigationType !== 'POP') return;
+    const task = window.setTimeout(() => syncViewWithRoute(location.pathname), 0);
+    return () => window.clearTimeout(task);
+  }, [location.key, location.pathname, navigationType]);
 
   // Create workspace
   const handleChooseLocalFolder = useCallback(async () => {
@@ -656,28 +778,269 @@ export function MainLayout() {
     }
   };
 
+  // ── Personal workspace: Space modules, journal, tasks, Obsidian links ──
+
+  const isLocalSpace = (ws: Workspace | null): ws is Workspace => !!ws && desktop && !!ws.localPath;
+
+  const loadSpaceFeatures = useCallback(async (ws: Workspace): Promise<SpaceFeatures> => {
+    if (!desktop || !ws.localPath) return DEFAULT_SPACE_FEATURES;
+    try {
+      const features = parseSpaceFeatures(await readSpaceConfig(ws.slug));
+      setSpaceFeatures((previous) => ({ ...previous, [ws.id]: features }));
+      return features;
+    } catch {
+      return DEFAULT_SPACE_FEATURES;
+    }
+  }, [desktop]);
+
+  useEffect(() => {
+    if (!activeWorkspace || spaceFeatures[activeWorkspace.id] || !isLocalSpace(activeWorkspace)) return;
+    void loadSpaceFeatures(activeWorkspace);
+    // isLocalSpace only reads stable props of the workspace.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWorkspace, spaceFeatures, loadSpaceFeatures]);
+
+  useEffect(() => {
+    if (!desktop || !activeWorkspace?.slug) return;
+    try {
+      window.localStorage.setItem(LAST_SPACE_STORAGE_KEY, activeWorkspace.slug);
+    } catch {
+      // Remembering the last Space is a convenience only.
+    }
+  }, [desktop, activeWorkspace?.slug]);
+
+  const activeFeatures = (activeWorkspace && spaceFeatures[activeWorkspace.id]) || DEFAULT_SPACE_FEATURES;
+  const activeModules = isLocalSpace(activeWorkspace)
+    ? visibleModules(activeFeatures)
+    : [];
+  const activeFlatPages = useMemo(
+    () => flattenPages(activeWorkspace ? (spacePages[activeWorkspace.id] || []) : []),
+    [activeWorkspace, spacePages],
+  );
+  /** Create the journal entry for a day when missing; returns its path. */
+  const ensureJournalEntry = async (ws: Workspace, date: Date): Promise<{ conceptId: string; path: string; created: boolean }> => {
+    const features = spaceFeatures[ws.id] ?? await loadSpaceFeatures(ws);
+    const path = journalPagePath(features.journal, date);
+    const conceptId = conceptIdFromPath(path);
+    try {
+      await getPage(conceptId, userBranch, ws.slug, 'wiki');
+      return { conceptId, path, created: false };
+    } catch {
+      // Missing: create it below.
+    }
+    let template: string | null = null;
+    if (features.journal.template) {
+      try {
+        template = (await getPage(conceptIdFromPath(features.journal.template), userBranch, ws.slug, 'wiki')).body;
+      } catch {
+        template = null;
+      }
+    }
+    try {
+      await writePage(conceptId, newJournalBody(features.journal, date, template), userBranch, ws.slug, 'wiki', undefined, true);
+    } catch (error) {
+      if (!String(error instanceof Error ? error.message : error).includes('already exists')) throw error;
+    }
+    await loadSpacePages(ws);
+    return { conceptId, path, created: true };
+  };
+
+  const openJournalDay = async (ws: Workspace, date: Date) => {
+    try {
+      const entry = await ensureJournalEntry(ws, date);
+      await selectPage(ws, entry.conceptId, entry.path);
+      setActiveTab('journal');
+      setEditingPage(true);
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : 'Could not open the journal', type: 'error' });
+    }
+  };
+
+  // Open today's journal at startup when this person asked for it and the
+  // app was launched without a deep link.
+  useEffect(() => {
+    if (startupJournalHandled.current || !workspacesLoaded || !activeWorkspace) return;
+    if (!isLocalSpace(activeWorkspace) || !spaceFeatures[activeWorkspace.id]) return;
+    startupJournalHandled.current = true;
+    const launchedAtRoot = initialPathname.current === '/' || initialPathname.current === '';
+    if (!launchedAtRoot || !preferences.openJournalOnStartup) return;
+    if (!visibleModules(spaceFeatures[activeWorkspace.id]).includes('journal')) return;
+    void openJournalDay(activeWorkspace, new Date());
+    // Runs once per launch after the first Space and its settings load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspacesLoaded, activeWorkspace, spaceFeatures, preferences]);
+
+  /** Navigate like Obsidian: resolve by name anywhere, create the note if missing. */
+  const openWikilink = async (raw: string) => {
+    const ws = activeWorkspace;
+    if (!ws) return;
+    const currentPath = activeView?.kind === 'page' ? (activeView.path ?? conceptPath(activeView.slug)) : null;
+    const resolved = resolveWikilinkPath(raw, activeFlatPages, currentPath);
+    if (resolved) {
+      await selectPage(ws, conceptIdFromPath(resolved), resolved);
+      return;
+    }
+    const { page } = parseWikilink(raw);
+    if (!page) return;
+    if (!isLocalSpace(ws)) {
+      setMessage({ text: `Page "${page}" not found`, type: 'error' });
+      return;
+    }
+    const title = page.split('/').at(-1) ?? page;
+    const body = `---\ntype: Note\ntitle: "${title.replaceAll('"', '\\"')}"\n---\n\n# ${title}\n\n`;
+    try {
+      await writePage(page, body, userBranch, ws.slug, 'wiki', undefined, true);
+    } catch (error) {
+      if (!String(error instanceof Error ? error.message : error).includes('already exists')) {
+        setMessage({ text: error instanceof Error ? error.message : 'Could not create the page', type: 'error' });
+        return;
+      }
+    }
+    await loadSpacePages(ws);
+    await selectPage(ws, page, conceptPath(page));
+    setEditingPage(true);
+  };
+
+  const viewedPagePath = activeView?.kind === 'page' ? (activeView.path ?? conceptPath(activeView.slug)) : '';
+  const viewedSpaceSlug = activeWorkspace?.slug ?? '';
+  const canReadAssets = isLocalSpace(activeWorkspace);
+  const loadAssetUrl = useCallback(async (src: string): Promise<string> => {
+    if (!canReadAssets || !viewedSpaceSlug) throw new Error('Attachments are only available for local Spaces');
+    const key = `${viewedSpaceSlug}\u0000${viewedPagePath}\u0000${src}`;
+    const cached = assetUrls.current.get(key);
+    if (cached) return cached;
+    const asset = await readAsset(viewedSpaceSlug, viewedPagePath, src);
+    const url = URL.createObjectURL(new Blob([new Uint8Array(asset.bytes)], { type: asset.mime }));
+    assetUrls.current.set(key, url);
+    return url;
+  }, [canReadAssets, viewedSpaceSlug, viewedPagePath]);
+
+  /** Toggle a task from the reader; `renderedLine` is 1-based in the rendered body. */
+  const toggleReaderTask = async (renderedLine: number) => {
+    const ws = activeWorkspace;
+    if (!ws || activeView?.kind !== 'page' || !activeView.content) return;
+    const full = activeView.content.body;
+    const index = renderedLineOffset(full, renderBody(full)) + renderedLine - 1;
+    const raw = full.split(/\r?\n/)[index];
+    if (raw === undefined) return;
+    try {
+      const updated = applyTaskToggle(full, { line: index, raw }, dateKey(new Date()));
+      await writePage(activeView.slug, updated, userBranch, ws.slug, 'wiki', full);
+      const page = await getPage(activeView.slug, userBranch, ws.slug, 'wiki');
+      persistedPageBody.current = page.body;
+      setActiveView((previous) => previous?.kind === 'page' ? { ...previous, content: page } : previous);
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : 'Could not update the task', type: 'error' });
+    }
+  };
+
+  const toggleTaskInPage = async (task: TaskItem) => {
+    const ws = activeWorkspace;
+    if (!ws) return;
+    const conceptId = conceptIdFromPath(task.path);
+    const page = await getPage(conceptId, userBranch, ws.slug, 'wiki');
+    const updated = applyTaskToggle(page.body, task, dateKey(new Date()));
+    await writePage(conceptId, updated, userBranch, ws.slug, 'wiki', page.body);
+  };
+
+  const setTaskStatusInPage = async (task: TaskItem, status: BoardStatus) => {
+    const ws = activeWorkspace;
+    if (!ws) return;
+    const conceptId = conceptIdFromPath(task.path);
+    const page = await getPage(conceptId, userBranch, ws.slug, 'wiki');
+    const updated = applyTaskStatus(page.body, task, status, dateKey(new Date()));
+    await writePage(conceptId, updated, userBranch, ws.slug, 'wiki', page.body);
+  };
+
+  const addTaskToToday = async (line: string) => {
+    const ws = activeWorkspace;
+    if (!ws) return;
+    const entry = await ensureJournalEntry(ws, new Date());
+    const page = await getPage(entry.conceptId, userBranch, ws.slug, 'wiki');
+    await writePage(entry.conceptId, insertTaskLine(page.body, line), userBranch, ws.slug, 'wiki', page.body);
+  };
+
+  /** Re-read a page, transform it and save it, failing if it changed in between. */
+  const editPageAt = async (path: string, transform: (content: string) => string) => {
+    const ws = activeWorkspace;
+    if (!ws) return;
+    const conceptId = conceptIdFromPath(path);
+    const page = await getPage(conceptId, userBranch, ws.slug, 'wiki');
+    const updated = transform(page.body);
+    if (updated !== page.body) await writePage(conceptId, updated, userBranch, ws.slug, 'wiki', page.body);
+  };
+
+  const saveModules = async (features: SpaceFeatures, nextPreferences: PersonalPreferences) => {
+    const ws = activeWorkspace;
+    if (!ws) return;
+    const current = await readSpaceConfig(ws.slug).catch(() => null);
+    await writeSpaceConfig(ws.slug, withSpaceFeatures(current, features));
+    setSpaceFeatures((previous) => ({ ...previous, [ws.id]: parseSpaceFeatures(withSpaceFeatures(current, features)) }));
+    try {
+      savePersonalPreferences(window.localStorage, nextPreferences);
+    } catch {
+      // Preferences fall back to this session when storage is unavailable.
+    }
+    setPreferences(nextPreferences);
+  };
+
+  const handleObsidianImported = async (space: Workspace) => {
+    setObsidianImportOpen(false);
+    const ws = await listWorkspaces();
+    setWorkspaces(ws);
+    const created = ws.find((workspace) => workspace.slug === space.slug) ?? space;
+    setActiveWorkspace(created);
+    await loadSpacePages(created);
+    await loadSpaceFeatures(created);
+    await selectPage(created, 'CoWiki Import Report', 'CoWiki Import Report.md');
+    setMessage({ text: `Imported ${created.name}. Your Obsidian vault was not changed.`, type: 'success' });
+  };
+
+  const readerCallbacks: ReaderCallbacks = {
+    onWikilink: (target) => { void openWikilink(target); },
+    loadAsset: canReadAssets ? loadAssetUrl : undefined,
+    onToggleTask: canReadAssets && versionSelection.kind === 'working' ? (line) => { void toggleReaderTask(line); } : undefined,
+  };
+  const newPageTemplates = showNewPage
+    ? templatePagePaths(
+      flattenPages(spacePages[showNewPage.id] || []).map((page) => page.path),
+      spaceFeatures[showNewPage.id] ?? DEFAULT_SPACE_FEATURES,
+    )
+    : [];
   // Create page in a workspace
   const handleCreatePage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !showNewPage) return;
     const ws = showNewPage;
-    const baseSlug = newName.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim()
+    // Local Spaces keep readable file names so [[Name]] links find the page.
+    const baseSlug = (isLocalSpace(ws)
+      ? pageFileName(newName)
+      : newName.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim())
       || `page-${crypto.randomUUID().slice(0, 8)}`;
     const conceptId = newPageFolder ? `${newPageFolder}/${baseSlug}` : baseSlug;
-    const body = `---\ntype: Note\ntitle: "${newName.trim().replaceAll('"', '\\"')}"\ndescription: ""\n---\n\n`;
     try {
+      let template: { body: string; type?: string } | null = null;
+      if (newPageTemplate.startsWith('page:')) {
+        const templatePath = newPageTemplate.slice('page:'.length);
+        template = { body: (await getPage(conceptIdFromPath(templatePath), userBranch, ws.slug, 'wiki')).body };
+      }
+      const body = newPageBody(newName.trim(), template);
       await writePage(conceptId, body, userBranch, ws.slug, 'wiki', undefined, true);
       const title = newName.trim();
       setShowNewPage(null);
       setNewName('');
       setNewPageFolder(null);
+      setNewPageTemplate('');
       await loadSpacePages(ws);
       const newPath = conceptPath(conceptId);
-      persistedPageBody.current = body;
-      setActiveView({ kind: 'page', slug: conceptId, path: newPath, content: { slug: conceptId, path: newPath, title, summary: '', body, branch: userBranch, kind: 'page', children: [] } });
+      // The engine may normalize properties; edit what was actually saved.
+      const saved = await getPage(conceptId, userBranch, ws.slug, 'wiki')
+        .catch(() => ({ slug: conceptId, path: newPath, title, summary: '', body, branch: userBranch, kind: 'page' as const, children: [] }));
+      persistedPageBody.current = saved.body;
+      setActiveView({ kind: 'page', slug: conceptId, path: newPath, content: saved });
       navigate(pageRoute(ws.slug, conceptId), { replace: true });
-    } catch {
-      setMessage({ text: 'Failed to create page', type: 'error' });
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? `Failed to create page: ${error.message}` : 'Failed to create page', type: 'error' });
     }
   };
 
@@ -727,6 +1090,19 @@ export function MainLayout() {
         break;
       case 'links':
         setActiveView({ kind: 'links', workspaceSlug: activeWorkspace.slug });
+        navigate('/', { replace: true });
+        break;
+      case 'journal':
+        void openJournalDay(activeWorkspace, new Date());
+        break;
+      case 'flashcards':
+        setEditingPage(false);
+        setActiveView({ kind: 'flashcards', workspaceSlug: activeWorkspace.slug });
+        navigate('/', { replace: true });
+        break;
+      case 'tasks':
+        setEditingPage(false);
+        setActiveView({ kind: 'tasks', workspaceSlug: activeWorkspace.slug });
         navigate('/', { replace: true });
         break;
     }
@@ -804,13 +1180,14 @@ export function MainLayout() {
   // Page-view comment context: active only when reading (not editing) a page.
   const pageView = activeView?.kind === 'page' ? activeView : null;
   const isHtmlPage = !!pageView && isHtmlPath(pageView.path ?? pageView.slug);
+  const isDrawingPage = !!pageView?.content && isExcalidrawPage(pageView.path ?? pageView.slug, pageView.content.body);
   const htmlDocumentPath = pageView?.path ?? pageView?.slug ?? '';
   const htmlSpaceSlug = activeWorkspace?.slug ?? '';
   const htmlAssetReader = useCallback((assetPath: string) => {
     if (!htmlSpaceSlug || !htmlDocumentPath) return Promise.reject(new Error('No HTML document selected'));
     return readHtmlAsset(htmlSpaceSlug, htmlDocumentPath, assetPath);
   }, [htmlSpaceSlug, htmlDocumentPath]);
-  const commentsActive = !!pageView?.content && !editingPage && !isHtmlPage;
+  const commentsActive = !!pageView?.content && !editingPage && !isHtmlPage && !isDrawingPage;
   const commentPageSlug = commentsActive && pageView
     ? (pageView.path ?? pageView.content?.path ?? '')
     : '';
@@ -837,18 +1214,25 @@ export function MainLayout() {
     const ws = activeWorkspace;
     try {
       if (pathOp.kind === 'rename') {
-        const slugified = pathOp.value
-          .toLowerCase()
-          .replace(/[^a-z0-9\s-]/g, '')
-          .trim()
-          .replace(/\s+/g, '-') || `item-${crypto.randomUUID().slice(0, 8)}`;
+        const slugified = (isLocalSpace(ws)
+          ? pageFileName(pathOp.value)
+          : pathOp.value
+            .toLowerCase()
+            .replace(/[^a-z0-9\s-]/g, '')
+            .trim()
+            .replace(/\s+/g, '-')) || `item-${crypto.randomUUID().slice(0, 8)}`;
         const separator = pathOp.path.lastIndexOf('/');
         const parent = separator === -1 ? '' : pathOp.path.slice(0, separator);
         const renamed = pathOp.isFolder ? slugified : `${slugified}.md`;
         const to = parent ? `${parent}/${renamed}` : renamed;
         if (to === pathOp.path) { setPathOp(null); return; }
-        await renamePath(ws.slug, userBranch, pathOp.path, to);
-        setMessage({ text: 'Renamed in your draft.', type: 'success' });
+        const updatedLinks = await renamePath(ws.slug, userBranch, pathOp.path, to);
+        setMessage({
+          text: updatedLinks
+            ? `Renamed in your draft and updated links in ${updatedLinks} ${updatedLinks === 1 ? 'page' : 'pages'}.`
+            : 'Renamed in your draft.',
+          type: 'success',
+        });
       } else {
         await deletePath(ws.slug, userBranch, pathOp.path);
         setMessage({ text: `Deleted ${pathOp.isFolder ? 'folder' : 'page'} from your draft.`, type: 'success' });
@@ -1012,6 +1396,13 @@ export function MainLayout() {
           onSlugChange={setNewSlug}
           onChooseFolder={() => { void handleChooseLocalFolder(); }}
           onSubmit={handleCreateWorkspace}
+          onImportObsidian={() => { setShowCreate(false); setObsidianImportOpen(true); }}
+        />
+        <ObsidianImportDialog
+          open={obsidianImportOpen}
+          existingSlugs={workspaces.map((workspace) => workspace.slug)}
+          onClose={() => setObsidianImportOpen(false)}
+          onImported={handleObsidianImported}
         />
       </>
     );
@@ -1073,6 +1464,8 @@ export function MainLayout() {
                 onDeletePath={(path, isFolder, title) => setPathOp({ kind: 'delete', path, isFolder, title })}
                 onShowIngest={() => setShowIngest(true)}
                 onSettings={() => setSettingsOpen(true)}
+                modules={activeModules}
+                onModules={isLocalSpace(activeWorkspace) ? () => setModulesDialogOpen(true) : undefined}
                 onCollapse={() => setSidebarLayout((current) => ({ ...current, collapsed: true }))}
               />
               <div
@@ -1193,6 +1586,18 @@ export function MainLayout() {
                     <span style={{ color: C.ink }}>Links</span>
                   </>
                 )}
+                {activeView?.kind === 'tasks' && (
+                  <>
+                    <span style={{ color: C.faint }}>/</span>
+                    <span style={{ color: C.ink }}>Tasks</span>
+                  </>
+                )}
+                {activeView?.kind === 'flashcards' && (
+                  <>
+                    <span style={{ color: C.faint }}>/</span>
+                    <span style={{ color: C.ink }}>Flashcards</span>
+                  </>
+                )}
                 {activeView?.kind === 'notifications' && (
                   <span style={{ color: C.ink }}>Notifications</span>
                 )}
@@ -1200,7 +1605,6 @@ export function MainLayout() {
 
               {/* Right: actions */}
               <ContentHeaderActions>
-
                 {desktop && activeWorkspace?.localPath && (
                   <WorkspaceContextBadge
                     context={workspaceContext}
@@ -1364,11 +1768,34 @@ export function MainLayout() {
               /* Space history */
               ) : activeView?.kind === 'history' && activeWorkspace ? (
                 <HistoryView
+                  key={`${activeWorkspace.slug}:${checkpointTick}`}
                   workspaceSlug={activeWorkspace.slug}
                   local={desktop && !!activeWorkspace.localPath}
                 />
 
               /* Link diagnostics */
+              ) : activeView?.kind === 'tasks' && activeWorkspace ? (
+                <div style={{ position: 'absolute', inset: 0, overflow: 'auto', padding: '36px 32px 56px' }}>
+                  <TasksView
+                    workspaceSlug={activeWorkspace.slug}
+                    journal={activeFeatures.journal}
+                    onOpenPage={(path) => { void selectPage(activeWorkspace, conceptIdFromPath(path), path); }}
+                    onToggleTask={toggleTaskInPage}
+                    onSetTaskStatus={setTaskStatusInPage}
+                    onAddTask={addTaskToToday}
+                  />
+                </div>
+              ) : activeView?.kind === 'flashcards' && activeWorkspace ? (
+                <div style={{ position: 'absolute', inset: 0, overflow: 'auto', padding: '36px 32px 56px' }}>
+                  <ObsidianReaderContext.Provider value={readerCallbacks}>
+                    <FlashcardsView
+                      key={activeWorkspace.slug}
+                      workspaceSlug={activeWorkspace.slug}
+                      onOpenSource={(path) => { void selectPage(activeWorkspace, conceptIdFromPath(path), path); }}
+                      onEditPage={editPageAt}
+                    />
+                  </ObsidianReaderContext.Provider>
+                </div>
               ) : activeView?.kind === 'links' && activeWorkspace ? (
                 <LinksView
                   workspaceSlug={activeWorkspace.slug}
@@ -1414,6 +1841,14 @@ export function MainLayout() {
                 isHtmlPage ? (
                   <HtmlFileReader key={(activeWorkspace?.slug ?? '') + ':' + activeView.content.path + ':' + activeView.content.body}
                     path={activeView.content.path} source={activeView.content.body} readAsset={htmlAssetReader} />
+                ) : isDrawingPage && !editingPage && versionSelection.kind === 'working' ? (
+                  <ObsidianReaderContext.Provider value={readerCallbacks}>
+                    <ExcalidrawReader
+                      key={(activeWorkspace?.slug ?? '') + ':' + activeView.content.path}
+                      title={(activeView.content.path.split('/').at(-1) ?? '').replace(/\.excalidraw(\.md)?$|\.md$/i, '')}
+                      body={activeView.content.body}
+                    />
+                  </ObsidianReaderContext.Provider>
                 ) : editingPage ? (
                   <PageEditor
                     ref={pageEditorRef}
@@ -1435,7 +1870,8 @@ export function MainLayout() {
                       if (activeWorkspace) loadSpacePages(activeWorkspace);
                     }}
                     onDone={() => { void handleDoneEditing(); }}
-                    onWikilink={(target) => activeWorkspace && selectPage(activeWorkspace, target)}
+                    onWikilink={(target) => { void openWikilink(target); }}
+                    loadImage={canReadAssets ? loadAssetUrl : undefined}
                     getPageSlugs={() => (activeWorkspace ? collectSlugs(spacePages[activeWorkspace.id] || []) : [])}
                   />
                 ) : (
@@ -1443,10 +1879,11 @@ export function MainLayout() {
                   // (left-anchored, same left edge as every other view), the comment
                   // panel is flush to the right edge and full height with its own
                   // scroll. Opening it shrinks the doc from the right only.
+                  <ObsidianReaderContext.Provider value={readerCallbacks}>
                   <PageReader
                     key={(activeWorkspace?.slug ?? '') + ':' + (activeView.path ?? activeView.slug) + ':' + versionSelection.kind}
                     articleRef={articleRef}
-                    body={renderBody(viewedPageBody)}
+                    body={obsidianToReaderMarkdown(renderBody(viewedPageBody))}
                     lineage={pageLineage(
                       viewedPageBody,
                       versionSelection.kind === 'working' ? activeView.content.provenance : undefined,
@@ -1457,7 +1894,7 @@ export function MainLayout() {
                     loadSource={versionSelection.kind === 'working' && activeWorkspace
                       ? (path) => getSource(activeWorkspace.slug, sourceFilename(path))
                       : undefined}
-                    markdownComponents={commentMarkdownComponents}
+                    markdownComponents={READER_COMPONENTS}
                     byline={versionSelection.kind === 'working' ? {
                       name: activeView.content.edited_by,
                       editedAt: activeView.content.edited_at,
@@ -1469,6 +1906,7 @@ export function MainLayout() {
                       : undefined}
                     aside={<CommentsPanel />}
                   />
+                  </ObsidianReaderContext.Provider>
                 )
 
               /* Discover */
@@ -1553,6 +1991,7 @@ export function MainLayout() {
         onSlugChange={setNewSlug}
         onChooseFolder={() => { void handleChooseLocalFolder(); }}
         onSubmit={handleCreateWorkspace}
+        onImportObsidian={desktop ? () => { setShowCreate(false); setObsidianImportOpen(true); } : undefined}
       />
 
       {/* New page */}
@@ -1563,6 +2002,25 @@ export function MainLayout() {
             <div>
               <label className="mb-1.5 block text-sm text-text-secondary">Title</label>
               <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Meeting Notes" autoFocus />
+            </div>
+            <div>
+              <label htmlFor="new-page-template" className="mb-1.5 block text-sm text-text-secondary">Template</label>
+              <select
+                id="new-page-template"
+                value={newPageTemplate}
+                onChange={(e) => setNewPageTemplate(e.target.value)}
+                className="w-full rounded-md border bg-transparent px-3 py-2 text-sm"
+              >
+                <option value="">Blank page</option>
+                {newPageTemplates.map((path) => (
+                  <option key={path} value={`page:${path}`}>{path.replace(/\.md$/i, '')}</option>
+                ))}
+              </select>
+              {newPageTemplates.length === 0 && showNewPage && (
+                <p className="mt-1.5 text-xs text-text-secondary">
+                  No templates yet. Pages in the <code>{(spaceFeatures[showNewPage.id] ?? DEFAULT_SPACE_FEATURES).templates.folder || 'Templates'}</code> folder appear here.
+                </p>
+              )}
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" type="button" onClick={() => setShowNewPage(null)}>Cancel</Button>
@@ -1686,6 +2144,22 @@ export function MainLayout() {
       </Dialog>
 
       {/* Settings dialog */}
+      {activeWorkspace && (
+        <SpaceFeaturesDialog
+          open={modulesDialogOpen}
+          spaceName={activeWorkspace.name}
+          features={activeFeatures}
+          preferences={preferences}
+          onClose={() => setModulesDialogOpen(false)}
+          onSave={saveModules}
+        />
+      )}
+      <ObsidianImportDialog
+        open={obsidianImportOpen}
+        existingSlugs={workspaces.map((workspace) => workspace.slug)}
+        onClose={() => setObsidianImportOpen(false)}
+        onImported={handleObsidianImported}
+      />
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
@@ -1725,6 +2199,7 @@ function CreateSpaceDialog({
   onSlugChange,
   onChooseFolder,
   onSubmit,
+  onImportObsidian,
 }: {
   open: boolean;
   desktop: boolean;
@@ -1739,11 +2214,15 @@ function CreateSpaceDialog({
   onSlugChange: (slug: string) => void;
   onChooseFolder: () => void;
   onSubmit: (event: React.FormEvent) => void;
+  onImportObsidian?: () => void;
 }) {
   const choice = (
     <div className="grid gap-2 mt-2">
       <SpaceChoice icon={<HardDrive size={19} />} title="Create local Space" description="Start a new OKF knowledge space on this Mac." onClick={() => onModeChange('local')} />
-      <SpaceChoice icon={<FolderInput size={19} />} title="Import a folder" description="Open an existing Markdown folder or Git repository." onClick={() => onModeChange('import')} />
+      {onImportObsidian && (
+        <SpaceChoice icon={<BookMarked size={19} />} title="Import Obsidian vault" description="Copy a vault into a new Space with a compatibility report. The vault is not changed." onClick={onImportObsidian} />
+      )}
+      <SpaceChoice icon={<FolderInput size={19} />} title="Open a folder in place" description="Use an existing Markdown folder or Git repository directly. CoWiki adds folder indexes and page properties to it." onClick={() => onModeChange('import')} />
       <SpaceChoice icon={<Cloud size={19} />} title="Create Cloud Space" description="Create locally and enable Cloud collaboration." disabled badge="Coming soon" />
       <SpaceChoice icon={<UserPlus size={19} />} title="Join Cloud Space" description="Download a shared Space as a local copy." disabled badge="Coming soon" />
     </div>

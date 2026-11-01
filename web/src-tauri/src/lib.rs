@@ -2,9 +2,12 @@ mod cloud_sync;
 mod extract;
 mod html_assets;
 mod knowledge_index;
+mod link_rewrite;
 mod local_engine;
 mod mcp;
+mod obsidian;
 mod okf;
+mod personal;
 mod terminal;
 mod web_source;
 
@@ -98,6 +101,93 @@ fn local_get_page(
     page_slug: String,
 ) -> Result<PageFull, String> {
     engine.get_page(&space_slug, &page_slug)
+}
+
+#[tauri::command]
+fn local_read_space_config(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<Option<serde_json::Value>, String> {
+    engine.read_space_config(&space_slug)
+}
+
+#[tauri::command]
+fn local_write_space_config(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    config: serde_json::Value,
+) -> Result<(), String> {
+    let _mutation = engine.lock_mutations()?;
+    engine.write_space_config(&space_slug, &config)
+}
+
+#[tauri::command(async)]
+fn local_list_task_sources(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<Vec<personal::TaskSource>, String> {
+    engine.task_sources(&space_slug)
+}
+
+#[tauri::command(async)]
+fn local_list_card_sources(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<Vec<personal::TaskSource>, String> {
+    engine.card_sources(&space_slug)
+}
+
+#[tauri::command]
+fn local_read_card_reviews(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+) -> Result<Option<serde_json::Value>, String> {
+    engine.read_card_reviews(&space_slug)
+}
+
+#[tauri::command]
+fn local_write_card_reviews(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    state: serde_json::Value,
+) -> Result<(), String> {
+    engine.write_card_reviews(&space_slug, &state)
+}
+
+#[tauri::command(async)]
+fn local_read_asset(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    from_path: String,
+    target: String,
+) -> Result<personal::AssetBytes, String> {
+    engine.read_asset(&space_slug, &from_path, &target)
+}
+
+#[tauri::command(async)]
+fn obsidian_scan_vault(vault_path: String) -> Result<obsidian::VaultReport, String> {
+    obsidian::scan_vault(&PathBuf::from(vault_path))
+}
+
+#[tauri::command(async)]
+fn obsidian_import_vault(
+    engine: State<'_, LocalEngine>,
+    name: String,
+    slug: String,
+    source_path: String,
+    destination_path: String,
+    space_config: serde_json::Value,
+    report_markdown: String,
+) -> Result<Space, String> {
+    let _mutation = engine.lock_mutations()?;
+    engine.import_obsidian_vault(
+        &name,
+        &slug,
+        &PathBuf::from(source_path),
+        &PathBuf::from(destination_path),
+        &space_config,
+        &report_markdown,
+    )
 }
 
 #[tauri::command]
@@ -259,7 +349,7 @@ fn local_rename_path(
     space_slug: String,
     from: String,
     to: String,
-) -> Result<(), String> {
+) -> Result<usize, String> {
     let _mutation = engine.lock_mutations()?;
     engine.rename_path(&space_slug, &from, &to)
 }
@@ -338,6 +428,24 @@ fn local_create_checkpoint(
 ) -> Result<Checkpoint, String> {
     let _mutation = engine.lock_mutations()?;
     engine.create_checkpoint(&space_slug, name.as_deref())
+}
+
+/// Called about once a minute; saves a checkpoint once the draft has been
+/// quiet for `settle_seconds`.
+#[tauri::command(async)]
+fn local_auto_checkpoint(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    settle_seconds: u64,
+) -> Result<Option<Checkpoint>, String> {
+    let _mutation = engine.lock_mutations()?;
+    engine.auto_checkpoint(&space_slug, std::time::Duration::from_secs(settle_seconds))
+}
+
+/// Personal setting: also controls the checkpoint taken when the app quits.
+#[tauri::command]
+fn local_set_auto_checkpoint(engine: State<'_, LocalEngine>, enabled: bool) {
+    engine.set_auto_checkpoint(enabled);
 }
 
 #[tauri::command]
@@ -529,6 +637,15 @@ pub fn run() {
             local_list_pages,
             local_get_page,
             local_read_html_asset,
+            local_read_space_config,
+            local_write_space_config,
+            local_list_task_sources,
+            local_list_card_sources,
+            local_read_card_reviews,
+            local_write_card_reviews,
+            local_read_asset,
+            obsidian_scan_vault,
+            obsidian_import_vault,
             local_list_page_comments,
             local_create_page_comment,
             local_list_comment_members,
@@ -549,6 +666,8 @@ pub fn run() {
             local_keep_working_diff,
             local_history,
             local_create_checkpoint,
+            local_auto_checkpoint,
+            local_set_auto_checkpoint,
             local_create_agent_change,
             local_list_agent_changes,
             local_merge_agent_change,
@@ -572,7 +691,12 @@ pub fn run() {
             let home = std::env::var_os("HOME")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| app.path().app_data_dir().unwrap_or_default());
-            let cowiki_home = home.join("cowiki");
+            // COWIKI_HOME lets a second profile (tests, demos) keep its own
+            // Space registry instead of sharing ~/cowiki.
+            let cowiki_home = std::env::var_os("COWIKI_HOME")
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join("cowiki"));
             let engine = LocalEngine::open(&cowiki_home.join(".cowiki"))
                 .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
             engine
@@ -595,8 +719,18 @@ pub fn run() {
             window.set_focus()?;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running CoWiki desktop client");
+        .build(tauri::generate_context!())
+        .expect("error while building CoWiki desktop client")
+        .run(|app, event| {
+            // Keep edits made since the last checkpoint when the app quits.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(engine) = app.try_state::<LocalEngine>() {
+                    if let Ok(_mutation) = engine.lock_mutations() {
+                        engine.checkpoint_unsaved_drafts();
+                    }
+                }
+            }
+        });
 }
 
 pub fn run_mcp_if_requested() -> Result<bool, String> {

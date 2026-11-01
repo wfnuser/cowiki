@@ -52,6 +52,7 @@ export const PageEditor = forwardRef<PageEditorHandle, {
   /** Exit edit mode (pending changes are flushed first). */
   onDone: () => void;
   onWikilink?: (target: string) => void;
+  loadImage?: (src: string) => Promise<string>;
   getPageSlugs?: () => string[];
 }>(function PageEditor({
   initialBody,
@@ -60,6 +61,7 @@ export const PageEditor = forwardRef<PageEditorHandle, {
   onExternalDeleted,
   onDone,
   onWikilink,
+  loadImage,
   getPageSlugs,
 }, ref) {
   const [feedback, setFeedback] = useState<SaveFeedback>(null);
@@ -247,6 +249,7 @@ export const PageEditor = forwardRef<PageEditorHandle, {
         onDocChanged={handleDocChanged}
         onRequestSave={() => { void flush(true); }}
         onWikilink={handleWikilink}
+        loadImage={loadImage}
         getPageSlugs={getPageSlugs}
       />
 

@@ -222,6 +222,10 @@ pub fn needs_migration(root: &Path) -> Result<bool, String> {
             continue;
         }
         let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
+        // Attachments (images, PDFs, recordings) are not OKF documents.
+        if matches!(DocumentKind::from_path(relative), DocumentKind::Other) {
+            continue;
+        }
         let content = match std::fs::read_to_string(path) {
             Ok(content) => content,
             Err(error) if error.kind() == std::io::ErrorKind::InvalidData => return Ok(true),
@@ -263,6 +267,10 @@ pub fn needs_content_migration(root: &Path) -> Result<bool, String> {
     {
         let path = entry.path();
         let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
+        // Attachments (images, PDFs, recordings) are not OKF documents.
+        if matches!(DocumentKind::from_path(relative), DocumentKind::Other) {
+            continue;
+        }
         let content = match std::fs::read_to_string(path) {
             Ok(content) => content,
             Err(error) if error.kind() == std::io::ErrorKind::InvalidData => return Ok(true),
@@ -301,6 +309,11 @@ fn normalize_documents(root: &Path) -> Result<(), String> {
     for path in files {
         let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
         let kind = DocumentKind::from_path(relative);
+        // Attachments are left alone; reading them as text would archive a
+        // copy of every image or PDF under .cowiki/legacy.
+        if matches!(kind, DocumentKind::Other) {
+            continue;
+        }
         let content = match std::fs::read_to_string(&path) {
             Ok(content) => content,
             Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
@@ -642,6 +655,28 @@ pub fn refresh_progressive_indexes(root: &Path) -> Result<(), String> {
     directories.sort_by_key(|directory| std::cmp::Reverse(directory.components().count()));
     for directory in directories {
         refresh_directory_index(root, &directory)?;
+    }
+    Ok(())
+}
+
+/// Refresh only the progressive indexes that list `relative`: its folder and
+/// every ancestor up to the Space root. A page write cannot change any other
+/// folder's listing, so walking the whole tree on every save is unnecessary.
+pub fn refresh_indexes_for(root: &Path, relative: &Path) -> Result<(), String> {
+    if is_hidden_relative(root, &root.join(relative)) {
+        return Ok(());
+    }
+    let mut directory = root.join(relative);
+    while directory.pop() {
+        if !directory.starts_with(root) {
+            break;
+        }
+        if directory.is_dir() {
+            refresh_directory_index(root, &directory)?;
+        }
+        if directory == root {
+            break;
+        }
     }
     Ok(())
 }
@@ -1094,6 +1129,30 @@ mod tests {
                 .contains("type: Note")
         );
         assert!(!current.path().join(RAW_SOURCES_DIR).exists());
+    }
+
+    #[test]
+    fn binary_attachments_are_not_archived_or_treated_as_unmigrated() {
+        let bundle = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(bundle.path().join("notes/assets")).unwrap();
+        let png = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0x00];
+        std::fs::write(bundle.path().join("notes/assets/figure.png"), png).unwrap();
+        std::fs::write(bundle.path().join("notes/paper.pdf"), [0xff, 0xfe, 0x00]).unwrap();
+        std::fs::write(
+            bundle.path().join("notes/Idea.md"),
+            "# Idea\n\n![[figure.png]]\n",
+        )
+        .unwrap();
+
+        ensure_bundle(bundle.path()).unwrap();
+
+        assert!(!bundle.path().join(".cowiki/legacy").exists());
+        assert_eq!(
+            std::fs::read(bundle.path().join("notes/assets/figure.png")).unwrap(),
+            png
+        );
+        assert!(!needs_migration(bundle.path()).unwrap());
+        assert!(!needs_content_migration(bundle.path()).unwrap());
     }
 
     #[test]

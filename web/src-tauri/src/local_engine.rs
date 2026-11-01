@@ -7,10 +7,13 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use similar::{ChangeTag, TextDiff};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 use crate::knowledge_index::{self, SearchHit};
@@ -283,7 +286,21 @@ pub struct LocalEngine {
     // cannot join this protocol, so merge still performs its final no-follow
     // content CAS immediately before each replacement.
     mutation_lock: Arc<Mutex<()>>,
+    /// Per-Space draft fingerprints for automatic checkpoints (memory only).
+    auto_checkpoints: Arc<Mutex<HashMap<String, AutoCheckpointState>>>,
+    auto_checkpoint_enabled: Arc<AtomicBool>,
 }
+
+/// What the automatic checkpoint last saw in a Space's draft.
+#[derive(Debug, Clone, Copy)]
+struct AutoCheckpointState {
+    seen: u64,
+    since: Instant,
+    saved: Option<u64>,
+}
+
+pub const AUTO_CHECKPOINT_LABEL: &str = "Auto checkpoint";
+pub const QUIT_CHECKPOINT_LABEL: &str = "Checkpoint on quit";
 
 impl LocalEngine {
     pub fn open(metadata_dir: &Path) -> Result<Self, String> {
@@ -319,6 +336,8 @@ impl LocalEngine {
             search_index_checked: Arc::new(Mutex::new(false)),
             backlinks_checked: Arc::new(Mutex::new(HashSet::new())),
             mutation_lock: Arc::new(Mutex::new(())),
+            auto_checkpoints: Arc::new(Mutex::new(HashMap::new())),
+            auto_checkpoint_enabled: Arc::new(AtomicBool::new(true)),
         };
         engine.prepare_registered_spaces()?;
         Ok(engine)
@@ -614,12 +633,153 @@ impl LocalEngine {
         } else {
             std::fs::rename(&temporary, &path).map_err(|e| e.to_string())?;
         }
-        okf::refresh_progressive_indexes(&space.local_path)?;
+        // Only the written page and the folder listings above it can change.
+        okf::refresh_indexes_for(&space.local_path, &relative)?;
+        let mut changed = vec![relative.clone()];
+        let mut directory = relative.clone();
+        while directory.pop() {
+            changed.push(directory.join("index.md"));
+            if directory.as_os_str().is_empty() {
+                break;
+            }
+        }
         let mut db = self
             .db
             .lock()
             .map_err(|_| "local database lock poisoned".to_string())?;
-        knowledge_index::rebuild_space(&mut db, &space.id, &space.local_path)
+        knowledge_index::index_paths(&mut db, &space.id, &space.local_path, &changed)
+    }
+
+    pub fn read_space_config(&self, space_slug: &str) -> Result<Option<serde_json::Value>, String> {
+        let space = self.find_space(space_slug)?;
+        crate::personal::read_space_config(&space.local_path)
+    }
+
+    pub fn write_space_config(
+        &self,
+        space_slug: &str,
+        config: &serde_json::Value,
+    ) -> Result<(), String> {
+        let space = self.find_space(space_slug)?;
+        crate::personal::write_space_config(&space.local_path, config)
+    }
+
+    pub fn task_sources(
+        &self,
+        space_slug: &str,
+    ) -> Result<Vec<crate::personal::TaskSource>, String> {
+        let space = self.find_space(space_slug)?;
+        crate::personal::task_sources(&space.local_path)
+    }
+
+    pub fn card_sources(
+        &self,
+        space_slug: &str,
+    ) -> Result<Vec<crate::personal::TaskSource>, String> {
+        let space = self.find_space(space_slug)?;
+        crate::personal::card_sources(&space.local_path)
+    }
+
+    pub fn read_card_reviews(&self, space_slug: &str) -> Result<Option<serde_json::Value>, String> {
+        let space = self.find_space(space_slug)?;
+        crate::personal::read_review_state(&self.metadata_dir, &space.id)
+    }
+
+    pub fn write_card_reviews(
+        &self,
+        space_slug: &str,
+        state: &serde_json::Value,
+    ) -> Result<(), String> {
+        let space = self.find_space(space_slug)?;
+        crate::personal::write_review_state(&self.metadata_dir, &space.id, state)
+    }
+
+    pub fn read_asset(
+        &self,
+        space_slug: &str,
+        from_path: &str,
+        target: &str,
+    ) -> Result<crate::personal::AssetBytes, String> {
+        let space = self.find_space(space_slug)?;
+        crate::personal::read_asset(&space.local_path, from_path, target)
+    }
+
+    /// Copy an Obsidian vault into `destination`, seed its Space settings and
+    /// import report, then register the copy as a Space. The vault itself is
+    /// only read.
+    pub fn import_obsidian_vault(
+        &self,
+        name: &str,
+        slug: &str,
+        source: &Path,
+        destination: &Path,
+        space_config: &serde_json::Value,
+        report_markdown: &str,
+    ) -> Result<Space, String> {
+        validate_slug(slug)?;
+        if self.list_spaces()?.iter().any(|space| space.slug == slug) {
+            return Err(format!("a Space named '{slug}' already exists"));
+        }
+        // Everything is checked before anything in the folder is written.
+        let resume = crate::obsidian::finished_copy_of(source, destination)?;
+        if resume {
+            let folder = destination.canonicalize().map_err(|e| e.to_string())?;
+            if let Some(existing) = self.space_by_path(&folder)? {
+                return Err(format!(
+                    "this vault is already imported as the Space \"{}\" in {}; open it, or choose another folder for a fresh copy",
+                    existing.name,
+                    folder.display()
+                ));
+            }
+        } else {
+            crate::obsidian::copy_vault(source, destination)?;
+        }
+        crate::obsidian::exclude_large_files_from_git(destination)?;
+        // When resuming, the copy may already hold settings and a report; keep them.
+        let keep_config = resume
+            && destination
+                .join(crate::personal::SPACE_CONFIG_PATH)
+                .exists();
+        if space_config.is_object() && !keep_config {
+            crate::personal::write_space_config(destination, space_config)?;
+        }
+        let report = destination.join("CoWiki Import Report.md");
+        let keep_report = resume && report.exists();
+        if !report_markdown.trim().is_empty() && !keep_report {
+            std::fs::write(&report, report_markdown).map_err(|error| error.to_string())?;
+        }
+        // Record the untouched copy first, so the later OKF normalization is a
+        // separate, reviewable commit instead of thousands of loose drafts.
+        commit_imported_copy(destination, name)?;
+        self.register_imported_copy(name, slug, destination)
+    }
+
+    /// Like `add_space`, but for a fresh import copy. The vault it came from
+    /// is the backup, so OKF normalization runs in place without the
+    /// full-tree snapshot that protects folders opened in place (that
+    /// snapshot would also put every large attachment into Git).
+    fn register_imported_copy(
+        &self,
+        name: &str,
+        slug: &str,
+        folder: &Path,
+    ) -> Result<Space, String> {
+        let local_path = folder.canonicalize().map_err(|e| e.to_string())?;
+        if let Some(existing) = self.space_by_path(&local_path)? {
+            return Ok(existing);
+        }
+        let repo = Repository::open(&local_path)
+            .map_err(|error| format!("cannot open the imported copy: {error}"))?;
+        ensure_local_main(&repo)?;
+        if okf::needs_migration(&local_path)? {
+            okf::ensure_bundle(&local_path).map_err(|error| {
+                format!("cannot prepare the imported copy: {error}. Import again to retry.")
+            })?;
+            commit_okf_migration(&repo)?;
+        }
+        let space = self.insert_space(name, slug, &local_path)?;
+        self.rebuild_search_index(&space.slug)?;
+        Ok(space)
     }
 
     pub fn create_folder(
@@ -839,7 +999,9 @@ impl LocalEngine {
         knowledge_index::refresh_space(&mut db, &space.id, &space.local_path)
     }
 
-    pub fn rename_path(&self, space_slug: &str, from: &str, to: &str) -> Result<(), String> {
+    /// Rename or move a page or folder and update links to it (and relative
+    /// links inside it) in other pages. Returns how many pages were updated.
+    pub fn rename_path(&self, space_slug: &str, from: &str, to: &str) -> Result<usize, String> {
         let space = self.find_space(space_slug)?;
         okf::ensure_supported_for_write(&space.local_path)?;
         let from = ui_path(&space.local_path, from)?;
@@ -861,9 +1023,41 @@ impl LocalEngine {
         if let Some(parent) = to.parent() {
             std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
+        let before = knowledge_index::FileIndex::scan(&space.local_path)?;
         std::fs::rename(&from, &to).map_err(|error| format!("cannot rename item: {error}"))?;
+        let relative = |path: &Path| {
+            path.strip_prefix(&space.local_path)
+                .unwrap_or(path)
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/")
+        };
+        if to.is_file() {
+            retitle_renamed_page(&from, &to)?;
+        }
+        let after = knowledge_index::FileIndex::scan(&space.local_path)?;
+        let pages = after
+            .files()
+            .iter()
+            // Folder listings are regenerated below.
+            .filter(|path| {
+                !path.starts_with(".cowiki/")
+                    && !matches!(path.rsplit('/').next(), Some("index.md" | "log.md"))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let updated = crate::link_rewrite::update_links_after_move(
+            &space.local_path,
+            &relative(&from),
+            &relative(&to),
+            &before,
+            &after,
+            &pages,
+        )?;
         okf::refresh_progressive_indexes(&space.local_path)?;
-        self.rebuild_search_index(space_slug)
+        self.rebuild_search_index(space_slug)?;
+        Ok(updated.len())
     }
 
     pub fn delete_path(&self, space_slug: &str, value: &str) -> Result<(), String> {
@@ -1104,7 +1298,7 @@ impl LocalEngine {
             .map_err(|_| "local database lock poisoned".to_string())?;
         self.refresh_search_index(&mut db, &space)?;
         self.prepare_backlinks(&mut db, &space.id)?;
-        knowledge_index::backlinks(&db, &space.id, target_path)
+        knowledge_index::backlinks(&db, &space.id, &space.local_path, target_path)
     }
 
     pub fn list_broken_links(&self, space_slug: &str) -> Result<Vec<BrokenLink>, String> {
@@ -1232,20 +1426,7 @@ impl LocalEngine {
         name: Option<&str>,
     ) -> Result<Checkpoint, String> {
         let repo = self.repo(space_slug)?;
-        let root = repo
-            .workdir()
-            .ok_or_else(|| "local Space repository has no working directory".to_string())?;
-        let mut snapshot = repo.index().map_err(|error| error.to_string())?;
-        reset_index_to_head(&repo, &mut snapshot)?;
-        for relative in draft_statuses(&repo)? {
-            let path = Path::new(&relative);
-            if root.join(path).symlink_metadata().is_ok() {
-                snapshot.add_path(path).map_err(|error| error.to_string())?;
-            } else {
-                let _ = snapshot.remove_path(path);
-            }
-        }
-        let tree_id = snapshot.write_tree().map_err(|error| error.to_string())?;
+        let tree_id = draft_tree(&repo)?;
         let tree = repo.find_tree(tree_id).map_err(|error| error.to_string())?;
         let parent_oid = checkpoint_tip(&repo)?.or_else(|| {
             repo.head()
@@ -1287,6 +1468,92 @@ impl LocalEngine {
             name: label,
             created_at: signature.when().seconds(),
         })
+    }
+
+    pub fn set_auto_checkpoint(&self, enabled: bool) {
+        self.auto_checkpoint_enabled
+            .store(enabled, Ordering::Relaxed);
+    }
+
+    /// Save a checkpoint once the draft has stopped changing for `settle`.
+    /// Call it periodically; it only checks file status until then.
+    pub fn auto_checkpoint(
+        &self,
+        space_slug: &str,
+        settle: Duration,
+    ) -> Result<Option<Checkpoint>, String> {
+        self.auto_checkpoint_at(space_slug, settle, Instant::now())
+    }
+
+    pub(crate) fn auto_checkpoint_at(
+        &self,
+        space_slug: &str,
+        settle: Duration,
+        now: Instant,
+    ) -> Result<Option<Checkpoint>, String> {
+        if !self.auto_checkpoint_enabled.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
+        let repo = self.repo(space_slug)?;
+        let fingerprint = draft_fingerprint(&repo)?;
+        {
+            let mut states = self
+                .auto_checkpoints
+                .lock()
+                .map_err(|_| "automatic checkpoint state is unavailable".to_string())?;
+            let Some(fingerprint) = fingerprint else {
+                states.remove(space_slug);
+                return Ok(None);
+            };
+            let state = states
+                .entry(space_slug.to_string())
+                .or_insert(AutoCheckpointState {
+                    seen: fingerprint,
+                    since: now,
+                    saved: None,
+                });
+            if state.seen != fingerprint {
+                state.seen = fingerprint;
+                state.since = now;
+                return Ok(None);
+            }
+            if state.saved == Some(fingerprint) || now.duration_since(state.since) < settle {
+                return Ok(None);
+            }
+            state.saved = Some(fingerprint);
+        }
+        if draft_matches_latest_checkpoint(&repo)? {
+            return Ok(None);
+        }
+        self.create_checkpoint(space_slug, Some(AUTO_CHECKPOINT_LABEL))
+            .map(Some)
+    }
+
+    /// Checkpoint every Space whose draft differs from its latest
+    /// checkpoint; used when the app quits. Failures are skipped.
+    pub fn checkpoint_unsaved_drafts(&self) -> Vec<String> {
+        if !self.auto_checkpoint_enabled.load(Ordering::Relaxed) {
+            return Vec::new();
+        }
+        let Ok(spaces) = self.list_spaces() else {
+            return Vec::new();
+        };
+        let mut saved = Vec::new();
+        for space in spaces {
+            let Ok(repo) = self.repo(&space.slug) else {
+                continue;
+            };
+            let unsaved = matches!(draft_fingerprint(&repo), Ok(Some(_)))
+                && matches!(draft_matches_latest_checkpoint(&repo), Ok(false));
+            if unsaved
+                && self
+                    .create_checkpoint(&space.slug, Some(QUIT_CHECKPOINT_LABEL))
+                    .is_ok()
+            {
+                saved.push(space.slug);
+            }
+        }
+        saved
     }
 
     pub fn submit(&self, space_slug: &str, paths: &[String]) -> Result<SubmitResult, String> {
@@ -1512,6 +1779,72 @@ fn draft_statuses(repo: &Repository) -> Result<Vec<String>, String> {
         .collect())
 }
 
+/// The tree a checkpoint of the current draft would record.
+fn draft_tree(repo: &Repository) -> Result<Oid, String> {
+    let root = repo
+        .workdir()
+        .ok_or_else(|| "local Space repository has no working directory".to_string())?;
+    let mut snapshot = repo.index().map_err(|error| error.to_string())?;
+    reset_index_to_head(repo, &mut snapshot)?;
+    for relative in draft_statuses(repo)? {
+        let path = Path::new(&relative);
+        if root.join(path).symlink_metadata().is_ok() {
+            snapshot.add_path(path).map_err(|error| error.to_string())?;
+        } else {
+            let _ = snapshot.remove_path(path);
+        }
+    }
+    snapshot.write_tree().map_err(|error| error.to_string())
+}
+
+/// Whether the draft is exactly what the latest checkpoint (or, without
+/// one, the last commit) already records.
+fn draft_matches_latest_checkpoint(repo: &Repository) -> Result<bool, String> {
+    let baseline = checkpoint_tip(repo)?.or_else(|| {
+        repo.head()
+            .ok()
+            .and_then(|head| head.peel_to_commit().ok())
+            .map(|commit| commit.id())
+    });
+    let Some(baseline) = baseline else {
+        return Ok(false);
+    };
+    let tree = repo
+        .find_commit(baseline)
+        .map_err(|error| error.to_string())?
+        .tree_id();
+    Ok(draft_tree(repo)? == tree)
+}
+
+/// A cheap fingerprint of the draft (changed paths with their sizes and
+/// modification times), or None when nothing differs from the last commit.
+fn draft_fingerprint(repo: &Repository) -> Result<Option<u64>, String> {
+    let root = repo
+        .workdir()
+        .ok_or_else(|| "local Space repository has no working directory".to_string())?;
+    let paths = draft_statuses(repo)?;
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for relative in &paths {
+        relative.hash(&mut hasher);
+        match root.join(relative).symlink_metadata() {
+            Ok(metadata) => {
+                metadata.len().hash(&mut hasher);
+                metadata
+                    .modified()
+                    .ok()
+                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|elapsed| elapsed.as_nanos())
+                    .hash(&mut hasher);
+            }
+            Err(_) => "deleted".hash(&mut hasher),
+        }
+    }
+    Ok(Some(hasher.finish()))
+}
+
 fn draft_changed_files(repo: &Repository) -> Result<usize, String> {
     let baseline_oid = checkpoint_tip(repo)?.or_else(|| {
         repo.head()
@@ -1681,6 +2014,51 @@ fn safe_repo_path(value: &str) -> Result<&Path, String> {
         return Err("invalid reviewed path".to_string());
     }
     Ok(path)
+}
+
+/// Commit every file of a freshly imported copy as one "Import" commit. A
+/// retried import that already has history gets a follow-up commit only when
+/// files changed.
+fn commit_imported_copy(root: &Path, name: &str) -> Result<(), String> {
+    let repo = match Repository::open(root) {
+        Ok(repo) => repo,
+        Err(_) => {
+            let mut options = RepositoryInitOptions::new();
+            options.initial_head("main");
+            Repository::init_opts(root, &options)
+                .map_err(|e| format!("cannot initialize local Git repository: {e}"))?
+        }
+    };
+    let mut index = repo.index().map_err(|error| error.to_string())?;
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .map_err(|error| error.to_string())?;
+    index
+        .update_all(["*"].iter(), None)
+        .map_err(|error| error.to_string())?;
+    index.write().map_err(|error| error.to_string())?;
+    let tree_id = index.write_tree().map_err(|error| error.to_string())?;
+    let parent = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
+    if parent
+        .as_ref()
+        .is_some_and(|commit| commit.tree_id() == tree_id)
+    {
+        return Ok(());
+    }
+    let tree = repo.find_tree(tree_id).map_err(|error| error.to_string())?;
+    let signature =
+        Signature::now("CoWiki Local", "local@cowiki.app").map_err(|error| error.to_string())?;
+    let parents = parent.iter().collect::<Vec<_>>();
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        &format!("Import Obsidian vault \"{}\"", name.trim()),
+        &tree,
+        &parents,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn commit_initial_okf_indexes(repo: &Repository, root: &Path) -> Result<(), String> {
@@ -2483,6 +2861,48 @@ fn frontmatter_field(body: &str, key: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// A page's `title` property usually mirrors its file name (Obsidian has no
+/// separate title; imports and new pages copy the name). When it still does,
+/// renaming the file renames the title too, so the tree shows the new name.
+fn retitle_renamed_page(from: &Path, to: &Path) -> Result<(), String> {
+    let stem = |path: &Path| {
+        path.file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    };
+    let (old_name, new_name) = (stem(from), stem(to));
+    if old_name == new_name {
+        return Ok(());
+    }
+    let Ok(body) = std::fs::read_to_string(to) else {
+        return Ok(());
+    };
+    let Some(rest) = body.strip_prefix("---\n") else {
+        return Ok(());
+    };
+    let Some(end) = rest.find("\n---") else {
+        return Ok(());
+    };
+    let mut changed = false;
+    let frontmatter = rest[..end]
+        .lines()
+        .map(|line| match line.strip_prefix("title:") {
+            Some(value) if value.trim().trim_matches(['"', '\'']) == old_name => {
+                changed = true;
+                format!("title: {}", yaml_string(&new_name))
+            }
+            _ => line.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !changed {
+        return Ok(());
+    }
+    let updated = format!("---\n{frontmatter}{}", &rest[end..]);
+    std::fs::write(to, updated).map_err(|error| error.to_string())
 }
 
 pub(crate) fn markdown_title(body: &str) -> Option<String> {
@@ -5202,6 +5622,481 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(folder.join("page.md")).unwrap(),
             page
+        );
+    }
+
+    #[test]
+    fn automatic_checkpoints_wait_for_the_draft_to_settle() {
+        use super::{AUTO_CHECKPOINT_LABEL, QUIT_CHECKPOINT_LABEL};
+        use std::time::{Duration, Instant};
+
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        let settle = Duration::from_secs(300);
+        let start = Instant::now();
+        let at = |seconds: u64| start + Duration::from_secs(seconds);
+        let checkpoints = || engine.history(&space.slug).unwrap().checkpoints;
+        let existing = checkpoints().len();
+
+        // Nothing changed: nothing to save.
+        assert!(engine
+            .auto_checkpoint_at(&space.slug, settle, at(0))
+            .unwrap()
+            .is_none());
+        engine
+            .write_page(&space.slug, "idea", "# Idea\n\nFirst\n")
+            .unwrap();
+        assert!(engine
+            .auto_checkpoint_at(&space.slug, settle, at(10))
+            .unwrap()
+            .is_none());
+        // Still editing: each change restarts the wait.
+        assert!(engine
+            .auto_checkpoint_at(&space.slug, settle, at(200))
+            .unwrap()
+            .is_none());
+        std::thread::sleep(Duration::from_millis(20));
+        engine
+            .write_page(&space.slug, "idea", "# Idea\n\nSecond\n")
+            .unwrap();
+        assert!(engine
+            .auto_checkpoint_at(&space.slug, settle, at(320))
+            .unwrap()
+            .is_none());
+        assert!(engine
+            .auto_checkpoint_at(&space.slug, settle, at(500))
+            .unwrap()
+            .is_none());
+        // Five quiet minutes after the last change: one checkpoint.
+        let saved = engine
+            .auto_checkpoint_at(&space.slug, settle, at(620))
+            .unwrap()
+            .expect("checkpoint after the draft settled");
+        assert_eq!(saved.name, AUTO_CHECKPOINT_LABEL);
+        assert_eq!(checkpoints().len(), existing + 1);
+        assert_eq!(
+            engine
+                .history(&space.slug)
+                .unwrap()
+                .current_draft
+                .changed_files,
+            0
+        );
+        // No new changes: no duplicate, even much later or after a restart.
+        assert!(engine
+            .auto_checkpoint_at(&space.slug, settle, at(2000))
+            .unwrap()
+            .is_none());
+        let restarted = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        assert!(restarted
+            .auto_checkpoint_at(&space.slug, settle, at(0))
+            .unwrap()
+            .is_none());
+        assert!(restarted
+            .auto_checkpoint_at(&space.slug, settle, at(400))
+            .unwrap()
+            .is_none());
+        assert!(restarted.checkpoint_unsaved_drafts().is_empty());
+        assert_eq!(checkpoints().len(), existing + 1);
+
+        // Quitting saves whatever has not settled yet, unless turned off.
+        engine
+            .write_page(&space.slug, "idea", "# Idea\n\nThird\n")
+            .unwrap();
+        engine.set_auto_checkpoint(false);
+        assert!(engine.checkpoint_unsaved_drafts().is_empty());
+        assert!(engine
+            .auto_checkpoint_at(&space.slug, Duration::ZERO, at(3000))
+            .unwrap()
+            .is_none());
+        engine.set_auto_checkpoint(true);
+        assert_eq!(engine.checkpoint_unsaved_drafts(), vec![space.slug.clone()]);
+        assert_eq!(checkpoints()[0].name, QUIT_CHECKPOINT_LABEL);
+        assert_eq!(checkpoints().len(), existing + 2);
+    }
+
+    #[test]
+    fn importing_a_vault_again_never_copies_over_the_imported_space() {
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::write(vault.path().join("Note.md"), "# Note\n\nOriginal\n").unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&work.path().join("metadata")).unwrap();
+        let config = serde_json::json!({});
+        let destination = work.path().join("Vault (CoWiki)");
+        engine
+            .import_obsidian_vault("Vault", "vault", vault.path(), &destination, &config, "")
+            .unwrap();
+        std::fs::write(destination.join("Note.md"), "# Note\n\nEdited in CoWiki\n").unwrap();
+
+        // Same vault, same folder, new Space name: refused before any write.
+        let error = engine
+            .import_obsidian_vault(
+                "Vault 2",
+                "vault-2",
+                vault.path(),
+                &destination,
+                &config,
+                "",
+            )
+            .unwrap_err();
+        assert!(error.contains("already imported"), "{error}");
+        assert!(std::fs::read_to_string(destination.join("Note.md"))
+            .unwrap()
+            .contains("Edited in CoWiki"));
+        assert_eq!(engine.list_spaces().unwrap().len(), 1);
+
+        // A finished copy that never became a Space resumes without copying again.
+        let second = work.path().join("Second");
+        crate::obsidian::copy_vault(vault.path(), &second).unwrap();
+        std::fs::write(second.join("Note.md"), "# Note\n\nKept\n").unwrap();
+        let space = engine
+            .import_obsidian_vault(
+                "Second",
+                "second",
+                vault.path(),
+                &second,
+                &config,
+                "# Report\n",
+            )
+            .unwrap();
+        assert_eq!(space.slug, "second");
+        assert!(std::fs::read_to_string(second.join("Note.md"))
+            .unwrap()
+            .contains("Kept"));
+    }
+
+    #[test]
+    fn obsidian_name_links_resolve_for_backlinks_diagnostics_and_renames() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("vault");
+        std::fs::create_dir_all(folder.join("Resources/Papers")).unwrap();
+        std::fs::create_dir_all(folder.join("Projects/assets")).unwrap();
+        std::fs::write(
+            folder.join("Resources/Papers/Attention.md"),
+            "# Attention\n",
+        )
+        .unwrap();
+        std::fs::write(
+            folder.join("Projects/assets/figure.png"),
+            [0x89, b'P', b'N', b'G'],
+        )
+        .unwrap();
+        std::fs::write(
+            folder.join("Projects/Plan.md"),
+            "# Plan\n\nRead [[attention|the paper]] and [[Attention#Results]].\n\n![[figure.png]] [[Nowhere]]\n",
+        )
+        .unwrap();
+        let space = engine.add_space("Vault", "vault", &folder).unwrap();
+
+        let backlinks = engine
+            .list_backlinks(&space.slug, "Resources/Papers/Attention.md")
+            .unwrap();
+        assert_eq!(
+            backlinks
+                .iter()
+                .map(|hit| hit.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Projects/Plan.md"]
+        );
+        let broken = engine.list_broken_links(&space.slug).unwrap();
+        assert_eq!(
+            broken
+                .iter()
+                .map(|link| link.target.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Nowhere.md"]
+        );
+
+        let updated = engine
+            .rename_path(
+                &space.slug,
+                "Resources/Papers/Attention.md",
+                "Resources/Papers/Attention Is All You Need.md",
+            )
+            .unwrap();
+        assert_eq!(updated, 1);
+        let renamed =
+            std::fs::read_to_string(folder.join("Resources/Papers/Attention Is All You Need.md"))
+                .unwrap();
+        assert!(
+            renamed.contains("title: \"Attention Is All You Need\""),
+            "{renamed}"
+        );
+        let plan = std::fs::read_to_string(folder.join("Projects/Plan.md")).unwrap();
+        assert!(plan.contains(
+            "[[Attention Is All You Need|the paper]] and [[Attention Is All You Need#Results]]"
+        ));
+        assert_eq!(
+            engine
+                .list_backlinks(&space.slug, "Resources/Papers/Attention Is All You Need.md")
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    /// Regression run against a real Obsidian vault. It imports a copy and
+    /// exercises listing, search, tasks, attachments and saving; the vault is
+    /// only read. Run with:
+    /// `COWIKI_REAL_VAULT=/path/to/vault cargo test --lib real_obsidian_vault -- --ignored --nocapture`
+    #[test]
+    #[ignore = "needs COWIKI_REAL_VAULT"]
+    fn real_obsidian_vault_round_trip() {
+        use std::time::Instant;
+        let Ok(vault) = std::env::var("COWIKI_REAL_VAULT") else {
+            eprintln!("COWIKI_REAL_VAULT is not set; skipping");
+            return;
+        };
+        let vault = std::path::PathBuf::from(vault);
+        let fingerprint = |root: &std::path::Path| {
+            let mut files = 0usize;
+            let mut bytes = 0u64;
+            let mut newest = std::time::SystemTime::UNIX_EPOCH;
+            let mut stack = vec![root.to_path_buf()];
+            while let Some(dir) = stack.pop() {
+                for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                    let meta = entry.metadata().unwrap();
+                    if meta.is_dir() {
+                        stack.push(entry.path());
+                    } else {
+                        files += 1;
+                        bytes += meta.len();
+                        newest = newest.max(meta.modified().unwrap());
+                    }
+                }
+            }
+            (files, bytes, newest)
+        };
+        let before = fingerprint(&vault);
+
+        let work = std::env::var("COWIKI_REAL_VAULT_WORKDIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::env::temp_dir().join("cowiki-real-vault"));
+        let _ = std::fs::remove_dir_all(&work);
+        std::fs::create_dir_all(&work).unwrap();
+        let engine = LocalEngine::open(&work.join("metadata")).unwrap();
+
+        let started = Instant::now();
+        let report = crate::obsidian::scan_vault(&vault).unwrap();
+        eprintln!(
+            "scan: {:?} — {} notes, {} attachments, {} wikilinks ({} unresolved), {} tasks, {} duplicate names",
+            started.elapsed(),
+            report.markdown_files,
+            report.attachment_files,
+            report.wikilinks,
+            report.unresolved_links,
+            report.task_lines,
+            report.duplicate_name_count
+        );
+
+        let started = Instant::now();
+        let destination = work.join("vault-copy");
+        let space = engine
+            .import_obsidian_vault(
+                "Real vault",
+                "real-vault",
+                &vault,
+                &destination,
+                &serde_json::json!({ "features": { "modules": { "journal": true, "tasks": true } } }),
+                "---\ntype: Note\ntitle: \"CoWiki Import Report\"\n---\n\n# Report\n",
+            )
+            .unwrap();
+        eprintln!(
+            "import (copy + commit + OKF + index): {:?}",
+            started.elapsed()
+        );
+        let git_bytes: u64 = walkdir::WalkDir::new(destination.join(".git"))
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.metadata().ok())
+            .filter(|metadata| metadata.is_file())
+            .map(|metadata| metadata.len())
+            .sum();
+        eprintln!(
+            "git history: {} MB ({} large files, {} MB, kept out)",
+            git_bytes / 1_048_576,
+            report.large_files,
+            report.large_file_bytes / 1_048_576
+        );
+        let repo = Repository::open(&destination).unwrap();
+        let mut status = git2::StatusOptions::new();
+        status.include_untracked(true).recurse_untracked_dirs(true);
+        assert!(
+            repo.statuses(Some(&mut status)).unwrap().is_empty(),
+            "an imported copy starts with no drafts"
+        );
+
+        let started = Instant::now();
+        let tree = engine.list_pages(&space.slug).unwrap();
+        eprintln!(
+            "list_pages: {:?} ({} top-level entries)",
+            started.elapsed(),
+            tree.len()
+        );
+
+        let started = Instant::now();
+        let hits = engine.search(&space.slug, "agent", 20).unwrap();
+        eprintln!(
+            "search: {:?} ({} hits)",
+            started.elapsed(),
+            hits.keyword.len()
+        );
+        assert!(!hits.keyword.is_empty());
+
+        let started = Instant::now();
+        let sources = engine.task_sources(&space.slug).unwrap();
+        eprintln!(
+            "task_sources: {:?} ({} files with tasks)",
+            started.elapsed(),
+            sources.len()
+        );
+
+        // Find a note that embeds an image and load that image.
+        let image_embed = |text: &str| -> Option<String> {
+            text.split("![[").skip(1).find_map(|rest| {
+                let target = rest.split([']', '|', '#']).next()?.trim();
+                let lower = target.to_lowercase();
+                [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]
+                    .iter()
+                    .any(|extension| lower.ends_with(extension))
+                    .then(|| target.to_string())
+            })
+        };
+        let mut checked_asset = false;
+        for path in &report.markdown_paths {
+            let Ok(text) = std::fs::read_to_string(destination.join(path)) else {
+                continue;
+            };
+            if let Some(target) = image_embed(&text) {
+                let started = Instant::now();
+                let asset = engine.read_asset(&space.slug, path, &target).unwrap();
+                eprintln!(
+                    "read_asset: {:?} ({} from {path}, {} bytes)",
+                    started.elapsed(),
+                    asset.path,
+                    asset.bytes.len()
+                );
+                checked_asset = true;
+                break;
+            }
+        }
+        assert!(checked_asset || report.embeds == 0);
+
+        // Save an existing page twice the way the editor does.
+        let page_path = report
+            .markdown_paths
+            .iter()
+            .find(|path| path.contains('/'))
+            .unwrap()
+            .clone();
+        let concept = page_path.trim_end_matches(".md").to_string();
+        let current = std::fs::read_to_string(destination.join(&page_path)).unwrap();
+        for round in 0..2 {
+            let started = Instant::now();
+            let body = std::fs::read_to_string(destination.join(&page_path)).unwrap();
+            let edited = format!("{body}\n- [ ] regression edit {round}\n");
+            engine
+                .write_page_checked(&space.slug, &concept, &edited, Some(&body), false)
+                .unwrap();
+            eprintln!("save {round}: {:?} ({page_path})", started.elapsed());
+        }
+        assert_ne!(
+            std::fs::read_to_string(destination.join(&page_path)).unwrap(),
+            current
+        );
+        assert!(engine
+            .search(&space.slug, "regression edit", 5)
+            .unwrap()
+            .keyword
+            .iter()
+            .any(|hit| hit.path.ends_with(&page_path)));
+
+        // An edit made outside CoWiki (Obsidian, an Agent, git) is picked up.
+        let outside = destination.join(&page_path);
+        let mut text = std::fs::read_to_string(&outside).unwrap();
+        text.push_str("\nexternal-edit-sentinel\n");
+        std::fs::write(&outside, text).unwrap();
+        assert!(!engine
+            .search(&space.slug, "external-edit-sentinel", 5)
+            .unwrap()
+            .keyword
+            .is_empty());
+
+        // Name-style links resolve: only links Obsidian also cannot resolve
+        // are reported as broken.
+        let started = Instant::now();
+        let broken = engine.list_broken_links(&space.slug).unwrap();
+        eprintln!(
+            "broken links: {} (scan found {} unresolved) in {:?}",
+            broken.len(),
+            report.unresolved_links,
+            started.elapsed()
+        );
+        for link in broken.iter().take(5) {
+            eprintln!("  {} -> {}", link.source_path, link.target);
+        }
+        std::fs::write(
+            work.join("broken-links.txt"),
+            broken
+                .iter()
+                .map(|link| format!("{}\t{}\n", link.source_path, link.target))
+                .collect::<String>(),
+        )
+        .unwrap();
+
+        // Rename the most linked-to page and check every link follows it.
+        let target = report
+            .markdown_paths
+            .iter()
+            .filter(|path| !path.ends_with("index.md") && path.contains('/'))
+            .map(|path| {
+                let count = engine.list_backlinks(&space.slug, path).unwrap().len();
+                (count, path.clone())
+            })
+            .max()
+            .unwrap();
+        eprintln!("most linked page: {} ({} backlinks)", target.1, target.0);
+        let renamed = format!(
+            "{}/{} (renamed).md",
+            target.1.rsplit_once('/').unwrap().0,
+            target.1.rsplit('/').next().unwrap().trim_end_matches(".md")
+        );
+        let started = Instant::now();
+        let updated = engine
+            .rename_path(&space.slug, &target.1, &renamed)
+            .unwrap();
+        eprintln!("rename: {:?}, {updated} pages updated", started.elapsed());
+        assert_eq!(
+            engine.list_backlinks(&space.slug, &renamed).unwrap().len(),
+            target.0
+        );
+        assert_eq!(
+            engine.list_broken_links(&space.slug).unwrap().len(),
+            broken.len()
+        );
+
+        // Restart: a fresh engine on the same metadata finds the Space and its index.
+        drop(engine);
+        let reopened = LocalEngine::open(&work.join("metadata")).unwrap();
+        assert!(reopened
+            .list_spaces()
+            .unwrap()
+            .iter()
+            .any(|space| space.slug == "real-vault"));
+        assert!(!reopened
+            .search("real-vault", "external-edit-sentinel", 5)
+            .unwrap()
+            .keyword
+            .is_empty());
+
+        assert_eq!(
+            fingerprint(&vault),
+            before,
+            "the original vault must not change"
         );
     }
 }

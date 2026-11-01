@@ -104,6 +104,7 @@ export function SpaceRail<T extends SpaceRailItem>({
         <TooltipTrigger asChild>
           <button
             onClick={onCreateWorkspace}
+            aria-label={createLabel}
             style={{
               width: 42, height: 42, borderRadius: 13, border: `1.5px dashed ${C.faint}`,
               background: 'transparent', cursor: 'pointer',

@@ -9,9 +9,9 @@ use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 const CREATE_SCHEMA: &str = "CREATE TABLE knowledge_index_metadata (
         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -51,7 +51,8 @@ const CREATE_SCHEMA: &str = "CREATE TABLE knowledge_index_metadata (
         space_id TEXT NOT NULL,
         source_path TEXT NOT NULL,
         target TEXT NOT NULL,
-        UNIQUE(space_id, source_path, target)
+        kind INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(space_id, source_path, target, kind)
     );
     CREATE INDEX page_links_target ON page_links(space_id, target);";
 
@@ -119,7 +120,7 @@ fn schema_is_structurally_healthy(connection: &Connection) -> bool {
         )
         .is_err()
         || connection
-            .prepare("SELECT space_id, source_path, target FROM page_links LIMIT 0")
+            .prepare("SELECT space_id, source_path, target, kind FROM page_links LIMIT 0")
             .is_err()
     {
         return false;
@@ -259,6 +260,46 @@ pub fn refresh_space(
     transaction.commit().map_err(|e| e.to_string())
 }
 
+/// Re-index only the given Space-relative Markdown paths. A product write
+/// touches one page, so re-reading every page in a large vault on each save
+/// would make autosave cost grow with the vault size. Missing files are
+/// removed from the index.
+pub fn index_paths(
+    connection: &mut Connection,
+    space_id: &str,
+    root: &Path,
+    paths: &[PathBuf],
+) -> Result<(), String> {
+    if !root.is_dir() {
+        return Ok(());
+    }
+    let transaction = connection.transaction().map_err(|e| e.to_string())?;
+    for relative in paths {
+        let path = root.join(relative);
+        if !is_markdown(&path) || !should_walk(&path, root) {
+            continue;
+        }
+        if path.is_file() {
+            index_file_in(&transaction, space_id, root, &path)?;
+        } else {
+            let relative = normalize_path(relative);
+            transaction
+                .execute(
+                    "DELETE FROM page_links WHERE space_id = ?1 AND source_path = ?2",
+                    params![space_id, relative],
+                )
+                .map_err(|e| e.to_string())?;
+            transaction
+                .execute(
+                    "DELETE FROM indexed_pages WHERE space_id = ?1 AND path = ?2",
+                    params![space_id, relative],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    transaction.commit().map_err(|e| e.to_string())
+}
+
 /// Re-derive one Space's relationship graph after its Markdown rows have been
 /// refreshed. This runs lazily before the first backlinks query in a process,
 /// so corrupt link rows cannot make SQLite authoritative at startup.
@@ -280,12 +321,12 @@ pub fn rebuild_links(connection: &mut Connection, space_id: &str) -> Result<(), 
         .execute("DELETE FROM page_links WHERE space_id = ?1", [space_id])
         .map_err(|e| e.to_string())?;
     for (source_path, body) in pages {
-        for target in extract_links(&body, &source_path) {
+        for (target, kind) in extract_links(&body, &source_path) {
             transaction
                 .execute(
-                    "INSERT INTO page_links (space_id, source_path, target)
-                     VALUES (?1, ?2, ?3)",
-                    params![space_id, source_path, target],
+                    "INSERT OR IGNORE INTO page_links (space_id, source_path, target, kind)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![space_id, source_path, target, kind as i64],
                 )
                 .map_err(|e| e.to_string())?;
         }
@@ -344,12 +385,12 @@ fn index_file_in(
             params![space_id, relative],
         )
         .map_err(|e| e.to_string())?;
-    for target in extract_links(&body, &relative) {
+    for (target, kind) in extract_links(&body, &relative) {
         connection
             .execute(
-                "INSERT OR IGNORE INTO page_links (space_id, source_path, target)
-                 VALUES (?1, ?2, ?3)",
-                params![space_id, relative, target],
+                "INSERT OR IGNORE INTO page_links (space_id, source_path, target, kind)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![space_id, relative, target, kind as i64],
             )
             .map_err(|e| e.to_string())?;
     }
@@ -410,37 +451,64 @@ pub fn search(
 pub fn backlinks(
     connection: &Connection,
     space_id: &str,
+    root: &Path,
     target_path: &str,
 ) -> Result<Vec<SearchHit>, String> {
     let Some(target) = resolve_wikilink_target(target_path) else {
         return Ok(Vec::new());
     };
+    let name = target.rsplit('/').next().unwrap_or(&target).to_lowercase();
+    // Markdown links must match exactly; wikilinks are narrowed by file name
+    // here and resolved below the way the reader resolves them.
     let mut statement = connection
         .prepare(
-            "SELECT page.path, page.title, page.body
+            "SELECT page.path, page.title, page.body, link.target, link.kind
              FROM page_links AS link
              JOIN indexed_pages AS page
                ON page.space_id = link.space_id AND page.path = link.source_path
-             WHERE link.space_id = ?1 AND link.target = ?2
+             WHERE link.space_id = ?1
+               AND ((link.kind = 0 AND link.target = ?2)
+                 OR (link.kind = 1 AND (lower(link.target) = ?3
+                                        OR lower(link.target) LIKE '%/' || ?3
+                                        OR link.target = ?2)))
              ORDER BY page.title COLLATE NOCASE, page.path",
         )
         .map_err(|e| e.to_string())?;
     let rows = statement
-        .query_map(params![space_id, target], |row| {
-            let path: String = row.get(0)?;
-            let body: String = row.get(2)?;
-            Ok(SearchHit {
-                slug: slug_for_path(&path),
-                path,
-                title: row.get(1)?,
-                snippet: first_content_line(&body),
-                title_match: false,
-            })
+        .query_map(params![space_id, target, name], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
         })
-        .map_err(|e| e.to_string())?;
-    let mut results = rows
+        .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
+    let files = if rows.iter().any(|row| row.4 == LinkKind::Wiki as i64) {
+        Some(FileIndex::scan(root)?)
+    } else {
+        None
+    };
+    let mut results: Vec<SearchHit> = Vec::new();
+    for (path, title, body, link_target, kind) in rows {
+        let points_here = kind == LinkKind::Markdown as i64
+            || files
+                .as_ref()
+                .and_then(|files| files.resolve_wikilink(&link_target, &path))
+                .is_some_and(|resolved| resolved == target);
+        if points_here && !results.iter().any(|hit| hit.path == path) {
+            results.push(SearchHit {
+                slug: slug_for_path(&path),
+                snippet: first_content_line(&body),
+                path,
+                title,
+                title_match: false,
+            });
+        }
+    }
     results.retain(|hit| {
         hit.path != "index.md"
             && hit.path != "log.md"
@@ -456,9 +524,10 @@ pub fn broken_links(
     root: &Path,
 ) -> Result<Vec<BrokenLink>, String> {
     let live_targets = live_space_targets(root)?;
+    let files = FileIndex::scan(root)?;
     let mut statement = connection
         .prepare(
-            "SELECT link.source_path, page.title, link.target
+            "SELECT link.source_path, page.title, link.target, link.kind
              FROM page_links AS link
              JOIN indexed_pages AS page
                ON page.space_id = link.space_id AND page.path = link.source_path
@@ -468,23 +537,32 @@ pub fn broken_links(
         .map_err(|e| e.to_string())?;
     let rows = statement
         .query_map([space_id], |row| {
-            Ok(BrokenLink {
-                source_path: row.get(0)?,
-                source_title: row.get(1)?,
-                target: row.get(2)?,
-            })
+            Ok((
+                BrokenLink {
+                    source_path: row.get(0)?,
+                    source_title: row.get(1)?,
+                    target: row.get(2)?,
+                },
+                row.get::<_, i64>(3)?,
+            ))
         })
         .map_err(|e| e.to_string())?;
-    let results = rows
+    let mut results: Vec<BrokenLink> = Vec::new();
+    for (link, kind) in rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?
-        .into_iter()
-        .filter(|link| {
-            is_diagnostic_source(&link.source_path)
-                && is_diagnostic_target(&link.target)
-                && !live_targets.contains(&link.target)
-        })
-        .collect();
+    {
+        let broken = is_diagnostic_source(&link.source_path)
+            && is_diagnostic_target(&link.target)
+            && !live_targets.contains(&link.target)
+            && (kind != LinkKind::Wiki as i64
+                || files
+                    .resolve_wikilink(&link.target, &link.source_path)
+                    .is_none());
+        if broken && !results.contains(&link) {
+            results.push(link);
+        }
+    }
     Ok(results)
 }
 
@@ -574,13 +652,22 @@ fn fts_query(query: &str) -> String {
         .join(" AND ")
 }
 
-fn extract_links(body: &str, source_path: &str) -> Vec<String> {
+/// How a stored link target is resolved: Markdown links name an exact,
+/// case-sensitive path; wikilinks resolve like Obsidian (by name anywhere).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkKind {
+    Markdown = 0,
+    Wiki = 1,
+}
+
+fn extract_links(body: &str, source_path: &str) -> Vec<(String, LinkKind)> {
     let mut links = Vec::new();
     let excluded = code_ranges(body);
     let wikilinks = extract_wikilinks(body, &excluded);
     for (_, target) in &wikilinks {
-        if !links.contains(target) {
-            links.push(target.clone());
+        let link = (target.clone(), LinkKind::Wiki);
+        if !links.contains(&link) {
+            links.push(link);
         }
     }
 
@@ -596,8 +683,9 @@ fn extract_links(body: &str, source_path: &str) -> Vec<String> {
                         .any(|(wikilink, _)| ranges_overlap(wikilink, &range)) =>
             {
                 if let Some(target) = resolve_markdown_target(source_path, dest_url.as_ref()) {
-                    if !links.contains(&target) {
-                        links.push(target);
+                    let link = (target, LinkKind::Markdown);
+                    if !links.contains(&link) {
+                        links.push(link);
                     }
                 }
             }
@@ -607,7 +695,7 @@ fn extract_links(body: &str, source_path: &str) -> Vec<String> {
     links
 }
 
-fn code_ranges(body: &str) -> Vec<Range<usize>> {
+pub(crate) fn code_ranges(body: &str) -> Vec<Range<usize>> {
     let mut ranges = Vec::new();
     let mut code_block_depth = 0;
     for (event, range) in Parser::new_ext(body, Options::all()).into_offset_iter() {
@@ -645,7 +733,12 @@ fn extract_wikilinks(text: &str, excluded: &[Range<usize>]) -> Vec<(Range<usize>
         let span = start..content_end + 2;
         let raw = &text[content_start..content_end];
         if !raw.contains('\n') && !excluded.iter().any(|range| ranges_overlap(&span, range)) {
-            let raw_target = raw.split('|').next().unwrap_or_default();
+            // Inside tables Obsidian escapes the alias pipe: [[Note\\|alias]].
+            let raw_target = raw
+                .split('|')
+                .next()
+                .unwrap_or_default()
+                .trim_end_matches('\\');
             if let Some(target) = resolve_wikilink_target(raw_target) {
                 links.push((span.clone(), target));
             }
@@ -700,7 +793,7 @@ fn is_diagnostic_target(target: &str) -> bool {
     parts.iter().all(|part| !part.starts_with('.'))
 }
 
-fn resolve_markdown_target(source_path: &str, target: &str) -> Option<String> {
+pub(crate) fn resolve_markdown_target(source_path: &str, target: &str) -> Option<String> {
     let target = local_link_target(target)?;
     let target = percent_decode_str(target).decode_utf8().ok()?;
     let target = target.as_ref();
@@ -730,7 +823,7 @@ fn resolve_markdown_target(source_path: &str, target: &str) -> Option<String> {
     Some(components.join("/"))
 }
 
-fn resolve_wikilink_target(target: &str) -> Option<String> {
+pub(crate) fn resolve_wikilink_target(target: &str) -> Option<String> {
     let target = local_link_target(target)?;
     let target = percent_decode_str(target).decode_utf8().ok()?;
     let mut components = Vec::new();
@@ -754,6 +847,126 @@ fn resolve_wikilink_target(target: &str) -> Option<String> {
         normalized.push_str(".md");
     }
     Some(normalized)
+}
+
+/// Visible files of a Space, for resolving wikilinks the way Obsidian and the
+/// CoWiki reader do: a path resolves exactly, relative to the linking page,
+/// or by path suffix; a bare name resolves to a file with that name anywhere,
+/// preferring the linking page's folder, then the shortest path.
+pub struct FileIndex {
+    files: Vec<String>,
+    by_key: HashMap<String, usize>,
+    by_name: HashMap<String, Vec<usize>>,
+}
+
+fn folder_of(path: &str) -> &str {
+    path.rsplit_once('/')
+        .map(|(folder, _)| folder)
+        .unwrap_or("")
+}
+
+impl FileIndex {
+    pub fn new(files: Vec<String>) -> Self {
+        let mut by_key = HashMap::new();
+        let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
+        for (index, path) in files.iter().enumerate() {
+            let key = path.to_lowercase();
+            let name = key.rsplit('/').next().unwrap_or(&key).to_string();
+            by_key.entry(key).or_insert(index);
+            by_name.entry(name).or_default().push(index);
+        }
+        Self {
+            files,
+            by_key,
+            by_name,
+        }
+    }
+
+    pub fn scan(root: &Path) -> Result<Self, String> {
+        let mut files = Vec::new();
+        for entry in walkdir::WalkDir::new(root)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|entry| should_walk(entry.path(), root))
+        {
+            let entry = entry.map_err(|error| error.to_string())?;
+            if entry.file_type().is_file() {
+                files.push(relative_path(root, entry.path())?);
+            }
+        }
+        files.sort();
+        Ok(Self::new(files))
+    }
+
+    pub fn files(&self) -> &[String] {
+        &self.files
+    }
+
+    pub fn contains(&self, path: &str) -> bool {
+        self.by_key
+            .get(&path.to_lowercase())
+            .is_some_and(|index| self.files[*index] == path)
+    }
+
+    fn closest(&self, candidates: impl Iterator<Item = usize>, source: &str) -> Option<String> {
+        let folder = folder_of(source).to_lowercase();
+        candidates
+            .map(|index| &self.files[index])
+            .min_by(|left, right| {
+                let same = |path: &str| folder_of(path).to_lowercase() != folder;
+                same(left)
+                    .cmp(&same(right))
+                    .then(left.matches('/').count().cmp(&right.matches('/').count()))
+                    .then(left.cmp(right))
+            })
+            .cloned()
+    }
+
+    /// Resolve a stored wikilink target (normalized by `resolve_wikilink_target`,
+    /// so `.md` is appended to names without it) from `source`.
+    pub fn resolve_wikilink(&self, stored: &str, source: &str) -> Option<String> {
+        let mut forms = vec![stored.to_string()];
+        // `![[photo.png]]` is stored as `photo.png.md`.
+        if let Some(stem) = stored.strip_suffix(".md") {
+            if stem
+                .rsplit('/')
+                .next()
+                .is_some_and(|name| name.contains('.'))
+            {
+                forms.push(stem.to_string());
+            }
+        }
+        for form in forms {
+            let key = form.to_lowercase();
+            if key.contains('/') {
+                if let Some(index) = self.by_key.get(&key) {
+                    return Some(self.files[*index].clone());
+                }
+                let folder = folder_of(source);
+                if !folder.is_empty() {
+                    let relative = format!("{}/{key}", folder.to_lowercase());
+                    if let Some(index) = self.by_key.get(&relative) {
+                        return Some(self.files[*index].clone());
+                    }
+                }
+                let suffix = format!("/{key}");
+                let found = self.closest(
+                    self.files
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, path)| path.to_lowercase().ends_with(&suffix))
+                        .map(|(index, _)| index),
+                    source,
+                );
+                if found.is_some() {
+                    return found;
+                }
+            } else if let Some(indices) = self.by_name.get(&key) {
+                return self.closest(indices.iter().copied(), source);
+            }
+        }
+        None
+    }
 }
 
 fn first_content_line(body: &str) -> String {
