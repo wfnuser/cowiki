@@ -100,15 +100,11 @@ export function withSpaceFeatures(config: unknown, features: SpaceFeatures): Rec
   return root;
 }
 
-/**
- * Personal usage preferences, stored on this device only. A member can hide a
- * module the Space offers without changing it for anyone else.
- */
+/** Personal usage preferences, stored on this device only. */
 export interface PersonalPreferences {
   openJournalOnStartup: boolean;
   /** Save a checkpoint after a quiet spell and when the app quits (desktop). */
   autoCheckpoint: boolean;
-  hiddenModules: Record<string, ModuleId[]>;
 }
 
 export interface PreferenceStorage {
@@ -121,28 +117,18 @@ export const PERSONAL_PREFERENCES_KEY = 'cowiki.personal.preferences';
 export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
   openJournalOnStartup: false,
   autoCheckpoint: true,
-  hiddenModules: {},
 };
-
-function isModuleId(value: unknown): value is ModuleId {
-  return value === 'journal' || value === 'tasks' || value === 'flashcards';
-}
 
 export function loadPersonalPreferences(storage: PreferenceStorage): PersonalPreferences {
   try {
     const value = record(JSON.parse(storage.getItem(PERSONAL_PREFERENCES_KEY) ?? 'null'));
-    if (!value) return { ...DEFAULT_PERSONAL_PREFERENCES, hiddenModules: {} };
-    const hidden: Record<string, ModuleId[]> = {};
-    for (const [spaceId, modules] of Object.entries(record(value.hiddenModules) ?? {})) {
-      if (Array.isArray(modules)) hidden[spaceId] = [...new Set(modules.filter(isModuleId))];
-    }
+    if (!value) return { ...DEFAULT_PERSONAL_PREFERENCES };
     return {
       openJournalOnStartup: value.openJournalOnStartup === true,
       autoCheckpoint: value.autoCheckpoint !== false,
-      hiddenModules: hidden,
     };
   } catch {
-    return { ...DEFAULT_PERSONAL_PREFERENCES, hiddenModules: {} };
+    return { ...DEFAULT_PERSONAL_PREFERENCES };
   }
 }
 
@@ -150,29 +136,7 @@ export function savePersonalPreferences(storage: PreferenceStorage, preferences:
   storage.setItem(PERSONAL_PREFERENCES_KEY, JSON.stringify(preferences));
 }
 
-export function setModuleHidden(
-  preferences: PersonalPreferences,
-  spaceId: string,
-  module: ModuleId,
-  hidden: boolean,
-): PersonalPreferences {
-  const current = new Set(preferences.hiddenModules[spaceId] ?? []);
-  if (hidden) current.add(module);
-  else current.delete(module);
-  return {
-    ...preferences,
-    hiddenModules: { ...preferences.hiddenModules, [spaceId]: [...current] },
-  };
-}
-
-/** Modules whose entry points this person sees in this Space. */
-export function visibleModules(
-  features: SpaceFeatures,
-  preferences: PersonalPreferences,
-  spaceId: string,
-): ModuleId[] {
-  const hidden = new Set(preferences.hiddenModules[spaceId] ?? []);
-  return MODULES
-    .map((module) => module.id)
-    .filter((id) => features.modules[id] && !hidden.has(id));
+/** Modules turned on in this Space. */
+export function visibleModules(features: SpaceFeatures): ModuleId[] {
+  return MODULES.map((module) => module.id).filter((id) => features.modules[id]);
 }

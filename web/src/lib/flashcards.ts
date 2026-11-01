@@ -370,14 +370,6 @@ export function writeSchedule(content: string, card: Pick<Flashcard, 'front' | '
   return lines.join(eol);
 }
 
-/** Append a card as a Logseq block at the end of a page. */
-export function appendCardBlock(content: string, front: string, back: string): string {
-  const question = front.replace(/\s+/g, ' ').trim();
-  const answer = back.trim().split(/\r?\n/).filter((line) => line.trim()).map((line) => `  - ${line.trim()}`);
-  const base = content.replace(/\s+$/, '');
-  return `${base}${base ? '\n\n' : ''}- ${question} #card\n${answer.join('\n')}${answer.length ? '\n' : ''}`;
-}
-
 export function parseOfMatrix(value: unknown): OfMatrix {
   const raw = value && typeof value === 'object' ? (value as { ofMatrix?: unknown }).ofMatrix : null;
   if (!raw || typeof raw !== 'object') return {};

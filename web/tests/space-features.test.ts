@@ -6,7 +6,6 @@ import {
   loadPersonalPreferences,
   parseSpaceFeatures,
   savePersonalPreferences,
-  setModuleHidden,
   visibleModules,
   withSpaceFeatures,
 } from '../src/lib/space-features.ts';
@@ -51,22 +50,21 @@ test('writing features keeps other Space config keys', () => {
   assert.deepEqual(parseSpaceFeatures(merged), DEFAULT_SPACE_FEATURES);
 });
 
-test('personal preferences hide modules per Space without changing the Space', () => {
+test('personal preferences and the modules a Space turns on', () => {
   const storage = new MemoryStorage();
   let preferences = loadPersonalPreferences(storage);
-  assert.equal(preferences.openJournalOnStartup, false);
-  preferences = setModuleHidden(preferences, 'space-a', 'tasks', true);
-  preferences = { ...preferences, openJournalOnStartup: true };
+  assert.deepEqual(preferences, { openJournalOnStartup: false, autoCheckpoint: true });
+  preferences = { openJournalOnStartup: true, autoCheckpoint: false };
   savePersonalPreferences(storage, preferences);
+  assert.deepEqual(loadPersonalPreferences(storage), preferences);
+  // Older saved preferences may still carry the removed per-person module hiding.
+  storage.setItem('cowiki.personal.preferences', JSON.stringify({ openJournalOnStartup: true, hiddenModules: { a: ['tasks'] } }));
+  assert.deepEqual(loadPersonalPreferences(storage), { openJournalOnStartup: true, autoCheckpoint: true });
 
-  const loaded = loadPersonalPreferences(storage);
-  assert.equal(loaded.openJournalOnStartup, true);
-  assert.deepEqual(visibleModules(DEFAULT_SPACE_FEATURES, loaded, 'space-a'), ['journal', 'flashcards']);
-  assert.deepEqual(visibleModules(DEFAULT_SPACE_FEATURES, loaded, 'space-b'), ['journal', 'tasks', 'flashcards']);
-
+  assert.deepEqual(visibleModules(DEFAULT_SPACE_FEATURES), ['journal', 'tasks', 'flashcards']);
   const disabled = { ...DEFAULT_SPACE_FEATURES, modules: { journal: false, tasks: true, flashcards: false } };
-  assert.deepEqual(visibleModules(disabled, loaded, 'space-b'), ['tasks']);
+  assert.deepEqual(visibleModules(disabled), ['tasks']);
 
   storage.setItem('cowiki.personal.preferences', '{broken');
-  assert.deepEqual(loadPersonalPreferences(storage).hiddenModules, {});
+  assert.deepEqual(loadPersonalPreferences(storage), { openJournalOnStartup: false, autoCheckpoint: true });
 });

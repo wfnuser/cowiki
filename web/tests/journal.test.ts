@@ -10,12 +10,11 @@ import {
   journalDateFromPath,
   journalEntryKeys,
   journalPagePath,
-  monthGrid,
   newJournalBody,
   parseDate,
   renderTemplate,
 } from '../src/lib/journal.ts';
-import { adjacentEntry, withTitle } from '../src/lib/journal.ts';
+import { withTitle } from '../src/lib/journal.ts';
 
 const halloween = new Date(2026, 9, 31);
 
@@ -76,15 +75,6 @@ test('default journal body has a dated title and plan/notes/review sections', ()
   assert.equal(newJournalBody(DEFAULT_JOURNAL_CONFIG, halloween, 'Day {{date}}'), 'Day 2026-10-31');
 });
 
-test('month grid marks today and existing entries', () => {
-  const grid = monthGrid(halloween, halloween, new Set(['2026-10-01']));
-  assert.equal(grid.length, 6);
-  const cells = grid.flat();
-  assert.equal(cells.find((cell) => cell.isToday)?.key, '2026-10-31');
-  assert.equal(cells.find((cell) => cell.key === '2026-10-01')?.hasEntry, true);
-  assert.equal(grid[0][0].key, '2026-09-28', 'weeks start on Monday');
-});
-
 test('reads Obsidian daily-notes and periodic-notes settings', () => {
   assert.deepEqual(
     journalConfigFromObsidian({ folder: 'Daily/', format: 'YYYY-MM-DD', template: 'Templates/Daily' }),
@@ -103,11 +93,3 @@ test('a journal template never keeps its own title', () => {
   assert.equal(withTitle('# No frontmatter\n', 'x'), '# No frontmatter\n');
 });
 
-test('previous/next step through existing entries only', () => {
-  const keys = ['2026-03-31', '2026-04-06', '2026-04-14', '2026-11-01'];
-  assert.equal(adjacentEntry(keys, '2026-04-14', -1), '2026-04-06');
-  assert.equal(adjacentEntry(keys, '2026-04-14', 1), '2026-11-01');
-  assert.equal(adjacentEntry(keys, '2026-04-10', 1), '2026-04-14');
-  assert.equal(adjacentEntry(keys, '2026-03-31', -1), null);
-  assert.equal(adjacentEntry(keys, '2026-11-01', 1), null);
-});

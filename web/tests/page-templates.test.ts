@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { STARTER_TEMPLATES, newPageBody, starterTemplatePath, templatePagePaths } from '../src/lib/page-templates.ts';
+import { newPageBody, templatePagePaths } from '../src/lib/page-templates.ts';
 
 const now = new Date(2026, 9, 31, 9, 5);
 
@@ -9,16 +9,10 @@ test('a blank page keeps the existing properties block', () => {
   assert.equal(newPageBody('Week "plan"', null, now), '---\ntype: Note\ntitle: "Week \\"plan\\""\ndescription: ""\n---\n\n');
 });
 
-test('starter templates are files that keep their page type and get the new title', () => {
-  const meeting = STARTER_TEMPLATES.find((template) => template.id === 'meeting')!;
-  assert.equal(starterTemplatePath('Meta/Templates/', meeting), 'Meta/Templates/Meeting notes.md');
-  assert.equal(starterTemplatePath('', meeting), 'Templates/Meeting notes.md');
-  assert.match(meeting.body, /^---\ntype: Meeting\ntitle: "Meeting notes"\n---\n\n# \{\{title\}\}/);
+test('a template page fills title, date and time and keeps its type', () => {
+  const meeting = { body: '---\ntype: Meeting\ntitle: "Meeting notes"\n---\n\n# {{title}}\n\n**Date:** {{date}} {{time}}\n' };
   const body = newPageBody('Kickoff: CoWiki', meeting, now);
-  assert.match(body, /^---\ntype: Meeting\ntitle: "Kickoff: CoWiki"\n---\n/);
-  assert.match(body, /# Kickoff: CoWiki\n\n\*\*Date:\*\* 2026-10-31 09:05/);
-  const learning = STARTER_TEMPLATES.find((template) => template.id === 'learning-plan')!;
-  assert.match(newPageBody('Rust', learning, now), /\| 2026-10-31 \| {2}\| read \|/);
+  assert.equal(body, '---\ntype: Meeting\ntitle: "Kickoff: CoWiki"\n---\n\n# Kickoff: CoWiki\n\n**Date:** 2026-10-31 09:05\n');
 });
 
 test('Space templates keep their own frontmatter but never their own title', () => {

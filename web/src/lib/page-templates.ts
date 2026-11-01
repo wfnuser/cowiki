@@ -2,120 +2,13 @@
  * Templates for new pages are ordinary pages in the Space's templates folder
  * (Obsidian's Templates folder works as is), so people add, edit and delete
  * them like any note. They use {{title}}, {{date}} and {{time}} like Obsidian
- * core templates. The starter templates below are only written into that
- * folder when someone asks for them.
+ * core templates.
  */
 
 import { renderTemplate, withTitle } from './journal.ts';
 
-export interface StarterTemplate {
-  id: string;
-  name: string;
-  type: string;
-  body: string;
-}
-
-const STARTERS: StarterTemplate[] = [
-  {
-    id: 'learning-plan',
-    name: 'Learning plan',
-    type: 'Plan',
-    body: [
-      '# {{title}}',
-      '',
-      '## Goal',
-      '',
-      'What I want to be able to do, and by when.',
-      '',
-      '## Resources',
-      '',
-      '- ',
-      '',
-      '## Plan',
-      '',
-      '- [ ] ',
-      '',
-      '## Progress',
-      '',
-      'Level: **read** (seen it) → **recall** (can explain without notes) → **apply** (used it to solve something).',
-      '',
-      '| Date | What I did | Level |',
-      '| --- | --- | --- |',
-      '| {{date}} |  | read |',
-      '',
-      '## Practice',
-      '',
-      'Link practice logs, small projects or explanations here.',
-      '',
-      '## Open questions',
-      '',
-    ].join('\n'),
-  },
-  {
-    id: 'practice-log',
-    name: 'Practice log',
-    type: 'Practice',
-    body: [
-      '# {{title}}',
-      '',
-      '**Date:** {{date}} · **Topic:** [[ ]] · **Level reached:** read / recall / apply',
-      '',
-      '## Task',
-      '',
-      'The exercise, project or explanation I attempted.',
-      '',
-      '## Attempt',
-      '',
-      '## Result',
-      '',
-      '## Feedback',
-      '',
-      '## Mistakes',
-      '',
-      '- ',
-      '',
-      '## Next',
-      '',
-      '- [ ] Practise again',
-      '',
-    ].join('\n'),
-  },
-  {
-    id: 'meeting',
-    name: 'Meeting notes',
-    type: 'Meeting',
-    body: [
-      '# {{title}}',
-      '',
-      '**Date:** {{date}} {{time}} · **People:** ',
-      '',
-      '## Agenda',
-      '',
-      '## Notes',
-      '',
-      '## Decisions',
-      '',
-      '## Action items',
-      '',
-      '- [ ] ',
-      '',
-    ].join('\n'),
-  },
-];
-
 function yamlString(value: string): string {
   return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
-}
-
-/** Starter templates as files: frontmatter keeps the page type for pages made from them. */
-export const STARTER_TEMPLATES: StarterTemplate[] = STARTERS.map((template) => ({
-  ...template,
-  body: `---\ntype: ${template.type}\ntitle: ${yamlString(template.name)}\n---\n\n${template.body}`,
-}));
-
-export function starterTemplatePath(folder: string, template: StarterTemplate): string {
-  const clean = folder.replace(/^\/+|\/+$/g, '') || 'Templates';
-  return `${clean}/${template.name}.md`;
 }
 
 function hasFrontmatter(body: string): boolean {

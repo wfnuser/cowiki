@@ -98,8 +98,6 @@ import { cloudPageCommentStore, desktopPageCommentStore } from '@/lib/page-comme
 import { openExternalUrl } from '@/external-links';
 import { TasksView } from '../components/views/TasksView';
 import { FlashcardsView } from '../components/views/FlashcardsView';
-import { appendCardBlock } from '@/lib/flashcards';
-import { JournalNav } from '../components/JournalNav';
 import { SpaceFeaturesDialog } from '../components/SpaceFeaturesDialog';
 import { ObsidianImportDialog } from '../components/ObsidianImportDialog';
 import { ObsidianReaderContext, withObsidianReader, type ReaderCallbacks } from '../components/ObsidianReader';
@@ -114,12 +112,12 @@ import {
   type PersonalPreferences,
   type SpaceFeatures,
 } from '@/lib/space-features';
-import { dateKey, journalDateFromPath, journalEntryKeys, journalPagePath, newJournalBody } from '@/lib/journal';
+import { dateKey, journalPagePath, newJournalBody } from '@/lib/journal';
 import { applyTaskStatus, applyTaskToggle, insertTaskLine, type BoardStatus, type TaskItem } from '@/lib/tasks';
 import { flattenPages, parseWikilink, resolveWikilinkPath } from '@/lib/wikilinks';
 import { obsidianToReaderMarkdown, renderedLineOffset } from '@/lib/obsidian-markdown';
 import { pageFileName } from '@/lib/page-names';
-import { STARTER_TEMPLATES, newPageBody, starterTemplatePath, templatePagePaths } from '@/lib/page-templates';
+import { newPageBody, templatePagePaths } from '@/lib/page-templates';
 
 /** An automatic checkpoint waits until the draft has been quiet this long. */
 const AUTO_CHECKPOINT_SETTLE_SECONDS = 5 * 60;
@@ -813,17 +811,12 @@ export function MainLayout() {
 
   const activeFeatures = (activeWorkspace && spaceFeatures[activeWorkspace.id]) || DEFAULT_SPACE_FEATURES;
   const activeModules = isLocalSpace(activeWorkspace)
-    ? visibleModules(activeFeatures, preferences, activeWorkspace.id)
+    ? visibleModules(activeFeatures)
     : [];
   const activeFlatPages = useMemo(
     () => flattenPages(activeWorkspace ? (spacePages[activeWorkspace.id] || []) : []),
     [activeWorkspace, spacePages],
   );
-  const journalEntryKeySet = useMemo(
-    () => new Set(journalEntryKeys(activeFeatures.journal, activeFlatPages.map((page) => page.path))),
-    [activeFeatures.journal, activeFlatPages],
-  );
-
   /** Create the journal entry for a day when missing; returns its path. */
   const ensureJournalEntry = async (ws: Workspace, date: Date): Promise<{ conceptId: string; path: string; created: boolean }> => {
     const features = spaceFeatures[ws.id] ?? await loadSpaceFeatures(ws);
@@ -871,7 +864,7 @@ export function MainLayout() {
     startupJournalHandled.current = true;
     const launchedAtRoot = initialPathname.current === '/' || initialPathname.current === '';
     if (!launchedAtRoot || !preferences.openJournalOnStartup) return;
-    if (!visibleModules(spaceFeatures[activeWorkspace.id], preferences, activeWorkspace.id).includes('journal')) return;
+    if (!visibleModules(spaceFeatures[activeWorkspace.id]).includes('journal')) return;
     void openJournalDay(activeWorkspace, new Date());
     // Runs once per launch after the first Space and its settings load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -959,23 +952,6 @@ export function MainLayout() {
     await writePage(conceptId, updated, userBranch, ws.slug, 'wiki', page.body);
   };
 
-  /** Write the starter templates into the Space's templates folder, skipping ones that exist. */
-  const addStarterTemplates = async (folder: string): Promise<number> => {
-    const ws = activeWorkspace;
-    if (!ws) return 0;
-    let added = 0;
-    for (const template of STARTER_TEMPLATES) {
-      try {
-        await writePage(conceptIdFromPath(starterTemplatePath(folder, template)), template.body, userBranch, ws.slug, 'wiki', undefined, true);
-        added += 1;
-      } catch (error) {
-        if (!String(error instanceof Error ? error.message : error).includes('already exists')) throw error;
-      }
-    }
-    await loadSpacePages(ws);
-    return added;
-  };
-
   const addTaskToToday = async (line: string) => {
     const ws = activeWorkspace;
     if (!ws) return;
@@ -992,25 +968,6 @@ export function MainLayout() {
     const page = await getPage(conceptId, userBranch, ws.slug, 'wiki');
     const updated = transform(page.body);
     if (updated !== page.body) await writePage(conceptId, updated, userBranch, ws.slug, 'wiki', page.body);
-  };
-
-  /** Add a `#card` block to today's journal (or a "Flashcards" page without the journal), as in Logseq. */
-  const addCard = async (front: string, back: string) => {
-    const ws = activeWorkspace;
-    if (!ws) return;
-    if (activeFeatures.modules.journal) {
-      const entry = await ensureJournalEntry(ws, new Date());
-      await editPageAt(entry.path, (content) => appendCardBlock(content, front, back));
-      return;
-    }
-    const current = await getPage('Flashcards', userBranch, ws.slug, 'wiki').then((page) => page.body).catch(() => null);
-    if (current === null) {
-      const body = appendCardBlock('---\ntype: Note\ntitle: "Flashcards"\n---\n\n# Flashcards', front, back);
-      await writePage('Flashcards', body, userBranch, ws.slug, 'wiki', undefined, true);
-      await loadSpacePages(ws);
-      return;
-    }
-    await editPageAt('Flashcards.md', (content) => appendCardBlock(content, front, back));
   };
 
   const saveModules = async (features: SpaceFeatures, nextPreferences: PersonalPreferences) => {
@@ -1050,10 +1007,6 @@ export function MainLayout() {
       spaceFeatures[showNewPage.id] ?? DEFAULT_SPACE_FEATURES,
     )
     : [];
-  const journalDay = activeWorkspace && activeView?.kind === 'page' && activeModules.includes('journal')
-    ? journalDateFromPath(activeFeatures.journal, activeView.path ?? conceptPath(activeView.slug))
-    : null;
-
   // Create page in a workspace
   const handleCreatePage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1652,14 +1605,6 @@ export function MainLayout() {
 
               {/* Right: actions */}
               <ContentHeaderActions>
-                {activeWorkspace && journalDay && (
-                  <JournalNav
-                    date={journalDay}
-                    entryKeys={journalEntryKeySet}
-                    onOpenDate={(date) => { void openJournalDay(activeWorkspace, date); }}
-                  />
-                )}
-
                 {desktop && activeWorkspace?.localPath && (
                   <WorkspaceContextBadge
                     context={workspaceContext}
@@ -1846,9 +1791,7 @@ export function MainLayout() {
                     <FlashcardsView
                       key={activeWorkspace.slug}
                       workspaceSlug={activeWorkspace.slug}
-                      addTarget={activeFeatures.modules.journal ? 'today’s journal' : 'the page Flashcards'}
                       onOpenSource={(path) => { void selectPage(activeWorkspace, conceptIdFromPath(path), path); }}
-                      onAddCard={addCard}
                       onEditPage={editPageAt}
                     />
                   </ObsidianReaderContext.Provider>
@@ -2075,7 +2018,7 @@ export function MainLayout() {
               </select>
               {newPageTemplates.length === 0 && showNewPage && (
                 <p className="mt-1.5 text-xs text-text-secondary">
-                  No templates yet. Pages in the <code>{(spaceFeatures[showNewPage.id] ?? DEFAULT_SPACE_FEATURES).templates.folder || 'Templates'}</code> folder appear here; add starter templates from Modules &amp; settings.
+                  No templates yet. Pages in the <code>{(spaceFeatures[showNewPage.id] ?? DEFAULT_SPACE_FEATURES).templates.folder || 'Templates'}</code> folder appear here.
                 </p>
               )}
             </div>
@@ -2204,13 +2147,11 @@ export function MainLayout() {
       {activeWorkspace && (
         <SpaceFeaturesDialog
           open={modulesDialogOpen}
-          spaceId={activeWorkspace.id}
           spaceName={activeWorkspace.name}
           features={activeFeatures}
           preferences={preferences}
           onClose={() => setModulesDialogOpen(false)}
           onSave={saveModules}
-          onAddStarterTemplates={addStarterTemplates}
         />
       )}
       <ObsidianImportDialog

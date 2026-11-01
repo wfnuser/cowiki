@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ExternalLink, Layers, LoaderCircle, Plus, RefreshCw, RotateCcw } from 'lucide-react';
+import { ExternalLink, Layers, LoaderCircle, RefreshCw, RotateCcw } from 'lucide-react';
 
 import { withObsidianReader } from '@/components/ObsidianReader';
 import { listCardSources, readCardReviews, writeCardReviews } from '@/local-api';
@@ -33,11 +33,7 @@ const SCORES: Array<{ score: Score; label: string; keys: string[]; tone: string 
 
 interface FlashcardsViewProps {
   workspaceSlug: string;
-  /** Where "Add a card" puts new cards, for the hint under the form. */
-  addTarget: string;
   onOpenSource: (path: string) => void;
-  /** Append a `#card` block with the answer as its child. */
-  onAddCard: (front: string, back: string) => Promise<void>;
   /** Re-read a page, transform it and save it. */
   onEditPage: (path: string, transform: (content: string) => string) => Promise<void>;
 }
@@ -50,7 +46,7 @@ function CardText({ text }: { text: string }) {
   );
 }
 
-export function FlashcardsView({ workspaceSlug, addTarget, onOpenSource, onAddCard, onEditPage }: FlashcardsViewProps) {
+export function FlashcardsView({ workspaceSlug, onOpenSource, onEditPage }: FlashcardsViewProps) {
   const [cards, setCards] = useState<Flashcard[]>([]);
   const [matrix, setMatrix] = useState<OfMatrix>({});
   const [loading, setLoading] = useState(true);
@@ -60,9 +56,6 @@ export function FlashcardsView({ workspaceSlug, addTarget, onOpenSource, onAddCa
   const [reviewed, setReviewed] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [front, setFront] = useState('');
-  const [back, setBack] = useState('');
-  const [adding, setAdding] = useState(false);
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -170,22 +163,6 @@ export function FlashcardsView({ workspaceSlug, addTarget, onOpenSource, onAddCa
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  const add = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!front.trim() || adding) return;
-    setAdding(true);
-    try {
-      await onAddCard(front, back);
-      setFront('');
-      setBack('');
-      setReloadKey((key) => key + 1);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setAdding(false);
-    }
-  };
-
   if (current) {
     const intervals = previewIntervals(current.schedule, matrix);
     const fresh = isNew(current);
@@ -283,18 +260,6 @@ export function FlashcardsView({ workspaceSlug, addTarget, onOpenSource, onAddCa
             {reviewed > 0 && <span style={{ fontSize: 12, color: C.muted }}>{reviewed} reviewed this session</span>}
           </div>
 
-          <form onSubmit={add} style={{ ...tile, display: 'grid', gap: 8, marginBottom: 20 }}>
-            <div style={{ fontSize: 12, fontWeight: 650, color: C.muted, textTransform: 'uppercase', letterSpacing: '.04em' }}>Add a card</div>
-            <input aria-label="Question" placeholder="Question (use {{cloze text}} to hide part of it)" value={front} onChange={(event) => setFront(event.target.value)} style={textInput} />
-            <textarea aria-label="Answer" placeholder="Answer, one bullet per line (optional for cloze cards)" value={back} rows={2} onChange={(event) => setBack(event.target.value)} style={{ ...textInput, resize: 'vertical' }} />
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ fontSize: 11.5, color: C.muted }}>Added to {addTarget} as <code>- Question #card</code>.</span>
-              <button type="submit" disabled={!front.trim() || adding} style={primaryButton}>
-                <Plus size={13} /> {adding ? 'Adding…' : 'Add'}
-              </button>
-            </div>
-          </form>
-
           {decks.length === 0 ? (
             <div style={emptyState}>
               No cards yet. Add <code>#card</code> to any bullet in your notes; its indented child bullets are the answer.
@@ -348,10 +313,6 @@ const cardStyle: React.CSSProperties = {
 
 const tile: React.CSSProperties = {
   padding: '12px 14px', border: `1px solid ${C.line}`, borderRadius: 10, background: C.panel,
-};
-
-const textInput: React.CSSProperties = {
-  width: '100%', padding: '7px 10px', border: `1px solid ${C.line}`, borderRadius: 7, background: C.bg, color: C.ink, fontSize: 13.5,
 };
 
 const linkButton: React.CSSProperties = {

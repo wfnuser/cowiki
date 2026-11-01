@@ -6,7 +6,6 @@ import { C, fonts } from '@/lib/design';
 import { journalPagePath } from '@/lib/journal';
 import {
   MODULES,
-  setModuleHidden,
   type ModuleId,
   type PersonalPreferences,
   type SpaceFeatures,
@@ -14,43 +13,35 @@ import {
 
 interface SpaceFeaturesDialogProps {
   open: boolean;
-  spaceId: string;
   spaceName: string;
   features: SpaceFeatures;
   preferences: PersonalPreferences;
   onClose: () => void;
   onSave: (features: SpaceFeatures, preferences: PersonalPreferences) => Promise<void>;
-  /** Write the starter templates into a folder; resolves to how many were added. */
-  onAddStarterTemplates: (folder: string) => Promise<number>;
 }
 
 export function SpaceFeaturesDialog({
   open,
-  spaceId,
   spaceName,
   features,
   preferences,
   onClose,
   onSave,
-  onAddStarterTemplates,
 }: SpaceFeaturesDialogProps) {
   const [draft, setDraft] = useState(features);
   const [personal, setPersonal] = useState(preferences);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [starterNote, setStarterNote] = useState('');
 
   useEffect(() => {
     if (open) {
       setDraft(features);
       setPersonal(preferences);
       setError('');
-      setStarterNote('');
     }
   }, [open, features, preferences]);
 
 
-  const hidden = new Set(personal.hiddenModules[spaceId] ?? []);
   const preview = (() => {
     try {
       return journalPagePath(draft.journal, new Date());
@@ -101,15 +92,6 @@ export function SpaceFeaturesDialog({
                   <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, color: C.ink }}>{module.label}</span>
                   <span style={{ display: 'block', fontSize: 12, color: C.muted }}>{module.description}</span>
                 </span>
-              </label>
-              <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 12, color: C.muted, whiteSpace: 'nowrap' }}>
-                <input
-                  type="checkbox"
-                  checked={hidden.has(module.id)}
-                  disabled={!draft.modules[module.id]}
-                  onChange={(event) => setPersonal((previous) => setModuleHidden(previous, spaceId, module.id, event.target.checked))}
-                />
-                Hide for me
               </label>
             </div>
           ))}
@@ -168,21 +150,6 @@ export function SpaceFeaturesDialog({
           <p style={{ margin: '8px 0 0', fontSize: 11.5, color: C.muted }}>
             Every page in this folder is offered when you create a page. Templates are ordinary pages: edit or delete them like any note. They support <code>{'{{title}}'}</code>, <code>{'{{date}}'}</code> and <code>{'{{time}}'}</code>.
           </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-            <Button
-              variant="outline"
-              type="button"
-              onClick={() => {
-                const folder = draft.templates.folder.trim() || 'Templates';
-                onAddStarterTemplates(folder)
-                  .then((added) => setStarterNote(added > 0 ? `Added ${added} templates to ${folder}/.` : `${folder}/ already has them.`))
-                  .catch((caught: unknown) => setStarterNote(caught instanceof Error ? caught.message : String(caught)));
-              }}
-            >
-              Add starter templates
-            </Button>
-            <span style={{ fontSize: 11.5, color: C.muted }}>{starterNote || 'Learning plan, Practice log, Meeting notes.'}</span>
-          </div>
         </section>
 
         <section style={sectionStyle}>

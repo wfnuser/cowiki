@@ -3,7 +3,6 @@ import test from 'node:test';
 
 import {
   DEFAULT_SCHEDULE,
-  appendCardBlock,
   buildQueue,
   collectCards,
   deckStats,
@@ -145,11 +144,6 @@ test('a review is written back as properties under the question', () => {
     '  - Ownership rules',
   ]);
   assert.throws(() => writeSchedule('# Empty\n', card, next), /changed or removed/);
-});
-
-test('new cards are appended as Logseq blocks', () => {
-  assert.equal(appendCardBlock('# Today\n\n', 'What is  SM-5?', 'A spaced\nrepetition algorithm'), '# Today\n\n- What is SM-5? #card\n  - A spaced\n  - repetition algorithm\n');
-  assert.equal(appendCardBlock('', 'Q', ''), '- Q #card\n');
 });
 
 test('the learned factor matrix tolerates bad stored values', () => {

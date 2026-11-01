@@ -223,16 +223,6 @@ export function journalEntryKeys(config: JournalConfig, paths: Iterable<string>)
   return [...keys].sort();
 }
 
-/** The nearest existing entry before or after `current` (keys are `YYYY-MM-DD`). */
-export function adjacentEntry(keys: Iterable<string>, current: string, direction: -1 | 1): string | null {
-  let best: string | null = null;
-  for (const key of keys) {
-    if (direction < 0 ? key >= current : key <= current) continue;
-    if (best === null || (direction < 0 ? key > best : key < best)) best = key;
-  }
-  return best;
-}
-
 /**
  * A template's own `title:` (for example "Daily" on an imported template page)
  * must not become every new page's title: replace it with the page's title.
@@ -291,39 +281,6 @@ export function newJournalBody(config: JournalConfig, date: Date, template: stri
     '## Review',
     '',
   ].join('\n');
-}
-
-export interface MonthCell {
-  key: string;
-  day: number;
-  inMonth: boolean;
-  isToday: boolean;
-  hasEntry: boolean;
-}
-
-/** Six-week calendar grid (weeks start on Monday) for a month view. */
-export function monthGrid(month: Date, today: Date, entries: ReadonlySet<string>): MonthCell[][] {
-  const first = new Date(month.getFullYear(), month.getMonth(), 1);
-  const offset = (first.getDay() + 6) % 7;
-  const start = addDays(first, -offset);
-  const todayKey = dateKey(today);
-  const weeks: MonthCell[][] = [];
-  for (let week = 0; week < 6; week += 1) {
-    const row: MonthCell[] = [];
-    for (let weekday = 0; weekday < 7; weekday += 1) {
-      const date = addDays(start, week * 7 + weekday);
-      const key = dateKey(date);
-      row.push({
-        key,
-        day: date.getDate(),
-        inMonth: date.getMonth() === month.getMonth(),
-        isToday: key === todayKey,
-        hasEntry: entries.has(key),
-      });
-    }
-    weeks.push(row);
-  }
-  return weeks;
 }
 
 /**
