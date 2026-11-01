@@ -41,6 +41,24 @@ test('parses Logseq markers', () => {
   assert.equal(parseTaskLine('- TODO')?.syntax, undefined);
 });
 
+test('reads Logseq priorities and SCHEDULED / DEADLINE lines', () => {
+  const [task, other] = extractTasks('Plan.md', [
+    '- TODO [#A] Write report #work',
+    '  SCHEDULED: <2026-11-03 Tue>',
+    '  DEADLINE: <2026-11-05 Thu 18:00>',
+    '- LATER Read paper',
+    '  - DEADLINE: <2026-12-01 Tue> is just text in a child',
+  ].join('\n'));
+  assert.equal(task.text, 'Write report #work');
+  assert.equal(task.priority, 'high');
+  assert.deepEqual(task.tags, ['work']);
+  assert.equal(task.scheduled, '2026-11-03');
+  assert.equal(task.due, '2026-11-05');
+  assert.equal(other.due, null);
+  // Obsidian Tasks lines keep using their own markers.
+  assert.equal(parseTaskLine('- [ ] Plain [#A] text')?.priority, null);
+});
+
 test('ignores non-tasks, empty checkboxes, frontmatter and code fences', () => {
   assert.equal(parseTaskLine('- plain item'), null);
   assert.equal(parseTaskLine('- [ ] '), null);

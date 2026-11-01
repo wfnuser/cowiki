@@ -52,6 +52,9 @@ const PRIORITIES: Array<[TaskPriority, string]> = [
   ['low', '🔽'],
   ['lowest', '⏬'],
 ];
+// Logseq: `[#A]` priorities, and SCHEDULED / DEADLINE on the lines below the task.
+const LOGSEQ_PRIORITIES: Record<string, TaskPriority> = { A: 'high', B: 'medium', C: 'low' };
+const LOGSEQ_DATE = /^\s*(SCHEDULED|DEADLINE):\s*<(\d{4}-\d{2}-\d{2})[^>]*>/;
 const INLINE_FIELD = /[[(]\s*(due|scheduled|start|completion|done)\s*::\s*(\d{4}-\d{2}-\d{2})\s*[\])]/gi;
 const TAG = /(^|\s)#([\p{L}\p{N}_/-]+)/gu;
 
@@ -115,9 +118,11 @@ export function parseTaskLine(line: string): Omit<TaskItem, 'path' | 'line' | 'j
     if (key === 'start' && !fields.start) fields.start = value;
     if ((key === 'completion' || key === 'done') && !fields.doneDate) fields.doneDate = value;
   }
-  const priority = PRIORITIES.find(([, emoji]) => rest.includes(emoji))?.[0] ?? null;
+  const logseqPriority = syntax === 'logseq' ? /\[#([ABC])\]/.exec(rest)?.[1] : undefined;
+  const priority = PRIORITIES.find(([, emoji]) => rest.includes(emoji))?.[0]
+    ?? (logseqPriority ? LOGSEQ_PRIORITIES[logseqPriority] : null);
   const tags = [...rest.matchAll(TAG)].map((match) => match[2]);
-  const text = stripMetadata(rest);
+  const text = stripMetadata(syntax === 'logseq' ? rest.replace(/\[#[ABC]\]\s*/, '') : rest);
   if (!text && syntax === 'checkbox' && status === 'todo') return null;
   return {
     raw: line,
@@ -170,7 +175,17 @@ export function extractTasks(path: string, content: string, journalDate: string 
   lines.forEach((line, index) => {
     if (ignored.has(index)) return;
     const parsed = parseTaskLine(line);
-    if (parsed) tasks.push({ ...parsed, path, line: index, journalDate });
+    if (!parsed) return;
+    if (parsed.syntax === 'logseq') {
+      // Logseq keeps a task's dates on the following lines of the same block.
+      for (let next = index + 1; next < lines.length; next += 1) {
+        const date = LOGSEQ_DATE.exec(lines[next]);
+        if (!date) break;
+        if (date[1] === 'DEADLINE' && !parsed.due) parsed.due = date[2];
+        if (date[1] === 'SCHEDULED' && !parsed.scheduled) parsed.scheduled = date[2];
+      }
+    }
+    tasks.push({ ...parsed, path, line: index, journalDate });
   });
   return tasks;
 }
