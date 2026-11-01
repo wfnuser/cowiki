@@ -9,7 +9,7 @@ interface WeekNavProps {
   onOpenWeek: (date: Date) => void;
 }
 
-/** Previous/next week navigation shown while a weekly review page is open. */
+/** Previous/next week navigation. */
 export function WeekNav({ week, onOpenWeek }: WeekNavProps) {
   const monday = startOfIsoWeek(week);
   const sunday = addDays(monday, 6);

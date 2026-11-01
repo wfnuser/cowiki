@@ -61,6 +61,8 @@ import { CloudSpaceDialog } from '@/components/cloud/CloudSpaceDialog';
 import { WorkspaceContextBadge } from '@/components/layout/WorkspaceContextBadge';
 import { getCloudStatus, readHtmlAsset, type CloudSyncState } from '@/local-api';
 import { HtmlFileReader } from '../components/HtmlFileReader';
+import { ExcalidrawReader } from '../components/ExcalidrawDrawing';
+import { isExcalidrawPage } from '../lib/excalidraw';
 import { isHtmlPath } from '../lib/okf-pages';
 import { chooseLocalSpaceDirectory, localSpaceIdentityFromPath } from '@/local-space';
 import {
@@ -95,13 +97,12 @@ import { cloudPageCommentStore, desktopPageCommentStore } from '@/lib/page-comme
 import { openExternalUrl } from '@/external-links';
 import { TasksView } from '../components/views/TasksView';
 import { FlashcardsView } from '../components/views/FlashcardsView';
-import { appendCard } from '@/lib/flashcards';
+import { appendCardBlock } from '@/lib/flashcards';
 import { JournalNav } from '../components/JournalNav';
-import { WeekNav } from '../components/WeekNav';
 import { SpaceFeaturesDialog } from '../components/SpaceFeaturesDialog';
 import { ObsidianImportDialog } from '../components/ObsidianImportDialog';
 import { ObsidianReaderContext, withObsidianReader, type ReaderCallbacks } from '../components/ObsidianReader';
-import { listTaskSources, readAsset, readSpaceConfig, writeSpaceConfig } from '@/local-api';
+import { readAsset, readSpaceConfig, writeSpaceConfig } from '@/local-api';
 import {
   DEFAULT_SPACE_FEATURES,
   loadPersonalPreferences,
@@ -113,12 +114,11 @@ import {
   type SpaceFeatures,
 } from '@/lib/space-features';
 import { dateKey, journalDateFromPath, journalEntryKeys, journalPagePath, newJournalBody } from '@/lib/journal';
-import { applyTaskToggle, extractTasks, insertTaskLine, type TaskItem } from '@/lib/tasks';
-import { newReviewBody, reviewPagePath, reviewWeekFromPath } from '@/lib/weekly-review';
+import { applyTaskStatus, applyTaskToggle, insertTaskLine, type BoardStatus, type TaskItem } from '@/lib/tasks';
 import { flattenPages, parseWikilink, resolveWikilinkPath } from '@/lib/wikilinks';
 import { obsidianToReaderMarkdown, renderedLineOffset } from '@/lib/obsidian-markdown';
 import { pageFileName } from '@/lib/page-names';
-import { BUILT_IN_TEMPLATES, newPageBody, templatePagePaths } from '@/lib/page-templates';
+import { STARTER_TEMPLATES, newPageBody, starterTemplatePath, templatePagePaths } from '@/lib/page-templates';
 
 const LAST_SPACE_STORAGE_KEY = 'cowiki.lastSpace';
 const READER_COMPONENTS = withObsidianReader(commentMarkdownComponents);
@@ -808,54 +808,6 @@ export function MainLayout() {
     }
   };
 
-  /** Create the weekly review for the week of `date` when missing, with a snapshot of the week. */
-  const ensureReviewEntry = async (ws: Workspace, date: Date): Promise<{ conceptId: string; path: string }> => {
-    const features = spaceFeatures[ws.id] ?? await loadSpaceFeatures(ws);
-    const path = reviewPagePath(features.review, date);
-    const conceptId = conceptIdFromPath(path);
-    try {
-      await getPage(conceptId, userBranch, ws.slug, 'wiki');
-      return { conceptId, path };
-    } catch {
-      // Missing: create it below.
-    }
-    let template: string | null = null;
-    if (features.review.template) {
-      try {
-        template = (await getPage(conceptIdFromPath(features.review.template), userBranch, ws.slug, 'wiki')).body;
-      } catch {
-        template = null;
-      }
-    }
-    const sources = await listTaskSources(ws.slug).catch(() => []);
-    const tasks = sources.flatMap((source) => {
-      const day = journalDateFromPath(features.journal, source.path);
-      return extractTasks(source.path, source.content, day ? dateKey(day) : null);
-    });
-    const journal = flattenPages(spacePages[ws.id] || []).flatMap((page) => {
-      const day = journalDateFromPath(features.journal, page.path);
-      return day ? [{ key: dateKey(day), path: page.path }] : [];
-    });
-    try {
-      await writePage(conceptId, newReviewBody({ date, tasks, journal, template }), userBranch, ws.slug, 'wiki', undefined, true);
-    } catch (error) {
-      if (!String(error instanceof Error ? error.message : error).includes('already exists')) throw error;
-    }
-    await loadSpacePages(ws);
-    return { conceptId, path };
-  };
-
-  const openReviewWeek = async (ws: Workspace, date: Date) => {
-    try {
-      const entry = await ensureReviewEntry(ws, date);
-      await selectPage(ws, entry.conceptId, entry.path);
-      setActiveTab('review');
-      setEditingPage(true);
-    } catch (error) {
-      setMessage({ text: error instanceof Error ? error.message : 'Could not open the weekly review', type: 'error' });
-    }
-  };
-
   // Open today's journal at startup when this person asked for it and the
   // app was launched without a deep link.
   useEffect(() => {
@@ -943,6 +895,32 @@ export function MainLayout() {
     await writePage(conceptId, updated, userBranch, ws.slug, 'wiki', page.body);
   };
 
+  const setTaskStatusInPage = async (task: TaskItem, status: BoardStatus) => {
+    const ws = activeWorkspace;
+    if (!ws) return;
+    const conceptId = conceptIdFromPath(task.path);
+    const page = await getPage(conceptId, userBranch, ws.slug, 'wiki');
+    const updated = applyTaskStatus(page.body, task, status, dateKey(new Date()));
+    await writePage(conceptId, updated, userBranch, ws.slug, 'wiki', page.body);
+  };
+
+  /** Write the starter templates into the Space's templates folder, skipping ones that exist. */
+  const addStarterTemplates = async (folder: string): Promise<number> => {
+    const ws = activeWorkspace;
+    if (!ws) return 0;
+    let added = 0;
+    for (const template of STARTER_TEMPLATES) {
+      try {
+        await writePage(conceptIdFromPath(starterTemplatePath(folder, template)), template.body, userBranch, ws.slug, 'wiki', undefined, true);
+        added += 1;
+      } catch (error) {
+        if (!String(error instanceof Error ? error.message : error).includes('already exists')) throw error;
+      }
+    }
+    await loadSpacePages(ws);
+    return added;
+  };
+
   const addTaskToToday = async (line: string) => {
     const ws = activeWorkspace;
     if (!ws) return;
@@ -951,29 +929,62 @@ export function MainLayout() {
     await writePage(entry.conceptId, insertTaskLine(page.body, line), userBranch, ws.slug, 'wiki', page.body);
   };
 
-  /** Append a card to the Space's "Flashcards" deck page, creating it if needed. */
-  const addCardToInbox = async (front: string, back: string) => {
+  /** Re-read a page, transform it and save it, failing if it changed in between. */
+  const editPageAt = async (path: string, transform: (content: string) => string) => {
     const ws = activeWorkspace;
     if (!ws) return;
-    const conceptId = 'Flashcards';
-    const current = await getPage(conceptId, userBranch, ws.slug, 'wiki')
-      .then((page) => page.body)
-      .catch(() => null);
+    const conceptId = conceptIdFromPath(path);
+    const page = await getPage(conceptId, userBranch, ws.slug, 'wiki');
+    const updated = transform(page.body);
+    if (updated !== page.body) await writePage(conceptId, updated, userBranch, ws.slug, 'wiki', page.body);
+  };
+
+  /** Add a `#card` block to today's journal (or a "Flashcards" page without the journal), as in Logseq. */
+  const addCard = async (front: string, back: string) => {
+    const ws = activeWorkspace;
+    if (!ws) return;
+    if (activeFeatures.modules.journal) {
+      const entry = await ensureJournalEntry(ws, new Date());
+      await editPageAt(entry.path, (content) => appendCardBlock(content, front, back));
+      return;
+    }
+    const current = await getPage('Flashcards', userBranch, ws.slug, 'wiki').then((page) => page.body).catch(() => null);
     if (current === null) {
-      const body = appendCard('---\ntype: Note\ntitle: "Flashcards"\ntags: [flashcards]\n---\n\n# Flashcards\n', front, back);
-      await writePage(conceptId, body, userBranch, ws.slug, 'wiki', undefined, true);
+      const body = appendCardBlock('---\ntype: Note\ntitle: "Flashcards"\n---\n\n# Flashcards', front, back);
+      await writePage('Flashcards', body, userBranch, ws.slug, 'wiki', undefined, true);
       await loadSpacePages(ws);
       return;
     }
-    await writePage(conceptId, appendCard(current, front, back), userBranch, ws.slug, 'wiki', current);
+    await editPageAt('Flashcards.md', (content) => appendCardBlock(content, front, back));
   };
 
-  const saveModules = async (features: SpaceFeatures, nextPreferences: PersonalPreferences) => {
+  const saveModules = async (
+    features: SpaceFeatures,
+    nextPreferences: PersonalPreferences,
+    moves: Array<{ from: string; to: string }> = [],
+  ) => {
     const ws = activeWorkspace;
     if (!ws) return;
     const current = await readSpaceConfig(ws.slug).catch(() => null);
     await writeSpaceConfig(ws.slug, withSpaceFeatures(current, features));
     setSpaceFeatures((previous) => ({ ...previous, [ws.id]: parseSpaceFeatures(withSpaceFeatures(current, features)) }));
+    if (moves.length > 0) {
+      // One at a time: each move updates links in the pages that point to the entry.
+      let moved = 0;
+      let links = 0;
+      try {
+        for (const move of moves) {
+          links += Number(await renamePath(ws.slug, userBranch, move.from, move.to)) || 0;
+          moved += 1;
+        }
+      } finally {
+        await loadSpacePages(ws);
+        setMessage({
+          text: `Moved ${moved} of ${moves.length} journal entries${links > 0 ? ` and updated ${links} linking pages` : ''}.`,
+          type: moved === moves.length ? 'success' : 'error',
+        });
+      }
+    }
     try {
       savePersonalPreferences(window.localStorage, nextPreferences);
     } catch {
@@ -999,11 +1010,14 @@ export function MainLayout() {
     loadAsset: canReadAssets ? loadAssetUrl : undefined,
     onToggleTask: canReadAssets && versionSelection.kind === 'working' ? (line) => { void toggleReaderTask(line); } : undefined,
   };
+  const newPageTemplates = showNewPage
+    ? templatePagePaths(
+      flattenPages(spacePages[showNewPage.id] || []).map((page) => page.path),
+      spaceFeatures[showNewPage.id] ?? DEFAULT_SPACE_FEATURES,
+    )
+    : [];
   const journalDay = activeWorkspace && activeView?.kind === 'page' && activeModules.includes('journal')
     ? journalDateFromPath(activeFeatures.journal, activeView.path ?? conceptPath(activeView.slug))
-    : null;
-  const reviewWeek = activeWorkspace && activeView?.kind === 'page' && activeModules.includes('review')
-    ? reviewWeekFromPath(activeFeatures.review, activeView.path ?? conceptPath(activeView.slug))
     : null;
 
   // Create page in a workspace
@@ -1019,9 +1033,7 @@ export function MainLayout() {
     const conceptId = newPageFolder ? `${newPageFolder}/${baseSlug}` : baseSlug;
     try {
       let template: { body: string; type?: string } | null = null;
-      if (newPageTemplate.startsWith('builtin:')) {
-        template = BUILT_IN_TEMPLATES.find((item) => `builtin:${item.id}` === newPageTemplate) ?? null;
-      } else if (newPageTemplate.startsWith('page:')) {
+      if (newPageTemplate.startsWith('page:')) {
         const templatePath = newPageTemplate.slice('page:'.length);
         template = { body: (await getPage(conceptIdFromPath(templatePath), userBranch, ws.slug, 'wiki')).body };
       }
@@ -1095,9 +1107,6 @@ export function MainLayout() {
         break;
       case 'journal':
         void openJournalDay(activeWorkspace, new Date());
-        break;
-      case 'review':
-        void openReviewWeek(activeWorkspace, new Date());
         break;
       case 'flashcards':
         setEditingPage(false);
@@ -1184,13 +1193,14 @@ export function MainLayout() {
   // Page-view comment context: active only when reading (not editing) a page.
   const pageView = activeView?.kind === 'page' ? activeView : null;
   const isHtmlPage = !!pageView && isHtmlPath(pageView.path ?? pageView.slug);
+  const isDrawingPage = !!pageView?.content && isExcalidrawPage(pageView.path ?? pageView.slug, pageView.content.body);
   const htmlDocumentPath = pageView?.path ?? pageView?.slug ?? '';
   const htmlSpaceSlug = activeWorkspace?.slug ?? '';
   const htmlAssetReader = useCallback((assetPath: string) => {
     if (!htmlSpaceSlug || !htmlDocumentPath) return Promise.reject(new Error('No HTML document selected'));
     return readHtmlAsset(htmlSpaceSlug, htmlDocumentPath, assetPath);
   }, [htmlSpaceSlug, htmlDocumentPath]);
-  const commentsActive = !!pageView?.content && !editingPage && !isHtmlPage;
+  const commentsActive = !!pageView?.content && !editingPage && !isHtmlPage && !isDrawingPage;
   const commentPageSlug = commentsActive && pageView
     ? (pageView.path ?? pageView.content?.path ?? '')
     : '';
@@ -1608,9 +1618,6 @@ export function MainLayout() {
 
               {/* Right: actions */}
               <ContentHeaderActions>
-                {activeWorkspace && reviewWeek && (
-                  <WeekNav week={reviewWeek} onOpenWeek={(date) => { void openReviewWeek(activeWorkspace, date); }} />
-                )}
                 {activeWorkspace && journalDay && (
                   <JournalNav
                     date={journalDay}
@@ -1794,6 +1801,7 @@ export function MainLayout() {
                     journal={activeFeatures.journal}
                     onOpenPage={(path) => { void selectPage(activeWorkspace, conceptIdFromPath(path), path); }}
                     onToggleTask={toggleTaskInPage}
+                    onSetTaskStatus={setTaskStatusInPage}
                     onAddTask={addTaskToToday}
                   />
                 </div>
@@ -1803,8 +1811,10 @@ export function MainLayout() {
                     <FlashcardsView
                       key={activeWorkspace.slug}
                       workspaceSlug={activeWorkspace.slug}
+                      addTarget={activeFeatures.modules.journal ? 'today’s journal' : 'the page Flashcards'}
                       onOpenSource={(path) => { void selectPage(activeWorkspace, conceptIdFromPath(path), path); }}
-                      onAddCard={addCardToInbox}
+                      onAddCard={addCard}
+                      onEditPage={editPageAt}
                     />
                   </ObsidianReaderContext.Provider>
                 </div>
@@ -1853,6 +1863,14 @@ export function MainLayout() {
                 isHtmlPage ? (
                   <HtmlFileReader key={(activeWorkspace?.slug ?? '') + ':' + activeView.content.path + ':' + activeView.content.body}
                     path={activeView.content.path} source={activeView.content.body} readAsset={htmlAssetReader} />
+                ) : isDrawingPage && !editingPage && versionSelection.kind === 'working' ? (
+                  <ObsidianReaderContext.Provider value={readerCallbacks}>
+                    <ExcalidrawReader
+                      key={(activeWorkspace?.slug ?? '') + ':' + activeView.content.path}
+                      title={(activeView.content.path.split('/').at(-1) ?? '').replace(/\.excalidraw(\.md)?$|\.md$/i, '')}
+                      body={activeView.content.body}
+                    />
+                  </ObsidianReaderContext.Provider>
                 ) : editingPage ? (
                   <PageEditor
                     ref={pageEditorRef}
@@ -2016,26 +2034,15 @@ export function MainLayout() {
                 className="w-full rounded-md border bg-transparent px-3 py-2 text-sm"
               >
                 <option value="">Blank page</option>
-                <optgroup label="Built in">
-                  {BUILT_IN_TEMPLATES.map((template) => (
-                    <option key={template.id} value={`builtin:${template.id}`}>{template.name}</option>
-                  ))}
-                </optgroup>
-                {showNewPage && (() => {
-                  const features = spaceFeatures[showNewPage.id] ?? DEFAULT_SPACE_FEATURES;
-                  const pages = templatePagePaths(
-                    flattenPages(spacePages[showNewPage.id] || []).map((page) => page.path),
-                    [features.journal.template, features.review.template],
-                  );
-                  return pages.length > 0 ? (
-                    <optgroup label="This Space">
-                      {pages.map((path) => (
-                        <option key={path} value={`page:${path}`}>{path.replace(/\.md$/i, '')}</option>
-                      ))}
-                    </optgroup>
-                  ) : null;
-                })()}
+                {newPageTemplates.map((path) => (
+                  <option key={path} value={`page:${path}`}>{path.replace(/\.md$/i, '')}</option>
+                ))}
               </select>
+              {newPageTemplates.length === 0 && showNewPage && (
+                <p className="mt-1.5 text-xs text-text-secondary">
+                  No templates yet. Pages in the <code>{(spaceFeatures[showNewPage.id] ?? DEFAULT_SPACE_FEATURES).templates.folder || 'Templates'}</code> folder appear here; add starter templates from Modules &amp; settings.
+                </p>
+              )}
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" type="button" onClick={() => setShowNewPage(null)}>Cancel</Button>
@@ -2166,8 +2173,10 @@ export function MainLayout() {
           spaceName={activeWorkspace.name}
           features={activeFeatures}
           preferences={preferences}
+          pagePaths={modulesDialogOpen ? flattenPages(spacePages[activeWorkspace.id] || []).map((page) => page.path) : []}
           onClose={() => setModulesDialogOpen(false)}
           onSave={saveModules}
+          onAddStarterTemplates={addStarterTemplates}
         />
       )}
       <ObsidianImportDialog

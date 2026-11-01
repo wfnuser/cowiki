@@ -203,6 +203,10 @@ export function toggledTaskLine(line: string, today: string): string {
  * Anything else is reported instead of guessing.
  */
 export function applyTaskToggle(content: string, task: Pick<TaskItem, 'line' | 'raw'>, today: string): string {
+  return editTaskLine(content, task, (line) => toggledTaskLine(line, today));
+}
+
+function editTaskLine(content: string, task: Pick<TaskItem, 'line' | 'raw'>, edit: (line: string) => string): string {
   const newline = content.includes('\r\n') ? '\r\n' : '\n';
   const lines = content.split(/\r?\n/);
   let index = lines[task.line] === task.raw ? task.line : -1;
@@ -213,8 +217,64 @@ export function applyTaskToggle(content: string, task: Pick<TaskItem, 'line' | '
     }
     index = matches[0];
   }
-  lines[index] = toggledTaskLine(lines[index], today);
+  lines[index] = edit(lines[index]);
   return lines.join(newline);
+}
+
+export type BoardStatus = 'todo' | 'doing' | 'done';
+
+/**
+ * The line with its status set: Obsidian Tasks' `[/]` for in progress and a
+ * ✅ date when done; Logseq lines keep using TODO / DOING / DONE.
+ */
+export function taskLineWithStatus(line: string, status: BoardStatus, today: string): string {
+  const doneStamp = new RegExp(`\\s*✅\\uFE0F?\\s*${DATE}`, 'u');
+  const checkbox = CHECKBOX.exec(line);
+  if (checkbox) {
+    const body = checkbox[3].replace(/\s+$/, '');
+    if (status === 'done') {
+      return `${checkbox[1]}[x] ${body}${doneStamp.test(body) ? '' : ` ✅ ${today}`}`;
+    }
+    const open = body.replace(doneStamp, '').replace(/^~~(.*)~~$/, '$1');
+    return `${checkbox[1]}[${status === 'doing' ? '/' : ' '}] ${open}`.replace(/\s+$/, '');
+  }
+  const logseq = LOGSEQ.exec(line);
+  if (logseq) return `${logseq[1]}${status === 'todo' ? 'TODO' : status === 'doing' ? 'DOING' : 'DONE'} ${logseq[3]}`;
+  throw new Error('This line is no longer a task.');
+}
+
+export function applyTaskStatus(content: string, task: Pick<TaskItem, 'line' | 'raw'>, status: BoardStatus, today: string): string {
+  return editTaskLine(content, task, (line) => taskLineWithStatus(line, status, today));
+}
+
+export interface WeekBoard {
+  /** Monday and Sunday of the week (`YYYY-MM-DD`). */
+  first: string;
+  last: string;
+  /** Open tasks for this week, including ones still overdue from before. */
+  todo: TaskItem[];
+  doing: TaskItem[];
+  /** Finished during the week. */
+  done: TaskItem[];
+}
+
+const byDay = (left: TaskItem, right: TaskItem) => (taskDay(left) ?? '9999').localeCompare(taskDay(right) ?? '9999');
+
+/** Tasks for one week as board columns. Doing tasks without a date always show. */
+export function weekBoard(tasks: TaskItem[], first: string, last: string): WeekBoard {
+  const due = (task: TaskItem) => {
+    const day = taskDay(task);
+    return day !== null && day <= last;
+  };
+  return {
+    first,
+    last,
+    todo: tasks.filter((task) => task.status === 'todo' && due(task)).sort(byDay),
+    doing: tasks.filter((task) => task.status === 'doing' && (taskDay(task) === null || due(task))).sort(byDay),
+    done: tasks
+      .filter((task) => task.status === 'done' && task.doneDate !== null && task.doneDate >= first && task.doneDate <= last)
+      .sort((left, right) => (left.doneDate ?? '').localeCompare(right.doneDate ?? '')),
+  };
 }
 
 /** Markdown for a new task, using Obsidian Tasks' due-date marker. */

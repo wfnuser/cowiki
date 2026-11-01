@@ -117,12 +117,13 @@ pub fn task_sources(root: &Path) -> Result<Vec<TaskSource>, String> {
     markdown_sources(root, |content| content.lines().any(is_task_candidate))
 }
 
-/// Pages that can hold flashcards: Obsidian Spaced Repetition decks (tagged
-/// `flashcards`) and Logseq `#card` blocks. The front end parses the cards.
+/// Pages that can hold flashcards: Logseq `#card` / `[[card]]` blocks. The
+/// front end parses the cards; their schedule is stored in the page itself.
 pub fn card_sources(root: &Path) -> Result<Vec<TaskSource>, String> {
     markdown_sources(root, |content| {
+        // Logseq cards: bullets tagged #card or [[card]].
         let lower = content.to_lowercase();
-        lower.contains("flashcards") || lower.contains("#card")
+        lower.contains("#card") || lower.contains("[[card]]")
     })
 }
 
@@ -181,8 +182,8 @@ fn review_state_path(metadata_dir: &Path, space_id: &str) -> Result<PathBuf, Str
         .join(format!("{space_id}.json")))
 }
 
-/// Personal flashcard review history for a Space. It lives with the app's
-/// own data, not in the Space, so it is never shared with other members.
+/// Personal flashcard tuning for a Space (the SM-5 factor matrix). It lives
+/// with the app's own data, not in the Space; card schedules are in the notes.
 pub fn read_review_state(
     metadata_dir: &Path,
     space_id: &str,
@@ -466,13 +467,14 @@ mod tests {
         let space = tempfile::tempdir().unwrap();
         std::fs::write(space.path().join("Deck.md"), "#flashcards\nQ :: A\n").unwrap();
         std::fs::write(space.path().join("Logseq.md"), "- What? #card\n  - This\n").unwrap();
+        std::fs::write(space.path().join("Ref.md"), "- Why? [[card]]\n").unwrap();
         std::fs::write(space.path().join("Plain.md"), "key:: value\n").unwrap();
         let paths = card_sources(space.path())
             .unwrap()
             .into_iter()
             .map(|source| source.path)
             .collect::<Vec<_>>();
-        assert_eq!(paths, vec!["Deck.md", "Logseq.md"]);
+        assert_eq!(paths, vec!["Logseq.md", "Ref.md"]);
 
         let metadata = tempfile::tempdir().unwrap();
         assert_eq!(read_review_state(metadata.path(), "space-1").unwrap(), None);

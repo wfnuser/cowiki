@@ -1,19 +1,21 @@
 /**
- * Templates for new pages: a few built-in layouts for learning and meetings,
- * plus the Space's own template pages (Obsidian's Templates folder works as is).
- * Templates use {{title}}, {{date}} and {{time}} like Obsidian core templates.
+ * Templates for new pages are ordinary pages in the Space's templates folder
+ * (Obsidian's Templates folder works as is), so people add, edit and delete
+ * them like any note. They use {{title}}, {{date}} and {{time}} like Obsidian
+ * core templates. The starter templates below are only written into that
+ * folder when someone asks for them.
  */
 
-import { renderTemplate } from './journal.ts';
+import { renderTemplate, withTitle } from './journal.ts';
 
-export interface BuiltInTemplate {
+export interface StarterTemplate {
   id: string;
   name: string;
   type: string;
   body: string;
 }
 
-export const BUILT_IN_TEMPLATES: BuiltInTemplate[] = [
+const STARTERS: StarterTemplate[] = [
   {
     id: 'learning-plan',
     name: 'Learning plan',
@@ -105,17 +107,30 @@ function yamlString(value: string): string {
   return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
 
+/** Starter templates as files: frontmatter keeps the page type for pages made from them. */
+export const STARTER_TEMPLATES: StarterTemplate[] = STARTERS.map((template) => ({
+  ...template,
+  body: `---\ntype: ${template.type}\ntitle: ${yamlString(template.name)}\n---\n\n${template.body}`,
+}));
+
+export function starterTemplatePath(folder: string, template: StarterTemplate): string {
+  const clean = folder.replace(/^\/+|\/+$/g, '') || 'Templates';
+  return `${clean}/${template.name}.md`;
+}
+
 function hasFrontmatter(body: string): boolean {
   return /^---\r?\n[\s\S]*?\r?\n---(\r?\n|$)/.test(body);
 }
 
-/** Template pages in the Space: a top-level Templates folder plus configured template folders. */
-export function templatePagePaths(paths: Iterable<string>, configuredTemplates: Array<string | null> = []): string[] {
-  const folders = new Set(['templates']);
-  for (const template of configuredTemplates) {
-    const folder = template?.split('/').slice(0, -1).join('/');
-    if (folder) folders.add(folder.toLowerCase());
-  }
+/** Template pages: the Space's templates folder plus the folder of the journal template. */
+export function templatePagePaths(
+  paths: Iterable<string>,
+  features: { templates: { folder: string }; journal: { template: string | null } },
+): string[] {
+  const folders = new Set<string>();
+  if (features.templates.folder) folders.add(features.templates.folder.toLowerCase());
+  const journalFolder = features.journal.template?.split('/').slice(0, -1).join('/');
+  if (journalFolder) folders.add(journalFolder.toLowerCase());
   return [...paths]
     .filter((path) => /\.md$/i.test(path))
     .filter((path) => {
@@ -137,5 +152,5 @@ export function newPageBody(
   const frontmatter = (type: string) => `---\ntype: ${type}\ntitle: ${yamlString(title)}\ndescription: ""\n---\n\n`;
   if (!template) return frontmatter('Note');
   const rendered = renderTemplate(template.body, now, title, now);
-  return hasFrontmatter(rendered) ? rendered : `${frontmatter(template.type ?? 'Note')}${rendered}`;
+  return hasFrontmatter(rendered) ? withTitle(rendered, title) : `${frontmatter(template.type ?? 'Note')}${rendered}`;
 }

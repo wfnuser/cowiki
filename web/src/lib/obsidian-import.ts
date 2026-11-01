@@ -112,8 +112,8 @@ export function planImport(scan: VaultScan): ImportPlan {
       ...DEFAULT_SPACE_FEATURES,
       modules: { ...DEFAULT_SPACE_FEATURES.modules },
       journal,
-      // Weekly reviews sit next to the daily notes.
-      review: { ...DEFAULT_SPACE_FEATURES.review, folder: journal.folder },
+      // Obsidian's core Templates folder stays the place for templates.
+      templates: { folder: scan.templatesFolder?.replace(/^\/+|\/+$/g, '') || DEFAULT_SPACE_FEATURES.templates.folder },
     },
   };
 }
@@ -234,7 +234,7 @@ export function importReportMarkdown(scan: VaultScan, plan: ImportPlan, imported
     '',
     `- Location ${journalWhere}, format \`${plan.journal.format}\` (${journalHow}); ${plan.journalEntries} existing entries recognised.`,
     plan.journal.template ? `- New entries use the template \`${plan.journal.template}\`.` : '- New entries use CoWiki\'s Plan / Notes / Review layout.',
-    '- Change this under Modules & journal in the sidebar.',
+    '- Change this under Modules & settings in the sidebar.',
     '',
   ];
   if (scan.communityPlugins.length > 0) {

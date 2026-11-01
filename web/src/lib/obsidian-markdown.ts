@@ -39,7 +39,7 @@ const CALLOUT_ICONS: Record<string, string> = {
 };
 
 function convertInline(segment: string): string {
-  let text = segment.replace(/%%.*?%%/g, '');
+  let text = segment.replace(/%%.*?%%/g, '').replace(/\{\{cloze:?\s+(.*?)\}\}/g, '==$1==');
   text = text.replace(/(!?)\[\[([^\]\n]+?)\]\]/g, (_match, bang: string, inner: string) => {
     const target = parseWikilink(inner);
     const page = target.page;
@@ -80,7 +80,12 @@ function convertTaskMarker(line: string): string {
   return line;
 }
 
+/** Logseq bookkeeping properties: flashcard schedules, block ids, folding. */
+const HIDDEN_PROPERTY = /^\s*(?:card-[a-z-]+|id|collapsed)::/i;
+
 function convertLine(raw: string): string {
+  // Blank instead of removed, so rendered lines still match the file's lines.
+  if (HIDDEN_PROPERTY.test(raw)) return '';
   const line = convertTaskMarker(raw);
   const callout = /^(\s*(?:>\s*)+)\[!([A-Za-z-]+)\]([+-]?)\s*(.*)$/.exec(line);
   if (callout) {

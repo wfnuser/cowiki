@@ -154,6 +154,8 @@ test('source files do not hardcode hex colors outside the palette', () => {
       '#cf222e', '#0a3069', '#6e7781', '#0550ae',
       '#953800', '#8250df', '#116329',
     ])],
+    // Excalidraw's default ink, paper and frame colors, drawn inside the drawing itself.
+    ['lib/excalidraw.ts', new Set(['#1e1e1e', '#ffffff', '#bbbbbb', '#999999'])],
   ]);
   const hexPattern = /#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})\b/gi;
   const offenders: string[] = [];

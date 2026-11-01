@@ -1,18 +1,28 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, CheckSquare, LoaderCircle, Plus, RefreshCw } from 'lucide-react';
+import { CalendarDays, CheckSquare, LoaderCircle, Play, Plus, RefreshCw } from 'lucide-react';
 
+import { WeekNav } from '@/components/WeekNav';
 import { listTaskSources } from '@/local-api';
 import { C } from '@/lib/design';
-import { dateKey, journalDateFromPath, type JournalConfig } from '@/lib/journal';
+import { addDays, dateKey, journalDateFromPath, startOfIsoWeek, type JournalConfig } from '@/lib/journal';
 import {
   extractTasks,
   groupTasks,
   newTaskLine,
+  taskDay,
   taskKey,
+  weekBoard,
+  type BoardStatus,
   type TaskItem,
 } from '@/lib/tasks';
 
-type Filter = 'today' | 'upcoming' | 'someday' | 'done';
+type Filter = 'today' | 'week' | 'upcoming' | 'someday' | 'done';
+
+const COLUMNS: Array<{ status: BoardStatus; title: string }> = [
+  { status: 'todo', title: 'To do' },
+  { status: 'doing', title: 'Doing' },
+  { status: 'done', title: 'Done' },
+];
 
 interface TasksViewProps {
   workspaceSlug: string;
@@ -20,12 +30,19 @@ interface TasksViewProps {
   onOpenPage: (path: string) => void;
   /** Toggle a task in its page; resolves when the file is written. */
   onToggleTask: (task: TaskItem) => Promise<void>;
+  /** Set a task's status from the board. */
+  onSetTaskStatus: (task: TaskItem, status: BoardStatus) => Promise<void>;
   /** Append a task line to today's journal entry (creating it if needed). */
   onAddTask: (line: string) => Promise<void>;
 }
 
 function pageLabel(path: string): string {
   return path.split('/').at(-1)?.replace(/\.md$/i, '') ?? path;
+}
+
+/** Task text as read: `[[Page|alias]]` shows as its alias or page name. */
+function readable(text: string): string {
+  return text.replace(/\[\[([^\]|]+?)(?:\\?\|([^\]]+))?\]\]/g, (_match, page: string, alias?: string) => (alias ?? page).trim());
 }
 
 function relativeDay(day: string, today: string): string {
@@ -40,7 +57,7 @@ function relativeDay(day: string, today: string): string {
   return day;
 }
 
-export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, onAddTask }: TasksViewProps) {
+export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, onSetTaskStatus, onAddTask }: TasksViewProps) {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -51,6 +68,9 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
   const [draftDue, setDraftDue] = useState('');
   const [adding, setAdding] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [week, setWeek] = useState(() => startOfIsoWeek(new Date()));
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<BoardStatus | null>(null);
   const today = dateKey(new Date());
   const refresh = () => setReloadKey((key) => key + 1);
 
@@ -93,8 +113,10 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
   }, []);
 
   const groups = useMemo(() => groupTasks(tasks, today), [tasks, today]);
+  const board = useMemo(() => weekBoard(tasks, dateKey(week), dateKey(addDays(week, 6))), [tasks, week]);
   const counts: Record<Filter, number> = {
     today: groups.overdue.length + groups.today.length,
+    week: board.todo.length + board.doing.length + board.done.length,
     upcoming: groups.upcoming.length,
     someday: groups.someday.length,
     done: groups.done.length,
@@ -105,6 +127,17 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
     setPending((previous) => new Set(previous).add(taskKey(task)));
     try {
       await onToggleTask(task);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+    refresh();
+  };
+
+  const move = async (task: TaskItem, status: BoardStatus) => {
+    if (task.status === status) return;
+    setPending((previous) => new Set(previous).add(taskKey(task)));
+    try {
+      await onSetTaskStatus(task, status);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -127,7 +160,7 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
     }
   };
 
-  const sections: Array<{ title: string; items: TaskItem[]; tone?: 'red' }> = filter === 'today'
+  const sections: Array<{ title: string; items: TaskItem[]; tone?: 'red' }> = filter === 'today' || filter === 'week'
     ? [
       { title: 'Overdue', items: groups.overdue, tone: 'red' },
       { title: 'Today', items: groups.today },
@@ -139,7 +172,7 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
         : [{ title: 'Recently done', items: groups.done }];
 
   return (
-    <section style={{ width: 'min(760px, 100%)', margin: '0 auto' }}>
+    <section style={{ width: filter === 'week' ? 'min(1040px, 100%)' : 'min(760px, 100%)', margin: '0 auto' }}>
       <header style={{ marginBottom: 18 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -183,6 +216,7 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
       <nav role="tablist" aria-label="Task lists" style={{ display: 'flex', gap: 4, margin: '16px 0 14px' }}>
         {([
           ['today', 'Today'],
+          ['week', 'This week'],
           ['upcoming', 'Upcoming'],
           ['someday', 'No date'],
           ['done', 'Done'],
@@ -210,6 +244,95 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
 
       {loading ? (
         <div style={emptyState}><LoaderCircle size={15} className="animate-spin" /> Collecting tasks…</div>
+      ) : filter === 'week' ? (
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+            <WeekNav week={week} onOpenWeek={(date) => setWeek(startOfIsoWeek(date))} />
+            <span style={{ fontSize: 12, color: C.muted }}>
+              {board.done.length} done · {board.doing.length} doing · {board.todo.length} to do
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
+            {COLUMNS.map((column) => {
+              const items = board[column.status];
+              return (
+                <div
+                  key={column.status}
+                  role="list"
+                  aria-label={column.title}
+                  onDragOver={(event) => { event.preventDefault(); setDropTarget(column.status); }}
+                  onDragLeave={() => setDropTarget((current) => (current === column.status ? null : current))}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setDropTarget(null);
+                    const key = event.dataTransfer.getData('text/plain') || dragging;
+                    const task = tasks.find((item) => taskKey(item) === key);
+                    setDragging(null);
+                    if (task) void move(task, column.status);
+                  }}
+                  style={{
+                    minHeight: 160, padding: 8, borderRadius: 10, background: C.panel,
+                    border: `1px ${dropTarget === column.status ? 'dashed' : 'solid'} ${dropTarget === column.status ? C.accent : C.line}`,
+                  }}
+                >
+                  <h2 style={{ margin: '2px 4px 8px', fontSize: 11.5, fontWeight: 650, letterSpacing: '.04em', textTransform: 'uppercase', color: C.muted }}>
+                    {column.title} · {items.length}
+                  </h2>
+                  {items.length === 0 && (
+                    <div style={{ padding: '14px 6px', fontSize: 12, color: C.faint, textAlign: 'center' }}>
+                      {column.status === 'done' ? 'Nothing finished yet' : 'Drop tasks here'}
+                    </div>
+                  )}
+                  {items.map((task) => {
+                    const key = taskKey(task);
+                    const day = column.status === 'done' ? task.doneDate : taskDay(task);
+                    return (
+                      <div
+                        key={key}
+                        role="listitem"
+                        draggable={!pending.has(key)}
+                        onDragStart={(event) => { event.dataTransfer.setData('text/plain', key); setDragging(key); }}
+                        onDragEnd={() => { setDragging(null); setDropTarget(null); }}
+                        style={{
+                          marginBottom: 6, padding: '8px 9px', borderRadius: 8, border: `1px solid ${C.lineSoft}`, background: C.bg,
+                          cursor: 'grab', opacity: pending.has(key) || dragging === key ? 0.5 : 1,
+                        }}
+                      >
+                        <div style={{ display: 'flex', gap: 7, alignItems: 'flex-start' }}>
+                          <input
+                            type="checkbox"
+                            checked={column.status === 'done'}
+                            disabled={pending.has(key)}
+                            onChange={() => { void move(task, column.status === 'done' ? 'todo' : 'done'); }}
+                            aria-label={column.status === 'done' ? `Reopen ${task.text}` : `Complete ${task.text}`}
+                            style={{ marginTop: 3, cursor: 'pointer' }}
+                          />
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 13, lineHeight: 1.4, color: column.status === 'done' ? C.muted : C.ink, overflowWrap: 'anywhere' }}>
+                            {readable(task.text)}
+                          </span>
+                          {column.status === 'todo' && (
+                            <button type="button" onClick={() => { void move(task, 'doing'); }} disabled={pending.has(key)} style={iconButton} aria-label={`Start ${task.text}`} title="Start">
+                              <Play size={12} />
+                            </button>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4, paddingLeft: 21, fontSize: 11, color: C.muted }}>
+                          <button type="button" onClick={() => onOpenPage(task.path)} style={{ ...linkButton, fontSize: 11, maxWidth: 150 }} title={task.path}>
+                            {pageLabel(task.path)}
+                          </button>
+                          {day && <span style={{ color: column.status !== 'done' && day < today ? C.red : C.muted }}>{relativeDay(day, today)}</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+          <p style={{ margin: '10px 2px 0', fontSize: 11.5, color: C.muted }}>
+            Drag a card to change its status. Doing is saved as <code>[/]</code> (Obsidian Tasks) or <code>DOING</code> (Logseq) in the page.
+          </p>
+        </div>
       ) : sections.every((section) => section.items.length === 0) ? (
         <div style={emptyState}>
           {filter === 'today' ? 'Nothing due today. Add a task above or write `- [ ]` in any page.' : 'No tasks here.'}
@@ -254,7 +377,7 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                         {task.priority && task.priority !== 'medium' && task.priority !== 'low' && task.priority !== 'lowest' && (
                           <span title={`${task.priority} priority`} style={{ color: C.red, marginRight: 4 }}>!</span>
                         )}
-                        {task.text}
+                        {readable(task.text)}
                         {task.status === 'doing' && <span style={pill(C.blueSoft, C.blue)}>doing</span>}
                       </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 3, fontSize: 11.5, color: C.muted }}>
@@ -306,6 +429,11 @@ const addRow: React.CSSProperties = {
 const tabButton: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px',
   border: 'none', borderRadius: 7, fontSize: 12.5, fontWeight: 620, cursor: 'pointer',
+};
+
+const iconButton: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 3,
+  border: 'none', borderRadius: 5, background: 'transparent', color: C.muted, cursor: 'pointer',
 };
 
 const linkButton: React.CSSProperties = {

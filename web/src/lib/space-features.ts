@@ -1,11 +1,10 @@
 import { DEFAULT_JOURNAL_CONFIG, type JournalConfig } from './journal.ts';
-import { DEFAULT_REVIEW_CONFIG, type ReviewConfig } from './weekly-review.ts';
 
 /**
  * Optional modules a Space can turn on. Turning a module off only hides its
  * entry points; journal pages and task lines stay ordinary Markdown files.
  */
-export type ModuleId = 'journal' | 'tasks' | 'review' | 'flashcards';
+export type ModuleId = 'journal' | 'tasks' | 'flashcards';
 
 export const MODULES: Array<{ id: ModuleId; label: string; description: string }> = [
   {
@@ -16,17 +15,12 @@ export const MODULES: Array<{ id: ModuleId; label: string; description: string }
   {
     id: 'tasks',
     label: 'Tasks',
-    description: 'Collects checkbox tasks from every page into Today, Upcoming and Done lists.',
-  },
-  {
-    id: 'review',
-    label: 'Weekly review',
-    description: 'A "Review" entry that opens this week\'s review page, pre-filled with finished and open tasks and the week\'s journal entries.',
+    description: 'Collects checkbox tasks from every page into Today, This week (a board), Upcoming and Done lists.',
   },
   {
     id: 'flashcards',
     label: 'Flashcards',
-    description: 'Spaced repetition for cards written in notes (Obsidian "Q :: A" decks tagged #flashcards, Logseq #card blocks). Review history stays on your device.',
+    description: 'Spaced repetition as in Logseq: tag any bullet #card and its children are the answer. Each review is saved in the note.',
   },
 ];
 
@@ -37,13 +31,14 @@ export const MODULES: Array<{ id: ModuleId; label: string; description: string }
 export interface SpaceFeatures {
   modules: Record<ModuleId, boolean>;
   journal: JournalConfig;
-  review: ReviewConfig;
+  /** Pages in this folder are offered as templates for new pages (Obsidian's Templates folder). */
+  templates: { folder: string };
 }
 
 export const DEFAULT_SPACE_FEATURES: SpaceFeatures = {
-  modules: { journal: true, tasks: true, review: true, flashcards: true },
+  modules: { journal: true, tasks: true, flashcards: true },
   journal: { ...DEFAULT_JOURNAL_CONFIG },
-  review: { ...DEFAULT_REVIEW_CONFIG },
+  templates: { folder: 'Templates' },
 };
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -77,20 +72,16 @@ export function parseSpaceFeatures(config: unknown): SpaceFeatures {
   const features = record(root?.features);
   const modules = record(features?.modules);
   const journal = record(features?.journal);
-  const review = record(features?.review);
+  const templates = record(features?.templates);
   const flag = (id: ModuleId) => (typeof modules?.[id] === 'boolean' ? modules[id] as boolean : DEFAULT_SPACE_FEATURES.modules[id]);
   return {
-    modules: { journal: flag('journal'), tasks: flag('tasks'), review: flag('review'), flashcards: flag('flashcards') },
+    modules: { journal: flag('journal'), tasks: flag('tasks'), flashcards: flag('flashcards') },
     journal: {
       folder: cleanFolder(journal?.folder, DEFAULT_JOURNAL_CONFIG.folder),
       format: cleanFormat(journal?.format, DEFAULT_JOURNAL_CONFIG.format),
       template: cleanTemplate(journal?.template),
     },
-    review: {
-      folder: cleanFolder(review?.folder, DEFAULT_REVIEW_CONFIG.folder),
-      format: cleanFormat(review?.format, DEFAULT_REVIEW_CONFIG.format),
-      template: cleanTemplate(review?.template),
-    },
+    templates: { folder: cleanFolder(templates?.folder, DEFAULT_SPACE_FEATURES.templates.folder) },
   };
 }
 
@@ -104,11 +95,7 @@ export function withSpaceFeatures(config: unknown, features: SpaceFeatures): Rec
       format: features.journal.format,
       template: features.journal.template,
     },
-    review: {
-      folder: features.review.folder,
-      format: features.review.format,
-      template: features.review.template,
-    },
+    templates: { folder: features.templates.folder },
   };
   return root;
 }
@@ -135,7 +122,7 @@ export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
 };
 
 function isModuleId(value: unknown): value is ModuleId {
-  return value === 'journal' || value === 'tasks' || value === 'review' || value === 'flashcards';
+  return value === 'journal' || value === 'tasks' || value === 'flashcards';
 }
 
 export function loadPersonalPreferences(storage: PreferenceStorage): PersonalPreferences {

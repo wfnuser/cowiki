@@ -224,6 +224,45 @@ export function journalEntryKeys(config: JournalConfig, paths: Iterable<string>)
 }
 
 /**
+ * Where existing entries go when the journal folder or date format changes.
+ * Entries whose new place is already taken are left alone.
+ */
+export function journalMoves(from: JournalConfig, to: JournalConfig, paths: Iterable<string>): Array<{ from: string; to: string }> {
+  const all = [...paths];
+  const taken = new Set(all.map((path) => path.toLowerCase()));
+  const moves: Array<{ from: string; to: string }> = [];
+  for (const path of all) {
+    const date = journalDateFromPath(from, path);
+    if (!date) continue;
+    let target: string;
+    try {
+      target = journalPagePath(to, date);
+    } catch {
+      continue;
+    }
+    if (target === path || taken.has(target.toLowerCase())) continue;
+    taken.add(target.toLowerCase());
+    moves.push({ from: path, to: target });
+  }
+  return moves.sort((left, right) => left.from.localeCompare(right.from));
+}
+
+/**
+ * A template's own `title:` (for example "Daily" on an imported template page)
+ * must not become every new page's title: replace it with the page's title.
+ */
+export function withTitle(body: string, title: string): string {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/.exec(body);
+  if (!match) return body;
+  const value = yamlString(title);
+  const lines = match[1].split(/\r?\n/);
+  const index = lines.findIndex((line) => /^title\s*:/.test(line));
+  if (index >= 0) lines[index] = `title: ${value}`;
+  else lines.push(`title: ${value}`);
+  return `---\n${lines.join('\n')}\n---${match[2]}${body.slice(match[0].length)}`;
+}
+
+/**
  * Render an Obsidian-compatible core template: `{{title}}`, `{{date}}`,
  * `{{time}}`, `{{date:FORMAT}}` and `{{time:FORMAT}}`. Unknown expressions
  * (for example Templater's `<% %>` blocks) are left untouched.
@@ -248,7 +287,7 @@ function yamlString(value: string): string {
 export function newJournalBody(config: JournalConfig, date: Date, template: string | null, now = new Date()): string {
   const title = formatDate(date, (config.format || DEFAULT_JOURNAL_CONFIG.format).split('/').at(-1) || 'YYYY-MM-DD');
   if (template !== null && template.trim()) {
-    return renderTemplate(template, date, title, now);
+    return withTitle(renderTemplate(template, date, title, now), title);
   }
   return [
     '---',

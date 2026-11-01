@@ -1,41 +1,45 @@
 import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ExternalLink, Layers, LoaderCircle, PauseCircle, Plus, RefreshCw } from 'lucide-react';
+import { ExternalLink, Layers, LoaderCircle, Plus, RefreshCw, RotateCcw } from 'lucide-react';
 
 import { withObsidianReader } from '@/components/ObsidianReader';
 import { listCardSources, readCardReviews, writeCardReviews } from '@/local-api';
 import { C } from '@/lib/design';
-import { dateKey } from '@/lib/journal';
 import { obsidianToReaderMarkdown } from '@/lib/obsidian-markdown';
 import {
-  answerCard,
   buildQueue,
-  changedSinceReview,
   collectCards,
   deckStats,
-  emptyReviewStore,
-  parseReviewStore,
+  isNew,
+  parseOfMatrix,
   previewIntervals,
-  setSuspended,
+  renderCloze,
+  review,
+  writeSchedule,
+  type CardSchedule,
   type Flashcard,
-  type Rating,
-  type ReviewStore,
+  type OfMatrix,
+  type Score,
 } from '@/lib/flashcards';
 
 const MARKDOWN = withObsidianReader(undefined);
-const RATINGS: Array<{ rating: Rating; label: string; key: string }> = [
-  { rating: 'again', label: 'Again', key: '1' },
-  { rating: 'hard', label: 'Hard', key: '2' },
-  { rating: 'good', label: 'Good', key: '3' },
-  { rating: 'easy', label: 'Easy', key: '4' },
+// Logseq's answers and shortcuts (f / t / r), with 1-3 as well.
+const SCORES: Array<{ score: Score; label: string; keys: string[]; tone: string }> = [
+  { score: 1, label: 'Forgotten', keys: ['f', '1'], tone: C.red },
+  { score: 3, label: 'Took a while', keys: ['t', '2'], tone: C.line },
+  { score: 5, label: 'Remembered', keys: ['r', '3'], tone: C.green },
 ];
 
 interface FlashcardsViewProps {
   workspaceSlug: string;
+  /** Where "Add a card" puts new cards, for the hint under the form. */
+  addTarget: string;
   onOpenSource: (path: string) => void;
-  /** Append a `front :: back` card to the Space's inbox deck. */
+  /** Append a `#card` block with the answer as its child. */
   onAddCard: (front: string, back: string) => Promise<void>;
+  /** Re-read a page, transform it and save it. */
+  onEditPage: (path: string, transform: (content: string) => string) => Promise<void>;
 }
 
 function CardText({ text }: { text: string }) {
@@ -46,18 +50,20 @@ function CardText({ text }: { text: string }) {
   );
 }
 
-export function FlashcardsView({ workspaceSlug, onOpenSource, onAddCard }: FlashcardsViewProps) {
+export function FlashcardsView({ workspaceSlug, addTarget, onOpenSource, onAddCard, onEditPage }: FlashcardsViewProps) {
   const [cards, setCards] = useState<Flashcard[]>([]);
-  const [store, setStore] = useState<ReviewStore>(emptyReviewStore);
+  const [matrix, setMatrix] = useState<OfMatrix>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
   const [session, setSession] = useState<Flashcard[] | null>(null);
+  const [reviewed, setReviewed] = useState(0);
   const [revealed, setRevealed] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [front, setFront] = useState('');
   const [back, setBack] = useState('');
   const [adding, setAdding] = useState(false);
-  const today = dateKey(new Date());
+  const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
     let cancelled = false;
@@ -66,7 +72,8 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onAddCard }: Flash
         .then(([sources, saved]) => {
           if (cancelled) return;
           setCards(collectCards(sources));
-          setStore(parseReviewStore(saved));
+          setMatrix(parseOfMatrix(saved));
+          setNow(new Date());
           setError('');
         })
         .catch((caught: unknown) => {
@@ -82,36 +89,59 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onAddCard }: Flash
     };
   }, [workspaceSlug, reloadKey]);
 
-  const stats = useMemo(() => deckStats(cards, store, today), [cards, store, today]);
-  const queue = useMemo(() => buildQueue(cards, store, today), [cards, store, today]);
+  const stats = useMemo(() => deckStats(cards, now), [cards, now]);
+  const queue = useMemo(() => buildQueue(cards, now), [cards, now]);
   const decks = useMemo(() => {
     const byPage = new Map<string, Flashcard[]>();
     for (const item of cards) byPage.set(item.path, [...(byPage.get(item.path) ?? []), item]);
     return [...byPage.entries()].sort(([left], [right]) => left.localeCompare(right));
   }, [cards]);
 
-  const persist = (next: ReviewStore) => {
-    setStore(next);
-    writeCardReviews(workspaceSlug, next).catch((caught: unknown) => {
-      setError(`Could not save review history: ${caught instanceof Error ? caught.message : String(caught)}`);
-    });
-  };
-
   const current = session?.[0] ?? null;
 
-  const rate = (rating: Rating) => {
-    if (!current || !session) return;
-    persist(answerCard(store, current, rating, today));
-    // "Again" comes back later in this session.
-    setSession(rating === 'again' ? [...session.slice(1), current] : session.slice(1));
+  /** Move to the next card; reload the counts when the session is over. */
+  const advance = () => {
+    const remaining = session?.slice(1) ?? [];
     setRevealed(false);
+    if (remaining.length > 0) {
+      setSession(remaining);
+      return;
+    }
+    setSession(null);
+    setReloadKey((key) => key + 1);
   };
 
-  const suspend = () => {
-    if (!current || !session) return;
-    persist(setSuspended(store, current, true, today));
-    setSession(session.slice(1));
+  /** Save a card's schedule into its note and move to the next card. */
+  const save = async (item: Flashcard, schedule: CardSchedule | null, nextMatrix?: OfMatrix) => {
+    setSaving(true);
+    try {
+      await onEditPage(item.path, (content) => writeSchedule(content, item, schedule));
+      if (nextMatrix) {
+        setMatrix(nextMatrix);
+        writeCardReviews(workspaceSlug, { version: 2, ofMatrix: nextMatrix }).catch(() => {
+          // The matrix only tunes intervals; the schedule itself is already in the note.
+        });
+      }
+      setReviewed((count) => count + 1);
+      setError('');
+      advance();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const rate = (score: Score) => {
+    if (!current || saving) return;
+    const next = review(current.schedule, score, matrix, new Date());
+    void save(current, next.schedule, next.matrix);
+  };
+
+  const endSession = () => {
+    setSession(null);
     setRevealed(false);
+    setReloadKey((key) => key + 1);
   };
 
   useEffect(() => {
@@ -119,15 +149,21 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onAddCard }: Flash
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return;
-      if (!revealed && (event.key === ' ' || event.key === 'Enter')) {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (!revealed && (event.key === ' ' || event.key === 'Enter' || event.key === 's')) {
         event.preventDefault();
         setRevealed(true);
         return;
       }
-      const choice = RATINGS.find((item) => item.key === event.key);
+      if (event.key === 'n') {
+        event.preventDefault();
+        advance();
+        return;
+      }
+      const choice = SCORES.find((item) => item.keys.includes(event.key));
       if (revealed && choice) {
         event.preventDefault();
-        rate(choice.rating);
+        rate(choice.score);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -136,7 +172,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onAddCard }: Flash
 
   const add = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!front.trim() || !back.trim() || adding) return;
+    if (!front.trim() || adding) return;
     setAdding(true);
     try {
       await onAddCard(front, back);
@@ -150,47 +186,53 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onAddCard }: Flash
     }
   };
 
-  const updateSetting = (key: 'newPerDay' | 'reviewsPerDay', value: string) => {
-    const number = Math.max(0, Math.min(9999, Math.round(Number(value) || 0)));
-    persist({ ...store, settings: { ...store.settings, [key]: number } });
-  };
-
   if (current) {
-    const state = store.cards[current.id];
-    const intervals = previewIntervals(state);
+    const intervals = previewIntervals(current.schedule, matrix);
+    const fresh = isNew(current);
     return (
       <section style={{ width: 'min(720px, 100%)', margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, fontSize: 12.5, color: C.muted }}>
-          <span>{session?.length ?? 0} left · {state ? 'Review' : 'New'}</span>
+          <span>{session?.length ?? 0} left · {fresh ? 'New' : `Review #${current.schedule.repeats + 1}`}</span>
           <div style={{ display: 'flex', gap: 6 }}>
             <button type="button" onClick={() => onOpenSource(current.path)} style={ghostButton} title={current.path}>
               <ExternalLink size={13} /> Open source
             </button>
-            <button type="button" onClick={suspend} style={ghostButton}>
-              <PauseCircle size={13} /> Suspend
+            <button
+              type="button"
+              onClick={() => { void save(current, null); }}
+              disabled={saving || fresh}
+              style={{ ...ghostButton, opacity: fresh ? 0.5 : 1 }}
+              title="Reset this card so that you can review it again from the start."
+            >
+              <RotateCcw size={13} /> Reset
             </button>
-            <button type="button" onClick={() => { setSession(null); setRevealed(false); }} style={ghostButton}>End</button>
+            <button type="button" onClick={endSession} style={ghostButton}>End</button>
           </div>
         </div>
+        {error && <div role="alert" style={{ marginBottom: 12, color: C.red, fontSize: 12.5 }}>{error}</div>}
         <div style={cardStyle}>
-          {changedSinceReview(current, state) && (
-            <div style={{ marginBottom: 10, fontSize: 12, color: C.amber }}>The answer changed since you last reviewed this card.</div>
-          )}
-          <CardText text={current.front} />
-          {revealed && (
+          <CardText text={renderCloze(current.front, revealed)} />
+          {revealed && current.back && (
             <>
               <hr style={{ border: 'none', borderTop: `1px solid ${C.line}`, margin: '18px 0' }} />
-              <CardText text={current.back} />
+              <CardText text={renderCloze(current.back, true)} />
             </>
           )}
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 16 }}>
           {!revealed ? (
-            <button type="button" onClick={() => setRevealed(true)} style={primaryButton}>Show answer <kbd style={kbd}>Space</kbd></button>
-          ) : RATINGS.map((item) => (
-            <button key={item.rating} type="button" onClick={() => rate(item.rating)} style={{ ...ratingButton, borderColor: item.rating === 'again' ? C.red : C.line }}>
+            <>
+              <button type="button" onClick={() => setRevealed(true)} style={primaryButton}>
+                {current.cloze && !current.back ? 'Show clozes' : 'Show answer'} <kbd style={kbd}>Space</kbd>
+              </button>
+              <button type="button" onClick={advance} style={ghostButton}>
+                Next <kbd style={{ ...kbd, borderColor: C.line }}>n</kbd>
+              </button>
+            </>
+          ) : SCORES.map((item) => (
+            <button key={item.score} type="button" disabled={saving} onClick={() => rate(item.score)} style={{ ...ratingButton, borderColor: item.tone }}>
               <span style={{ fontWeight: 650 }}>{item.label}</span>
-              <span style={{ fontSize: 11, color: C.muted }}>{intervals[item.rating]} · {item.key}</span>
+              <span style={{ fontSize: 11, color: C.muted }}>{intervals[item.score]} · {item.keys[0]}</span>
             </button>
           ))}
         </div>
@@ -211,7 +253,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onAddCard }: Flash
           </button>
         </div>
         <p style={{ margin: 0, color: C.muted, fontSize: 13 }}>
-          Cards live in your notes; your review history stays on this device and is not shared with the Space.
+          Any bullet tagged <code>#card</code> is a card and its child bullets are the answer, as in Logseq. Each review is saved in the note itself as <code>card-*::</code> properties.
         </p>
       </header>
 
@@ -221,8 +263,8 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onAddCard }: Flash
         <div style={emptyState}><LoaderCircle size={15} className="animate-spin" /> Collecting cards…</div>
       ) : (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 14 }}>
-            {([['Due', stats.due], ['New', stats.fresh], ['Total', stats.total], ['Suspended', stats.suspended]] as Array<[string, number]>).map(([label, value]) => (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginBottom: 14 }}>
+            {([['Due now', stats.due], ['Never reviewed', stats.fresh], ['Total', stats.total]] as Array<[string, number]>).map(([label, value]) => (
               <div key={label} style={tile}>
                 <div style={{ fontSize: 20, fontWeight: 650, color: C.ink }}>{value}</div>
                 <div style={{ fontSize: 11.5, color: C.muted }}>{label}</div>
@@ -233,29 +275,21 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onAddCard }: Flash
             <button
               type="button"
               disabled={queue.length === 0}
-              onClick={() => { setSession(queue); setRevealed(false); }}
+              onClick={() => { setSession(queue); setReviewed(0); setRevealed(false); }}
               style={{ ...primaryButton, opacity: queue.length === 0 ? 0.5 : 1 }}
             >
-              {queue.length === 0 ? 'Nothing to review today' : `Study now · ${queue.length}`}
+              {queue.length === 0 ? 'Nothing due' : `Review now · ${queue.length}`}
             </button>
-            <label style={settingLabel}>
-              New per day
-              <input type="number" min={0} value={store.settings.newPerDay} onChange={(event) => updateSetting('newPerDay', event.target.value)} style={numberInput} />
-            </label>
-            <label style={settingLabel}>
-              Reviews per day
-              <input type="number" min={0} value={store.settings.reviewsPerDay} onChange={(event) => updateSetting('reviewsPerDay', event.target.value)} style={numberInput} />
-            </label>
-            {stats.changed > 0 && <span style={{ fontSize: 12, color: C.amber }}>{stats.changed} changed since last review</span>}
+            {reviewed > 0 && <span style={{ fontSize: 12, color: C.muted }}>{reviewed} reviewed this session</span>}
           </div>
 
           <form onSubmit={add} style={{ ...tile, display: 'grid', gap: 8, marginBottom: 20 }}>
             <div style={{ fontSize: 12, fontWeight: 650, color: C.muted, textTransform: 'uppercase', letterSpacing: '.04em' }}>Add a card</div>
-            <input aria-label="Question" placeholder="Question" value={front} onChange={(event) => setFront(event.target.value)} style={textInput} />
-            <input aria-label="Answer" placeholder="Answer" value={back} onChange={(event) => setBack(event.target.value)} style={textInput} />
+            <input aria-label="Question" placeholder="Question (use {{cloze text}} to hide part of it)" value={front} onChange={(event) => setFront(event.target.value)} style={textInput} />
+            <textarea aria-label="Answer" placeholder="Answer, one bullet per line (optional for cloze cards)" value={back} rows={2} onChange={(event) => setBack(event.target.value)} style={{ ...textInput, resize: 'vertical' }} />
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ fontSize: 11.5, color: C.muted }}>Saved as <code>Question :: Answer</code> in the page Flashcards.</span>
-              <button type="submit" disabled={!front.trim() || !back.trim() || adding} style={primaryButton}>
+              <span style={{ fontSize: 11.5, color: C.muted }}>Added to {addTarget} as <code>- Question #card</code>.</span>
+              <button type="submit" disabled={!front.trim() || adding} style={primaryButton}>
                 <Plus size={13} /> {adding ? 'Adding…' : 'Add'}
               </button>
             </div>
@@ -263,19 +297,19 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onAddCard }: Flash
 
           {decks.length === 0 ? (
             <div style={emptyState}>
-              No cards yet. Tag a note with #flashcards and write <code>Question :: Answer</code>, or add <code>#card</code> to a bullet whose children hold the answer.
+              No cards yet. Add <code>#card</code> to any bullet in your notes; its indented child bullets are the answer.
             </div>
           ) : (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0, border: `1px solid ${C.line}`, borderRadius: 10, background: C.panel }}>
               {decks.map(([path, items], index) => {
-                const deck = deckStats(items, store, today);
+                const deck = deckStats(items, now);
                 return (
                   <li key={path} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderTop: index === 0 ? 'none' : `1px solid ${C.lineSoft}` }}>
                     <button type="button" onClick={() => onOpenSource(path)} style={linkButton} title={path}>
                       {path.replace(/\.md$/i, '')}
                     </button>
-                    <span style={{ marginLeft: 'auto', fontSize: 12, color: C.muted }}>
-                      {deck.total} cards · {deck.due} due · {deck.fresh} new
+                    <span style={{ marginLeft: 'auto', fontSize: 12, color: C.muted, whiteSpace: 'nowrap' }}>
+                      {deck.total} {deck.total === 1 ? 'card' : 'cards'} · {deck.due} due
                     </span>
                   </li>
                 );
@@ -314,14 +348,6 @@ const cardStyle: React.CSSProperties = {
 
 const tile: React.CSSProperties = {
   padding: '12px 14px', border: `1px solid ${C.line}`, borderRadius: 10, background: C.panel,
-};
-
-const settingLabel: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: C.muted,
-};
-
-const numberInput: React.CSSProperties = {
-  width: 64, padding: '4px 6px', border: `1px solid ${C.line}`, borderRadius: 6, background: C.bg, color: C.ink, fontSize: 12.5,
 };
 
 const textInput: React.CSSProperties = {

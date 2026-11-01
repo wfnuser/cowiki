@@ -2,13 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  applyTaskStatus,
   applyTaskToggle,
   extractTasks,
   groupTasks,
   insertTaskLine,
   newTaskLine,
   parseTaskLine,
+  taskLineWithStatus,
   toggledTaskLine,
+  weekBoard,
 } from '../src/lib/tasks.ts';
 
 test('parses checkbox tasks with Obsidian Tasks metadata', () => {
@@ -114,4 +117,36 @@ test('cancelled tasks reopen instead of being marked done', () => {
   assert.equal(toggledTaskLine('- [-] Dropped idea', '2026-10-31'), '- [ ] Dropped idea');
   assert.equal(toggledTaskLine('- CANCELLED Old plan', '2026-10-31'), '- TODO Old plan');
   assert.equal(toggledTaskLine('- [/] Drafting', '2026-10-31'), '- [x] Drafting ✅ 2026-10-31');
+});
+
+test('board moves set the status on the task line', () => {
+  assert.equal(taskLineWithStatus('- [ ] Draft 📅 2026-11-02', 'doing', '2026-11-01'), '- [/] Draft 📅 2026-11-02');
+  assert.equal(taskLineWithStatus('- [/] Draft', 'done', '2026-11-01'), '- [x] Draft ✅ 2026-11-01');
+  assert.equal(taskLineWithStatus('- [x] Draft ✅ 2026-10-30', 'done', '2026-11-01'), '- [x] Draft ✅ 2026-10-30');
+  assert.equal(taskLineWithStatus('- [x] Draft ✅ 2026-10-30', 'todo', '2026-11-01'), '- [ ] Draft');
+  assert.equal(taskLineWithStatus('- [-] ~~Dropped~~', 'doing', '2026-11-01'), '- [/] Dropped');
+  assert.equal(taskLineWithStatus('  - TODO Call Ana', 'doing', '2026-11-01'), '  - DOING Call Ana');
+  assert.equal(taskLineWithStatus('- DOING Call Ana', 'done', '2026-11-01'), '- DONE Call Ana');
+  assert.throws(() => taskLineWithStatus('plain text', 'done', '2026-11-01'), /no longer a task/);
+  const page = '# Plan\n\n- [ ] One\n- [ ] Two\n';
+  const [, two] = extractTasks('Plan.md', page);
+  assert.equal(applyTaskStatus(page, two, 'doing', '2026-11-01'), '# Plan\n\n- [ ] One\n- [/] Two\n');
+});
+
+test('the week board collects open, in-progress and finished tasks', () => {
+  const tasks = extractTasks('Week.md', [
+    '- [ ] Overdue 📅 2026-10-20',
+    '- [ ] This week 📅 2026-10-28',
+    '- [ ] Next week 📅 2026-11-03',
+    '- [ ] No date',
+    '- [/] Doing no date',
+    '- [/] Doing later 📅 2026-11-20',
+    '- [x] Done this week ✅ 2026-10-27',
+    '- [x] Done before ✅ 2026-10-19',
+    '- [-] Cancelled 📅 2026-10-28',
+  ].join('\n'));
+  const board = weekBoard(tasks, '2026-10-26', '2026-11-01');
+  assert.deepEqual(board.todo.map((task) => task.text), ['Overdue', 'This week']);
+  assert.deepEqual(board.doing.map((task) => task.text), ['Doing no date']);
+  assert.deepEqual(board.done.map((task) => task.text), ['Done this week']);
 });

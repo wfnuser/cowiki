@@ -326,7 +326,7 @@ export function importObsidianVault(options: {
   return invoke('obsidian_import_vault', options);
 }
 
-/** Pages that may contain flashcards (decks tagged #flashcards, Logseq #card blocks). */
+/** Pages that may contain flashcards (Logseq #card blocks). */
 export function listCardSources(spaceSlug: string): Promise<TaskSource[]> {
   return invoke('local_list_card_sources', { spaceSlug });
 }

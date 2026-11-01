@@ -73,3 +73,14 @@ test('task statuses and Logseq markers render as checkboxes', () => {
     '1. [ ] Numbered',
   ].join('\n'));
 });
+
+test('Logseq card properties are hidden and cloze text is shown', () => {
+  const body = ['- Rust has {{cloze zero-cost}} abstractions #card', '  id:: 6540a1b2', '  card-repeats:: 1', '  - answer', 'status:: draft'].join('\n');
+  assert.equal(obsidianToReaderMarkdown(body), [
+    '- Rust has **zero-cost** abstractions #card',
+    '',
+    '',
+    '  - answer',
+    'status:: draft',
+  ].join('\n'));
+});

@@ -3,8 +3,7 @@ import { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { C, fonts } from '@/lib/design';
-import { journalPagePath } from '@/lib/journal';
-import { reviewPagePath } from '@/lib/weekly-review';
+import { journalMoves, journalPagePath } from '@/lib/journal';
 import {
   MODULES,
   setModuleHidden,
@@ -19,8 +18,12 @@ interface SpaceFeaturesDialogProps {
   spaceName: string;
   features: SpaceFeatures;
   preferences: PersonalPreferences;
+  /** Every page path in the Space, to find journal entries to move. */
+  pagePaths: string[];
   onClose: () => void;
-  onSave: (features: SpaceFeatures, preferences: PersonalPreferences) => Promise<void>;
+  onSave: (features: SpaceFeatures, preferences: PersonalPreferences, moves: Array<{ from: string; to: string }>) => Promise<void>;
+  /** Write the starter templates into a folder; resolves to how many were added. */
+  onAddStarterTemplates: (folder: string) => Promise<number>;
 }
 
 export function SpaceFeaturesDialog({
@@ -29,34 +32,34 @@ export function SpaceFeaturesDialog({
   spaceName,
   features,
   preferences,
+  pagePaths,
   onClose,
   onSave,
+  onAddStarterTemplates,
 }: SpaceFeaturesDialogProps) {
   const [draft, setDraft] = useState(features);
   const [personal, setPersonal] = useState(preferences);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [moveEntries, setMoveEntries] = useState(true);
+  const [starterNote, setStarterNote] = useState('');
 
   useEffect(() => {
     if (open) {
       setDraft(features);
       setPersonal(preferences);
       setError('');
+      setStarterNote('');
+      setMoveEntries(true);
     }
   }, [open, features, preferences]);
+
+  const moves = draft.modules.journal ? journalMoves(features.journal, draft.journal, pagePaths) : [];
 
   const hidden = new Set(personal.hiddenModules[spaceId] ?? []);
   const preview = (() => {
     try {
       return journalPagePath(draft.journal, new Date());
-    } catch {
-      return '';
-    }
-  })();
-
-  const reviewPreview = (() => {
-    try {
-      return reviewPagePath(draft.review, new Date());
     } catch {
       return '';
     }
@@ -70,7 +73,7 @@ export function SpaceFeaturesDialog({
     setSaving(true);
     setError('');
     try {
-      await onSave(draft, personal);
+      await onSave(draft, personal, moveEntries ? moves : []);
       onClose();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -83,7 +86,7 @@ export function SpaceFeaturesDialog({
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
       <DialogContent style={{ maxWidth: 560, maxHeight: "88vh", overflowY: "auto" }}>
         <DialogHeader>
-          <DialogTitle>Modules & journal</DialogTitle>
+          <DialogTitle>Modules & settings</DialogTitle>
         </DialogHeader>
         <p style={{ margin: '-4px 0 6px', color: C.muted, fontSize: 12.5 }}>
           Space settings apply to everyone using <strong>{spaceName}</strong>. Turning a module off only hides its entry points; journal pages and tasks stay in your Markdown files.
@@ -154,44 +157,46 @@ export function SpaceFeaturesDialog({
           <p style={{ margin: '8px 0 0', fontSize: 11.5, color: C.muted }}>
             Today’s entry: <code style={{ fontFamily: fonts.mono }}>{preview || '—'}</code>. Formats use Obsidian/moment tokens such as <code>YYYY-MM-DD</code> or <code>YYYY/MM/YYYY-MM-DD</code>; templates support <code>{'{{date}}'}</code>, <code>{'{{title}}'}</code> and <code>{'{{time}}'}</code>.
           </p>
+          {moves.length > 0 && (
+            <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 8, fontSize: 12.5, color: C.ink, cursor: 'pointer' }}>
+              <input type="checkbox" checked={moveEntries} onChange={(event) => setMoveEntries(event.target.checked)} style={{ marginTop: 2 }} />
+              <span>
+                Move the {moves.length} existing {moves.length === 1 ? 'entry' : 'entries'} to the new location (for example <code>{moves[0].from}</code> → <code>{moves[0].to}</code>). Links to them are updated.
+              </span>
+            </label>
+          )}
         </section>
 
-        <section style={{ ...sectionStyle, opacity: draft.modules.review ? 1 : 0.55 }}>
-          <h3 style={headingStyle}>Weekly review</h3>
+        <section style={sectionStyle}>
+          <h3 style={headingStyle}>Templates</h3>
           <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px 12px', alignItems: 'center' }}>
-            <label htmlFor="review-folder" style={labelStyle}>Folder</label>
+            <label htmlFor="templates-folder" style={labelStyle}>Folder</label>
             <input
-              id="review-folder"
-              value={draft.review.folder}
-              placeholder="Space root"
-              disabled={!draft.modules.review}
-              onChange={(event) => setDraft((previous) => ({ ...previous, review: { ...previous.review, folder: event.target.value } }))}
-              style={inputStyle}
-            />
-            <label htmlFor="review-format" style={labelStyle}>Week format</label>
-            <input
-              id="review-format"
-              value={draft.review.format}
-              disabled={!draft.modules.review}
-              onChange={(event) => setDraft((previous) => ({ ...previous, review: { ...previous.review, format: event.target.value } }))}
-              style={{ ...inputStyle, fontFamily: fonts.mono }}
-            />
-            <label htmlFor="review-template" style={labelStyle}>Template page</label>
-            <input
-              id="review-template"
-              value={draft.review.template ?? ''}
-              placeholder="Optional, e.g. Templates/Weekly.md"
-              disabled={!draft.modules.review}
-              onChange={(event) => setDraft((previous) => ({
-                ...previous,
-                review: { ...previous.review, template: event.target.value.trim() ? event.target.value : null },
-              }))}
+              id="templates-folder"
+              value={draft.templates.folder}
+              placeholder="Templates"
+              onChange={(event) => setDraft((previous) => ({ ...previous, templates: { folder: event.target.value } }))}
               style={inputStyle}
             />
           </div>
           <p style={{ margin: '8px 0 0', fontSize: 11.5, color: C.muted }}>
-            This week: <code style={{ fontFamily: fonts.mono }}>{reviewPreview || '—'}</code>. <code>GGGG</code> and <code>WW</code> are the ISO week year and number. A new review lists the week&apos;s finished and open tasks and journal entries; a template replaces the reflection sections.
+            Every page in this folder is offered when you create a page. Templates are ordinary pages: edit or delete them like any note. They support <code>{'{{title}}'}</code>, <code>{'{{date}}'}</code> and <code>{'{{time}}'}</code>.
           </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => {
+                const folder = draft.templates.folder.trim() || 'Templates';
+                onAddStarterTemplates(folder)
+                  .then((added) => setStarterNote(added > 0 ? `Added ${added} templates to ${folder}/.` : `${folder}/ already has them.`))
+                  .catch((caught: unknown) => setStarterNote(caught instanceof Error ? caught.message : String(caught)));
+              }}
+            >
+              Add starter templates
+            </Button>
+            <span style={{ fontSize: 11.5, color: C.muted }}>{starterNote || 'Learning plan, Practice log, Meeting notes.'}</span>
+          </div>
         </section>
 
         <section style={sectionStyle}>
