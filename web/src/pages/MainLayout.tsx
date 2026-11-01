@@ -960,16 +960,6 @@ export function MainLayout() {
     await writePage(entry.conceptId, insertTaskLine(page.body, line), userBranch, ws.slug, 'wiki', page.body);
   };
 
-  /** Re-read a page, transform it and save it, failing if it changed in between. */
-  const editPageAt = async (path: string, transform: (content: string) => string) => {
-    const ws = activeWorkspace;
-    if (!ws) return;
-    const conceptId = conceptIdFromPath(path);
-    const page = await getPage(conceptId, userBranch, ws.slug, 'wiki');
-    const updated = transform(page.body);
-    if (updated !== page.body) await writePage(conceptId, updated, userBranch, ws.slug, 'wiki', page.body);
-  };
-
   const saveModules = async (features: SpaceFeatures, nextPreferences: PersonalPreferences) => {
     const ws = activeWorkspace;
     if (!ws) return;
@@ -1792,7 +1782,6 @@ export function MainLayout() {
                       key={activeWorkspace.slug}
                       workspaceSlug={activeWorkspace.slug}
                       onOpenSource={(path) => { void selectPage(activeWorkspace, conceptIdFromPath(path), path); }}
-                      onEditPage={editPageAt}
                     />
                   </ObsidianReaderContext.Provider>
                 </div>

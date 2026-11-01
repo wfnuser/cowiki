@@ -118,7 +118,7 @@ pub fn task_sources(root: &Path) -> Result<Vec<TaskSource>, String> {
 }
 
 /// Pages that can hold flashcards: Logseq `#card` / `[[card]]` blocks. The
-/// front end parses the cards; their schedule is stored in the page itself.
+/// front end parses the cards; review history is kept outside the Space.
 pub fn card_sources(root: &Path) -> Result<Vec<TaskSource>, String> {
     markdown_sources(root, |content| {
         // Logseq cards: bullets tagged #card or [[card]].
@@ -182,8 +182,8 @@ fn review_state_path(metadata_dir: &Path, space_id: &str) -> Result<PathBuf, Str
         .join(format!("{space_id}.json")))
 }
 
-/// Personal flashcard tuning for a Space (the SM-5 factor matrix). It lives
-/// with the app's own data, not in the Space; card schedules are in the notes.
+/// Personal flashcard review history for a Space. It lives with the app's
+/// own data, not in the Space, so it is never shared and never edits notes.
 pub fn read_review_state(
     metadata_dir: &Path,
     space_id: &str,
