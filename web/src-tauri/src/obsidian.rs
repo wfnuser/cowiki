@@ -435,12 +435,29 @@ fn directory_is_empty(path: &Path) -> Result<bool, String> {
         .all(|entry| entry.file_name() == ".DS_Store"))
 }
 
-fn marker_source(destination: &Path) -> Option<String> {
-    read_json(&destination.join(IMPORT_MARKER_PATH)).and_then(|value| json_string(&value, "source"))
+/// The import marker in `destination`, if it records a copy of `source`:
+/// `Some(true)` once the copy finished, `Some(false)` while it was interrupted.
+fn import_marker_of(source: &Path, destination: &Path) -> Option<bool> {
+    let marker = read_json(&destination.join(IMPORT_MARKER_PATH))?;
+    if json_string(&marker, "source").as_deref() != Some(source.to_string_lossy().as_ref()) {
+        return None;
+    }
+    Some(marker.get("finished") == Some(&serde_json::Value::Bool(true)))
+}
+
+/// Whether `destination` already holds a finished copy of `source`. Such a
+/// folder may have been edited since, so it is never copied over again.
+pub fn finished_copy_of(source: &Path, destination: &Path) -> Result<bool, String> {
+    if !destination.exists() {
+        return Ok(false);
+    }
+    let source = source.canonicalize().map_err(|error| error.to_string())?;
+    Ok(import_marker_of(&source, destination) == Some(true))
 }
 
 /// Copy a vault into `destination`. The destination must be new or empty, or
-/// an unfinished import of the same vault (so a failed import can be retried).
+/// an interrupted copy of the same vault (so a failed copy can be retried).
+/// A finished copy is refused: it may hold edits made after the import.
 pub fn copy_vault(source: &Path, destination: &Path) -> Result<CopyOutcome, String> {
     let source = source.canonicalize().map_err(|error| error.to_string())?;
     if destination.exists() {
@@ -450,10 +467,17 @@ pub fn copy_vault(source: &Path, destination: &Path) -> Result<CopyOutcome, Stri
         if canonical.starts_with(&source) || source.starts_with(&canonical) {
             return Err("the import folder cannot be inside the vault (or contain it)".to_string());
         }
-        let same_import =
-            marker_source(destination).as_deref() == Some(source.to_string_lossy().as_ref());
-        if !directory_is_empty(destination)? && !same_import {
-            return Err("choose an empty folder for the imported copy".to_string());
+        if !directory_is_empty(destination)? {
+            match import_marker_of(&source, destination) {
+                Some(false) => {}
+                Some(true) => {
+                    return Err(
+                        "this vault was already copied into that folder; choose another folder for a fresh copy"
+                            .to_string(),
+                    )
+                }
+                None => return Err("choose an empty folder for the imported copy".to_string()),
+            }
         }
     } else {
         if let Some(parent) = destination.parent() {
@@ -728,7 +752,22 @@ mod tests {
             !dir.path().join(".cowiki").exists(),
             "the vault itself is not written"
         );
-        // Retrying the same import into its own folder is allowed.
+        // A finished copy may have been edited since: it is never copied over.
+        std::fs::write(destination.join("Note.md"), "edited in the copy").unwrap();
+        assert!(finished_copy_of(dir.path(), &destination).unwrap());
+        let refused = copy_vault(dir.path(), &destination).unwrap_err();
+        assert!(refused.contains("already copied"), "{refused}");
+        assert_eq!(
+            std::fs::read_to_string(destination.join("Note.md")).unwrap(),
+            "edited in the copy"
+        );
+        // An interrupted copy of the same vault can be retried.
+        let marker = destination.join(IMPORT_MARKER_PATH);
+        let unfinished = std::fs::read_to_string(&marker)
+            .unwrap()
+            .replace("\"finished\": true", "\"finished\": false");
+        std::fs::write(&marker, unfinished).unwrap();
+        assert!(!finished_copy_of(dir.path(), &destination).unwrap());
         copy_vault(dir.path(), &destination).unwrap();
         // A different, non-empty folder is refused.
         let other = output.path().join("Other");

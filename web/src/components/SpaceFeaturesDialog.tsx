@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { C, fonts } from '@/lib/design';
-import { journalMoves, journalPagePath } from '@/lib/journal';
+import { journalPagePath } from '@/lib/journal';
 import {
   MODULES,
   setModuleHidden,
@@ -18,10 +18,8 @@ interface SpaceFeaturesDialogProps {
   spaceName: string;
   features: SpaceFeatures;
   preferences: PersonalPreferences;
-  /** Every page path in the Space, to find journal entries to move. */
-  pagePaths: string[];
   onClose: () => void;
-  onSave: (features: SpaceFeatures, preferences: PersonalPreferences, moves: Array<{ from: string; to: string }>) => Promise<void>;
+  onSave: (features: SpaceFeatures, preferences: PersonalPreferences) => Promise<void>;
   /** Write the starter templates into a folder; resolves to how many were added. */
   onAddStarterTemplates: (folder: string) => Promise<number>;
 }
@@ -32,7 +30,6 @@ export function SpaceFeaturesDialog({
   spaceName,
   features,
   preferences,
-  pagePaths,
   onClose,
   onSave,
   onAddStarterTemplates,
@@ -41,7 +38,6 @@ export function SpaceFeaturesDialog({
   const [personal, setPersonal] = useState(preferences);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [moveEntries, setMoveEntries] = useState(true);
   const [starterNote, setStarterNote] = useState('');
 
   useEffect(() => {
@@ -50,11 +46,9 @@ export function SpaceFeaturesDialog({
       setPersonal(preferences);
       setError('');
       setStarterNote('');
-      setMoveEntries(true);
     }
   }, [open, features, preferences]);
 
-  const moves = draft.modules.journal ? journalMoves(features.journal, draft.journal, pagePaths) : [];
 
   const hidden = new Set(personal.hiddenModules[spaceId] ?? []);
   const preview = (() => {
@@ -73,7 +67,7 @@ export function SpaceFeaturesDialog({
     setSaving(true);
     setError('');
     try {
-      await onSave(draft, personal, moveEntries ? moves : []);
+      await onSave(draft, personal);
       onClose();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -157,14 +151,6 @@ export function SpaceFeaturesDialog({
           <p style={{ margin: '8px 0 0', fontSize: 11.5, color: C.muted }}>
             Today’s entry: <code style={{ fontFamily: fonts.mono }}>{preview || '—'}</code>. Formats use Obsidian/moment tokens such as <code>YYYY-MM-DD</code> or <code>YYYY/MM/YYYY-MM-DD</code>; templates support <code>{'{{date}}'}</code>, <code>{'{{title}}'}</code> and <code>{'{{time}}'}</code>.
           </p>
-          {moves.length > 0 && (
-            <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 8, fontSize: 12.5, color: C.ink, cursor: 'pointer' }}>
-              <input type="checkbox" checked={moveEntries} onChange={(event) => setMoveEntries(event.target.checked)} style={{ marginTop: 2 }} />
-              <span>
-                Move the {moves.length} existing {moves.length === 1 ? 'entry' : 'entries'} to the new location (for example <code>{moves[0].from}</code> → <code>{moves[0].to}</code>). Links to them are updated.
-              </span>
-            </label>
-          )}
         </section>
 
         <section style={sectionStyle}>

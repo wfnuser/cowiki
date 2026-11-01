@@ -43,7 +43,11 @@ export interface CardSchedule {
 }
 
 export interface Flashcard {
-  /** Path and question; stable while the card stays in its page. */
+  /**
+   * Path, question and how many cards above it share that question. Only a
+   * display key: each card's review state lives in its own block, so cards
+   * with the same question in other pages never share history.
+   */
   id: string;
   path: string;
   /** 0-based line of the question bullet in the source page. */
@@ -195,10 +199,16 @@ function cardBlocks(content: string): Block[] {
 
 /** Cards defined in one page. */
 export function parseCards(path: string, content: string): Flashcard[] {
+  const seen = new Map<string, number>();
   return cardBlocks(content)
     .filter((block) => block.front || block.back)
-    .map((block) => ({
-      id: hash(`${path}\u0000${block.front}`),
+    .map((block) => {
+      const occurrence = seen.get(block.front) ?? 0;
+      seen.set(block.front, occurrence + 1);
+      return { block, occurrence };
+    })
+    .map(({ block, occurrence }) => ({
+      id: `${hash(`${path}\u0000${block.front}`)}-${occurrence}`,
       path,
       line: block.line,
       front: block.front,

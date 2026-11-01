@@ -224,30 +224,6 @@ export function journalEntryKeys(config: JournalConfig, paths: Iterable<string>)
 }
 
 /**
- * Where existing entries go when the journal folder or date format changes.
- * Entries whose new place is already taken are left alone.
- */
-export function journalMoves(from: JournalConfig, to: JournalConfig, paths: Iterable<string>): Array<{ from: string; to: string }> {
-  const all = [...paths];
-  const taken = new Set(all.map((path) => path.toLowerCase()));
-  const moves: Array<{ from: string; to: string }> = [];
-  for (const path of all) {
-    const date = journalDateFromPath(from, path);
-    if (!date) continue;
-    let target: string;
-    try {
-      target = journalPagePath(to, date);
-    } catch {
-      continue;
-    }
-    if (target === path || taken.has(target.toLowerCase())) continue;
-    taken.add(target.toLowerCase());
-    moves.push({ from: path, to: target });
-  }
-  return moves.sort((left, right) => left.from.localeCompare(right.from));
-}
-
-/**
  * A template's own `title:` (for example "Daily" on an imported template page)
  * must not become every new page's title: replace it with the page's title.
  */

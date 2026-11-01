@@ -701,13 +701,28 @@ impl LocalEngine {
         if self.list_spaces()?.iter().any(|space| space.slug == slug) {
             return Err(format!("a Space named '{slug}' already exists"));
         }
-        crate::obsidian::copy_vault(source, destination)?;
+        // Everything is checked before anything in the folder is written.
+        let resume = crate::obsidian::finished_copy_of(source, destination)?;
+        if resume {
+            let folder = destination.canonicalize().map_err(|e| e.to_string())?;
+            if let Some(existing) = self.space_by_path(&folder)? {
+                return Err(format!(
+                    "this vault is already imported as the Space \"{}\" in {}; open it, or choose another folder for a fresh copy",
+                    existing.name,
+                    folder.display()
+                ));
+            }
+        } else {
+            crate::obsidian::copy_vault(source, destination)?;
+        }
         crate::obsidian::exclude_large_files_from_git(destination)?;
-        if space_config.is_object() {
+        let config_path = destination.join(crate::personal::SPACE_CONFIG_PATH);
+        // When resuming, the copy may already hold settings and a report; keep them.
+        if space_config.is_object() && !(resume && config_path.exists()) {
             crate::personal::write_space_config(destination, space_config)?;
         }
-        if !report_markdown.trim().is_empty() {
-            let report = destination.join("CoWiki Import Report.md");
+        let report = destination.join("CoWiki Import Report.md");
+        if !report_markdown.trim().is_empty() && !(resume && report.exists()) {
             std::fs::write(&report, report_markdown).map_err(|error| error.to_string())?;
         }
         // Record the untouched copy first, so the later OKF normalization is a
@@ -5446,6 +5461,56 @@ mod tests {
             std::fs::read_to_string(folder.join("page.md")).unwrap(),
             page
         );
+    }
+
+    #[test]
+    fn importing_a_vault_again_never_copies_over_the_imported_space() {
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::write(vault.path().join("Note.md"), "# Note\n\nOriginal\n").unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&work.path().join("metadata")).unwrap();
+        let config = serde_json::json!({});
+        let destination = work.path().join("Vault (CoWiki)");
+        engine
+            .import_obsidian_vault("Vault", "vault", vault.path(), &destination, &config, "")
+            .unwrap();
+        std::fs::write(destination.join("Note.md"), "# Note\n\nEdited in CoWiki\n").unwrap();
+
+        // Same vault, same folder, new Space name: refused before any write.
+        let error = engine
+            .import_obsidian_vault(
+                "Vault 2",
+                "vault-2",
+                vault.path(),
+                &destination,
+                &config,
+                "",
+            )
+            .unwrap_err();
+        assert!(error.contains("already imported"), "{error}");
+        assert!(std::fs::read_to_string(destination.join("Note.md"))
+            .unwrap()
+            .contains("Edited in CoWiki"));
+        assert_eq!(engine.list_spaces().unwrap().len(), 1);
+
+        // A finished copy that never became a Space resumes without copying again.
+        let second = work.path().join("Second");
+        crate::obsidian::copy_vault(vault.path(), &second).unwrap();
+        std::fs::write(second.join("Note.md"), "# Note\n\nKept\n").unwrap();
+        let space = engine
+            .import_obsidian_vault(
+                "Second",
+                "second",
+                vault.path(),
+                &second,
+                &config,
+                "# Report\n",
+            )
+            .unwrap();
+        assert_eq!(space.slug, "second");
+        assert!(std::fs::read_to_string(second.join("Note.md"))
+            .unwrap()
+            .contains("Kept"));
     }
 
     #[test]

@@ -15,7 +15,7 @@ import {
   parseDate,
   renderTemplate,
 } from '../src/lib/journal.ts';
-import { journalMoves, withTitle } from '../src/lib/journal.ts';
+import { withTitle } from '../src/lib/journal.ts';
 
 const halloween = new Date(2026, 9, 31);
 
@@ -96,18 +96,6 @@ test('reads Obsidian daily-notes and periodic-notes settings', () => {
   );
   assert.deepEqual(journalConfigFromObsidian({}), { folder: '', format: 'YYYY-MM-DD', template: null });
   assert.equal(journalConfigFromObsidian(null), null);
-});
-
-test('changing the journal folder moves existing entries, never onto other pages', () => {
-  const paths = ['2026-04-10.md', '2026-04-11.md', 'Journal/2026-04-11.md', '2026-W44.md', 'Projects/2026-04-10.md', 'Ideas.md'];
-  assert.deepEqual(
-    journalMoves({ folder: '', format: 'YYYY-MM-DD', template: null }, { folder: 'Journal', format: 'YYYY-MM-DD', template: null }, paths),
-    [{ from: '2026-04-10.md', to: 'Journal/2026-04-10.md' }],
-  );
-  assert.deepEqual(
-    journalMoves({ folder: 'Journal', format: 'YYYY-MM-DD', template: null }, { folder: 'Journal', format: 'YYYY/MM/YYYY-MM-DD', template: null }, paths),
-    [{ from: 'Journal/2026-04-11.md', to: 'Journal/2026/04/2026-04-11.md' }],
-  );
 });
 
 test('a journal template never keeps its own title', () => {

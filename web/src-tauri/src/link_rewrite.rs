@@ -196,16 +196,13 @@ fn rewrite_page(
                     .find(['#', '?'])
                     .map(|index| &dest_url[index..])
                     .unwrap_or("");
-                let mut path = if dest_url.starts_with('/') {
+                let path = if dest_url.starts_with('/') {
                     format!("/{expected}")
                 } else {
                     relative_markdown_path(new_source, &expected)
                 };
-                if dest_url.contains('%')
-                    || (dest_url.contains(' ') && !body[..span.start].ends_with('<'))
-                {
-                    path = path.replace(' ', "%20");
-                }
+                let angled = body[..span.start].ends_with('<');
+                let mut path = encode_destination(&path, angled);
                 path.push_str(fragment);
                 edits.push((span, path));
             }
@@ -222,6 +219,31 @@ fn rewrite_page(
         updated.replace_range(range, &text);
     }
     (updated != body).then_some(updated)
+}
+
+/// Encode a new link destination so it still parses as one: the old link's
+/// spelling says nothing about characters the new name brings in. Targets
+/// are percent-decoded when resolved, so `%` itself is always encoded.
+fn encode_destination(path: &str, angled: bool) -> String {
+    let mut encoded = String::with_capacity(path.len());
+    for character in path.chars() {
+        match character {
+            '%' => encoded.push_str("%25"),
+            '<' => encoded.push_str("%3C"),
+            '>' => encoded.push_str("%3E"),
+            ' ' if !angled => encoded.push_str("%20"),
+            '(' if !angled => encoded.push_str("%28"),
+            ')' if !angled => encoded.push_str("%29"),
+            character if character.is_control() => {
+                let mut buffer = [0; 4];
+                for byte in character.encode_utf8(&mut buffer).bytes() {
+                    encoded.push_str(&format!("%{byte:02X}"));
+                }
+            }
+            character => encoded.push(character),
+        }
+    }
+    encoded
 }
 
 /// After `from` was renamed to `to` (Space-relative, `/`-separated), update
@@ -353,6 +375,35 @@ mod tests {
             rewrite(outside, "Home.md", "Proj", "Archive/Proj", &before, &after),
             "[plan](Archive/Proj/Plan.md) [[Proj/Plan]] [[Plan]]\n"
         );
+    }
+
+    #[test]
+    fn markdown_links_are_encoded_for_the_new_name() {
+        let before = ["Old.md", "Home.md"];
+        let after = ["New Name (v2) 100%.md", "Home.md"];
+        let body = "[see](Old.md) [angled](<Old.md>) ![x](./Old.md#top)\n";
+        let updated = rewrite(
+            body,
+            "Home.md",
+            "Old.md",
+            "New Name (v2) 100%.md",
+            &before,
+            &after,
+        );
+        assert_eq!(
+            updated,
+            "[see](New%20Name%20%28v2%29%20100%25.md) [angled](<New Name (v2) 100%25.md>) ![x](New%20Name%20%28v2%29%20100%25.md#top)\n"
+        );
+        // Every rewritten link still parses as a link to the renamed page.
+        let targets: Vec<String> = Parser::new_ext(&updated, Options::all())
+            .filter_map(|event| match event {
+                Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) => {
+                    resolve_markdown_target("Home.md", &dest_url)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(targets, vec!["New Name (v2) 100%.md"; 3]);
     }
 
     #[test]

@@ -157,3 +157,21 @@ test('the learned factor matrix tolerates bad stored values', () => {
   assert.deepEqual(parseOfMatrix({ version: 1, cards: {} }), {});
   assert.deepEqual(parseOfMatrix(null), {});
 });
+
+test('cards with the same question are separate cards with separate history', () => {
+  const javascript = '- 主要用途是什么？ #card\n  - 浏览器交互\n';
+  const sql = '- 主要用途是什么？ #card\n  - 数据查询\n';
+  const cards = collectCards([{ path: 'JavaScript.md', content: javascript }, { path: 'SQL.md', content: sql }]);
+  assert.deepEqual(cards.map((item) => [item.path, item.back]), [['JavaScript.md', '- 浏览器交互'], ['SQL.md', '- 数据查询']]);
+  assert.notEqual(cards[0].id, cards[1].id);
+  const now = new Date('2026-11-01T10:00:00.000Z');
+  const reviewed = writeSchedule(javascript, cards[0], review(cards[0].schedule, 5, {}, now).schedule);
+  // Reviewing the JavaScript card leaves the SQL card due today.
+  const after = collectCards([{ path: 'JavaScript.md', content: reviewed }, { path: 'SQL.md', content: sql }]);
+  assert.deepEqual(buildQueue(after, now).map((item) => item.path), ['SQL.md']);
+  // Within one page, repeated questions get distinct keys and are written separately.
+  const twice = parseCards('Same.md', `${javascript}${javascript}`);
+  assert.notEqual(twice[0].id, twice[1].id);
+  const second = writeSchedule(`${javascript}${javascript}`, twice[1], review(twice[1].schedule, 5, {}, now).schedule);
+  assert.deepEqual(parseCards('Same.md', second).map((item) => item.schedule.repeats), [0, 1]);
+});

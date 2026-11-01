@@ -1,5 +1,5 @@
 import { useState, useEffect, useEffectEvent, useCallback, useMemo, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useNavigationType } from 'react-router-dom';
 import {
   Compass,
   Pencil, FolderOpen, PanelLeft, Bot, HardDrive, FolderInput, Cloud, UserPlus, ChevronLeft,
@@ -63,6 +63,7 @@ import { getCloudStatus, readHtmlAsset, type CloudSyncState } from '@/local-api'
 import { HtmlFileReader } from '../components/HtmlFileReader';
 import { ExcalidrawReader } from '../components/ExcalidrawDrawing';
 import { isExcalidrawPage } from '../lib/excalidraw';
+import { showsRoute, viewForRoute } from '../lib/route-view';
 import { isHtmlPath } from '../lib/okf-pages';
 import { chooseLocalSpaceDirectory, localSpaceIdentityFromPath } from '@/local-space';
 import {
@@ -180,6 +181,7 @@ export function MainLayout() {
   const desktop = isDesktopClient();
   const navigate = useNavigate();
   const location = useLocation();
+  const navigationType = useNavigationType();
 
   // Data
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -619,7 +621,7 @@ export function MainLayout() {
   };
 
   // Select a page
-  const selectPage = async (ws: Workspace, slug: string, path?: string) => {
+  const selectPage = async (ws: Workspace, slug: string, path?: string, updateUrl = true) => {
     const conceptId = path ? conceptIdFromPath(path) : conceptIdFromPath(slug);
     const repoPath = path ? conceptPath(conceptIdFromPath(path)) : conceptPath(conceptId);
     if (isReservedDocument(repoPath)) return;
@@ -629,7 +631,7 @@ export function MainLayout() {
     persistedPageBody.current = null;
     externalConflictNotified.current = false;
     setActiveView({ kind: 'page', slug: conceptId, path: repoPath, content: null });
-    navigate(pageRoute(ws.slug, conceptId), { replace: true });
+    if (updateUrl) navigate(pageRoute(ws.slug, conceptId), { replace: true });
     const setContent = (content: PageFull | null) => {
       persistedPageBody.current = content?.body ?? null;
       setActiveView(prev => prev?.kind === 'page' ? { ...prev, content } : prev);
@@ -658,6 +660,32 @@ export function MainLayout() {
       }
     }
   };
+
+  // Back/forward change only the URL; show the view it stands for without
+  // reloading the Space. The first URL is handled by the startup load above.
+  const syncViewWithRoute = useEffectEvent((pathname: string) => {
+    if (!homePageOpened.current) return;
+    const route = viewForRoute(pathname, workspaces.map((workspace) => workspace.slug));
+    if (!route || showsRoute(activeView, activeWorkspace?.slug ?? null, route)) return;
+    const ws = workspaces.find((workspace) => workspace.slug === route.workspaceSlug);
+    if (!ws) return;
+    if (route.kind === 'page') {
+      void selectPage(ws, route.conceptId, undefined, false);
+      return;
+    }
+    if (activeWorkspace?.slug !== ws.slug) {
+      setActiveWorkspace(ws);
+      void loadSpacePages(ws);
+    }
+    setActiveTab('reviews');
+    setEditingPage(false);
+    setActiveView(route);
+  });
+  useEffect(() => {
+    if (navigationType !== 'POP') return;
+    const task = window.setTimeout(() => syncViewWithRoute(location.pathname), 0);
+    return () => window.clearTimeout(task);
+  }, [location.key, location.pathname, navigationType]);
 
   // Create workspace
   const handleChooseLocalFolder = useCallback(async () => {
@@ -958,33 +986,12 @@ export function MainLayout() {
     await editPageAt('Flashcards.md', (content) => appendCardBlock(content, front, back));
   };
 
-  const saveModules = async (
-    features: SpaceFeatures,
-    nextPreferences: PersonalPreferences,
-    moves: Array<{ from: string; to: string }> = [],
-  ) => {
+  const saveModules = async (features: SpaceFeatures, nextPreferences: PersonalPreferences) => {
     const ws = activeWorkspace;
     if (!ws) return;
     const current = await readSpaceConfig(ws.slug).catch(() => null);
     await writeSpaceConfig(ws.slug, withSpaceFeatures(current, features));
     setSpaceFeatures((previous) => ({ ...previous, [ws.id]: parseSpaceFeatures(withSpaceFeatures(current, features)) }));
-    if (moves.length > 0) {
-      // One at a time: each move updates links in the pages that point to the entry.
-      let moved = 0;
-      let links = 0;
-      try {
-        for (const move of moves) {
-          links += Number(await renamePath(ws.slug, userBranch, move.from, move.to)) || 0;
-          moved += 1;
-        }
-      } finally {
-        await loadSpacePages(ws);
-        setMessage({
-          text: `Moved ${moved} of ${moves.length} journal entries${links > 0 ? ` and updated ${links} linking pages` : ''}.`,
-          type: moved === moves.length ? 'success' : 'error',
-        });
-      }
-    }
     try {
       savePersonalPreferences(window.localStorage, nextPreferences);
     } catch {
@@ -2173,7 +2180,6 @@ export function MainLayout() {
           spaceName={activeWorkspace.name}
           features={activeFeatures}
           preferences={preferences}
-          pagePaths={modulesDialogOpen ? flattenPages(spacePages[activeWorkspace.id] || []).map((page) => page.path) : []}
           onClose={() => setModulesDialogOpen(false)}
           onSave={saveModules}
           onAddStarterTemplates={addStarterTemplates}
