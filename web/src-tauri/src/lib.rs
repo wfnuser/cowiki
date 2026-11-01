@@ -430,6 +430,24 @@ fn local_create_checkpoint(
     engine.create_checkpoint(&space_slug, name.as_deref())
 }
 
+/// Called about once a minute; saves a checkpoint once the draft has been
+/// quiet for `settle_seconds`.
+#[tauri::command(async)]
+fn local_auto_checkpoint(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    settle_seconds: u64,
+) -> Result<Option<Checkpoint>, String> {
+    let _mutation = engine.lock_mutations()?;
+    engine.auto_checkpoint(&space_slug, std::time::Duration::from_secs(settle_seconds))
+}
+
+/// Personal setting: also controls the checkpoint taken when the app quits.
+#[tauri::command]
+fn local_set_auto_checkpoint(engine: State<'_, LocalEngine>, enabled: bool) {
+    engine.set_auto_checkpoint(enabled);
+}
+
 #[tauri::command]
 fn local_create_agent_change(
     engine: State<'_, LocalEngine>,
@@ -648,6 +666,8 @@ pub fn run() {
             local_keep_working_diff,
             local_history,
             local_create_checkpoint,
+            local_auto_checkpoint,
+            local_set_auto_checkpoint,
             local_create_agent_change,
             local_list_agent_changes,
             local_merge_agent_change,
@@ -699,8 +719,18 @@ pub fn run() {
             window.set_focus()?;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running CoWiki desktop client");
+        .build(tauri::generate_context!())
+        .expect("error while building CoWiki desktop client")
+        .run(|app, event| {
+            // Keep edits made since the last checkpoint when the app quits.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(engine) = app.try_state::<LocalEngine>() {
+                    if let Ok(_mutation) = engine.lock_mutations() {
+                        engine.checkpoint_unsaved_drafts();
+                    }
+                }
+            }
+        });
 }
 
 pub fn run_mcp_if_requested() -> Result<bool, String> {

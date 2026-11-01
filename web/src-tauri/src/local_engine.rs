@@ -7,10 +7,13 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use similar::{ChangeTag, TextDiff};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 use crate::knowledge_index::{self, SearchHit};
@@ -283,7 +286,21 @@ pub struct LocalEngine {
     // cannot join this protocol, so merge still performs its final no-follow
     // content CAS immediately before each replacement.
     mutation_lock: Arc<Mutex<()>>,
+    /// Per-Space draft fingerprints for automatic checkpoints (memory only).
+    auto_checkpoints: Arc<Mutex<HashMap<String, AutoCheckpointState>>>,
+    auto_checkpoint_enabled: Arc<AtomicBool>,
 }
+
+/// What the automatic checkpoint last saw in a Space's draft.
+#[derive(Debug, Clone, Copy)]
+struct AutoCheckpointState {
+    seen: u64,
+    since: Instant,
+    saved: Option<u64>,
+}
+
+pub const AUTO_CHECKPOINT_LABEL: &str = "Auto checkpoint";
+pub const QUIT_CHECKPOINT_LABEL: &str = "Checkpoint on quit";
 
 impl LocalEngine {
     pub fn open(metadata_dir: &Path) -> Result<Self, String> {
@@ -319,6 +336,8 @@ impl LocalEngine {
             search_index_checked: Arc::new(Mutex::new(false)),
             backlinks_checked: Arc::new(Mutex::new(HashSet::new())),
             mutation_lock: Arc::new(Mutex::new(())),
+            auto_checkpoints: Arc::new(Mutex::new(HashMap::new())),
+            auto_checkpoint_enabled: Arc::new(AtomicBool::new(true)),
         };
         engine.prepare_registered_spaces()?;
         Ok(engine)
@@ -716,13 +735,17 @@ impl LocalEngine {
             crate::obsidian::copy_vault(source, destination)?;
         }
         crate::obsidian::exclude_large_files_from_git(destination)?;
-        let config_path = destination.join(crate::personal::SPACE_CONFIG_PATH);
         // When resuming, the copy may already hold settings and a report; keep them.
-        if space_config.is_object() && !(resume && config_path.exists()) {
+        let keep_config = resume
+            && destination
+                .join(crate::personal::SPACE_CONFIG_PATH)
+                .exists();
+        if space_config.is_object() && !keep_config {
             crate::personal::write_space_config(destination, space_config)?;
         }
         let report = destination.join("CoWiki Import Report.md");
-        if !report_markdown.trim().is_empty() && !(resume && report.exists()) {
+        let keep_report = resume && report.exists();
+        if !report_markdown.trim().is_empty() && !keep_report {
             std::fs::write(&report, report_markdown).map_err(|error| error.to_string())?;
         }
         // Record the untouched copy first, so the later OKF normalization is a
@@ -1403,20 +1426,7 @@ impl LocalEngine {
         name: Option<&str>,
     ) -> Result<Checkpoint, String> {
         let repo = self.repo(space_slug)?;
-        let root = repo
-            .workdir()
-            .ok_or_else(|| "local Space repository has no working directory".to_string())?;
-        let mut snapshot = repo.index().map_err(|error| error.to_string())?;
-        reset_index_to_head(&repo, &mut snapshot)?;
-        for relative in draft_statuses(&repo)? {
-            let path = Path::new(&relative);
-            if root.join(path).symlink_metadata().is_ok() {
-                snapshot.add_path(path).map_err(|error| error.to_string())?;
-            } else {
-                let _ = snapshot.remove_path(path);
-            }
-        }
-        let tree_id = snapshot.write_tree().map_err(|error| error.to_string())?;
+        let tree_id = draft_tree(&repo)?;
         let tree = repo.find_tree(tree_id).map_err(|error| error.to_string())?;
         let parent_oid = checkpoint_tip(&repo)?.or_else(|| {
             repo.head()
@@ -1458,6 +1468,92 @@ impl LocalEngine {
             name: label,
             created_at: signature.when().seconds(),
         })
+    }
+
+    pub fn set_auto_checkpoint(&self, enabled: bool) {
+        self.auto_checkpoint_enabled
+            .store(enabled, Ordering::Relaxed);
+    }
+
+    /// Save a checkpoint once the draft has stopped changing for `settle`.
+    /// Call it periodically; it only checks file status until then.
+    pub fn auto_checkpoint(
+        &self,
+        space_slug: &str,
+        settle: Duration,
+    ) -> Result<Option<Checkpoint>, String> {
+        self.auto_checkpoint_at(space_slug, settle, Instant::now())
+    }
+
+    pub(crate) fn auto_checkpoint_at(
+        &self,
+        space_slug: &str,
+        settle: Duration,
+        now: Instant,
+    ) -> Result<Option<Checkpoint>, String> {
+        if !self.auto_checkpoint_enabled.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
+        let repo = self.repo(space_slug)?;
+        let fingerprint = draft_fingerprint(&repo)?;
+        {
+            let mut states = self
+                .auto_checkpoints
+                .lock()
+                .map_err(|_| "automatic checkpoint state is unavailable".to_string())?;
+            let Some(fingerprint) = fingerprint else {
+                states.remove(space_slug);
+                return Ok(None);
+            };
+            let state = states
+                .entry(space_slug.to_string())
+                .or_insert(AutoCheckpointState {
+                    seen: fingerprint,
+                    since: now,
+                    saved: None,
+                });
+            if state.seen != fingerprint {
+                state.seen = fingerprint;
+                state.since = now;
+                return Ok(None);
+            }
+            if state.saved == Some(fingerprint) || now.duration_since(state.since) < settle {
+                return Ok(None);
+            }
+            state.saved = Some(fingerprint);
+        }
+        if draft_matches_latest_checkpoint(&repo)? {
+            return Ok(None);
+        }
+        self.create_checkpoint(space_slug, Some(AUTO_CHECKPOINT_LABEL))
+            .map(Some)
+    }
+
+    /// Checkpoint every Space whose draft differs from its latest
+    /// checkpoint; used when the app quits. Failures are skipped.
+    pub fn checkpoint_unsaved_drafts(&self) -> Vec<String> {
+        if !self.auto_checkpoint_enabled.load(Ordering::Relaxed) {
+            return Vec::new();
+        }
+        let Ok(spaces) = self.list_spaces() else {
+            return Vec::new();
+        };
+        let mut saved = Vec::new();
+        for space in spaces {
+            let Ok(repo) = self.repo(&space.slug) else {
+                continue;
+            };
+            let unsaved = matches!(draft_fingerprint(&repo), Ok(Some(_)))
+                && matches!(draft_matches_latest_checkpoint(&repo), Ok(false));
+            if unsaved
+                && self
+                    .create_checkpoint(&space.slug, Some(QUIT_CHECKPOINT_LABEL))
+                    .is_ok()
+            {
+                saved.push(space.slug);
+            }
+        }
+        saved
     }
 
     pub fn submit(&self, space_slug: &str, paths: &[String]) -> Result<SubmitResult, String> {
@@ -1681,6 +1777,72 @@ fn draft_statuses(repo: &Repository) -> Result<Vec<String>, String> {
         .filter_map(|entry| entry.path().map(str::to_string))
         .filter(|relative| safe_repo_path(relative).is_ok())
         .collect())
+}
+
+/// The tree a checkpoint of the current draft would record.
+fn draft_tree(repo: &Repository) -> Result<Oid, String> {
+    let root = repo
+        .workdir()
+        .ok_or_else(|| "local Space repository has no working directory".to_string())?;
+    let mut snapshot = repo.index().map_err(|error| error.to_string())?;
+    reset_index_to_head(repo, &mut snapshot)?;
+    for relative in draft_statuses(repo)? {
+        let path = Path::new(&relative);
+        if root.join(path).symlink_metadata().is_ok() {
+            snapshot.add_path(path).map_err(|error| error.to_string())?;
+        } else {
+            let _ = snapshot.remove_path(path);
+        }
+    }
+    snapshot.write_tree().map_err(|error| error.to_string())
+}
+
+/// Whether the draft is exactly what the latest checkpoint (or, without
+/// one, the last commit) already records.
+fn draft_matches_latest_checkpoint(repo: &Repository) -> Result<bool, String> {
+    let baseline = checkpoint_tip(repo)?.or_else(|| {
+        repo.head()
+            .ok()
+            .and_then(|head| head.peel_to_commit().ok())
+            .map(|commit| commit.id())
+    });
+    let Some(baseline) = baseline else {
+        return Ok(false);
+    };
+    let tree = repo
+        .find_commit(baseline)
+        .map_err(|error| error.to_string())?
+        .tree_id();
+    Ok(draft_tree(repo)? == tree)
+}
+
+/// A cheap fingerprint of the draft (changed paths with their sizes and
+/// modification times), or None when nothing differs from the last commit.
+fn draft_fingerprint(repo: &Repository) -> Result<Option<u64>, String> {
+    let root = repo
+        .workdir()
+        .ok_or_else(|| "local Space repository has no working directory".to_string())?;
+    let paths = draft_statuses(repo)?;
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for relative in &paths {
+        relative.hash(&mut hasher);
+        match root.join(relative).symlink_metadata() {
+            Ok(metadata) => {
+                metadata.len().hash(&mut hasher);
+                metadata
+                    .modified()
+                    .ok()
+                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|elapsed| elapsed.as_nanos())
+                    .hash(&mut hasher);
+            }
+            Err(_) => "deleted".hash(&mut hasher),
+        }
+    }
+    Ok(Some(hasher.finish()))
 }
 
 fn draft_changed_files(repo: &Repository) -> Result<usize, String> {
@@ -5461,6 +5623,99 @@ mod tests {
             std::fs::read_to_string(folder.join("page.md")).unwrap(),
             page
         );
+    }
+
+    #[test]
+    fn automatic_checkpoints_wait_for_the_draft_to_settle() {
+        use super::{AUTO_CHECKPOINT_LABEL, QUIT_CHECKPOINT_LABEL};
+        use std::time::{Duration, Instant};
+
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        let settle = Duration::from_secs(300);
+        let start = Instant::now();
+        let at = |seconds: u64| start + Duration::from_secs(seconds);
+        let checkpoints = || engine.history(&space.slug).unwrap().checkpoints;
+        let existing = checkpoints().len();
+
+        // Nothing changed: nothing to save.
+        assert!(engine
+            .auto_checkpoint_at(&space.slug, settle, at(0))
+            .unwrap()
+            .is_none());
+        engine
+            .write_page(&space.slug, "idea", "# Idea\n\nFirst\n")
+            .unwrap();
+        assert!(engine
+            .auto_checkpoint_at(&space.slug, settle, at(10))
+            .unwrap()
+            .is_none());
+        // Still editing: each change restarts the wait.
+        assert!(engine
+            .auto_checkpoint_at(&space.slug, settle, at(200))
+            .unwrap()
+            .is_none());
+        std::thread::sleep(Duration::from_millis(20));
+        engine
+            .write_page(&space.slug, "idea", "# Idea\n\nSecond\n")
+            .unwrap();
+        assert!(engine
+            .auto_checkpoint_at(&space.slug, settle, at(320))
+            .unwrap()
+            .is_none());
+        assert!(engine
+            .auto_checkpoint_at(&space.slug, settle, at(500))
+            .unwrap()
+            .is_none());
+        // Five quiet minutes after the last change: one checkpoint.
+        let saved = engine
+            .auto_checkpoint_at(&space.slug, settle, at(620))
+            .unwrap()
+            .expect("checkpoint after the draft settled");
+        assert_eq!(saved.name, AUTO_CHECKPOINT_LABEL);
+        assert_eq!(checkpoints().len(), existing + 1);
+        assert_eq!(
+            engine
+                .history(&space.slug)
+                .unwrap()
+                .current_draft
+                .changed_files,
+            0
+        );
+        // No new changes: no duplicate, even much later or after a restart.
+        assert!(engine
+            .auto_checkpoint_at(&space.slug, settle, at(2000))
+            .unwrap()
+            .is_none());
+        let restarted = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        assert!(restarted
+            .auto_checkpoint_at(&space.slug, settle, at(0))
+            .unwrap()
+            .is_none());
+        assert!(restarted
+            .auto_checkpoint_at(&space.slug, settle, at(400))
+            .unwrap()
+            .is_none());
+        assert!(restarted.checkpoint_unsaved_drafts().is_empty());
+        assert_eq!(checkpoints().len(), existing + 1);
+
+        // Quitting saves whatever has not settled yet, unless turned off.
+        engine
+            .write_page(&space.slug, "idea", "# Idea\n\nThird\n")
+            .unwrap();
+        engine.set_auto_checkpoint(false);
+        assert!(engine.checkpoint_unsaved_drafts().is_empty());
+        assert!(engine
+            .auto_checkpoint_at(&space.slug, Duration::ZERO, at(3000))
+            .unwrap()
+            .is_none());
+        engine.set_auto_checkpoint(true);
+        assert_eq!(engine.checkpoint_unsaved_drafts(), vec![space.slug.clone()]);
+        assert_eq!(checkpoints()[0].name, QUIT_CHECKPOINT_LABEL);
+        assert_eq!(checkpoints().len(), existing + 2);
     }
 
     #[test]

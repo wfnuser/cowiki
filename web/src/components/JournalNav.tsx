@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 
 import { C, shadows } from '@/lib/design';
-import { addDays, dateKey, formatDate, fromDateKey, monthGrid } from '@/lib/journal';
+import { adjacentEntry, dateKey, formatDate, fromDateKey, monthGrid } from '@/lib/journal';
 
 interface JournalNavProps {
   /** Day of the journal entry being shown. */
@@ -46,10 +46,23 @@ export function JournalNav({ date, entryKeys, onOpenDate, style }: JournalNavPro
     setOpen(false);
     onOpenDate(target);
   };
+  // Like Obsidian, previous/next step through existing entries instead of
+  // creating an empty page for every day passed; the calendar can create one.
+  const previous = adjacentEntry(entryKeys, dateKey(date), -1);
+  const next = adjacentEntry(entryKeys, dateKey(date), 1);
+  const previousDate = previous ? fromDateKey(previous) : null;
+  const nextDate = next ? fromDateKey(next) : null;
 
   return (
     <div ref={wrapper} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 2, ...style }}>
-      <button type="button" onClick={() => go(addDays(date, -1))} title="Previous day" aria-label="Previous day" style={iconButton}>
+      <button
+        type="button"
+        onClick={() => { if (previousDate) go(previousDate); }}
+        disabled={!previousDate}
+        title={previous ? `Previous entry (${previous})` : 'No earlier entry'}
+        aria-label="Previous entry"
+        style={{ ...iconButton, opacity: previousDate ? 1 : 0.35, cursor: previousDate ? 'pointer' : 'default' }}
+      >
         <ChevronLeft size={14} />
       </button>
       <button
@@ -63,7 +76,14 @@ export function JournalNav({ date, entryKeys, onOpenDate, style }: JournalNavPro
         <CalendarDays size={13} color={C.accent} />
         {formatDate(date, 'ddd, MMM D')}
       </button>
-      <button type="button" onClick={() => go(addDays(date, 1))} title="Next day" aria-label="Next day" style={iconButton}>
+      <button
+        type="button"
+        onClick={() => { if (nextDate) go(nextDate); }}
+        disabled={!nextDate}
+        title={next ? `Next entry (${next})` : 'No later entry'}
+        aria-label="Next entry"
+        style={{ ...iconButton, opacity: nextDate ? 1 : 0.35, cursor: nextDate ? 'pointer' : 'default' }}
+      >
         <ChevronRight size={14} />
       </button>
       {!isToday && (

@@ -103,7 +103,7 @@ import { JournalNav } from '../components/JournalNav';
 import { SpaceFeaturesDialog } from '../components/SpaceFeaturesDialog';
 import { ObsidianImportDialog } from '../components/ObsidianImportDialog';
 import { ObsidianReaderContext, withObsidianReader, type ReaderCallbacks } from '../components/ObsidianReader';
-import { readAsset, readSpaceConfig, writeSpaceConfig } from '@/local-api';
+import { autoCheckpoint, readAsset, readSpaceConfig, setAutoCheckpoint, writeSpaceConfig } from '@/local-api';
 import {
   DEFAULT_SPACE_FEATURES,
   loadPersonalPreferences,
@@ -121,6 +121,8 @@ import { obsidianToReaderMarkdown, renderedLineOffset } from '@/lib/obsidian-mar
 import { pageFileName } from '@/lib/page-names';
 import { STARTER_TEMPLATES, newPageBody, starterTemplatePath, templatePagePaths } from '@/lib/page-templates';
 
+/** An automatic checkpoint waits until the draft has been quiet this long. */
+const AUTO_CHECKPOINT_SETTLE_SECONDS = 5 * 60;
 const LAST_SPACE_STORAGE_KEY = 'cowiki.lastSpace';
 const READER_COMPONENTS = withObsidianReader(commentMarkdownComponents);
 
@@ -204,6 +206,8 @@ export function MainLayout() {
   const [activeTab, setActiveTab] = useState<NavTab>('wiki');
   const [spaceFeatures, setSpaceFeatures] = useState<Record<string, SpaceFeatures>>({});
   const [preferences, setPreferences] = useState<PersonalPreferences>(safePreferences);
+  // Bumped when an automatic checkpoint lands, so an open History view reloads.
+  const [checkpointTick, setCheckpointTick] = useState(0);
   const [modulesDialogOpen, setModulesDialogOpen] = useState(false);
   const [obsidianImportOpen, setObsidianImportOpen] = useState(false);
   const assetUrls = useRef(new Map<string, string>());
@@ -516,6 +520,29 @@ export function MainLayout() {
     const task = window.setTimeout(() => loadWorkspacesOnce(), 0);
     return () => window.clearTimeout(task);
   }, [auth]);
+
+  // Automatic checkpoints for local Spaces: ask the engine once a minute; it
+  // saves after five quiet minutes, and again when the app quits.
+  const localSpaceSlugs = desktop ? workspaces.filter((ws) => !!ws.localPath).map((ws) => ws.slug).join('\n') : '';
+  const onAutoCheckpointTick = useEffectEvent((slugs: string[]) => {
+    for (const slug of slugs) {
+      autoCheckpoint(slug, AUTO_CHECKPOINT_SETTLE_SECONDS)
+        .then((saved) => {
+          if (saved && activeWorkspace?.slug === slug) setCheckpointTick((tick) => tick + 1);
+        })
+        .catch(() => {
+          // A Space that cannot be read right now is retried on the next tick.
+        });
+    }
+  });
+  useEffect(() => {
+    if (!desktop) return;
+    setAutoCheckpoint(preferences.autoCheckpoint).catch(() => {});
+    if (!preferences.autoCheckpoint || !localSpaceSlugs) return;
+    const slugs = localSpaceSlugs.split('\n');
+    const timer = window.setInterval(() => onAutoCheckpointTick(slugs), 60_000);
+    return () => window.clearInterval(timer);
+  }, [desktop, preferences.autoCheckpoint, localSpaceSlugs]);
 
   // Load review count when workspace changes
   useEffect(() => {
@@ -1796,6 +1823,7 @@ export function MainLayout() {
               /* Space history */
               ) : activeView?.kind === 'history' && activeWorkspace ? (
                 <HistoryView
+                  key={`${activeWorkspace.slug}:${checkpointTick}`}
                   workspaceSlug={activeWorkspace.slug}
                   local={desktop && !!activeWorkspace.localPath}
                 />

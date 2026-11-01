@@ -223,6 +223,16 @@ export function journalEntryKeys(config: JournalConfig, paths: Iterable<string>)
   return [...keys].sort();
 }
 
+/** The nearest existing entry before or after `current` (keys are `YYYY-MM-DD`). */
+export function adjacentEntry(keys: Iterable<string>, current: string, direction: -1 | 1): string | null {
+  let best: string | null = null;
+  for (const key of keys) {
+    if (direction < 0 ? key >= current : key <= current) continue;
+    if (best === null || (direction < 0 ? key > best : key < best)) best = key;
+  }
+  return best;
+}
+
 /**
  * A template's own `title:` (for example "Daily" on an imported template page)
  * must not become every new page's title: replace it with the page's title.

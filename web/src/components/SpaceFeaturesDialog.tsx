@@ -195,6 +195,20 @@ export function SpaceFeaturesDialog({
             />
             Open today’s journal when CoWiki starts
           </label>
+          <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 13, color: C.ink, cursor: 'pointer', marginTop: 8 }}>
+            <input
+              type="checkbox"
+              checked={personal.autoCheckpoint}
+              onChange={(event) => setPersonal((previous) => ({ ...previous, autoCheckpoint: event.target.checked }))}
+              style={{ marginTop: 3 }}
+            />
+            <span>
+              Save checkpoints automatically
+              <span style={{ display: 'block', fontSize: 12, color: C.muted }}>
+                After 5 minutes without changes, and when CoWiki quits. Checkpoints are kept in History; they never commit or share anything.
+              </span>
+            </span>
+          </label>
         </section>
 
         {error && <p role="alert" style={{ color: C.red, fontSize: 12.5, margin: 0 }}>{error}</p>}

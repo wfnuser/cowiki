@@ -106,6 +106,8 @@ export function withSpaceFeatures(config: unknown, features: SpaceFeatures): Rec
  */
 export interface PersonalPreferences {
   openJournalOnStartup: boolean;
+  /** Save a checkpoint after a quiet spell and when the app quits (desktop). */
+  autoCheckpoint: boolean;
   hiddenModules: Record<string, ModuleId[]>;
 }
 
@@ -118,6 +120,7 @@ export const PERSONAL_PREFERENCES_KEY = 'cowiki.personal.preferences';
 
 export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
   openJournalOnStartup: false,
+  autoCheckpoint: true,
   hiddenModules: {},
 };
 
@@ -135,6 +138,7 @@ export function loadPersonalPreferences(storage: PreferenceStorage): PersonalPre
     }
     return {
       openJournalOnStartup: value.openJournalOnStartup === true,
+      autoCheckpoint: value.autoCheckpoint !== false,
       hiddenModules: hidden,
     };
   } catch {

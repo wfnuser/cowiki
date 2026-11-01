@@ -15,7 +15,7 @@ import {
   parseDate,
   renderTemplate,
 } from '../src/lib/journal.ts';
-import { withTitle } from '../src/lib/journal.ts';
+import { adjacentEntry, withTitle } from '../src/lib/journal.ts';
 
 const halloween = new Date(2026, 9, 31);
 
@@ -101,4 +101,13 @@ test('reads Obsidian daily-notes and periodic-notes settings', () => {
 test('a journal template never keeps its own title', () => {
   assert.equal(withTitle('---\ntype: Note\ntitle: Daily\n---\n\n# Day\n', '2026-11-01'), '---\ntype: Note\ntitle: "2026-11-01"\n---\n\n# Day\n');
   assert.equal(withTitle('# No frontmatter\n', 'x'), '# No frontmatter\n');
+});
+
+test('previous/next step through existing entries only', () => {
+  const keys = ['2026-03-31', '2026-04-06', '2026-04-14', '2026-11-01'];
+  assert.equal(adjacentEntry(keys, '2026-04-14', -1), '2026-04-06');
+  assert.equal(adjacentEntry(keys, '2026-04-14', 1), '2026-11-01');
+  assert.equal(adjacentEntry(keys, '2026-04-10', 1), '2026-04-14');
+  assert.equal(adjacentEntry(keys, '2026-03-31', -1), null);
+  assert.equal(adjacentEntry(keys, '2026-11-01', 1), null);
 });

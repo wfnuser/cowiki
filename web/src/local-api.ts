@@ -130,6 +130,16 @@ export function createCheckpoint(spaceSlug: string, name?: string): Promise<Chec
   return invoke('local_create_checkpoint', { spaceSlug, name });
 }
 
+/** Saves a checkpoint once the draft has been quiet for `settleSeconds`; null otherwise. */
+export function autoCheckpoint(spaceSlug: string, settleSeconds: number): Promise<Checkpoint | null> {
+  return invoke('local_auto_checkpoint', { spaceSlug, settleSeconds });
+}
+
+/** Turn automatic checkpoints (including the one on quit) on or off for this device. */
+export function setAutoCheckpoint(enabled: boolean): Promise<void> {
+  return invoke('local_set_auto_checkpoint', { enabled });
+}
+
 export function createAgentChange(spaceSlug: string, title: string, agentName = title): Promise<AgentChange> {
   return invoke('local_create_agent_change', { spaceSlug, title, agentName });
 }
