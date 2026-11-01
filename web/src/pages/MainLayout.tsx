@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useEffectEvent, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Compass,
@@ -441,7 +441,10 @@ export function MainLayout() {
     const firstLoad = !homePageOpened.current;
     homePageOpened.current = true;
 
-    const reviewLocation = parseReviewRoute(location.pathname, ws.map((workspace) => workspace.slug));
+    // Read the URL at call time: depending on location.pathname re-ran this
+    // whole startup load (Space list, full page tree, page) on every click.
+    const pathname = window.location.pathname;
+    const reviewLocation = parseReviewRoute(pathname, ws.map((workspace) => workspace.slug));
     if (reviewLocation) {
       const targetWs = ws.find((workspace) => workspace.slug === reviewLocation.workspaceSlug);
       if (targetWs) {
@@ -468,7 +471,7 @@ export function MainLayout() {
 
     // Restore a Concept from its stable bundle-relative ID:
     // /:workspaceSlug/:folder/:concept (the .md suffix is not exposed).
-    const pathParts = location.pathname.split('/').filter(Boolean);
+    const pathParts = pathname.split('/').filter(Boolean);
     if (pathParts.length >= 2) {
       const [wsSlug, ...pageParts] = pathParts;
       const conceptId = pageParts.map((part) => decodeURIComponent(part)).join('/');
@@ -501,13 +504,16 @@ export function MainLayout() {
         }
       }
     }
-  }, [auth, desktop, loadSpacePages, loadSpaceSources, location.pathname, navigate, userBranch]);
+  }, [auth, desktop, loadSpacePages, loadSpaceSources, navigate, userBranch]);
 
+  // Load once per sign-in. `navigate` changes identity on every route change,
+  // so depending on loadWorkspaces re-ran the whole startup load per click.
+  const loadWorkspacesOnce = useEffectEvent(() => { void loadWorkspaces(); });
   useEffect(() => {
     if (!auth) return;
-    const task = window.setTimeout(() => { void loadWorkspaces(); }, 0);
+    const task = window.setTimeout(() => loadWorkspacesOnce(), 0);
     return () => window.clearTimeout(task);
-  }, [auth, loadWorkspaces]);
+  }, [auth]);
 
   // Load review count when workspace changes
   useEffect(() => {
