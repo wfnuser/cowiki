@@ -27,8 +27,16 @@ hidden and reserved document paths. Compatible colon-bearing filenames/date
 formats remain usable. Native missing-file and already-exists errors are
 recognized narrowly; other read/write errors surface to the user. Switching
 Spaces or changing settings invalidates pending actions before their next
-operation or navigation. An already issued create-only operation cannot be
+operation or navigation. Operations also retain their activation epoch: leaving
+and returning to the same cached Space cannot revive an old action, while
+ordinary rerenders do not cancel it. The same guard protects the asynchronous
+read inside ordinary page opening. An already issued create-only operation cannot be
 undone, but cannot overwrite an existing note or navigate the new Space.
+
+Root startup is bound to the first visible activation even before boot navigation
+is complete. A terminal configuration failure or intentional departure consumes
+that startup opportunity. Repairing/reloading settings or choosing another Space
+does not re-arm it; an explicit Today command remains available after recovery.
 
 ## Adding another built-in
 

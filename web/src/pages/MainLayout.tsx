@@ -115,7 +115,7 @@ import {
 import { dateKey } from '@/lib/journal';
 import { ensureDatePage } from '@/lib/date-page';
 import { BUILTIN_PLUGINS } from '@/plugins/builtins';
-import { createPluginHost, type PluginHostOptions, type PluginSnapshot } from '@/plugins/host';
+import { createPluginHost, createSpaceActivationTracker, type PluginHostOptions, type PluginSnapshot } from '@/plugins/host';
 import { createSpacePageAdapter, PluginUnavailableError } from '@/plugins/space-pages';
 import { applyTaskStatus, applyTaskToggle, insertTaskLine, type BoardStatus, type TaskItem } from '@/lib/tasks';
 import { flattenPages, parseWikilink, resolveWikilinkPath } from '@/lib/wikilinks';
@@ -216,14 +216,15 @@ export function MainLayout() {
   const [obsidianImportOpen, setObsidianImportOpen] = useState(false);
   const assetUrls = useRef(new Map<string, string>());
   const initialPathname = useRef(location.pathname);
-  const pluginSnapshot = useRef<PluginSnapshot>({ space: null, features: null, preferences });
+  const [spaceActivation] = useState(createSpaceActivationTracker);
+  const pluginSnapshot = useRef<PluginSnapshot>({ space: null, activation: 0, readiness: 'pending', features: null, preferences });
   const pluginPages = useRef<PluginHostOptions['pages'] | null>(null);
   const [pluginHost] = useState(() => createPluginHost({
     definitions: BUILTIN_PLUGINS,
     getSnapshot: () => pluginSnapshot.current,
-    pages: (space, action) => {
+    pages: (space, action, isCurrent) => {
       if (!pluginPages.current) throw new PluginUnavailableError();
-      return pluginPages.current(space, action);
+      return pluginPages.current(space, action, isCurrent);
     },
   }));
   // loadWorkspaces re-runs on every navigation; opening the first page at '/'
@@ -646,9 +647,12 @@ export function MainLayout() {
   // Switch workspace via rail
   const handleSelectWorkspace = async (ws: Workspace) => {
     if (activeWorkspace?.id === ws.id) return;
+    pluginHost.cancelLaunch();
     // Invalidate a pending plugin operation immediately, not after React paints.
     pluginSnapshot.current = { ...pluginSnapshot.current,
-      space: { id: ws.id, local: desktop && !!ws.localPath }, features: spaceFeatures[ws.id] ?? null };
+      space: { id: ws.id, local: desktop && !!ws.localPath }, activation: spaceActivation(ws.id),
+      readiness: featureLoadErrors[ws.id] ? 'failed' : spaceFeatures[ws.id] ? 'ready' : 'pending',
+      features: spaceFeatures[ws.id] ?? null };
     setActiveWorkspace(ws);
     setActiveTab('wiki');
     // Resolve navigation from the loaded tree, not the pre-request state snapshot.
@@ -811,12 +815,15 @@ export function MainLayout() {
     try {
       return await readSpaceConfig(ws.slug);
     } catch (error) {
-      if (pluginSnapshot.current.space?.id === ws.id) pluginSnapshot.current = { ...pluginSnapshot.current, features: null };
+      if (pluginSnapshot.current.space?.id === ws.id) {
+        pluginHost.cancelLaunch();
+        pluginSnapshot.current = { ...pluginSnapshot.current, readiness: 'failed', features: null };
+      }
       setSpaceFeatures((previous) => { const next = { ...previous }; delete next[ws.id]; return next; });
       setFeatureLoadErrors((previous) => ({ ...previous, [ws.id]: error instanceof Error ? error.message : String(error) }));
       throw error;
     }
-  }, []);
+  }, [pluginHost]);
 
   const loadSpaceFeatures = useCallback(async (ws: Workspace): Promise<SpaceFeatures> => {
     if (!desktop || !ws.localPath) return DEFAULT_SPACE_FEATURES;
@@ -868,14 +875,14 @@ export function MainLayout() {
   useLayoutEffect(() => {
     pluginSnapshot.current = {
       space: activeWorkspace ? { id: activeWorkspace.id, local: isLocalSpace(activeWorkspace) } : null,
+      activation: spaceActivation(activeWorkspace?.id ?? null),
+      readiness: activeWorkspace && featureLoadErrors[activeWorkspace.id] ? 'failed' : activeFeaturesReady ? 'ready' : 'pending',
       features: activeWorkspace ? spaceFeatures[activeWorkspace.id] ?? null : null,
       preferences,
     };
-    pluginPages.current = (space, action) => {
+    pluginPages.current = (space, action, isCurrent) => {
       const ws = workspaces.find((workspace) => workspace.id === space.id);
       if (!ws) throw new PluginUnavailableError();
-      const features = pluginSnapshot.current.features;
-      const isCurrent = () => pluginSnapshot.current.space?.id === space.id && pluginSnapshot.current.features === features;
       return pagePorts(ws, isCurrent, action.id);
     };
   });
@@ -884,7 +891,8 @@ export function MainLayout() {
   // current snapshot in the host rather than trusting a stale sidebar button.
   const pluginActions = pluginHost.actions({
     space: activeWorkspace ? { id: activeWorkspace.id, local: isLocalSpace(activeWorkspace) } : null,
-    features: activeFeaturesReady ? activeFeatures : null, preferences,
+    readiness: activeWorkspace && featureLoadErrors[activeWorkspace.id] ? 'failed' : activeFeaturesReady ? 'ready' : 'pending',
+    features: activeFeaturesReady ? activeFeatures : null,
   });
 
   const dispatchPluginAction = async (id: string) => {
@@ -895,7 +903,7 @@ export function MainLayout() {
   useEffect(() => {
     void pluginHost.launch({ workspacesLoaded: workspacesLoaded && launchNavigationReady, initialPathname: initialPathname.current })
       .catch((error) => setMessage({ text: error instanceof Error ? error.message : String(error), type: 'error' }));
-  }, [pluginHost, workspacesLoaded, launchNavigationReady, activeWorkspace, spaceFeatures, preferences]);
+  }, [pluginHost, workspacesLoaded, launchNavigationReady, activeWorkspace, spaceFeatures, featureLoadErrors, preferences]);
 
   /** Navigate like Obsidian: resolve by name anywhere, create the note if missing. */
   const openWikilink = async (raw: string) => {

@@ -3,7 +3,7 @@ import test, { type TestContext } from 'node:test';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { createPluginHost, type BuiltinPlugin, type PluginSnapshot } from '../src/plugins/host.ts';
+import { createPluginHost, createSpaceActivationTracker, type BuiltinPlugin, type PluginSnapshot } from '../src/plugins/host.ts';
 import { dailyNotesPlugin } from '../src/plugins/daily-notes.ts';
 import { createSpacePageAdapter, type SpacePagePorts } from '../src/plugins/space-pages.ts';
 import { parseSpaceFeatures, saveSpaceFeatures, DEFAULT_SPACE_FEATURES, type SpaceFeatures } from '../src/lib/space-features.ts';
@@ -11,7 +11,8 @@ import { ensureDatePage } from '../src/lib/date-page.ts';
 
 const now = () => new Date(2026, 10, 2, 9, 15);
 function snapshot(features: SpaceFeatures | null = structuredClone(DEFAULT_SPACE_FEATURES)): PluginSnapshot {
-  return { space: { id: 'local-a', local: true }, features, preferences: { openJournalOnStartup: false, autoCheckpoint: true } };
+  return { space: { id: 'local-a', local: true }, activation: 1, readiness: features ? 'ready' : 'pending', features,
+    preferences: { openJournalOnStartup: false, autoCheckpoint: true } };
 }
 
 async function fixture(t: TestContext) {
@@ -175,6 +176,98 @@ test('pending Today cannot create or open after a Space switch or disabling the 
     assert.deepEqual(f.opened, []);
     await assert.rejects(readFile(join(f.root, 'journal/2026-11-02.md')), { code: 'ENOENT' });
   }
+});
+
+test('a held Today stays cancelled across A to B to A with the same cached features', async (t) => {
+  const f = await fixture(t);
+  const activation = createSpaceActivationTracker();
+  f.current = { ...f.current, activation: activation('local-a') };
+  const first = f.current;
+  const gate = Promise.withResolvers<void>();
+  let started = false;
+  const read = f.ports.read;
+  f.ports.read = async (path) => { started = true; await gate.promise; return read(path); };
+  const action = f.host.dispatch('journal:today');
+  assert.equal(started, true);
+  f.current = { ...first, activation: activation('local-b'), space: { id: 'local-b', local: true } };
+  f.current = { ...first, activation: activation('local-a') };
+  assert.equal(f.current.features, first.features, 'exercise the real cached-feature ABA case');
+  gate.resolve();
+  assert.equal(await action, false);
+  assert.deepEqual(f.opened, []);
+  await assert.rejects(readFile(join(f.root, 'journal/2026-11-02.md')), { code: 'ENOENT' });
+  assert.equal(await f.host.dispatch('journal:today'), true, 'explicit Today in the new activation still works');
+});
+
+test('ordinary rerenders in one activation do not cancel a held Today', async (t) => {
+  const f = await fixture(t);
+  const activation = createSpaceActivationTracker();
+  f.current = { ...f.current, activation: activation('local-a') };
+  const gate = Promise.withResolvers<void>();
+  const read = f.ports.read;
+  f.ports.read = async (path) => { await gate.promise; return read(path); };
+  const action = f.host.dispatch('journal:today');
+  for (let render = 0; render < 4; render++) f.current = { ...f.current, activation: activation('local-a') };
+  gate.resolve();
+  assert.equal(await action, true);
+  assert.deepEqual(f.opened, ['journal/2026-11-02.md']);
+});
+
+test('the inner ordinary page open receives the same activation lifetime guard', async (t) => {
+  const f = await fixture(t);
+  const first = f.current;
+  const gate = Promise.withResolvers<void>();
+  const started = Promise.withResolvers<void>();
+  const host = createPluginHost({ definitions: [dailyNotesPlugin], getSnapshot: () => f.current, now,
+    pages: (_space, _action, isCurrent = () => true) => ({ ...f.ports, read: async () => '# Existing', open: async (path) => {
+      started.resolve();
+      await gate.promise;
+      if (isCurrent()) f.opened.push(path);
+    } }) });
+  const action = host.dispatch('journal:today');
+  await started.promise;
+  f.current = { ...first, activation: 2, space: { id: 'local-b', local: true } };
+  f.current = { ...first, activation: 3 };
+  gate.resolve();
+  assert.equal(await action, false);
+  assert.deepEqual(f.opened, [], 'a stale read inside ordinary open must not commit page content');
+});
+
+test('a terminal first configuration failure consumes root startup even before boot navigation is ready', async (t) => {
+  for (const initiallyReady of [false, true]) {
+    const f = await fixture(t);
+    const first = { ...snapshot(null), readiness: 'failed' as const, preferences: { openJournalOnStartup: true, autoCheckpoint: true } };
+    f.current = first;
+    await f.host.launch({ workspacesLoaded: initiallyReady, initialPathname: '/' });
+    f.current = { ...first, readiness: 'ready', features: structuredClone(DEFAULT_SPACE_FEATURES) };
+    await f.host.launch({ workspacesLoaded: true, initialPathname: '/' });
+    assert.equal(f.calls, 0, 'repair/reload is not another application launch');
+    assert.equal(await f.host.dispatch('journal:today'), true);
+    assert.deepEqual(f.opened, ['journal/2026-11-02.md']);
+  }
+});
+
+test('startup is bound to the first visible activation while its configuration or boot navigation is pending', async (t) => {
+  for (const readiness of ['pending', 'failed'] as const) {
+    for (const initiallyReady of [false, true]) {
+      const f = await fixture(t);
+      const first = { ...snapshot(null), readiness, preferences: { openJournalOnStartup: true, autoCheckpoint: true } };
+      f.current = first;
+      await f.host.launch({ workspacesLoaded: initiallyReady, initialPathname: '/' });
+      f.current = { ...snapshot(), activation: 2, space: { id: 'local-b', local: true }, preferences: first.preferences };
+      await f.host.launch({ workspacesLoaded: true, initialPathname: '/' });
+      assert.equal(f.calls, 0, 'choosing ready B must not transfer startup from A');
+      assert.equal(await f.host.dispatch('journal:today'), true, 'B still permits explicit Today');
+    }
+  }
+});
+
+test('an intentional departure consumes launch before the first launch effect has observed a Space', async (t) => {
+  const f = await fixture(t);
+  f.host.cancelLaunch();
+  f.current.preferences.openJournalOnStartup = true;
+  await f.host.launch({ workspacesLoaded: true, initialPathname: '/' });
+  assert.equal(f.calls, 0);
 });
 
 test('launch waits for configuration and only honors explicit root-start preference once', async (t) => {
