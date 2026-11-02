@@ -662,7 +662,7 @@ fn index_metadata(path: &Path) -> io::Result<Option<std::fs::Metadata>> {
 
 fn open_existing_index(path: &Path, writable: bool) -> io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
-    options.read(!writable).write(writable);
+    options.read(true).write(writable);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -689,29 +689,100 @@ fn read_index(path: &Path) -> io::Result<Option<String>> {
     Ok(Some(text))
 }
 
-// Publish the completed sibling in one rename: an interrupted write cannot
-// truncate the old file's handwritten sections. This is atomic per listing.
-fn replace_index(path: &Path, text: &str) -> io::Result<()> {
-    let metadata = index_metadata(path)?;
-    if metadata.is_some() {
-        open_existing_index(path, true)?; // respect read-only files; never truncate
+#[cfg(target_os = "macos")]
+fn copy_index_security(source: &std::fs::File, target: &std::fs::File) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    use std::os::macos::fs::MetadataExt;
+
+    // Darwin copyfile merges an ACL with the sibling's inherited entries.
+    // Instead set the *exact* extended ACL, including the no-ACL case.
+    const ACL_TYPE_EXTENDED: libc::c_int = 0x100;
+    unsafe extern "C" {
+        fn acl_get_fd_np(fd: libc::c_int, ty: libc::c_int) -> *mut libc::c_void;
+        fn acl_init(count: libc::c_int) -> *mut libc::c_void;
+        fn acl_set_fd_np(fd: libc::c_int, acl: *mut libc::c_void, ty: libc::c_int) -> libc::c_int;
+        fn acl_free(acl: *mut libc::c_void) -> libc::c_int;
+    }
+    // SAFETY: both FDs are live regular files. The Darwin ACL object is freed
+    // exactly once after acl_set_fd_np; neither operation consumes it.
+    unsafe {
+        let mut acl = acl_get_fd_np(source.as_raw_fd(), ACL_TYPE_EXTENDED);
+        if acl.is_null() {
+            let error = io::Error::last_os_error();
+            // Darwin returns ENOENT for an open file without an extended ACL.
+            if error.raw_os_error() != Some(libc::ENOENT) {
+                return Err(error);
+            }
+            acl = acl_init(0);
+            if acl.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        let applied = acl_set_fd_np(target.as_raw_fd(), acl, ACL_TYPE_EXTENDED);
+        let error = (applied != 0).then(io::Error::last_os_error);
+        acl_free(acl);
+        if let Some(error) = error {
+            return Err(error);
+        }
+        if libc::fcopyfile(
+            source.as_raw_fd(),
+            target.as_raw_fd(),
+            std::ptr::null_mut(),
+            libc::COPYFILE_STAT | libc::COPYFILE_XATTR,
+        ) != 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    let rights = |meta: std::fs::Metadata| {
+        (
+            meta.st_uid(),
+            meta.st_gid(),
+            meta.st_mode(),
+            meta.st_flags(),
+        )
+    };
+    if rights(source.metadata()?) != rights(target.metadata()?) {
+        return Err(io::Error::other(
+            "cannot preserve index ownership, mode or file flags",
+        ));
+    }
+    Ok(())
+}
+
+// On macOS copy security metadata before writing any content to the sibling.
+// Elsewhere keep an existing inode (and its native ACL) until we can copy
+// security descriptors there too. Never replace protected files with mode alone.
+fn replace_index(path: &Path, text: &str, record_change: impl FnOnce()) -> io::Result<()> {
+    let original = index_metadata(path)?
+        .map(|_| open_existing_index(path, true))
+        .transpose()?;
+    #[cfg(not(target_os = "macos"))]
+    if let Some(mut existing) = original.as_ref() {
+        existing.set_len(0)?;
+        record_change();
+        return existing.write_all(text.as_bytes());
     }
     let mut builder = tempfile::Builder::new();
     builder.prefix(".cowiki-index-");
     #[cfg(unix)]
-    if metadata.is_none() {
+    if original.is_none() {
         use std::os::unix::fs::PermissionsExt;
         builder.permissions(std::fs::Permissions::from_mode(0o666)); // filtered by umask
     }
     let mut pending = builder.tempfile_in(path.parent().expect("index has a directory"))?;
+    #[cfg(target_os = "macos")]
+    if let Some(existing) = &original {
+        copy_index_security(existing, pending.as_file())?;
+    }
     pending.write_all(text.as_bytes())?;
-    if let Some(meta) = metadata {
-        pending.as_file().set_permissions(meta.permissions())?;
+    if original.is_some() {
         index_metadata(path)?;
         pending.persist(path)?;
     } else {
         pending.persist_noclobber(path)?;
     }
+    record_change();
     Ok(())
 }
 
@@ -725,7 +796,7 @@ pub fn refresh_review_indexes(root: &Path) -> Result<(), String> {
     if let Err(mut error) = result {
         for (path, previous) in originals.into_iter().rev() {
             let restored = match previous {
-                Some(text) => replace_index(&path, &text),
+                Some(text) => replace_index(&path, &text, || {}),
                 None => index_metadata(&path).and_then(|metadata| {
                     if metadata.is_some() {
                         std::fs::remove_file(&path)
@@ -745,7 +816,7 @@ pub fn refresh_review_indexes(root: &Path) -> Result<(), String> {
 
 fn refresh_progressive_indexes_with(
     root: &Path,
-    mut after_write: impl FnMut(&Path, Option<String>),
+    mut record_change: impl FnMut(&Path, Option<String>),
 ) -> Result<(), String> {
     let mut directories = BTreeSet::new();
     directories.insert(root.to_path_buf());
@@ -761,7 +832,7 @@ fn refresh_progressive_indexes_with(
     let mut directories = directories.into_iter().collect::<Vec<_>>();
     directories.sort_by_key(|directory| std::cmp::Reverse(directory.components().count()));
     for directory in directories {
-        refresh_directory_index(root, &directory, &mut after_write)?;
+        refresh_directory_index(root, &directory, &mut record_change)?;
     }
     Ok(())
 }
@@ -791,7 +862,7 @@ pub fn refresh_indexes_for(root: &Path, relative: &Path) -> Result<(), String> {
 fn refresh_directory_index(
     root: &Path,
     directory: &Path,
-    after_write: impl FnOnce(&Path, Option<String>),
+    record_change: impl FnOnce(&Path, Option<String>),
 ) -> Result<(), String> {
     let index_path = directory.join("index.md");
     let previous = read_index(&index_path).map_err(|error| error.to_string())?;
@@ -844,8 +915,10 @@ fn refresh_directory_index(
         update_generated_listing(&existing, &entries)?
     };
     if updated != existing {
-        replace_index(&index_path, &updated).map_err(|error| error.to_string())?;
-        after_write(&index_path, had_index.then_some(existing));
+        replace_index(&index_path, &updated, || {
+            record_change(&index_path, had_index.then_some(existing))
+        })
+        .map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -1121,7 +1194,75 @@ mod tests {
     use super::*;
 
     #[test]
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
+    fn refreshing_or_restoring_an_index_preserves_its_macos_acl_and_xattrs() {
+        use std::process::Command;
+        for (rollback, has_acl) in [(false, true), (true, true), (false, false)] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path();
+            std::fs::create_dir(root.join("child")).unwrap();
+            let index = root.join("child/index.md");
+            let original = "# Handwritten\n";
+            std::fs::write(&index, original).unwrap();
+            if has_acl {
+                assert!(Command::new("/bin/chmod")
+                    .args(["+a", "user:daemon deny read"])
+                    .arg(&index)
+                    .status()
+                    .unwrap()
+                    .success());
+            }
+            assert!(Command::new("/usr/bin/xattr")
+                .args(["-w", "org.cowiki.test", "keep-me"])
+                .arg(&index)
+                .status()
+                .unwrap()
+                .success());
+            // A sibling created later can inherit a broader ACL from its folder.
+            assert!(Command::new("/bin/chmod")
+                .args(["+a", "user:nobody allow read,file_inherit"])
+                .arg(root.join("child"))
+                .status()
+                .unwrap()
+                .success());
+            if rollback {
+                std::fs::write(
+                    root.join("index.md"),
+                    "# Root\n<!-- cowiki:generated-index:start -->\n",
+                )
+                .unwrap();
+            }
+
+            let result = super::refresh_review_indexes(root);
+            assert_eq!(result.is_err(), rollback);
+            let acl = Command::new("/bin/ls")
+                .arg("-le")
+                .arg(&index)
+                .output()
+                .unwrap();
+            let acl = String::from_utf8(acl.stdout).unwrap();
+            assert_eq!(
+                acl.contains("user:daemon deny read"),
+                has_acl,
+                "changed the original deny ACL"
+            );
+            assert!(
+                !acl.contains("user:nobody"),
+                "inherited a broader ACL: {acl}"
+            );
+            let attr = Command::new("/usr/bin/xattr")
+                .args(["-p", "org.cowiki.test"])
+                .arg(&index)
+                .output()
+                .unwrap();
+            assert_eq!(attr.stdout, b"keep-me\n");
+            let contents = std::fs::read_to_string(&index).unwrap();
+            assert_eq!(contents == original, rollback);
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
     fn review_publishes_a_complete_new_index_without_truncating_the_old_file() {
         use std::io::Read;
         use std::os::unix::fs::PermissionsExt;
