@@ -13,8 +13,9 @@ import {
 import { APP_HEADER_HEIGHT, C, colorForSpaceId, shadows } from '@/lib/design';
 import { conceptIdFromPath, visiblePageTree } from '@/lib/okf-pages';
 import type { ModuleId } from '@/lib/space-features';
+import type { PluginAction } from '@/plugins/host';
 
-export type NavTab = 'wiki' | 'journal' | 'tasks' | 'flashcards' | 'reviews' | 'members' | 'history' | 'links';
+export type NavTab = 'wiki' | 'tasks' | 'flashcards' | 'reviews' | 'members' | 'history' | 'links' | `plugin:${string}`;
 
 interface SpacePanelProps {
   workspace: Workspace | null;
@@ -46,6 +47,8 @@ interface SpacePanelProps {
   showHistory?: boolean;
   /** Optional modules this person sees in the Space (journal, tasks). */
   modules?: ModuleId[];
+  pluginActions?: PluginAction[];
+  onPluginAction?: (id: string) => void;
   /** Open the Space modules & journal settings. */
   onModules?: () => void;
 }
@@ -74,6 +77,8 @@ export function SpacePanel({
   onShowIngest,
   onSettings,
   modules = [],
+  pluginActions = [],
+  onPluginAction,
   onModules,
   onCollapse,
   readOnly = false,
@@ -108,9 +113,10 @@ export function SpacePanel({
     );
   }
 
-  const navItems: { tab: NavTab; icon: React.ReactNode; label: string; badge?: number; hide?: boolean }[] = [
+  const navItems: { tab: NavTab; icon: React.ReactNode; label: string; badge?: number; hide?: boolean; action?: string }[] = [
     { tab: 'wiki', icon: <BookOpen size={16} />, label: 'Wiki' },
-    { tab: 'journal', icon: <CalendarDays size={16} />, label: 'Today', hide: !modules.includes('journal') },
+    ...pluginActions.map((action) => ({ tab: `plugin:${action.id}` as const, action: action.id,
+      icon: action.icon === 'calendar' ? <CalendarDays size={16} /> : <FileText size={16} />, label: action.label })),
     { tab: 'tasks', icon: <CheckSquare size={16} />, label: 'Tasks', hide: !modules.includes('tasks') },
     { tab: 'flashcards', icon: <Layers size={16} />, label: 'Flashcards', hide: !modules.includes('flashcards') },
     { tab: 'reviews', icon: <GitPullRequest size={16} />, label: 'Reviews', badge: reviewCount || undefined, hide: !showReviews },
@@ -149,7 +155,7 @@ export function SpacePanel({
         {navItems.filter((n) => !n.hide).map((n) => (
           <button
             key={n.tab}
-            onClick={() => onTabChange(n.tab)}
+            onClick={() => n.action ? onPluginAction?.(n.action) : onTabChange(n.tab)}
             style={{
               display: 'flex', alignItems: 'center', gap: 9, width: 'calc(100% - 16px)',
               padding: '8px 14px', margin: '1px 8px', borderRadius: 8, border: 'none', cursor: 'pointer',

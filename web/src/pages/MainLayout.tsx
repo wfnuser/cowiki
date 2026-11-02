@@ -1,4 +1,4 @@
-import { useState, useEffect, useEffectEvent, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useEffectEvent, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useLocation, useNavigationType } from 'react-router-dom';
 import {
   Compass,
@@ -108,11 +108,15 @@ import {
   parseSpaceFeatures,
   savePersonalPreferences,
   visibleModules,
-  withSpaceFeatures,
+  saveSpaceFeatures,
   type PersonalPreferences,
   type SpaceFeatures,
 } from '@/lib/space-features';
-import { dateKey, journalPagePath, newJournalBody } from '@/lib/journal';
+import { dateKey } from '@/lib/journal';
+import { ensureDatePage } from '@/lib/date-page';
+import { BUILTIN_PLUGINS } from '@/plugins/builtins';
+import { createPluginHost, type PluginHostOptions, type PluginSnapshot } from '@/plugins/host';
+import { createSpacePageAdapter, PluginUnavailableError } from '@/plugins/space-pages';
 import { applyTaskStatus, applyTaskToggle, insertTaskLine, type BoardStatus, type TaskItem } from '@/lib/tasks';
 import { flattenPages, parseWikilink, resolveWikilinkPath } from '@/lib/wikilinks';
 import { obsidianToReaderMarkdown, renderedLineOffset } from '@/lib/obsidian-markdown';
@@ -186,6 +190,7 @@ export function MainLayout() {
   // Data
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
+  const [launchNavigationReady, setLaunchNavigationReady] = useState(false);
   const [spacePages, setSpacePages] = useState<Record<string, PageMeta[]>>({});
   const [spaceSources, setSpaceSources] = useState<Record<string, SourceItem[]>>({});
   const [activeView, setActiveView] = useState<ActiveView>(null);
@@ -203,6 +208,7 @@ export function MainLayout() {
   const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<NavTab>('wiki');
   const [spaceFeatures, setSpaceFeatures] = useState<Record<string, SpaceFeatures>>({});
+  const [featureLoadErrors, setFeatureLoadErrors] = useState<Record<string, string>>({});
   const [preferences, setPreferences] = useState<PersonalPreferences>(safePreferences);
   // Bumped when an automatic checkpoint lands, so an open History view reloads.
   const [checkpointTick, setCheckpointTick] = useState(0);
@@ -210,7 +216,16 @@ export function MainLayout() {
   const [obsidianImportOpen, setObsidianImportOpen] = useState(false);
   const assetUrls = useRef(new Map<string, string>());
   const initialPathname = useRef(location.pathname);
-  const startupJournalHandled = useRef(false);
+  const pluginSnapshot = useRef<PluginSnapshot>({ space: null, features: null, preferences });
+  const pluginPages = useRef<PluginHostOptions['pages'] | null>(null);
+  const [pluginHost] = useState(() => createPluginHost({
+    definitions: BUILTIN_PLUGINS,
+    getSnapshot: () => pluginSnapshot.current,
+    pages: (space, action) => {
+      if (!pluginPages.current) throw new PluginUnavailableError();
+      return pluginPages.current(space, action);
+    },
+  }));
   // loadWorkspaces re-runs on every navigation; opening the first page at '/'
   // is a startup default and must not replace a view chosen later (Links, Tasks).
   const homePageOpened = useRef(false);
@@ -512,7 +527,9 @@ export function MainLayout() {
 
   // Load once per sign-in. `navigate` changes identity on every route change,
   // so depending on loadWorkspaces re-ran the whole startup load per click.
-  const loadWorkspacesOnce = useEffectEvent(() => { void loadWorkspaces(); });
+  const loadWorkspacesOnce = useEffectEvent(() => {
+    void loadWorkspaces().finally(() => setLaunchNavigationReady(true));
+  });
   useEffect(() => {
     if (!auth) return;
     const task = window.setTimeout(() => loadWorkspacesOnce(), 0);
@@ -629,6 +646,9 @@ export function MainLayout() {
   // Switch workspace via rail
   const handleSelectWorkspace = async (ws: Workspace) => {
     if (activeWorkspace?.id === ws.id) return;
+    // Invalidate a pending plugin operation immediately, not after React paints.
+    pluginSnapshot.current = { ...pluginSnapshot.current,
+      space: { id: ws.id, local: desktop && !!ws.localPath }, features: spaceFeatures[ws.id] ?? null };
     setActiveWorkspace(ws);
     setActiveTab('wiki');
     // Resolve navigation from the loaded tree, not the pre-request state snapshot.
@@ -646,7 +666,8 @@ export function MainLayout() {
   };
 
   // Select a page
-  const selectPage = async (ws: Workspace, slug: string, path?: string, updateUrl = true) => {
+  const selectPage = async (ws: Workspace, slug: string, path?: string, updateUrl = true, isCurrent = () => true) => {
+    if (!isCurrent()) return;
     const conceptId = path ? conceptIdFromPath(path) : conceptIdFromPath(slug);
     const repoPath = path ? conceptPath(conceptIdFromPath(path)) : conceptPath(conceptId);
     if (isReservedDocument(repoPath)) return;
@@ -658,6 +679,7 @@ export function MainLayout() {
     setActiveView({ kind: 'page', slug: conceptId, path: repoPath, content: null });
     if (updateUrl) navigate(pageRoute(ws.slug, conceptId), { replace: true });
     const setContent = (content: PageFull | null) => {
+      if (!isCurrent()) return;
       persistedPageBody.current = content?.body ?? null;
       setActiveView(prev => prev?.kind === 'page' ? { ...prev, content } : prev);
     };
@@ -667,6 +689,7 @@ export function MainLayout() {
         const page = await getPage(conceptId, userBranch, ws.slug, 'wiki');
         setContent(page);
       } catch {
+        if (!isCurrent()) return;
         setContent(null);
         setMessage({ text: `Page "${conceptId}" not found`, type: 'error' });
       }
@@ -675,10 +698,12 @@ export function MainLayout() {
         const page = await getPage(conceptId, userBranch, ws.slug, 'wiki');
         setContent(page);
       } catch {
+        if (!isCurrent()) return;
         try {
           const page = await getPage(conceptId, 'main', ws.slug, 'wiki');
           setContent(page);
         } catch {
+          if (!isCurrent()) return;
           setContent(null);
           setMessage({ text: `Page "${conceptId}" not found`, type: 'error' });
         }
@@ -788,17 +813,18 @@ export function MainLayout() {
       const features = parseSpaceFeatures(await readSpaceConfig(ws.slug));
       setSpaceFeatures((previous) => ({ ...previous, [ws.id]: features }));
       return features;
-    } catch {
-      return DEFAULT_SPACE_FEATURES;
+    } catch (error) {
+      setFeatureLoadErrors((previous) => ({ ...previous, [ws.id]: error instanceof Error ? error.message : String(error) }));
+      throw error;
     }
   }, [desktop]);
 
   useEffect(() => {
-    if (!activeWorkspace || spaceFeatures[activeWorkspace.id] || !isLocalSpace(activeWorkspace)) return;
-    void loadSpaceFeatures(activeWorkspace);
+    if (!activeWorkspace || spaceFeatures[activeWorkspace.id] || featureLoadErrors[activeWorkspace.id] || !isLocalSpace(activeWorkspace)) return;
+    void loadSpaceFeatures(activeWorkspace).catch(() => {});
     // isLocalSpace only reads stable props of the workspace.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeWorkspace, spaceFeatures, loadSpaceFeatures]);
+  }, [activeWorkspace, spaceFeatures, featureLoadErrors, loadSpaceFeatures]);
 
   useEffect(() => {
     if (!desktop || !activeWorkspace?.slug) return;
@@ -810,65 +836,59 @@ export function MainLayout() {
   }, [desktop, activeWorkspace?.slug]);
 
   const activeFeatures = (activeWorkspace && spaceFeatures[activeWorkspace.id]) || DEFAULT_SPACE_FEATURES;
-  const activeModules = isLocalSpace(activeWorkspace)
-    ? visibleModules(activeFeatures)
+  const activeFeaturesReady = !!activeWorkspace && !!spaceFeatures[activeWorkspace.id];
+  const activeModules = isLocalSpace(activeWorkspace) && activeFeaturesReady
+    ? visibleModules(activeFeatures).filter((id) => !BUILTIN_PLUGINS.some((plugin) => plugin.id === id))
     : [];
   const activeFlatPages = useMemo(
     () => flattenPages(activeWorkspace ? (spacePages[activeWorkspace.id] || []) : []),
     [activeWorkspace, spacePages],
   );
-  /** Create the journal entry for a day when missing; returns its path. */
-  const ensureJournalEntry = async (ws: Workspace, date: Date): Promise<{ conceptId: string; path: string; created: boolean }> => {
-    const features = spaceFeatures[ws.id] ?? await loadSpaceFeatures(ws);
-    const path = journalPagePath(features.journal, date);
-    const conceptId = conceptIdFromPath(path);
-    try {
-      await getPage(conceptId, userBranch, ws.slug, 'wiki');
-      return { conceptId, path, created: false };
-    } catch {
-      // Missing: create it below.
-    }
-    let template: string | null = null;
-    if (features.journal.template) {
-      try {
-        template = (await getPage(conceptIdFromPath(features.journal.template), userBranch, ws.slug, 'wiki')).body;
-      } catch {
-        template = null;
-      }
-    }
-    try {
-      await writePage(conceptId, newJournalBody(features.journal, date, template), userBranch, ws.slug, 'wiki', undefined, true);
-    } catch (error) {
-      if (!String(error instanceof Error ? error.message : error).includes('already exists')) throw error;
-    }
-    await loadSpacePages(ws);
-    return { conceptId, path, created: true };
-  };
-
-  const openJournalDay = async (ws: Workspace, date: Date) => {
-    try {
-      const entry = await ensureJournalEntry(ws, date);
-      await selectPage(ws, entry.conceptId, entry.path);
-      setActiveTab('journal');
+  // A page port is scoped to one Space. Plugins cannot request another Space,
+  // overwrite a file, or bypass ordinary page navigation.
+  const pagePorts = (ws: Workspace, isCurrent: () => boolean, actionId?: string) => ({
+    read: async (path: string) => (await getPage(conceptIdFromPath(path), userBranch, ws.slug, 'wiki')).body,
+    createOnly: (path: string, body: string) => writePage(conceptIdFromPath(path), body, userBranch, ws.slug, 'wiki', undefined, true),
+    refresh: async () => { await loadSpacePages(ws); },
+    open: async (path: string) => {
+      await selectPage(ws, conceptIdFromPath(path), path, true, isCurrent);
+      if (!isCurrent()) return;
+      if (actionId) setActiveTab(`plugin:${actionId}`);
       setEditingPage(true);
-    } catch (error) {
-      setMessage({ text: error instanceof Error ? error.message : 'Could not open the journal', type: 'error' });
-    }
+    },
+  });
+
+  useLayoutEffect(() => {
+    pluginSnapshot.current = {
+      space: activeWorkspace ? { id: activeWorkspace.id, local: isLocalSpace(activeWorkspace) } : null,
+      features: activeWorkspace ? spaceFeatures[activeWorkspace.id] ?? null : null,
+      preferences,
+    };
+    pluginPages.current = (space, action) => {
+      const ws = workspaces.find((workspace) => workspace.id === space.id);
+      if (!ws) throw new PluginUnavailableError();
+      const features = pluginSnapshot.current.features;
+      const isCurrent = () => pluginSnapshot.current.space?.id === space.id && pluginSnapshot.current.features === features;
+      return pagePorts(ws, isCurrent, action.id);
+    };
+  });
+
+  // Listing is pure and uses this render's snapshot; invocation re-resolves the
+  // current snapshot in the host rather than trusting a stale sidebar button.
+  const pluginActions = pluginHost.actions({
+    space: activeWorkspace ? { id: activeWorkspace.id, local: isLocalSpace(activeWorkspace) } : null,
+    features: activeFeaturesReady ? activeFeatures : null, preferences,
+  });
+
+  const dispatchPluginAction = async (id: string) => {
+    try { await pluginHost.dispatch(id); }
+    catch (error) { setMessage({ text: error instanceof Error ? error.message : String(error), type: 'error' }); }
   };
 
-  // Open today's journal at startup when this person asked for it and the
-  // app was launched without a deep link.
   useEffect(() => {
-    if (startupJournalHandled.current || !workspacesLoaded || !activeWorkspace) return;
-    if (!isLocalSpace(activeWorkspace) || !spaceFeatures[activeWorkspace.id]) return;
-    startupJournalHandled.current = true;
-    const launchedAtRoot = initialPathname.current === '/' || initialPathname.current === '';
-    if (!launchedAtRoot || !preferences.openJournalOnStartup) return;
-    if (!visibleModules(spaceFeatures[activeWorkspace.id]).includes('journal')) return;
-    void openJournalDay(activeWorkspace, new Date());
-    // Runs once per launch after the first Space and its settings load.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspacesLoaded, activeWorkspace, spaceFeatures, preferences]);
+    void pluginHost.launch({ workspacesLoaded: workspacesLoaded && launchNavigationReady, initialPathname: initialPathname.current })
+      .catch((error) => setMessage({ text: error instanceof Error ? error.message : String(error), type: 'error' }));
+  }, [pluginHost, workspacesLoaded, launchNavigationReady, activeWorkspace, spaceFeatures, preferences]);
 
   /** Navigate like Obsidian: resolve by name anywhere, create the note if missing. */
   const openWikilink = async (raw: string) => {
@@ -955,9 +975,13 @@ export function MainLayout() {
   const addTaskToToday = async (line: string) => {
     const ws = activeWorkspace;
     if (!ws) return;
-    const entry = await ensureJournalEntry(ws, new Date());
-    const page = await getPage(entry.conceptId, userBranch, ws.slug, 'wiki');
-    await writePage(entry.conceptId, insertTaskLine(page.body, line), userBranch, ws.slug, 'wiki', page.body);
+    const features = spaceFeatures[ws.id] ?? await loadSpaceFeatures(ws);
+    const isCurrent = () => pluginSnapshot.current.space?.id === ws.id;
+    const pages = createSpacePageAdapter(pagePorts(ws, isCurrent), isCurrent);
+    const path = await ensureDatePage(pages, features.journal, new Date());
+    const page = await pages.read(path);
+    if (page === null) throw new Error('Today’s page was removed before adding the task');
+    await writePage(conceptIdFromPath(path), insertTaskLine(page, line), userBranch, ws.slug, 'wiki', page);
   };
 
   /** Re-read a page, transform it and save it, failing if it changed in between. */
@@ -972,10 +996,10 @@ export function MainLayout() {
 
   const saveModules = async (features: SpaceFeatures, nextPreferences: PersonalPreferences) => {
     const ws = activeWorkspace;
-    if (!ws) return;
-    const current = await readSpaceConfig(ws.slug).catch(() => null);
-    await writeSpaceConfig(ws.slug, withSpaceFeatures(current, features));
-    setSpaceFeatures((previous) => ({ ...previous, [ws.id]: parseSpaceFeatures(withSpaceFeatures(current, features)) }));
+    if (!ws || !isLocalSpace(ws) || !spaceFeatures[ws.id]) throw new Error('Space settings are not ready');
+    const saved = await saveSpaceFeatures({ read: () => readSpaceConfig(ws.slug), write: (config) => writeSpaceConfig(ws.slug, config) }, features);
+    if (pluginSnapshot.current.space?.id === ws.id) pluginSnapshot.current = { ...pluginSnapshot.current, features: saved };
+    setSpaceFeatures((previous) => ({ ...previous, [ws.id]: saved }));
     try {
       savePersonalPreferences(window.localStorage, nextPreferences);
     } catch {
@@ -1091,9 +1115,6 @@ export function MainLayout() {
       case 'links':
         setActiveView({ kind: 'links', workspaceSlug: activeWorkspace.slug });
         navigate('/', { replace: true });
-        break;
-      case 'journal':
-        void openJournalDay(activeWorkspace, new Date());
         break;
       case 'flashcards':
         setEditingPage(false);
@@ -1465,6 +1486,8 @@ export function MainLayout() {
                 onShowIngest={() => setShowIngest(true)}
                 onSettings={() => setSettingsOpen(true)}
                 modules={activeModules}
+                pluginActions={pluginActions}
+                onPluginAction={(id) => { void dispatchPluginAction(id); }}
                 onModules={isLocalSpace(activeWorkspace) ? () => setModulesDialogOpen(true) : undefined}
                 onCollapse={() => setSidebarLayout((current) => ({ ...current, collapsed: true }))}
               />
@@ -2150,6 +2173,9 @@ export function MainLayout() {
           spaceName={activeWorkspace.name}
           features={activeFeatures}
           preferences={preferences}
+          plugins={BUILTIN_PLUGINS}
+          ready={activeFeaturesReady}
+          configurationError={featureLoadErrors[activeWorkspace.id]}
           onClose={() => setModulesDialogOpen(false)}
           onSave={saveModules}
         />

@@ -6,12 +6,8 @@ import { DEFAULT_JOURNAL_CONFIG, type JournalConfig } from './journal.ts';
  */
 export type ModuleId = 'journal' | 'tasks' | 'flashcards';
 
-export const MODULES: Array<{ id: ModuleId; label: string; description: string }> = [
-  {
-    id: 'journal',
-    label: 'Daily journal',
-    description: 'A "Today" entry that opens or creates the day\'s journal page, with date navigation.',
-  },
+/** Modules not yet migrated to built-in contributions. */
+export const MODULES: Array<{ id: Exclude<ModuleId, 'journal'>; label: string; description: string }> = [
   {
     id: 'tasks',
     label: 'Tasks',
@@ -29,7 +25,7 @@ export const MODULES: Array<{ id: ModuleId; label: string; description: string }
  * whole team shares the journal location and which modules exist.
  */
 export interface SpaceFeatures {
-  modules: Record<ModuleId, boolean>;
+  modules: Record<ModuleId, boolean> & Record<string, boolean>;
   journal: JournalConfig;
   /** Pages in this folder are offered as templates for new pages (Obsidian's Templates folder). */
   templates: { folder: string };
@@ -75,7 +71,12 @@ export function parseSpaceFeatures(config: unknown): SpaceFeatures {
   const templates = record(features?.templates);
   const flag = (id: ModuleId) => (typeof modules?.[id] === 'boolean' ? modules[id] as boolean : DEFAULT_SPACE_FEATURES.modules[id]);
   return {
-    modules: { journal: flag('journal'), tasks: flag('tasks'), flashcards: flag('flashcards') },
+    modules: {
+      // A second trusted built-in can own its enablement without a shell or
+      // schema branch. Unknown non-boolean config remains in the raw merge.
+      ...Object.fromEntries(Object.entries(modules ?? {}).filter(([, enabled]) => typeof enabled === 'boolean')),
+      journal: flag('journal'), tasks: flag('tasks'), flashcards: flag('flashcards'),
+    },
     journal: {
       folder: cleanFolder(journal?.folder, DEFAULT_JOURNAL_CONFIG.folder),
       format: cleanFormat(journal?.format, DEFAULT_JOURNAL_CONFIG.format),
@@ -88,16 +89,30 @@ export function parseSpaceFeatures(config: unknown): SpaceFeatures {
 /** Merge features back into the full Space config without dropping other keys. */
 export function withSpaceFeatures(config: unknown, features: SpaceFeatures): Record<string, unknown> {
   const root = { ...(record(config) ?? {}) };
+  const previous = record(root.features);
   root.features = {
-    modules: { ...features.modules },
+    ...previous,
+    modules: { ...record(previous?.modules), ...features.modules },
     journal: {
+      ...record(previous?.journal),
       folder: features.journal.folder,
       format: features.journal.format,
       template: features.journal.template,
     },
-    templates: { folder: features.templates.folder },
+    templates: { ...record(previous?.templates), folder: features.templates.folder },
   };
   return root;
+}
+
+/** Read must succeed before merging; an unreadable config is never a blank config. */
+export async function saveSpaceFeatures(config: {
+  read: () => Promise<unknown>;
+  write: (config: Record<string, unknown>) => Promise<void>;
+}, features: SpaceFeatures): Promise<SpaceFeatures> {
+  const current = await config.read();
+  const merged = withSpaceFeatures(current, features);
+  await config.write(merged);
+  return parseSpaceFeatures(merged);
 }
 
 /** Personal usage preferences, stored on this device only. */
@@ -138,5 +153,6 @@ export function savePersonalPreferences(storage: PreferenceStorage, preferences:
 
 /** Modules turned on in this Space. */
 export function visibleModules(features: SpaceFeatures): ModuleId[] {
-  return MODULES.map((module) => module.id).filter((id) => features.modules[id]);
+  const ids: ModuleId[] = ['journal', ...MODULES.map((module) => module.id)];
+  return ids.filter((id) => features.modules[id]);
 }
