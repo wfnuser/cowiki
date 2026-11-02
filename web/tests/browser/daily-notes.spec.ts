@@ -143,3 +143,42 @@ test('finishing a slow Today request cannot reopen the previous Space', async ({
   await expect(page.locator('article')).toContainText('Other notebook');
   await expect(page.locator('.cm-content')).toHaveCount(0);
 });
+
+test('saving a journal folder does not revert an external update to another plugin', async ({ page }) => {
+  const state = await desktop(page);
+  await page.goto(origin);
+  await expect(page.getByRole('button', { name: 'Today', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /Modules & settings/i }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.locator('section').filter({ has: page.getByRole('heading', { name: 'Journal', exact: true }) }).getByLabel('Folder', { exact: true }).fill('Diary');
+  state.config().features.modules.later = true; // another client after opening
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(state.config().features.journal.folder).toBe('Diary');
+  expect(state.config().features.modules.later).toBe(true);
+});
+
+test('unreadable settings leave ordinary pages available, then reload without restarting', async ({ page }) => {
+  let damaged = true;
+  const state = await desktop(page, true, { beforeConfig: async () => {
+    if (damaged) throw new Error('Unreadable settings document');
+  } });
+  await page.goto(origin + '/personal/Welcome');
+  await expect(page.locator('article')).toContainText('Welcome');
+  await page.getByRole('button', { name: /Modules & settings/i }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('Unreadable settings document');
+  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
+  expect(state.creates).toEqual([]);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Today', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: /Modules & settings/i }).click();
+  damaged = false;
+  await dialog.getByRole('button', { name: 'Reload settings', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: 'Today', exact: true })).toBeVisible();
+  await expect(page.locator('article')).toContainText('Welcome');
+  expect(state.creates).toEqual([]);
+});
