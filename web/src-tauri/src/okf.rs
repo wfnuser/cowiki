@@ -6,7 +6,7 @@
 use serde_yaml::{Mapping, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
-use std::io::Write;
+use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 pub const OKF_VERSION: &str = "0.1";
@@ -644,6 +644,77 @@ pub fn refresh_progressive_indexes(root: &Path) -> Result<(), String> {
     refresh_progressive_indexes_with(root, |_, _| {})
 }
 
+fn index_metadata(path: &Path) -> io::Result<Option<std::fs::Metadata>> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_symlink() => Err(io::Error::other(format!(
+            "refusing symbolic link at index {}",
+            path.display()
+        ))),
+        Ok(meta) if meta.is_file() => Ok(Some(meta)),
+        Ok(_) => Err(io::Error::other(format!(
+            "not a regular index file: {}",
+            path.display()
+        ))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn open_existing_index(path: &Path, writable: bool) -> io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(!writable).write(writable);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x0020_0000); // FILE_FLAG_OPEN_REPARSE_POINT
+    }
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other("refusing a non-regular index file"));
+    }
+    Ok(file)
+}
+
+fn read_index(path: &Path) -> io::Result<Option<String>> {
+    if index_metadata(path)?.is_none() {
+        return Ok(None);
+    }
+    let mut text = String::new();
+    open_existing_index(path, false)?.read_to_string(&mut text)?;
+    Ok(Some(text))
+}
+
+// Publish the completed sibling in one rename: an interrupted write cannot
+// truncate the old file's handwritten sections. This is atomic per listing.
+fn replace_index(path: &Path, text: &str) -> io::Result<()> {
+    let metadata = index_metadata(path)?;
+    if metadata.is_some() {
+        open_existing_index(path, true)?; // respect read-only files; never truncate
+    }
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(".cowiki-index-");
+    #[cfg(unix)]
+    if metadata.is_none() {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(std::fs::Permissions::from_mode(0o666)); // filtered by umask
+    }
+    let mut pending = builder.tempfile_in(path.parent().expect("index has a directory"))?;
+    pending.write_all(text.as_bytes())?;
+    if let Some(meta) = metadata {
+        pending.as_file().set_permissions(meta.permissions())?;
+        index_metadata(path)?;
+        pending.persist(path)?;
+    } else {
+        pending.persist_noclobber(path)?;
+    }
+    Ok(())
+}
+
 /// Reviewing a conforming draft only updates generated listings. Keep their
 /// prior text, not a Git snapshot of the entire Space, for error recovery.
 pub fn refresh_review_indexes(root: &Path) -> Result<(), String> {
@@ -654,9 +725,14 @@ pub fn refresh_review_indexes(root: &Path) -> Result<(), String> {
     if let Err(mut error) = result {
         for (path, previous) in originals.into_iter().rev() {
             let restored = match previous {
-                Some(text) => std::fs::write(&path, text),
-                None if path.is_file() => std::fs::remove_file(&path),
-                None => Ok(()),
+                Some(text) => replace_index(&path, &text),
+                None => index_metadata(&path).and_then(|metadata| {
+                    if metadata.is_some() {
+                        std::fs::remove_file(&path)
+                    } else {
+                        Ok(())
+                    }
+                }),
             };
             if let Err(cause) = restored {
                 error.push_str(&format!("; could not restore {}: {cause}", path.display()));
@@ -669,7 +745,7 @@ pub fn refresh_review_indexes(root: &Path) -> Result<(), String> {
 
 fn refresh_progressive_indexes_with(
     root: &Path,
-    mut before_write: impl FnMut(&Path, Option<String>),
+    mut after_write: impl FnMut(&Path, Option<String>),
 ) -> Result<(), String> {
     let mut directories = BTreeSet::new();
     directories.insert(root.to_path_buf());
@@ -685,7 +761,7 @@ fn refresh_progressive_indexes_with(
     let mut directories = directories.into_iter().collect::<Vec<_>>();
     directories.sort_by_key(|directory| std::cmp::Reverse(directory.components().count()));
     for directory in directories {
-        refresh_directory_index(root, &directory, &mut before_write)?;
+        refresh_directory_index(root, &directory, &mut after_write)?;
     }
     Ok(())
 }
@@ -715,17 +791,18 @@ pub fn refresh_indexes_for(root: &Path, relative: &Path) -> Result<(), String> {
 fn refresh_directory_index(
     root: &Path,
     directory: &Path,
-    before_write: impl FnOnce(&Path, Option<String>),
+    after_write: impl FnOnce(&Path, Option<String>),
 ) -> Result<(), String> {
     let index_path = directory.join("index.md");
-    let had_index = index_path.is_file();
-    let existing = if had_index {
-        std::fs::read_to_string(&index_path).map_err(|error| error.to_string())?
-    } else if directory == root {
-        root_index()
-    } else {
-        folder_index(&directory.file_name().unwrap_or_default().to_string_lossy())
-    };
+    let previous = read_index(&index_path).map_err(|error| error.to_string())?;
+    let had_index = previous.is_some();
+    let existing = previous.unwrap_or_else(|| {
+        if directory == root {
+            root_index()
+        } else {
+            folder_index(&directory.file_name().unwrap_or_default().to_string_lossy())
+        }
+    });
     let mut entries = Vec::new();
     for child in std::fs::read_dir(directory).map_err(|error| error.to_string())? {
         let child = child.map_err(|error| error.to_string())?;
@@ -740,8 +817,8 @@ fn refresh_directory_index(
         }
         if file_type.is_dir() {
             let child_index = path.join("index.md");
-            let title = std::fs::read_to_string(child_index)
-                .ok()
+            let title = read_index(&child_index)
+                .map_err(|error| error.to_string())?
                 .and_then(|body| display_metadata(&body).0)
                 .unwrap_or_else(|| name.clone());
             entries.push((title, format!("{name}/"), None));
@@ -767,12 +844,8 @@ fn refresh_directory_index(
         update_generated_listing(&existing, &entries)?
     };
     if updated != existing {
-        // A permission error opening the file leaves it untouched. Record it
-        // for rollback once opened, before writing any of the new bytes.
-        let mut file = std::fs::File::create(&index_path).map_err(|error| error.to_string())?;
-        before_write(&index_path, had_index.then_some(existing));
-        file.write_all(updated.as_bytes())
-            .map_err(|error| error.to_string())?;
+        replace_index(&index_path, &updated).map_err(|error| error.to_string())?;
+        after_write(&index_path, had_index.then_some(existing));
     }
     Ok(())
 }
@@ -1046,6 +1119,74 @@ fn escape_target(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn review_publishes_a_complete_new_index_without_truncating_the_old_file() {
+        use std::io::Read;
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let path = root.join("index.md");
+        let original = "# My handwritten notes\n\nKeep this paragraph.\n";
+        std::fs::write(&path, original).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let mut old_file = std::fs::File::open(&path).unwrap();
+
+        super::refresh_review_indexes(root).unwrap();
+        let mut prior_bytes = String::new();
+        old_file.read_to_string(&mut prior_bytes).unwrap();
+        assert_eq!(
+            prior_bytes, original,
+            "refresh overwrote the live index in place"
+        );
+        let published = std::fs::read_to_string(&path).unwrap();
+        assert!(published.contains(original) && published.contains("cowiki:generated-index:end"));
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn review_refresh_refuses_linked_indexes_and_restores_prior_listings() {
+        use std::os::unix::fs::symlink;
+        for existing_target in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().join("space");
+            std::fs::create_dir_all(root.join("child/deeper")).unwrap();
+            let index =
+                "---\nokf_version: '0.1'\n---\n\n# Notes\n<!-- cowiki:generated-index:start -->\n";
+            std::fs::write(root.join("index.md"), index).unwrap();
+            let target = temp.path().join("private.md");
+            if existing_target {
+                std::fs::write(&target, "# Private outside the Space\n").unwrap();
+            }
+            let link = root.join("child/index.md");
+            symlink(&target, &link).unwrap();
+
+            let error = super::refresh_review_indexes(&root).unwrap_err();
+            if existing_target {
+                assert_eq!(
+                    std::fs::read_to_string(&target).unwrap(),
+                    "# Private outside the Space\n"
+                );
+            } else {
+                assert!(
+                    !target.exists(),
+                    "refresh created an external symlink target"
+                );
+            }
+            assert_eq!(std::fs::read_link(link).unwrap(), target);
+            assert!(!root.join("child/deeper/index.md").exists());
+            assert_eq!(
+                std::fs::read_to_string(root.join("index.md")).unwrap(),
+                index
+            );
+            assert!(error.contains("symbolic link"));
+        }
+    }
 
     #[test]
     #[cfg(unix)]
