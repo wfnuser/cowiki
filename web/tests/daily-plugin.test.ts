@@ -221,14 +221,65 @@ test('saving through the public config adapter retains unknown settings and reje
   features.modules.tasks = false;
   features.journal = { folder: 'Daily', format: 'YYYY_MM_DD', template: 'Templates/Daily.md' };
   features.templates.folder = 'Meta';
-  await saveSpaceFeatures({ read: async () => stored, write: async (next) => { stored = next; } }, features);
+  const base = parseSpaceFeatures(original);
+  await saveSpaceFeatures({ read: async () => stored, write: async (next) => { stored = next; } }, features, base);
   const result = stored as typeof original;
   assert.deepEqual(result.customRoot, original.customRoot);
   assert.deepEqual(result.features.futurePlugin, original.features.futurePlugin);
   assert.equal(result.features.modules.custom, original.features.modules.custom);
   assert.deepEqual(result.features.journal, original.features.journal);
   assert.deepEqual(result.features.templates, original.features.templates);
-  await assert.rejects(saveSpaceFeatures({ read: async () => { throw Error('unreadable config'); }, write: async () => { assert.fail('must not overwrite unreadable config'); } }, features), /unreadable config/);
+  await assert.rejects(saveSpaceFeatures({ read: async () => { throw Error('unreadable config'); }, write: async () => { assert.fail('must not overwrite unreadable config'); } }, features, base), /unreadable config/);
+});
+
+test('saving one edited field keeps fresh external flags, settings and omitted defaults', async () => {
+  const original = { root: 'keep', features: { modules: { journal: true, futurePlugin: false },
+    journal: { folder: 'Daily', format: 'YYYY-MM-DD', future: [1] }, other: { version: 1 } } };
+  const base = parseSpaceFeatures(original);
+  const draft = structuredClone(base);
+  draft.journal.folder = 'Notes';
+  const fresh = { root: 'updated', features: { modules: { journal: true, futurePlugin: true },
+    journal: { folder: 'Daily', format: 'YYYY_MM_DD', future: [2] }, other: { version: 2 } } };
+  let stored: unknown = fresh;
+  await saveSpaceFeatures({ read: async () => stored, write: async (next) => { stored = next; } }, draft, base);
+  assert.deepEqual(stored, { root: 'updated', features: { modules: { journal: true, futurePlugin: true },
+    journal: { folder: 'Notes', format: 'YYYY_MM_DD', future: [2] }, other: { version: 2 } } });
+});
+
+test('intentional plugin toggles save but conflicting edits do not replace an external edit', async () => {
+  let stored: unknown = { features: { modules: { journal: true, example: false } } };
+  const base = parseSpaceFeatures(stored);
+  const draft = structuredClone(base);
+  draft.modules.journal = false;
+  draft.modules.example = true;
+  await saveSpaceFeatures({ read: async () => stored, write: async (next) => { stored = next; } }, draft, base);
+  assert.deepEqual(stored, { features: { modules: { journal: false, example: true } } });
+
+  const conflicting = structuredClone(base);
+  conflicting.journal.folder = 'My edits';
+  await assert.rejects(saveSpaceFeatures({ read: async () => ({ features: { journal: { folder: 'External edits' } } }),
+    write: async () => { assert.fail('a conflicting edit must not be written'); } }, conflicting, base), /changed|conflict|reload/i);
+});
+
+test('saving refuses invalid roots or edited-section shape conflicts and preserves untouched shapes', async () => {
+  const base = parseSpaceFeatures(null);
+  const draft = structuredClone(base);
+  draft.journal.folder = 'Daily';
+  for (const invalid of [[], 7, 'settings', { features: [] }, { features: { journal: 'external shape' } }]) {
+    await assert.rejects(saveSpaceFeatures({ read: async () => invalid,
+      write: async () => { assert.fail('must not replace an invalid shape'); } }, draft, base), /object|changed|conflict|reload/i);
+  }
+  const existing = { features: { templates: ['unrelated shape'], other: false } };
+  let stored: unknown = existing;
+  await saveSpaceFeatures({ read: async () => stored, write: async (next) => { stored = next; } }, draft, base);
+  assert.deepEqual(stored, { features: { templates: ['unrelated shape'], other: false, journal: { folder: 'Daily' } } });
+});
+
+test('saving only a local preference does not materialize Space defaults or rewrite its file', async () => {
+  const current = { custom: [1] };
+  const base = parseSpaceFeatures(current);
+  await saveSpaceFeatures({ read: async () => current,
+    write: async () => { assert.fail('unchanged Space settings must not be rewritten'); } }, structuredClone(base), base);
 });
 
 test('the real sidebar renders contributed commands rather than a hardwired Today entry', async () => {

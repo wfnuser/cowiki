@@ -20,6 +20,7 @@ interface SpaceFeaturesDialogProps {
   plugins: readonly BuiltinPlugin[];
   ready: boolean;
   configurationError?: string;
+  onReload: () => Promise<void>;
   onClose: () => void;
   onSave: (features: SpaceFeatures, preferences: PersonalPreferences) => Promise<void>;
 }
@@ -32,12 +33,14 @@ export function SpaceFeaturesDialog({
   plugins,
   ready,
   configurationError,
+  onReload,
   onClose,
   onSave,
 }: SpaceFeaturesDialogProps) {
   const [draft, setDraft] = useState(features);
   const [personal, setPersonal] = useState(preferences);
   const [saving, setSaving] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -66,6 +69,14 @@ export function SpaceFeaturesDialog({
     }
   };
 
+  const reload = async () => {
+    setReloading(true);
+    setError('');
+    try { await onReload(); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+    finally { setReloading(false); }
+  };
+
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
       <DialogContent style={{ maxWidth: 560, maxHeight: "88vh", overflowY: "auto" }}>
@@ -77,7 +88,7 @@ export function SpaceFeaturesDialog({
         </p>
 
         {!ready && <p role="status" style={{ color: C.muted, fontSize: 12.5 }}>{configurationError || 'Loading Space settings…'}</p>}
-        <fieldset disabled={!ready || saving} style={{ border: 0, padding: 0, margin: 0, display: 'contents' }}>
+        <fieldset disabled={!ready || saving || reloading} style={{ border: 0, padding: 0, margin: 0, display: 'contents' }}>
         <section style={sectionStyle}>
           <h3 style={headingStyle}>In this Space</h3>
           <PluginSettings plugins={plugins} features={draft} preferences={personal} onFeatures={setDraft} onPreferences={setPersonal} part="toggles" />
@@ -140,8 +151,9 @@ export function SpaceFeaturesDialog({
 
         {error && <p role="alert" style={{ color: C.red, fontSize: 12.5, margin: 0 }}>{error}</p>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
-          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={() => { void save(); }} disabled={saving || !ready}>{saving ? 'Saving…' : 'Save'}</Button>
+          {(configurationError || error) && <Button variant="outline" onClick={() => { void reload(); }} disabled={saving || reloading}>{reloading ? 'Reloading…' : 'Reload settings'}</Button>}
+          <Button variant="outline" onClick={onClose} disabled={saving || reloading}>Cancel</Button>
+          <Button onClick={() => { void save(); }} disabled={saving || reloading || !ready}>{saving ? 'Saving…' : 'Save'}</Button>
         </div>
       </DialogContent>
     </Dialog>

@@ -104,14 +104,39 @@ export function withSpaceFeatures(config: unknown, features: SpaceFeatures): Rec
   return root;
 }
 
-/** Read must succeed before merging; an unreadable config is never a blank config. */
+/**
+ * Apply only edits made against the dialog's base, not its stale defaults or
+ * unrelated plugin flags. Read failure or a competing edit is never a blank config.
+ */
 export async function saveSpaceFeatures(config: {
   read: () => Promise<unknown>;
   write: (config: Record<string, unknown>) => Promise<void>;
-}, features: SpaceFeatures): Promise<SpaceFeatures> {
+}, features: SpaceFeatures, base: SpaceFeatures): Promise<SpaceFeatures> {
   const current = await config.read();
-  const merged = withSpaceFeatures(current, features);
-  await config.write(merged);
+  if (current !== null && !record(current)) throw new Error('Space settings must be a JSON object');
+  const merged = { ...record(current) };
+  const latest = parseSpaceFeatures(current);
+  let changed = false;
+  const edit = (group: 'modules' | 'journal' | 'templates', key: string, before: unknown, value: unknown, fresh: unknown) => {
+    if (Object.is(before, value)) return;
+    const previous = record(merged.features);
+    const section = record(previous?.[group]);
+    if ((merged.features !== undefined && !previous) || (previous?.[group] !== undefined && !section)
+      || (!Object.is(fresh, before) && !Object.is(fresh, value))) {
+      throw new Error(`Space settings changed at features.${group}.${key}. Reload settings before saving.`);
+    }
+    if (Object.is(fresh, value)) return;
+    merged.features = { ...previous, [group]: { ...section, [key]: value } };
+    changed = true;
+  };
+  for (const key of Object.keys(features.modules)) {
+    edit('modules', key, base.modules[key], features.modules[key], latest.modules[key]);
+  }
+  for (const key of ['folder', 'format', 'template'] as const) {
+    edit('journal', key, base.journal[key], features.journal[key], latest.journal[key]);
+  }
+  edit('templates', 'folder', base.templates.folder, features.templates.folder, latest.templates.folder);
+  if (changed) await config.write(merged);
   return parseSpaceFeatures(merged);
 }
 

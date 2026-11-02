@@ -23,9 +23,15 @@ pub fn read_space_config(root: &Path) -> Result<Option<serde_json::Value>, Strin
     if bytes.len() > MAX_SPACE_CONFIG_BYTES {
         return Err("Space settings file is too large".to_string());
     }
-    // A hand-edited, malformed file must not lock the Space: report it as
-    // missing so the client falls back to defaults, and keep the bytes.
-    Ok(serde_json::from_slice(&bytes).ok())
+    // Only actual absence means defaults. The client isolates a configuration
+    // failure from ordinary Wiki access; invalid bytes must never be replaced
+    // merely because the settings dialog treated them as a new Space.
+    let value: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("Space settings must contain valid JSON: {error}"))?;
+    if !value.is_object() {
+        return Err("Space settings must be a JSON object".to_string());
+    }
+    Ok(Some(value))
 }
 
 pub fn write_space_config(root: &Path, value: &serde_json::Value) -> Result<(), String> {
@@ -387,15 +393,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn space_config_round_trips_and_tolerates_bad_json() {
+    fn space_config_round_trips_and_distinguishes_absence() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(read_space_config(dir.path()).unwrap(), None);
         let value = serde_json::json!({ "features": { "modules": { "journal": true } } });
         write_space_config(dir.path(), &value).unwrap();
         assert_eq!(read_space_config(dir.path()).unwrap(), Some(value));
-        std::fs::write(dir.path().join(SPACE_CONFIG_PATH), "{broken").unwrap();
-        assert_eq!(read_space_config(dir.path()).unwrap(), None);
         assert!(write_space_config(dir.path(), &serde_json::json!([1])).is_err());
+    }
+
+    #[test]
+    fn space_config_rejects_malformed_or_nonobject_json_without_changing_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SPACE_CONFIG_PATH);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        for content in ["{broken", "[]", "null", "7", "\"settings\"", ""] {
+            std::fs::write(&path, content).unwrap();
+            assert!(
+                read_space_config(dir.path()).is_err(),
+                "accepted {content:?}"
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), content.as_bytes());
+        }
+        std::fs::write(&path, "{\"custom\":true}").unwrap();
+        assert_eq!(
+            read_space_config(dir.path()).unwrap(),
+            Some(serde_json::json!({ "custom": true }))
+        );
+    }
+
+    #[test]
+    fn space_config_reports_unreadable_files_without_treating_them_as_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SPACE_CONFIG_PATH);
+        std::fs::create_dir_all(&path).unwrap();
+        std::fs::write(path.join("keep"), "not a config file").unwrap();
+        assert!(read_space_config(dir.path()).is_err());
+        assert_eq!(
+            std::fs::read(path.join("keep")).unwrap(),
+            b"not a config file"
+        );
     }
 
     #[test]

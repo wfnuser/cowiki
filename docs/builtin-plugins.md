@@ -90,9 +90,18 @@ without invoking or enabling the plugin. A missing optional template falls
 back to the usual journal body; an unreadable template is an error, not absence.
 
 `openJournalOnStartup` remains in `cowiki.personal.preferences` on the device,
-not in the Space. Saving settings rereads the current Space config, preserves
-unknown root/feature/module/journal/template keys, and refuses to save if that
-read fails. Turning a local plugin on/off adds no Cloud/team feature behavior.
+not in the Space. Saving settings rereads the current Space config and applies
+only fields edited against the dialog's base. Fresh unrelated values (including
+other plugin flags), unknown keys and omitted defaults stay as they are. A
+competing edit to the same field requires reloading, and a device-only preference
+change does not rewrite the Space file.
+
+Missing settings use defaults; malformed JSON, a nonobject JSON root or an
+unreadable file is an error, not a new Space. That failure disables plugin
+actions/settings writes without locking ordinary Wiki access or changing the
+file's bytes. After repairing the file externally, use **Reload settings** in
+the dialog to reread it. Turning a local plugin on/off adds no Cloud/team
+feature behavior.
 
 ## Verification
 

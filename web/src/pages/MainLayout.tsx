@@ -807,17 +807,24 @@ export function MainLayout() {
 
   const isLocalSpace = (ws: Workspace | null): ws is Workspace => !!ws && desktop && !!ws.localPath;
 
-  const loadSpaceFeatures = useCallback(async (ws: Workspace): Promise<SpaceFeatures> => {
-    if (!desktop || !ws.localPath) return DEFAULT_SPACE_FEATURES;
+  const readFeatureConfig = useCallback(async (ws: Workspace) => {
     try {
-      const features = parseSpaceFeatures(await readSpaceConfig(ws.slug));
-      setSpaceFeatures((previous) => ({ ...previous, [ws.id]: features }));
-      return features;
+      return await readSpaceConfig(ws.slug);
     } catch (error) {
+      if (pluginSnapshot.current.space?.id === ws.id) pluginSnapshot.current = { ...pluginSnapshot.current, features: null };
+      setSpaceFeatures((previous) => { const next = { ...previous }; delete next[ws.id]; return next; });
       setFeatureLoadErrors((previous) => ({ ...previous, [ws.id]: error instanceof Error ? error.message : String(error) }));
       throw error;
     }
-  }, [desktop]);
+  }, []);
+
+  const loadSpaceFeatures = useCallback(async (ws: Workspace): Promise<SpaceFeatures> => {
+    if (!desktop || !ws.localPath) return DEFAULT_SPACE_FEATURES;
+    const features = parseSpaceFeatures(await readFeatureConfig(ws));
+    setSpaceFeatures((previous) => ({ ...previous, [ws.id]: features }));
+    setFeatureLoadErrors((previous) => { const next = { ...previous }; delete next[ws.id]; return next; });
+    return features;
+  }, [desktop, readFeatureConfig]);
 
   useEffect(() => {
     if (!activeWorkspace || spaceFeatures[activeWorkspace.id] || featureLoadErrors[activeWorkspace.id] || !isLocalSpace(activeWorkspace)) return;
@@ -997,7 +1004,7 @@ export function MainLayout() {
   const saveModules = async (features: SpaceFeatures, nextPreferences: PersonalPreferences) => {
     const ws = activeWorkspace;
     if (!ws || !isLocalSpace(ws) || !spaceFeatures[ws.id]) throw new Error('Space settings are not ready');
-    const saved = await saveSpaceFeatures({ read: () => readSpaceConfig(ws.slug), write: (config) => writeSpaceConfig(ws.slug, config) }, features);
+    const saved = await saveSpaceFeatures({ read: () => readFeatureConfig(ws), write: (config) => writeSpaceConfig(ws.slug, config) }, features, spaceFeatures[ws.id]);
     if (pluginSnapshot.current.space?.id === ws.id) pluginSnapshot.current = { ...pluginSnapshot.current, features: saved };
     setSpaceFeatures((previous) => ({ ...previous, [ws.id]: saved }));
     try {
@@ -2176,6 +2183,7 @@ export function MainLayout() {
           plugins={BUILTIN_PLUGINS}
           ready={activeFeaturesReady}
           configurationError={featureLoadErrors[activeWorkspace.id]}
+          onReload={async () => { await loadSpaceFeatures(activeWorkspace); }}
           onClose={() => setModulesDialogOpen(false)}
           onSave={saveModules}
         />
