@@ -19,7 +19,7 @@ test.afterAll(async () => { await server.close(); });
 const today = 'Daily/2026-11-01'; // local day at 02:30 UTC on November 2
 const unknownSettings = { version: 7, data: ['preserve'] };
 interface FixtureOptions {
-  beforeConfig?: () => Promise<void>;
+  beforeConfig?: (space: string) => Promise<void>;
   beforePage?: (space: string, slug: string) => Promise<void>;
   disabled?: boolean;
   secondSpace?: boolean;
@@ -50,7 +50,7 @@ async function desktop(page: Page, openOnStartup = false, options: FixtureOption
         notes.set(args.pageSlug, args.content);
         if (args.createOnly) creates.push(args.pageSlug);
         return;
-      case 'local_read_space_config': await options.beforeConfig?.(); return config;
+      case 'local_read_space_config': await options.beforeConfig?.(args.spaceSlug); return config;
       case 'local_write_space_config': config = args.config; return;
       case 'local_list_page_comments': return { comments: [], snapshots: [] };
       case 'local_working_diff': case 'local_list_agent_changes': case 'local_list_sources': case 'local_list_backlinks': return [];
@@ -123,13 +123,14 @@ test('a disabled Space never offers Today while its settings are still loading',
   expect(state.creates).toEqual([]);
 });
 
-test('finishing a slow Today request cannot reopen the previous Space', async ({ page }) => {
+for (const switchBack of [false, true]) test(`a slow Today request stays cancelled after switching ${switchBack ? 'away and back' : 'away'}`, async ({ page }) => {
   const gate = Promise.withResolvers<void>();
   const started = Promise.withResolvers<void>();
   const state = await desktop(page, false, { secondSpace: true, beforePage: async (space, slug) => {
     if (space === 'personal' && slug === today) { started.resolve(); await gate.promise; }
   } });
-  state.files.set(today, '# Private journal\n');
+  if (!switchBack) state.files.set(today, '# Private journal\n');
+  let userSelection: string;
   try {
     await page.goto(origin + '/personal/Welcome');
     await expect(page.locator('article')).toContainText('Welcome');
@@ -137,11 +138,18 @@ test('finishing a slow Today request cannot reopen the previous Space', async ({
     await started.promise;
     await page.getByRole('button', { name: 'W', exact: true }).click();
     await expect(page.locator('article')).toContainText('Other notebook');
+    if (switchBack) {
+      await page.getByRole('button', { name: 'P', exact: true }).click();
+      await expect(page).toHaveURL(/\/personal\/(Welcome|Template)$/);
+      await expect(page.locator('article')).toContainText(/Welcome|From my template/);
+    }
+    userSelection = page.url();
   } finally { gate.resolve(); }
   await page.waitForFunction(() => Reflect.get(window, '__TAURI_INTERNALS__').pending === 0);
-  await expect(page).toHaveURL(/\/work\/Other$/);
-  await expect(page.locator('article')).toContainText('Other notebook');
+  await expect(page).toHaveURL(userSelection);
+  await expect(page.locator('article')).toContainText(switchBack ? /Welcome|From my template/ : 'Other notebook');
   await expect(page.locator('.cm-content')).toHaveCount(0);
+  expect(state.creates).toEqual([]);
 });
 
 test('saving a journal folder does not revert an external update to another plugin', async ({ page }) => {
@@ -158,13 +166,14 @@ test('saving a journal folder does not revert an external update to another plug
   expect(state.config().features.modules.later).toBe(true);
 });
 
-test('unreadable settings leave ordinary pages available, then reload without restarting', async ({ page }) => {
+for (const entry of ['/', '/personal/Welcome']) test(`unreadable settings recover without replaying startup (${entry})`, async ({ page }) => {
   let damaged = true;
   const state = await desktop(page, true, { beforeConfig: async () => {
     if (damaged) throw new Error('Unreadable settings document');
   } });
-  await page.goto(origin + '/personal/Welcome');
-  await expect(page.locator('article')).toContainText('Welcome');
+  await page.goto(origin + entry);
+  await expect(page.locator('article')).toContainText(/Welcome|From my template/);
+  const originalSelection = page.url();
   await page.getByRole('button', { name: /Modules & settings/i }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('Unreadable settings document');
@@ -179,6 +188,28 @@ test('unreadable settings leave ordinary pages available, then reload without re
   await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('button', { name: 'Today', exact: true })).toBeVisible();
-  await expect(page.locator('article')).toContainText('Welcome');
+  await page.waitForFunction(() => Reflect.get(window, '__TAURI_INTERNALS__').pending === 0);
+  await expect(page).toHaveURL(originalSelection);
+  await expect(page.locator('article')).toContainText(/Welcome|From my template/);
+  expect(state.creates).toEqual([]);
+  await page.getByRole('button', { name: 'Today', exact: true }).click();
+  await expect(page.locator('.cm-content')).toContainText('From my template 2026-11-01');
+});
+
+test('selecting a new Space cancels startup while the first Space is loading', async ({ page }) => {
+  const gate = Promise.withResolvers<void>();
+  const reading = Promise.withResolvers<void>();
+  const state = await desktop(page, true, { secondSpace: true, beforeConfig: async slug => {
+    if (slug === 'personal') { reading.resolve(); await gate.promise; }
+  } });
+  try {
+    await page.goto(origin);
+    await reading.promise;
+    await page.getByRole('button', { name: 'W', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Today', exact: true })).toBeVisible();
+  } finally { gate.resolve(); }
+  await page.waitForFunction(() => Reflect.get(window, '__TAURI_INTERNALS__').pending === 0);
+  await expect(page).toHaveURL(/\/work\/Other$/);
+  await expect(page.locator('article')).toContainText('Other notebook');
   expect(state.creates).toEqual([]);
 });
