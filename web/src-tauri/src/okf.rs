@@ -6,6 +6,7 @@
 use serde_yaml::{Mapping, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 pub const OKF_VERSION: &str = "0.1";
@@ -640,6 +641,36 @@ fn is_source_path(root: &Path, path: &Path) -> bool {
 }
 
 pub fn refresh_progressive_indexes(root: &Path) -> Result<(), String> {
+    refresh_progressive_indexes_with(root, |_, _| {})
+}
+
+/// Reviewing a conforming draft only updates generated listings. Keep their
+/// prior text, not a Git snapshot of the entire Space, for error recovery.
+pub fn refresh_review_indexes(root: &Path) -> Result<(), String> {
+    let mut originals = Vec::new();
+    let result = refresh_progressive_indexes_with(root, |path, previous| {
+        originals.push((path.to_path_buf(), previous));
+    });
+    if let Err(mut error) = result {
+        for (path, previous) in originals.into_iter().rev() {
+            let restored = match previous {
+                Some(text) => std::fs::write(&path, text),
+                None if path.is_file() => std::fs::remove_file(&path),
+                None => Ok(()),
+            };
+            if let Err(cause) = restored {
+                error.push_str(&format!("; could not restore {}: {cause}", path.display()));
+            }
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn refresh_progressive_indexes_with(
+    root: &Path,
+    mut before_write: impl FnMut(&Path, Option<String>),
+) -> Result<(), String> {
     let mut directories = BTreeSet::new();
     directories.insert(root.to_path_buf());
     for entry in walkdir::WalkDir::new(root)
@@ -654,7 +685,7 @@ pub fn refresh_progressive_indexes(root: &Path) -> Result<(), String> {
     let mut directories = directories.into_iter().collect::<Vec<_>>();
     directories.sort_by_key(|directory| std::cmp::Reverse(directory.components().count()));
     for directory in directories {
-        refresh_directory_index(root, &directory)?;
+        refresh_directory_index(root, &directory, &mut before_write)?;
     }
     Ok(())
 }
@@ -672,7 +703,7 @@ pub fn refresh_indexes_for(root: &Path, relative: &Path) -> Result<(), String> {
             break;
         }
         if directory.is_dir() {
-            refresh_directory_index(root, &directory)?;
+            refresh_directory_index(root, &directory, |_, _| {})?;
         }
         if directory == root {
             break;
@@ -681,9 +712,14 @@ pub fn refresh_indexes_for(root: &Path, relative: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn refresh_directory_index(root: &Path, directory: &Path) -> Result<(), String> {
+fn refresh_directory_index(
+    root: &Path,
+    directory: &Path,
+    before_write: impl FnOnce(&Path, Option<String>),
+) -> Result<(), String> {
     let index_path = directory.join("index.md");
-    let existing = if index_path.is_file() {
+    let had_index = index_path.is_file();
+    let existing = if had_index {
         std::fs::read_to_string(&index_path).map_err(|error| error.to_string())?
     } else if directory == root {
         root_index()
@@ -725,14 +761,18 @@ fn refresh_directory_index(root: &Path, directory: &Path) -> Result<(), String> 
         }
     }
     entries.sort_by_key(|left| left.0.to_lowercase());
-    let existing = if directory == root {
-        normalize_root_index(&existing)?
+    let updated = if directory == root {
+        update_generated_listing(&normalize_root_index(&existing)?, &entries)?
     } else {
-        existing
+        update_generated_listing(&existing, &entries)?
     };
-    let updated = update_generated_listing(&existing, &entries)?;
     if updated != existing {
-        std::fs::write(index_path, updated).map_err(|error| error.to_string())?;
+        // A permission error opening the file leaves it untouched. Record it
+        // for rollback once opened, before writing any of the new bytes.
+        let mut file = std::fs::File::create(&index_path).map_err(|error| error.to_string())?;
+        before_write(&index_path, had_index.then_some(existing));
+        file.write_all(updated.as_bytes())
+            .map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -1006,6 +1046,25 @@ fn escape_target(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn review_refresh_rolls_back_child_when_parent_is_read_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let index = root.join("index.md");
+        std::fs::write(&index, root_index()).unwrap();
+        std::fs::create_dir(root.join("new")).unwrap();
+        std::fs::set_permissions(&index, std::fs::Permissions::from_mode(0o444)).unwrap();
+        if std::fs::OpenOptions::new().write(true).open(&index).is_ok() {
+            // A privileged test process bypasses the permission failure.
+            return;
+        }
+        assert!(super::refresh_review_indexes(root).is_err());
+        assert!(!root.join("new/index.md").exists());
+        assert_eq!(std::fs::read_to_string(index).unwrap(), root_index());
+    }
 
     #[test]
     fn legacy_concept_kind_is_removed_without_dropping_other_metadata() {

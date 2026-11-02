@@ -1701,12 +1701,18 @@ impl LocalEngine {
         let space = self.find_space(space_slug)?;
         let repo = Repository::open(&space.local_path).map_err(|error| error.to_string())?;
         if okf::ensure_supported_for_write(&space.local_path).is_ok() {
-            let backup = create_migration_backup(&repo, &space.local_path)?;
-            if let Err(error) = okf::ensure_bundle(&space.local_path) {
-                rollback_migration(&repo, &space.local_path, &backup)?;
-                return Err(error);
+            if okf::needs_content_migration(&space.local_path)? {
+                let backup = create_migration_backup(&repo, &space.local_path)?;
+                if let Err(error) = okf::ensure_bundle(&space.local_path) {
+                    rollback_migration(&repo, &space.local_path, &backup)?;
+                    return Err(error);
+                }
+                delete_migration_backup(&repo, &backup.reference)?;
+            } else {
+                // A stale listing (including a new folder) is not a migration:
+                // restore only the indexes this refresh touches if it fails.
+                okf::refresh_review_indexes(&space.local_path)?;
             }
-            delete_migration_backup(&repo, &backup.reference)?;
         }
         let mut options = StatusOptions::new();
         options
@@ -2207,7 +2213,11 @@ struct MigrationBackup {
 
 fn create_migration_backup(repo: &Repository, root: &Path) -> Result<MigrationBackup, String> {
     let original_index = std::fs::read(repo.path().join("index")).ok();
-    let mut index = repo.index().map_err(|error| error.to_string())?;
+    // libgit2 caches the index per repository handle. Keep the scratch index
+    // off the caller's handle, or later status queries report ignored backup
+    // files as staged even though the on-disk index was never written.
+    let snapshot_repo = Repository::open(root).map_err(|error| error.to_string())?;
+    let mut index = snapshot_repo.index().map_err(|error| error.to_string())?;
     index.clear().map_err(|error| error.to_string())?;
     let mut directories = Vec::new();
     for entry in walkdir::WalkDir::new(root)
@@ -4234,6 +4244,121 @@ mod tests {
         let preserved = std::fs::read_to_string(folder.join("same.md")).unwrap();
         assert!(preserved.contains("# Original"));
         assert!(!preserved.contains("Replacement"));
+    }
+
+    #[test]
+    fn working_diff_refreshes_an_external_draft_without_storing_ignored_attachments() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        let repo = Repository::open(&folder).unwrap();
+        std::fs::write(repo.path().join("info/exclude"), "*.bin\n").unwrap();
+
+        // Deterministic high-entropy bytes, like an already compressed attachment.
+        let mut state = 42_u32;
+        let mut attachment = Vec::new();
+        for _ in 0..1_048_576 {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            attachment.extend_from_slice(&state.to_le_bytes());
+        }
+        std::fs::write(folder.join("recording.bin"), &attachment).unwrap();
+        let blob = git2::Oid::hash_object(git2::ObjectType::Blob, &attachment).unwrap();
+        let odb = repo.odb().unwrap();
+        assert!(!odb.exists(blob));
+        let draft = "---\ntype: Note\n---\n\n# External draft\n";
+        std::fs::create_dir(folder.join("outside")).unwrap();
+        std::fs::write(folder.join("outside/draft.md"), draft).unwrap();
+        assert!(repo
+            .status_should_ignore(std::path::Path::new("recording.bin"))
+            .unwrap());
+        let object_bytes = || -> u64 {
+            walkdir::WalkDir::new(repo.path().join("objects"))
+                .into_iter()
+                .map(Result::unwrap)
+                .filter(|entry| entry.file_type().is_file())
+                .map(|entry| entry.metadata().unwrap().len())
+                .sum()
+        };
+        let before = object_bytes();
+        let mut displayed_ignored = false;
+        for _ in 0..2 {
+            let start = std::time::Instant::now();
+            let diffs = engine.working_diff(&space.slug).unwrap();
+            eprintln!(
+                "review {:?}, object growth {} bytes, ignored blob {}",
+                start.elapsed(),
+                object_bytes() - before,
+                odb.exists(blob)
+            );
+            assert!(diffs.iter().any(|diff| diff.path == "outside/draft.md"
+                && diff.new_content.as_deref() == Some(draft)));
+            assert!(diffs.iter().any(|diff| diff.path == "outside/index.md"
+                && diff.new_content.as_deref().unwrap().contains("draft.md")));
+            displayed_ignored |= diffs.iter().any(|diff| diff.path == "recording.bin");
+        }
+        assert!(
+            !odb.exists(blob),
+            "draft review wrote the ignored attachment into Git"
+        );
+        assert!(!displayed_ignored);
+        assert_eq!(object_bytes(), before);
+    }
+
+    #[test]
+    fn failed_review_index_refresh_preserves_existing_and_missing_listings() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        let root_index =
+            "---\nokf_version: '0.1'\n---\n\n# Notes\n<!-- cowiki:generated-index:start -->\n";
+        std::fs::write(folder.join("index.md"), root_index).unwrap();
+        std::fs::create_dir_all(folder.join("existing/new")).unwrap();
+        let existing = "# Existing listing with my edits\n";
+        std::fs::write(folder.join("existing/index.md"), existing).unwrap();
+        let draft = "---\ntype: Note\n---\n\nDraft.\n";
+        std::fs::write(folder.join("existing/new/draft.md"), draft).unwrap();
+        let index = std::fs::read(folder.join(".git/index")).unwrap();
+
+        let error = engine.working_diff(&space.slug).unwrap_err();
+        assert!(error.contains("no closing marker"));
+        assert_eq!(
+            std::fs::read_to_string(folder.join("index.md")).unwrap(),
+            root_index
+        );
+        assert_eq!(
+            std::fs::read_to_string(folder.join("existing/index.md")).unwrap(),
+            existing
+        );
+        assert!(!folder.join("existing/new/index.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(folder.join("existing/new/draft.md")).unwrap(),
+            draft
+        );
+        assert_eq!(std::fs::read(folder.join(".git/index")).unwrap(), index);
+    }
+
+    #[test]
+    fn review_of_a_legacy_draft_keeps_backup_files_out_of_the_diff() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        let repo = Repository::open(&folder).unwrap();
+        std::fs::write(repo.path().join("info/exclude"), "private.bin\n").unwrap();
+        std::fs::write(folder.join("private.bin"), [0xfe, 0xff]).unwrap();
+        std::fs::write(folder.join("legacy.md"), "# Legacy\n").unwrap();
+
+        let diffs = engine.working_diff(&space.slug).unwrap();
+        assert!(diffs.iter().any(|diff| diff.path == "legacy.md"
+            && diff.new_content.as_deref().unwrap().contains("type: Note")));
+        assert!(!diffs.iter().any(|diff| diff.path == "private.bin"));
     }
 
     #[test]
