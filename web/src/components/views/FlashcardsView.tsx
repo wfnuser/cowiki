@@ -1,25 +1,30 @@
 import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ExternalLink, Layers, LoaderCircle, RefreshCw, RotateCcw } from 'lucide-react';
+import { ExternalLink, Layers, LoaderCircle, PauseCircle, RefreshCw, RotateCcw } from 'lucide-react';
 
 import { withObsidianReader } from '@/components/ObsidianReader';
 import { listCardSources, readCardReviews, writeCardReviews } from '@/local-api';
 import { C } from '@/lib/design';
+import { dateKey } from '@/lib/journal';
 import { obsidianToReaderMarkdown } from '@/lib/obsidian-markdown';
 import {
+  adoptMovedCards,
+  answerCard,
   buildQueue,
+  changedSinceReview,
   collectCards,
   deckStats,
+  emptyReviewStore,
   isNew,
-  parseOfMatrix,
+  parseReviewStore,
   previewIntervals,
   renderCloze,
-  review,
-  writeSchedule,
-  type CardSchedule,
+  resetCard,
+  scheduleOf,
+  setSuspended,
   type Flashcard,
-  type OfMatrix,
+  type ReviewStore,
   type Score,
 } from '@/lib/flashcards';
 
@@ -34,8 +39,6 @@ const SCORES: Array<{ score: Score; label: string; keys: string[]; tone: string 
 interface FlashcardsViewProps {
   workspaceSlug: string;
   onOpenSource: (path: string) => void;
-  /** Re-read a page, transform it and save it. */
-  onEditPage: (path: string, transform: (content: string) => string) => Promise<void>;
 }
 
 function CardText({ text }: { text: string }) {
@@ -46,17 +49,24 @@ function CardText({ text }: { text: string }) {
   );
 }
 
-export function FlashcardsView({ workspaceSlug, onOpenSource, onEditPage }: FlashcardsViewProps) {
+export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewProps) {
   const [cards, setCards] = useState<Flashcard[]>([]);
-  const [matrix, setMatrix] = useState<OfMatrix>({});
+  const [store, setStore] = useState<ReviewStore>(emptyReviewStore);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
   const [session, setSession] = useState<Flashcard[] | null>(null);
   const [reviewed, setReviewed] = useState(0);
   const [revealed, setRevealed] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [now, setNow] = useState(() => new Date());
+  const today = dateKey(now);
+
+  const persist = (next: ReviewStore) => {
+    setStore(next);
+    writeCardReviews(workspaceSlug, next).catch((caught: unknown) => {
+      setError(`Could not save review history: ${caught instanceof Error ? caught.message : String(caught)}`);
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -64,8 +74,13 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onEditPage }: Flas
       Promise.all([listCardSources(workspaceSlug), readCardReviews(workspaceSlug)])
         .then(([sources, saved]) => {
           if (cancelled) return;
-          setCards(collectCards(sources));
-          setMatrix(parseOfMatrix(saved));
+          const found = collectCards(sources);
+          const loaded = parseReviewStore(saved);
+          // Cards whose page moved keep their history.
+          const adopted = adoptMovedCards(found, loaded);
+          setCards(found);
+          setStore(adopted);
+          if (adopted !== loaded) writeCardReviews(workspaceSlug, adopted).catch(() => {});
           setNow(new Date());
           setError('');
         })
@@ -82,8 +97,8 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onEditPage }: Flas
     };
   }, [workspaceSlug, reloadKey]);
 
-  const stats = useMemo(() => deckStats(cards, now), [cards, now]);
-  const queue = useMemo(() => buildQueue(cards, now), [cards, now]);
+  const stats = useMemo(() => deckStats(cards, store, now), [cards, store, now]);
+  const queue = useMemo(() => buildQueue(cards, store, now, today), [cards, store, now, today]);
   const decks = useMemo(() => {
     const byPage = new Map<string, Flashcard[]>();
     for (const item of cards) byPage.set(item.path, [...(byPage.get(item.path) ?? []), item]);
@@ -92,7 +107,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onEditPage }: Flas
 
   const current = session?.[0] ?? null;
 
-  /** Move to the next card; reload the counts when the session is over. */
+  /** Move to the next card; refresh the counts when the session is over. */
   const advance = () => {
     const remaining = session?.slice(1) ?? [];
     setRevealed(false);
@@ -101,40 +116,37 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onEditPage }: Flas
       return;
     }
     setSession(null);
-    setReloadKey((key) => key + 1);
-  };
-
-  /** Save a card's schedule into its note and move to the next card. */
-  const save = async (item: Flashcard, schedule: CardSchedule | null, nextMatrix?: OfMatrix) => {
-    setSaving(true);
-    try {
-      await onEditPage(item.path, (content) => writeSchedule(content, item, schedule));
-      if (nextMatrix) {
-        setMatrix(nextMatrix);
-        writeCardReviews(workspaceSlug, { version: 2, ofMatrix: nextMatrix }).catch(() => {
-          // The matrix only tunes intervals; the schedule itself is already in the note.
-        });
-      }
-      setReviewed((count) => count + 1);
-      setError('');
-      advance();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setSaving(false);
-    }
+    setNow(new Date());
   };
 
   const rate = (score: Score) => {
-    if (!current || saving) return;
-    const next = review(current.schedule, score, matrix, new Date());
-    void save(current, next.schedule, next.matrix);
+    if (!current) return;
+    persist(answerCard(store, current, score, new Date(), dateKey(new Date())));
+    setReviewed((count) => count + 1);
+    advance();
+  };
+
+  const suspend = () => {
+    if (!current) return;
+    persist(setSuspended(store, current, true));
+    advance();
+  };
+
+  const reset = () => {
+    if (!current) return;
+    persist(resetCard(store, current));
+    advance();
   };
 
   const endSession = () => {
     setSession(null);
     setRevealed(false);
     setReloadKey((key) => key + 1);
+  };
+
+  const updateSetting = (key: 'newPerDay' | 'reviewsPerDay', value: string) => {
+    const amount = Math.max(0, Math.min(9999, Math.round(Number(value) || 0)));
+    persist({ ...store, settings: { ...store.settings, [key]: amount } });
   };
 
   useEffect(() => {
@@ -164,20 +176,24 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onEditPage }: Flas
   });
 
   if (current) {
-    const intervals = previewIntervals(current.schedule, matrix);
-    const fresh = isNew(current);
+    const schedule = scheduleOf(store, current);
+    const intervals = previewIntervals(schedule, store.ofMatrix);
+    const fresh = isNew(store, current);
     return (
       <section style={{ width: 'min(720px, 100%)', margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, fontSize: 12.5, color: C.muted }}>
-          <span>{session?.length ?? 0} left · {fresh ? 'New' : `Review #${current.schedule.repeats + 1}`}</span>
+          <span>{session?.length ?? 0} left · {fresh ? 'New' : `Review #${schedule.repeats + 1}`}</span>
           <div style={{ display: 'flex', gap: 6 }}>
             <button type="button" onClick={() => onOpenSource(current.path)} style={ghostButton} title={current.path}>
               <ExternalLink size={13} /> Open source
             </button>
+            <button type="button" onClick={suspend} style={ghostButton} title="Stop showing this card until you resume it.">
+              <PauseCircle size={13} /> Suspend
+            </button>
             <button
               type="button"
-              onClick={() => { void save(current, null); }}
-              disabled={saving || fresh}
+              onClick={reset}
+              disabled={fresh}
               style={{ ...ghostButton, opacity: fresh ? 0.5 : 1 }}
               title="Reset this card so that you can review it again from the start."
             >
@@ -188,6 +204,9 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onEditPage }: Flas
         </div>
         {error && <div role="alert" style={{ marginBottom: 12, color: C.red, fontSize: 12.5 }}>{error}</div>}
         <div style={cardStyle}>
+          {changedSinceReview(store, current) && (
+            <div style={{ marginBottom: 10, fontSize: 12, color: C.amber }}>The answer changed in the note since you last reviewed this card.</div>
+          )}
           <CardText text={renderCloze(current.front, revealed)} />
           {revealed && current.back && (
             <>
@@ -207,7 +226,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onEditPage }: Flas
               </button>
             </>
           ) : SCORES.map((item) => (
-            <button key={item.score} type="button" disabled={saving} onClick={() => rate(item.score)} style={{ ...ratingButton, borderColor: item.tone }}>
+            <button key={item.score} type="button" onClick={() => rate(item.score)} style={{ ...ratingButton, borderColor: item.tone }}>
               <span style={{ fontWeight: 650 }}>{item.label}</span>
               <span style={{ fontSize: 11, color: C.muted }}>{intervals[item.score]} · {item.keys[0]}</span>
             </button>
@@ -230,7 +249,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onEditPage }: Flas
           </button>
         </div>
         <p style={{ margin: 0, color: C.muted, fontSize: 13 }}>
-          Any bullet tagged <code>#card</code> is a card and its child bullets are the answer, as in Logseq. Each review is saved in the note itself as <code>card-*::</code> properties.
+          Any bullet tagged <code>#card</code> is a card and its child bullets are the answer, as in Logseq. Your review history stays on this device and never changes the notes.
         </p>
       </header>
 
@@ -240,8 +259,8 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onEditPage }: Flas
         <div style={emptyState}><LoaderCircle size={15} className="animate-spin" /> Collecting cards…</div>
       ) : (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginBottom: 14 }}>
-            {([['Due now', stats.due], ['Never reviewed', stats.fresh], ['Total', stats.total]] as Array<[string, number]>).map(([label, value]) => (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 14 }}>
+            {([['Due', stats.due], ['New', stats.fresh], ['Total', stats.total], ['Suspended', stats.suspended]] as Array<[string, number]>).map(([label, value]) => (
               <div key={label} style={tile}>
                 <div style={{ fontSize: 20, fontWeight: 650, color: C.ink }}>{value}</div>
                 <div style={{ fontSize: 11.5, color: C.muted }}>{label}</div>
@@ -255,9 +274,18 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onEditPage }: Flas
               onClick={() => { setSession(queue); setReviewed(0); setRevealed(false); }}
               style={{ ...primaryButton, opacity: queue.length === 0 ? 0.5 : 1 }}
             >
-              {queue.length === 0 ? 'Nothing due' : `Review now · ${queue.length}`}
+              {queue.length === 0 ? 'Nothing to review today' : `Review now · ${queue.length}`}
             </button>
+            <label style={settingLabel}>
+              New per day
+              <input type="number" min={0} value={store.settings.newPerDay} onChange={(event) => updateSetting('newPerDay', event.target.value)} style={numberInput} />
+            </label>
+            <label style={settingLabel}>
+              Reviews per day
+              <input type="number" min={0} value={store.settings.reviewsPerDay} onChange={(event) => updateSetting('reviewsPerDay', event.target.value)} style={numberInput} />
+            </label>
             {reviewed > 0 && <span style={{ fontSize: 12, color: C.muted }}>{reviewed} reviewed this session</span>}
+            {stats.changed > 0 && <span style={{ fontSize: 12, color: C.amber }}>{stats.changed} changed since last review</span>}
           </div>
 
           {decks.length === 0 ? (
@@ -267,14 +295,15 @@ export function FlashcardsView({ workspaceSlug, onOpenSource, onEditPage }: Flas
           ) : (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0, border: `1px solid ${C.line}`, borderRadius: 10, background: C.panel }}>
               {decks.map(([path, items], index) => {
-                const deck = deckStats(items, now);
+                const deck = deckStats(items, store, now);
                 return (
                   <li key={path} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderTop: index === 0 ? 'none' : `1px solid ${C.lineSoft}` }}>
                     <button type="button" onClick={() => onOpenSource(path)} style={linkButton} title={path}>
                       {path.replace(/\.md$/i, '')}
                     </button>
                     <span style={{ marginLeft: 'auto', fontSize: 12, color: C.muted, whiteSpace: 'nowrap' }}>
-                      {deck.total} {deck.total === 1 ? 'card' : 'cards'} · {deck.due} due
+                      {deck.total} {deck.total === 1 ? 'card' : 'cards'} · {deck.due} due · {deck.fresh} new
+                      {deck.suspended > 0 ? ` · ${deck.suspended} suspended` : ''}
                     </span>
                   </li>
                 );
@@ -323,4 +352,12 @@ const linkButton: React.CSSProperties = {
 const emptyState: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 120,
   border: `1px dashed ${C.line}`, borderRadius: 11, color: C.muted, fontSize: 12.5, textAlign: 'center', padding: 16, lineHeight: 1.6,
+};
+
+const settingLabel: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: C.muted,
+};
+
+const numberInput: React.CSSProperties = {
+  width: 64, padding: '4px 6px', border: `1px solid ${C.line}`, borderRadius: 6, background: C.bg, color: C.ink, fontSize: 12.5,
 };

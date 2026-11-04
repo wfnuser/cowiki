@@ -1,7 +1,6 @@
 use git2::build::CheckoutBuilder;
 use git2::{
-    DiffOptions, IndexEntry, IndexTime, Oid, Repository, RepositoryInitOptions, Signature,
-    StatusOptions,
+    IndexEntry, IndexTime, Oid, Repository, RepositoryInitOptions, Signature, StatusOptions,
 };
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -1701,6 +1700,9 @@ impl LocalEngine {
         let space = self.find_space(space_slug)?;
         let repo = Repository::open(&space.local_path).map_err(|error| error.to_string())?;
         if okf::ensure_supported_for_write(&space.local_path).is_ok() {
+            // This runs whenever a Space is opened. The full backup hashes
+            // every byte (ignored attachments included) and leaves them in
+            // .git, so take it only when the content actually needs migrating.
             if okf::needs_content_migration(&space.local_path)? {
                 let backup = create_migration_backup(&repo, &space.local_path)?;
                 if let Err(error) = okf::ensure_bundle(&space.local_path) {
@@ -1851,26 +1853,56 @@ fn draft_fingerprint(repo: &Repository) -> Result<Option<u64>, String> {
     Ok(Some(hasher.finish()))
 }
 
+/// Files whose content differs from the latest checkpoint (or the last
+/// commit). Only paths Git reports as changed, plus paths that differ between
+/// the checkpoint and the last commit, are hashed; unchanged files, such as
+/// large attachments, are never read.
 fn draft_changed_files(repo: &Repository) -> Result<usize, String> {
-    let baseline_oid = checkpoint_tip(repo)?.or_else(|| {
-        repo.head()
-            .ok()
-            .and_then(|head| head.peel_to_commit().ok())
-            .map(|commit| commit.id())
-    });
-    let baseline = baseline_oid
-        .map(|oid| {
+    let root = repo
+        .workdir()
+        .ok_or_else(|| "local Space repository has no working directory".to_string())?;
+    let head_tree = repo.head().ok().and_then(|head| head.peel_to_tree().ok());
+    let baseline_tree = match checkpoint_tip(repo)? {
+        Some(oid) => Some(
             repo.find_commit(oid)
                 .and_then(|commit| commit.tree())
-                .map_err(|error| error.to_string())
-        })
-        .transpose()?;
-    let mut options = DiffOptions::new();
-    options.include_untracked(true).recurse_untracked_dirs(true);
-    let diff = repo
-        .diff_tree_to_workdir(baseline.as_ref(), Some(&mut options))
-        .map_err(|error| error.to_string())?;
-    Ok(diff.deltas().count())
+                .map_err(|error| error.to_string())?,
+        ),
+        None => head_tree.clone(),
+    };
+    let mut candidates: std::collections::BTreeSet<String> =
+        draft_statuses(repo)?.into_iter().collect();
+    if let (Some(head), Some(baseline)) = (head_tree.as_ref(), baseline_tree.as_ref()) {
+        if head.id() != baseline.id() {
+            let diff = repo
+                .diff_tree_to_tree(Some(head), Some(baseline), None)
+                .map_err(|error| error.to_string())?;
+            for delta in diff.deltas() {
+                for file in [delta.old_file(), delta.new_file()] {
+                    if let Some(path) = file.path() {
+                        candidates.insert(path.to_string_lossy().into_owned());
+                    }
+                }
+            }
+        }
+    }
+    let mut changed = 0;
+    for relative in candidates {
+        let recorded = baseline_tree
+            .as_ref()
+            .and_then(|tree| tree.get_path(Path::new(&relative)).ok())
+            .map(|entry| entry.id());
+        let path = root.join(&relative);
+        let current = if path.is_file() {
+            Some(Oid::hash_file(git2::ObjectType::Blob, &path).map_err(|error| error.to_string())?)
+        } else {
+            None
+        };
+        if recorded != current {
+            changed += 1;
+        }
+    }
+    Ok(changed)
 }
 
 fn reset_index_to_head(repo: &Repository, index: &mut git2::Index) -> Result<(), String> {
@@ -5968,6 +6000,16 @@ mod tests {
     /// exercises listing, search, tasks, attachments and saving; the vault is
     /// only read. Run with:
     /// `COWIKI_REAL_VAULT=/path/to/vault cargo test --lib real_obsidian_vault -- --ignored --nocapture`
+    fn git_object_bytes(root: &std::path::Path) -> u64 {
+        walkdir::WalkDir::new(root.join(".git/objects"))
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.metadata().ok())
+            .filter(|metadata| metadata.is_file())
+            .map(|metadata| metadata.len())
+            .sum()
+    }
+
     #[test]
     #[ignore = "needs COWIKI_REAL_VAULT"]
     fn real_obsidian_vault_round_trip() {
@@ -6139,6 +6181,80 @@ mod tests {
             .keyword
             .iter()
             .any(|hit| hit.path.ends_with(&page_path)));
+
+        // Costs paid on every page view, every minute, or when History opens.
+        let started = Instant::now();
+        engine.get_page(&space.slug, &concept).unwrap();
+        eprintln!("open page: {:?}", started.elapsed());
+        let started = Instant::now();
+        let backlinks = engine
+            .list_backlinks(&space.slug, &page_path)
+            .unwrap()
+            .len();
+        eprintln!(
+            "backlinks of one page: {:?} ({backlinks})",
+            started.elapsed()
+        );
+        let started = Instant::now();
+        engine.list_backlinks(&space.slug, &page_path).unwrap();
+        eprintln!("backlinks again: {:?}", started.elapsed());
+        let objects_before = git_object_bytes(&destination);
+        let started = Instant::now();
+        let diffs = engine.working_diff(&space.slug).unwrap().len();
+        eprintln!(
+            "working diff (opening the Space): {:?} ({diffs} files)",
+            started.elapsed()
+        );
+        let started = Instant::now();
+        engine.working_diff(&space.slug).unwrap();
+        eprintln!("working diff again: {:?}", started.elapsed());
+        assert!(
+            git_object_bytes(&destination) < objects_before + 50 * 1_048_576,
+            "opening a Space must not copy attachments into .git"
+        );
+        let started = Instant::now();
+        let search_again = engine
+            .search(&space.slug, "agent", 20)
+            .unwrap()
+            .keyword
+            .len();
+        eprintln!(
+            "search again: {:?} ({search_again} hits)",
+            started.elapsed()
+        );
+        let started = Instant::now();
+        let cards = engine.card_sources(&space.slug).unwrap().len();
+        eprintln!("card_sources: {:?} ({cards} files)", started.elapsed());
+        let started = Instant::now();
+        let draft = engine
+            .history(&space.slug)
+            .unwrap()
+            .current_draft
+            .changed_files;
+        eprintln!(
+            "history (draft size): {:?} ({draft} files)",
+            started.elapsed()
+        );
+        let settle = std::time::Duration::from_secs(300);
+        let base = Instant::now();
+        let started = Instant::now();
+        assert!(engine
+            .auto_checkpoint_at(&space.slug, settle, base)
+            .unwrap()
+            .is_none());
+        eprintln!("auto checkpoint check: {:?}", started.elapsed());
+        let started = Instant::now();
+        let saved = engine
+            .auto_checkpoint_at(&space.slug, settle, base + settle)
+            .unwrap();
+        assert!(saved.is_some(), "the settled draft is checkpointed");
+        eprintln!("auto checkpoint save: {:?}", started.elapsed());
+        let started = Instant::now();
+        assert!(engine
+            .auto_checkpoint_at(&space.slug, settle, base + settle * 3)
+            .unwrap()
+            .is_none());
+        eprintln!("auto checkpoint check after save: {:?}", started.elapsed());
 
         // An edit made outside CoWiki (Obsidian, an Agent, git) is picked up.
         let outside = destination.join(&page_path);

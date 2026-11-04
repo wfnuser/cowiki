@@ -1,35 +1,17 @@
 /**
- * Flashcards written inside ordinary notes, the way Logseq (file graphs) does
- * it:
+ * Flashcards written in ordinary notes with Logseq's syntax:
  *
  * - A card is a bullet tagged `#card` (or `[[card]]`). The bullet is the
  *   question; its indented children are the answer.
  * - `{{cloze text}}` hides `text` until the answer is shown.
- * - Review state is written back into the note as block properties right
- *   under the question, so the schedule travels with the note:
  *
- *       - What does SM-5 adapt? #card
- *         card-last-interval:: 4
- *         card-repeats:: 1
- *         card-ease-factor:: 2.6
- *         card-next-schedule:: 2026-11-05T02:00:00.000Z
- *         card-last-reviewed:: 2026-11-01T02:00:00.000Z
- *         card-last-score:: 5
- *         - The optimal factor matrix
- *
- * Scheduling follows Logseq's SM-5 (frontend/extensions/srs.cljs in Logseq
- * 0.10.9). The optimal-factor matrix it learns over time is the only state kept
- * outside the notes; losing it just resets intervals to the defaults.
+ * Cards are only read from notes. Review history is personal and kept per
+ * device outside the Space (ReviewStore), so card content and scheduling never
+ * mix and reviewing never changes a note. Scheduling follows Logseq's SM-5
+ * (frontend/extensions/srs.cljs in Logseq 0.10.9) with its three answers.
+ * A note imported from Logseq may carry `card-*::` properties; they seed a
+ * card's schedule until it is first reviewed here.
  */
-
-export const CARD_PROPERTIES = [
-  'card-last-interval',
-  'card-repeats',
-  'card-ease-factor',
-  'card-next-schedule',
-  'card-last-reviewed',
-  'card-last-score',
-] as const;
 
 export interface CardSchedule {
   /** Days; -1 before the first successful answer. */
@@ -44,9 +26,9 @@ export interface CardSchedule {
 
 export interface Flashcard {
   /**
-   * Path, question and how many cards above it share that question. Only a
-   * display key: each card's review state lives in its own block, so cards
-   * with the same question in other pages never share history.
+   * Key of the card's review history: the block's Logseq `id::` when it has
+   * one, otherwise page, question and how many cards above share that
+   * question. Cards with the same question in different pages are separate.
    */
   id: string;
   path: string;
@@ -55,7 +37,10 @@ export interface Flashcard {
   front: string;
   back: string;
   cloze: boolean;
-  schedule: CardSchedule;
+  /** Changes when the answer is edited, to suggest re-checking the card. */
+  backHash: string;
+  /** Schedule from Logseq `card-*::` properties in the note, if any (read only). */
+  imported: CardSchedule | null;
 }
 
 /** Logseq's three answers: Forgotten, Took a while to recall, Remembered. */
@@ -63,6 +48,36 @@ export type Score = 1 | 3 | 5;
 
 /** Optimal factors by repetition number, then ease (as strings, like JSON keys). */
 export type OfMatrix = Record<string, Record<string, number>>;
+
+export interface CardState extends CardSchedule {
+  suspended?: boolean;
+  /** Answer hash when last reviewed. */
+  backHash?: string;
+  /** Where the card was last seen, to keep its history when its page moves. */
+  path: string;
+  front: string;
+}
+
+export interface ReviewSettings {
+  newPerDay: number;
+  reviewsPerDay: number;
+}
+
+export interface ReviewLogEntry {
+  id: string;
+  /** Local day, `YYYY-MM-DD`. */
+  day: string;
+  score: Score;
+  wasNew: boolean;
+}
+
+export interface ReviewStore {
+  version: 3;
+  cards: Record<string, CardState>;
+  log: ReviewLogEntry[];
+  settings: ReviewSettings;
+  ofMatrix: OfMatrix;
+}
 
 export const DEFAULT_SCHEDULE: CardSchedule = {
   lastInterval: -1,
@@ -72,6 +87,13 @@ export const DEFAULT_SCHEDULE: CardSchedule = {
   lastReviewed: null,
   lastScore: null,
 };
+
+export const DEFAULT_REVIEW_SETTINGS: ReviewSettings = { newPerDay: 20, reviewsPerDay: 200 };
+const LOG_LIMIT = 5000;
+
+export function emptyReviewStore(): ReviewStore {
+  return { version: 3, cards: {}, log: [], settings: { ...DEFAULT_REVIEW_SETTINGS }, ofMatrix: {} };
+}
 
 const INITIAL_INTERVAL = 4;
 const LEARNING_FRACTION = 0.5;
@@ -144,15 +166,12 @@ function stripCardTag(value: string): string {
 interface Block {
   /** Index of the bullet line. */
   line: number;
-  /** Last line of the question's own text and properties (the bullet line when none). */
-  ownEnd: number;
-  indent: string;
   properties: Map<string, string>;
   front: string;
   back: string;
 }
 
-/** Card blocks in a page, with the line ranges needed to edit them. */
+/** Card blocks in a page. */
 function cardBlocks(content: string): Block[] {
   const lines = content.split(/\r?\n/);
   const start = frontmatterEnd(lines);
@@ -176,7 +195,6 @@ function cardBlocks(content: string): Block[] {
       }
       next += 1;
     }
-    const ownEnd = next - 1;
     const children: string[] = [];
     while (next < lines.length && (lines[next].trim() === '' || indentWidth(lines[next]) > width)) {
       if (!PROPERTY.test(lines[next]) || inCode[next]) children.push(lines[next]);
@@ -186,8 +204,6 @@ function cardBlocks(content: string): Block[] {
     const base = Math.min(...children.filter((line) => line.trim()).map((line) => /^\s*/.exec(line)![0].length));
     blocks.push({
       line: index,
-      ownEnd,
-      indent: `${/^\s*/.exec(lines[index])![0]}  `,
       properties,
       front: stripCardTag(front.join('\n')),
       back: children.map((line) => line.slice(Number.isFinite(base) ? base : 0)).join('\n').trim(),
@@ -207,15 +223,22 @@ export function parseCards(path: string, content: string): Flashcard[] {
       seen.set(block.front, occurrence + 1);
       return { block, occurrence };
     })
-    .map(({ block, occurrence }) => ({
-      id: `${hash(`${path}\u0000${block.front}`)}-${occurrence}`,
-      path,
-      line: block.line,
-      front: block.front,
-      back: block.back,
-      cloze: /\{\{cloze:?\s/.test(`${block.front}\n${block.back}`),
-      schedule: scheduleFrom(block.properties),
-    }));
+    .map(({ block, occurrence }) => {
+      const blockId = text(block.properties.get('id'));
+      const imported = [...block.properties.keys()].some((key) => key.startsWith('card-'))
+        ? scheduleFrom(block.properties)
+        : null;
+      return {
+        id: blockId ? `block:${blockId}` : `${hash(`${path}\u0000${block.front}`)}-${occurrence}`,
+        path,
+        line: block.line,
+        front: block.front,
+        back: block.back,
+        cloze: /\{\{cloze:?\s/.test(`${block.front}\n${block.back}`),
+        backHash: hash(block.back.replace(/\s+/g, ' ').trim()),
+        imported,
+      };
+    });
 }
 
 export function collectCards(sources: Array<{ path: string; content: string }>): Flashcard[] {
@@ -301,86 +324,172 @@ export function previewIntervals(schedule: CardSchedule, matrix: OfMatrix): Reco
   };
 }
 
+/** A card's saved review state, or what its note imported from Logseq. */
+export function stateOf(store: ReviewStore, card: Flashcard): CardState | undefined {
+  const saved = store.cards[card.id];
+  if (saved) return saved;
+  return card.imported ? { ...card.imported, path: card.path, front: card.front } : undefined;
+}
+
+export function scheduleOf(store: ReviewStore, card: Flashcard): CardSchedule {
+  return stateOf(store, card) ?? DEFAULT_SCHEDULE;
+}
+
 /** Logseq's rule: never answered correctly, unscheduled, or scheduled before now. */
-export function isDue(card: Flashcard, now: Date): boolean {
-  const { repeats, nextSchedule } = card.schedule;
-  if (repeats < 1 || !nextSchedule) return true;
-  const time = Date.parse(nextSchedule);
+export function isDue(schedule: CardSchedule, now: Date): boolean {
+  if (schedule.repeats < 1 || !schedule.nextSchedule) return true;
+  const time = Date.parse(schedule.nextSchedule);
   return !Number.isFinite(time) || time < now.getTime();
 }
 
-export function isNew(card: Flashcard): boolean {
-  return card.schedule.repeats < 1 && !card.schedule.lastReviewed;
+export function isNew(store: ReviewStore, card: Flashcard): boolean {
+  const state = stateOf(store, card);
+  return !state || (state.repeats < 1 && !state.lastReviewed);
+}
+
+export function changedSinceReview(store: ReviewStore, card: Flashcard): boolean {
+  const backHash = store.cards[card.id]?.backHash;
+  return !!backHash && backHash !== card.backHash;
+}
+
+/**
+ * Keep history for cards whose page was moved or renamed: a saved state whose
+ * card is gone moves to the one new card with the same question and answer.
+ * A card that only shares the question (a different topic) never inherits it.
+ */
+export function adoptMovedCards(cards: Flashcard[], store: ReviewStore): ReviewStore {
+  const current = new Set(cards.map((card) => card.id));
+  const orphans = Object.entries(store.cards).filter(([id]) => !current.has(id));
+  if (orphans.length === 0) return store;
+  const unsaved = cards.filter((card) => !store.cards[card.id]);
+  let next = store;
+  for (const [id, state] of orphans) {
+    const same = (card: Flashcard) => card.front === state.front && card.backHash === state.backHash;
+    const matches = unsaved.filter((card) => same(card) && card.path !== state.path);
+    const others = orphans.filter(([otherId, other]) => otherId !== id && other.front === state.front && other.backHash === state.backHash);
+    if (matches.length !== 1 || others.length > 0) continue;
+    const [card] = matches;
+    const cardsById = { ...next.cards };
+    delete cardsById[id];
+    cardsById[card.id] = { ...state, path: card.path };
+    next = {
+      ...next,
+      cards: cardsById,
+      log: next.log.map((entry) => (entry.id === id ? { ...entry, id: card.id } : entry)),
+    };
+  }
+  return next;
 }
 
 export interface DeckStats {
   total: number;
   due: number;
   fresh: number;
+  suspended: number;
+  changed: number;
 }
 
-export function deckStats(cards: Flashcard[], now: Date): DeckStats {
+export function deckStats(cards: Flashcard[], store: ReviewStore, now: Date): DeckStats {
+  const stats: DeckStats = { total: cards.length, due: 0, fresh: 0, suspended: 0, changed: 0 };
+  for (const card of cards) {
+    if (stateOf(store, card)?.suspended) stats.suspended += 1;
+    else if (isNew(store, card)) stats.fresh += 1;
+    else if (isDue(scheduleOf(store, card), now)) stats.due += 1;
+    if (changedSinceReview(store, card)) stats.changed += 1;
+  }
+  return stats;
+}
+
+/** Today's queue: due reviews (earliest first), then new cards, within the daily limits. */
+export function buildQueue(cards: Flashcard[], store: ReviewStore, now: Date, today: string): Flashcard[] {
+  const todayLog = store.log.filter((entry) => entry.day === today);
+  const newDone = new Set(todayLog.filter((entry) => entry.wasNew).map((entry) => entry.id)).size;
+  const reviewsDone = new Set(todayLog.filter((entry) => !entry.wasNew).map((entry) => entry.id)).size;
+  const active = cards.filter((card) => !stateOf(store, card)?.suspended);
+  const due = active
+    .filter((card) => !isNew(store, card) && isDue(scheduleOf(store, card), now))
+    .sort((left, right) => (scheduleOf(store, left).nextSchedule ?? '').localeCompare(scheduleOf(store, right).nextSchedule ?? ''));
+  const fresh = active.filter((card) => isNew(store, card));
+  return [
+    ...due.slice(0, Math.max(0, store.settings.reviewsPerDay - reviewsDone)),
+    ...fresh.slice(0, Math.max(0, store.settings.newPerDay - newDone)),
+  ];
+}
+
+/** Record an answer and return the updated store. */
+export function answerCard(store: ReviewStore, card: Flashcard, score: Score, now: Date, today: string): ReviewStore {
+  const previous = stateOf(store, card);
+  const next = review(previous ?? DEFAULT_SCHEDULE, score, store.ofMatrix, now);
+  const state: CardState = {
+    ...next.schedule,
+    ...(previous?.suspended ? { suspended: true } : {}),
+    backHash: card.backHash,
+    path: card.path,
+    front: card.front,
+  };
   return {
-    total: cards.length,
-    due: cards.filter((item) => isDue(item, now)).length,
-    fresh: cards.filter(isNew).length,
+    ...store,
+    ofMatrix: next.matrix,
+    cards: { ...store.cards, [card.id]: state },
+    log: [...store.log, { id: card.id, day: today, score, wasNew: isNew(store, card) }].slice(-LOG_LIMIT),
   };
 }
 
-/** Cards due now, unscheduled ones first, then by next review time (as Logseq sorts them). */
-export function buildQueue(cards: Flashcard[], now: Date): Flashcard[] {
-  return cards
-    .filter((item) => isDue(item, now))
-    .sort((left, right) => (left.schedule.nextSchedule ?? '').localeCompare(right.schedule.nextSchedule ?? ''));
+export function setSuspended(store: ReviewStore, card: Flashcard, suspended: boolean): ReviewStore {
+  const previous = stateOf(store, card) ?? { ...DEFAULT_SCHEDULE, path: card.path, front: card.front };
+  return { ...store, cards: { ...store.cards, [card.id]: { ...previous, suspended } } };
 }
 
-function propertyValues(schedule: CardSchedule | null): Record<(typeof CARD_PROPERTIES)[number], string | null> {
-  const value = schedule ?? { ...DEFAULT_SCHEDULE };
+/** Logseq's "Reset": review the card again from the start. */
+export function resetCard(store: ReviewStore, card: Flashcard): ReviewStore {
+  const suspended = store.cards[card.id]?.suspended ? { suspended: true } : {};
   return {
-    'card-last-interval': String(value.lastInterval),
-    'card-repeats': String(value.repeats),
-    'card-ease-factor': String(value.ease),
-    'card-next-schedule': value.nextSchedule,
-    'card-last-reviewed': value.lastReviewed,
-    'card-last-score': value.lastScore === null ? null : String(value.lastScore),
+    ...store,
+    cards: { ...store.cards, [card.id]: { ...DEFAULT_SCHEDULE, ...suspended, path: card.path, front: card.front } },
   };
 }
 
-/**
- * Write a card's schedule into its page, under the question bullet. The card
- * is found again in the current text, so edits since it was loaded are kept.
- * A null schedule resets the card (Logseq's "Reset").
- */
-export function writeSchedule(content: string, card: Pick<Flashcard, 'front' | 'line'>, schedule: CardSchedule | null): string {
-  const eol = content.includes('\r\n') ? '\r\n' : '\n';
-  const lines = content.split(/\r?\n/);
-  const candidates = cardBlocks(content).filter((block) => block.front === card.front);
-  if (candidates.length === 0) throw new Error('This card was changed or removed. Refresh and try again.');
-  const block = candidates.reduce((best, item) => (Math.abs(item.line - card.line) < Math.abs(best.line - card.line) ? item : best));
-  const values = propertyValues(schedule);
-  const own = lines.slice(block.line + 1, block.ownEnd + 1);
-  const indent = own.find((line) => PROPERTY.test(line))?.match(/^\s*/)?.[0] ?? block.indent;
-  const isCardProperty = (line: string) => (CARD_PROPERTIES as readonly string[]).includes(PROPERTY.exec(line)?.[1].toLowerCase() ?? '');
-  const kept = own.filter((line) => !isCardProperty(line));
-  // Properties sit right after the question's first line, after any others it already has (id::, ...).
-  let at = 0;
-  while (at < kept.length && PROPERTY.test(kept[at])) at += 1;
-  const written = CARD_PROPERTIES.filter((key) => values[key] !== null).map((key) => `${indent}${key}:: ${values[key]}`);
-  lines.splice(block.line + 1, own.length, ...kept.slice(0, at), ...written, ...kept.slice(at));
-  return lines.join(eol);
+function finite(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
-export function parseOfMatrix(value: unknown): OfMatrix {
-  const raw = value && typeof value === 'object' ? (value as { ofMatrix?: unknown }).ofMatrix : null;
+function parseMatrix(raw: unknown): OfMatrix {
   if (!raw || typeof raw !== 'object') return {};
   const matrix: OfMatrix = {};
   for (const [repetition, row] of Object.entries(raw as Record<string, unknown>)) {
     if (!row || typeof row !== 'object') continue;
     for (const [ease, factor] of Object.entries(row as Record<string, unknown>)) {
-      if (typeof factor === 'number' && Number.isFinite(factor)) {
-        matrix[repetition] = { ...matrix[repetition], [ease]: factor };
-      }
+      if (finite(factor)) matrix[repetition] = { ...matrix[repetition], [ease]: factor };
     }
   }
   return matrix;
+}
+
+/**
+ * Accept a stored value, tolerating partial files and earlier formats: the
+ * first format (SM-2, keyed by question) keeps only its daily limits, and the
+ * second (factor matrix only) keeps the matrix.
+ */
+export function parseReviewStore(value: unknown): ReviewStore {
+  const store = emptyReviewStore();
+  if (!value || typeof value !== 'object') return store;
+  const raw = value as Partial<Omit<ReviewStore, 'version'>> & { version?: number };
+  store.ofMatrix = parseMatrix(raw.ofMatrix);
+  const settings = raw.settings;
+  if (settings && finite(settings.newPerDay) && finite(settings.reviewsPerDay)) {
+    store.settings = {
+      newPerDay: Math.max(0, Math.min(9999, Math.round(settings.newPerDay))),
+      reviewsPerDay: Math.max(0, Math.min(99999, Math.round(settings.reviewsPerDay))),
+    };
+  }
+  if (raw.version !== 3) return store;
+  for (const [id, state] of Object.entries(raw.cards ?? {})) {
+    if (state && finite(state.repeats) && finite(state.ease) && finite(state.lastInterval) && typeof state.front === 'string' && typeof state.path === 'string') {
+      store.cards[id] = state;
+    }
+  }
+  if (Array.isArray(raw.log)) {
+    store.log = raw.log.filter((entry) => entry && typeof entry.id === 'string' && typeof entry.day === 'string').slice(-LOG_LIMIT);
+  }
+  return store;
 }
