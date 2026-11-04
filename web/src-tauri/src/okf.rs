@@ -6,6 +6,7 @@
 use serde_yaml::{Mapping, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
+use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 pub const OKF_VERSION: &str = "0.1";
@@ -640,6 +641,183 @@ fn is_source_path(root: &Path, path: &Path) -> bool {
 }
 
 pub fn refresh_progressive_indexes(root: &Path) -> Result<(), String> {
+    refresh_progressive_indexes_with(root, |_, _| {})
+}
+
+fn index_metadata(path: &Path) -> io::Result<Option<std::fs::Metadata>> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_symlink() => Err(io::Error::other(format!(
+            "refusing symbolic link at index {}",
+            path.display()
+        ))),
+        Ok(meta) if meta.is_file() => Ok(Some(meta)),
+        Ok(_) => Err(io::Error::other(format!(
+            "not a regular index file: {}",
+            path.display()
+        ))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn open_existing_index(path: &Path, writable: bool) -> io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(writable);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x0020_0000); // FILE_FLAG_OPEN_REPARSE_POINT
+    }
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other("refusing a non-regular index file"));
+    }
+    Ok(file)
+}
+
+fn read_index(path: &Path) -> io::Result<Option<String>> {
+    if index_metadata(path)?.is_none() {
+        return Ok(None);
+    }
+    let mut text = String::new();
+    open_existing_index(path, false)?.read_to_string(&mut text)?;
+    Ok(Some(text))
+}
+
+#[cfg(target_os = "macos")]
+fn copy_index_security(source: &std::fs::File, target: &std::fs::File) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    use std::os::macos::fs::MetadataExt;
+
+    // Darwin copyfile merges an ACL with the sibling's inherited entries.
+    // Instead set the *exact* extended ACL, including the no-ACL case.
+    const ACL_TYPE_EXTENDED: libc::c_int = 0x100;
+    unsafe extern "C" {
+        fn acl_get_fd_np(fd: libc::c_int, ty: libc::c_int) -> *mut libc::c_void;
+        fn acl_init(count: libc::c_int) -> *mut libc::c_void;
+        fn acl_set_fd_np(fd: libc::c_int, acl: *mut libc::c_void, ty: libc::c_int) -> libc::c_int;
+        fn acl_free(acl: *mut libc::c_void) -> libc::c_int;
+    }
+    // SAFETY: both FDs are live regular files. The Darwin ACL object is freed
+    // exactly once after acl_set_fd_np; neither operation consumes it.
+    unsafe {
+        let mut acl = acl_get_fd_np(source.as_raw_fd(), ACL_TYPE_EXTENDED);
+        if acl.is_null() {
+            let error = io::Error::last_os_error();
+            // Darwin returns ENOENT for an open file without an extended ACL.
+            if error.raw_os_error() != Some(libc::ENOENT) {
+                return Err(error);
+            }
+            acl = acl_init(0);
+            if acl.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        let applied = acl_set_fd_np(target.as_raw_fd(), acl, ACL_TYPE_EXTENDED);
+        let error = (applied != 0).then(io::Error::last_os_error);
+        acl_free(acl);
+        if let Some(error) = error {
+            return Err(error);
+        }
+        if libc::fcopyfile(
+            source.as_raw_fd(),
+            target.as_raw_fd(),
+            std::ptr::null_mut(),
+            libc::COPYFILE_STAT | libc::COPYFILE_XATTR,
+        ) != 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    let rights = |meta: std::fs::Metadata| {
+        (
+            meta.st_uid(),
+            meta.st_gid(),
+            meta.st_mode(),
+            meta.st_flags(),
+        )
+    };
+    if rights(source.metadata()?) != rights(target.metadata()?) {
+        return Err(io::Error::other(
+            "cannot preserve index ownership, mode or file flags",
+        ));
+    }
+    Ok(())
+}
+
+// On macOS copy security metadata before writing any content to the sibling.
+// Elsewhere keep an existing inode (and its native ACL) until we can copy
+// security descriptors there too. Never replace protected files with mode alone.
+fn replace_index(path: &Path, text: &str, record_change: impl FnOnce()) -> io::Result<()> {
+    let original = index_metadata(path)?
+        .map(|_| open_existing_index(path, true))
+        .transpose()?;
+    #[cfg(not(target_os = "macos"))]
+    if let Some(mut existing) = original.as_ref() {
+        existing.set_len(0)?;
+        record_change();
+        return existing.write_all(text.as_bytes());
+    }
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(".cowiki-index-");
+    #[cfg(unix)]
+    if original.is_none() {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(std::fs::Permissions::from_mode(0o666)); // filtered by umask
+    }
+    let mut pending = builder.tempfile_in(path.parent().expect("index has a directory"))?;
+    #[cfg(target_os = "macos")]
+    if let Some(existing) = &original {
+        copy_index_security(existing, pending.as_file())?;
+    }
+    pending.write_all(text.as_bytes())?;
+    if original.is_some() {
+        index_metadata(path)?;
+        pending.persist(path)?;
+    } else {
+        pending.persist_noclobber(path)?;
+    }
+    record_change();
+    Ok(())
+}
+
+/// Reviewing a conforming draft only updates generated listings. Keep their
+/// prior text, not a Git snapshot of the entire Space, for error recovery.
+pub fn refresh_review_indexes(root: &Path) -> Result<(), String> {
+    let mut originals = Vec::new();
+    let result = refresh_progressive_indexes_with(root, |path, previous| {
+        originals.push((path.to_path_buf(), previous));
+    });
+    if let Err(mut error) = result {
+        for (path, previous) in originals.into_iter().rev() {
+            let restored = match previous {
+                Some(text) => replace_index(&path, &text, || {}),
+                None => index_metadata(&path).and_then(|metadata| {
+                    if metadata.is_some() {
+                        std::fs::remove_file(&path)
+                    } else {
+                        Ok(())
+                    }
+                }),
+            };
+            if let Err(cause) = restored {
+                error.push_str(&format!("; could not restore {}: {cause}", path.display()));
+            }
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn refresh_progressive_indexes_with(
+    root: &Path,
+    mut record_change: impl FnMut(&Path, Option<String>),
+) -> Result<(), String> {
     let mut directories = BTreeSet::new();
     directories.insert(root.to_path_buf());
     for entry in walkdir::WalkDir::new(root)
@@ -654,7 +832,7 @@ pub fn refresh_progressive_indexes(root: &Path) -> Result<(), String> {
     let mut directories = directories.into_iter().collect::<Vec<_>>();
     directories.sort_by_key(|directory| std::cmp::Reverse(directory.components().count()));
     for directory in directories {
-        refresh_directory_index(root, &directory)?;
+        refresh_directory_index(root, &directory, &mut record_change)?;
     }
     Ok(())
 }
@@ -672,7 +850,7 @@ pub fn refresh_indexes_for(root: &Path, relative: &Path) -> Result<(), String> {
             break;
         }
         if directory.is_dir() {
-            refresh_directory_index(root, &directory)?;
+            refresh_directory_index(root, &directory, |_, _| {})?;
         }
         if directory == root {
             break;
@@ -681,15 +859,21 @@ pub fn refresh_indexes_for(root: &Path, relative: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn refresh_directory_index(root: &Path, directory: &Path) -> Result<(), String> {
+fn refresh_directory_index(
+    root: &Path,
+    directory: &Path,
+    record_change: impl FnOnce(&Path, Option<String>),
+) -> Result<(), String> {
     let index_path = directory.join("index.md");
-    let existing = if index_path.is_file() {
-        std::fs::read_to_string(&index_path).map_err(|error| error.to_string())?
-    } else if directory == root {
-        root_index()
-    } else {
-        folder_index(&directory.file_name().unwrap_or_default().to_string_lossy())
-    };
+    let previous = read_index(&index_path).map_err(|error| error.to_string())?;
+    let had_index = previous.is_some();
+    let existing = previous.unwrap_or_else(|| {
+        if directory == root {
+            root_index()
+        } else {
+            folder_index(&directory.file_name().unwrap_or_default().to_string_lossy())
+        }
+    });
     let mut entries = Vec::new();
     for child in std::fs::read_dir(directory).map_err(|error| error.to_string())? {
         let child = child.map_err(|error| error.to_string())?;
@@ -704,8 +888,8 @@ fn refresh_directory_index(root: &Path, directory: &Path) -> Result<(), String> 
         }
         if file_type.is_dir() {
             let child_index = path.join("index.md");
-            let title = std::fs::read_to_string(child_index)
-                .ok()
+            let title = read_index(&child_index)
+                .map_err(|error| error.to_string())?
                 .and_then(|body| display_metadata(&body).0)
                 .unwrap_or_else(|| name.clone());
             entries.push((title, format!("{name}/"), None));
@@ -725,14 +909,16 @@ fn refresh_directory_index(root: &Path, directory: &Path) -> Result<(), String> 
         }
     }
     entries.sort_by_key(|left| left.0.to_lowercase());
-    let existing = if directory == root {
-        normalize_root_index(&existing)?
+    let updated = if directory == root {
+        update_generated_listing(&normalize_root_index(&existing)?, &entries)?
     } else {
-        existing
+        update_generated_listing(&existing, &entries)?
     };
-    let updated = update_generated_listing(&existing, &entries)?;
     if updated != existing {
-        std::fs::write(index_path, updated).map_err(|error| error.to_string())?;
+        replace_index(&index_path, &updated, || {
+            record_change(&index_path, had_index.then_some(existing))
+        })
+        .map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -1006,6 +1192,161 @@ fn escape_target(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn refreshing_or_restoring_an_index_preserves_its_macos_acl_and_xattrs() {
+        use std::process::Command;
+        for (rollback, has_acl) in [(false, true), (true, true), (false, false)] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path();
+            std::fs::create_dir(root.join("child")).unwrap();
+            let index = root.join("child/index.md");
+            let original = "# Handwritten\n";
+            std::fs::write(&index, original).unwrap();
+            if has_acl {
+                assert!(Command::new("/bin/chmod")
+                    .args(["+a", "user:daemon deny read"])
+                    .arg(&index)
+                    .status()
+                    .unwrap()
+                    .success());
+            }
+            assert!(Command::new("/usr/bin/xattr")
+                .args(["-w", "org.cowiki.test", "keep-me"])
+                .arg(&index)
+                .status()
+                .unwrap()
+                .success());
+            // A sibling created later can inherit a broader ACL from its folder.
+            assert!(Command::new("/bin/chmod")
+                .args(["+a", "user:nobody allow read,file_inherit"])
+                .arg(root.join("child"))
+                .status()
+                .unwrap()
+                .success());
+            if rollback {
+                std::fs::write(
+                    root.join("index.md"),
+                    "# Root\n<!-- cowiki:generated-index:start -->\n",
+                )
+                .unwrap();
+            }
+
+            let result = super::refresh_review_indexes(root);
+            assert_eq!(result.is_err(), rollback);
+            let acl = Command::new("/bin/ls")
+                .arg("-le")
+                .arg(&index)
+                .output()
+                .unwrap();
+            let acl = String::from_utf8(acl.stdout).unwrap();
+            assert_eq!(
+                acl.contains("user:daemon deny read"),
+                has_acl,
+                "changed the original deny ACL"
+            );
+            assert!(
+                !acl.contains("user:nobody"),
+                "inherited a broader ACL: {acl}"
+            );
+            let attr = Command::new("/usr/bin/xattr")
+                .args(["-p", "org.cowiki.test"])
+                .arg(&index)
+                .output()
+                .unwrap();
+            assert_eq!(attr.stdout, b"keep-me\n");
+            let contents = std::fs::read_to_string(&index).unwrap();
+            assert_eq!(contents == original, rollback);
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn review_publishes_a_complete_new_index_without_truncating_the_old_file() {
+        use std::io::Read;
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let path = root.join("index.md");
+        let original = "# My handwritten notes\n\nKeep this paragraph.\n";
+        std::fs::write(&path, original).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let mut old_file = std::fs::File::open(&path).unwrap();
+
+        super::refresh_review_indexes(root).unwrap();
+        let mut prior_bytes = String::new();
+        old_file.read_to_string(&mut prior_bytes).unwrap();
+        assert_eq!(
+            prior_bytes, original,
+            "refresh overwrote the live index in place"
+        );
+        let published = std::fs::read_to_string(&path).unwrap();
+        assert!(published.contains(original) && published.contains("cowiki:generated-index:end"));
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn review_refresh_refuses_linked_indexes_and_restores_prior_listings() {
+        use std::os::unix::fs::symlink;
+        for existing_target in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().join("space");
+            std::fs::create_dir_all(root.join("child/deeper")).unwrap();
+            let index =
+                "---\nokf_version: '0.1'\n---\n\n# Notes\n<!-- cowiki:generated-index:start -->\n";
+            std::fs::write(root.join("index.md"), index).unwrap();
+            let target = temp.path().join("private.md");
+            if existing_target {
+                std::fs::write(&target, "# Private outside the Space\n").unwrap();
+            }
+            let link = root.join("child/index.md");
+            symlink(&target, &link).unwrap();
+
+            let error = super::refresh_review_indexes(&root).unwrap_err();
+            if existing_target {
+                assert_eq!(
+                    std::fs::read_to_string(&target).unwrap(),
+                    "# Private outside the Space\n"
+                );
+            } else {
+                assert!(
+                    !target.exists(),
+                    "refresh created an external symlink target"
+                );
+            }
+            assert_eq!(std::fs::read_link(link).unwrap(), target);
+            assert!(!root.join("child/deeper/index.md").exists());
+            assert_eq!(
+                std::fs::read_to_string(root.join("index.md")).unwrap(),
+                index
+            );
+            assert!(error.contains("symbolic link"));
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn review_refresh_rolls_back_child_when_parent_is_read_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let index = root.join("index.md");
+        std::fs::write(&index, root_index()).unwrap();
+        std::fs::create_dir(root.join("new")).unwrap();
+        std::fs::set_permissions(&index, std::fs::Permissions::from_mode(0o444)).unwrap();
+        if std::fs::OpenOptions::new().write(true).open(&index).is_ok() {
+            // A privileged test process bypasses the permission failure.
+            return;
+        }
+        assert!(super::refresh_review_indexes(root).is_err());
+        assert!(!root.join("new/index.md").exists());
+        assert_eq!(std::fs::read_to_string(index).unwrap(), root_index());
+    }
 
     #[test]
     fn legacy_concept_kind_is_removed_without_dropping_other_metadata() {
