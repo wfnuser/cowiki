@@ -2,7 +2,15 @@
 
 日期：2026-11-05。基线：`dev@d469a21037d95705ed77bf48b703f56c3fe1943b`。
 
-状态：用户已同意 Codex app-server 优先、独立 Provider 适配器和不增加顶栏按钮的方向，并要求推送和拆解任务；[实施计划](../plans/2026-11-05-native-codex-agent.md)已写入，功能尚未实现。
+状态：用户已同意 Codex app-server 优先、独立 Provider 适配器和不增加顶栏按钮的方向，并要求推送和拆解任务；[实施计划](../plans/2026-11-05-native-codex-agent.md)已写入。2026-11-05 已在 `feat/native-codex-agent` 实施，验收记录见 [native-codex-agent 验收](../../testing/native-codex-agent.md)。
+
+## 0. 实施时的调整（2026-11-05，用户在实施中提出）
+
+- **Grok 一并支持**（“grok 這些可以也支持一下”）。本机 Grok Build 1.0.67 提供 `grok agent stdio`，讲 Agent Client Protocol（ACP v1）。因此新增一个通用 ACP 适配器，Grok 第一个使用；OpenCode（`opencode acp`）、Hermes（`hermes acp`）走同一适配器，是否可用由就绪探测在运行时的 ACP 握手确认，不预先声称支持。
+- **Claude 走 ACP**（“claude 不能也接 acp 嗎？”）。Claude Code 本体没有 ACP 模式（2.1.318 已核对），ACP 项目维护的适配器 `@agentclientprotocol/claude-agent-acp`（前身 Zed 的 `claude-code-acp`）包装 Claude Agent SDK、在 stdio 上讲 ACP。CoWiki 在 PATH 上找到 `claude-agent-acp`（或 `claude-code-acp`）就用同一个 ACP 适配器；未安装时就绪状态给出安装命令。CoWiki 自身仍不打包 Node sidecar，也不自行实现 Claude 的私有 stream-json 控制协议。
+- 因此第 1 节“第一版只接 Codex”、“不做 Claude SDK 接入”改为：Codex 用 app-server，其它 Agent 用 ACP；Antigravity CLI 没有结构化协议，仍明确标为暂不可用。
+- ACP 的权限边界：只选 `allow_once` / `reject_once`，从不选 `allow_always`；会话若以绕过审批的模式启动（如 `bypassPermissions`、`acceptEdits`、`dontAsk`），先 `session/set_mode` 切回 `default`，切不回就拒绝启动；不向 Agent 提供 CoWiki 的文件系统或终端（`fs/*`、`terminal/*` 返回不支持）。Grok 额外以 `GROK_SANDBOX=workspace` 启动（进程级 Seatbelt：只写工作目录、/tmp、~/.grok），其子进程网络在 macOS 上是否被限制未验证。
+- 应用契约里消息与工具步骤合并为一条按时间排序的 `items` 时间线（`{type: 'message' | 'tool'}`），其余字段与计划 T1 一致。
 
 ## 1. 用户结果与范围
 

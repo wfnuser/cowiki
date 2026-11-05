@@ -673,6 +673,31 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn shutdown_leaves_unrelated_processes_alone() {
+        // Stands in for a Codex session the user runs outside CoWiki.
+        let mut outsider = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let process = RpcProcess::spawn(
+            "fake",
+            &shell("sleep 30"),
+            false,
+            Arc::new(|_| {}),
+            Box::new(|_| {}),
+        )
+        .unwrap();
+        process.shutdown(Duration::from_millis(200)).unwrap();
+        assert!(
+            outsider.try_wait().unwrap().is_none(),
+            "an unrelated process was killed"
+        );
+        outsider.kill().unwrap();
+        outsider.wait().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn requests_time_out_without_a_response() {
         let process = RpcProcess::spawn(
             "fake",

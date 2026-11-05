@@ -265,6 +265,26 @@ fn upsert_tool(
     }
 }
 
+/// After a turn: thinking steps are done; when the turn was stopped or the
+/// Agent exited (`ended`), steps still marked running are marked stopped.
+fn settle_running_tools(items: &mut [AgentItem], ended: Option<ToolStatus>) {
+    for item in items.iter_mut() {
+        if let AgentItem::Tool {
+            status, tool_kind, ..
+        } = item
+        {
+            if *status != ToolStatus::Running {
+                continue;
+            }
+            if *tool_kind == ToolKind::Think {
+                *status = ToolStatus::Completed;
+            } else if let Some(ended) = ended {
+                *status = ended;
+            }
+        }
+    }
+}
+
 /// Clears a Change-close reservation of sessions on drop.
 pub struct ClosePreparation {
     runtime: AgentRuntime,
@@ -810,18 +830,12 @@ impl AgentRuntime {
                     if let Some(error) = error {
                         state.snapshot.error = Some(error);
                     }
-                    for item in state.snapshot.items.iter_mut() {
-                        if let AgentItem::Tool {
-                            status,
-                            tool_kind: ToolKind::Think,
-                            ..
-                        } = item
-                        {
-                            if *status == ToolStatus::Running {
-                                *status = ToolStatus::Completed;
-                            }
-                        }
-                    }
+                    let ended = if outcome == TurnOutcome::Completed {
+                        None
+                    } else {
+                        Some(ToolStatus::Stopped)
+                    };
+                    settle_running_tools(&mut state.snapshot.items, ended);
                 }
                 ProviderEvent::Message {
                     item_id,
@@ -892,6 +906,7 @@ impl AgentRuntime {
                     released = state.lease.take();
                     state.current_turn = None;
                     state.snapshot.approvals.clear();
+                    settle_running_tools(&mut state.snapshot.items, Some(ToolStatus::Stopped));
                     if state.snapshot.status.is_busy() {
                         state.snapshot.status = if state.stop_requested {
                             AgentStatus::Stopped
@@ -988,6 +1003,7 @@ impl AgentRuntime {
             };
             state.snapshot.status = AgentStatus::Stopped;
             state.snapshot.approvals.clear();
+            settle_running_tools(&mut state.snapshot.items, Some(ToolStatus::Stopped));
             state.current_turn = None;
             state.stop_requested = false;
             match result {

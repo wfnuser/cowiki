@@ -406,6 +406,16 @@ fn codex_stop_before_the_turn_exists_interrupts_it_when_it_starts() {
     let stopped = harness.settled(&id);
     assert_eq!(stopped.status, AgentStatus::Stopped);
     assert_eq!(harness.sent("turn/interrupt").len(), 1);
+    assert!(
+        !stopped.items.iter().any(|item| matches!(
+            item,
+            AgentItem::Tool {
+                status: ToolStatus::Running,
+                ..
+            }
+        )),
+        "a stopped turn leaves no step running"
+    );
     // The same session (and process) can run and stop again after Stop.
     harness.runtime.send(&id, "again").unwrap();
     harness.wait(&id, "the next turn", |snapshot| {
@@ -848,8 +858,201 @@ fn gate_scope_matches_session_mode() {
 #[test]
 #[ignore]
 fn real_cli_probes() {
-    for agent in [AgentKind::Codex, AgentKind::Grok, AgentKind::Claude, AgentKind::OpenCode, AgentKind::Hermes, AgentKind::Antigravity] {
+    for agent in [
+        AgentKind::Codex,
+        AgentKind::Grok,
+        AgentKind::Claude,
+        AgentKind::OpenCode,
+        AgentKind::Hermes,
+        AgentKind::Antigravity,
+    ] {
         let readiness = super::auth::probe(agent);
         println!("{agent:?}: {}", serde_json::to_string(&readiness).unwrap());
     }
+}
+
+fn wait_long(
+    runtime: &AgentRuntime,
+    id: &str,
+    what: &str,
+    done: impl Fn(&AgentSnapshot) -> bool,
+) -> AgentSnapshot {
+    let deadline = Instant::now() + Duration::from_secs(300);
+    loop {
+        let snapshot = runtime.snapshot(id).unwrap();
+        if done(&snapshot) {
+            return snapshot;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {what}: {snapshot:#?}"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+fn print_items(label: &str, snapshot: &AgentSnapshot) {
+    println!(
+        "--- {label}: status={:?} error={:?} notice={:?}",
+        snapshot.status, snapshot.error, snapshot.notice
+    );
+    for item in &snapshot.items {
+        match item {
+            AgentItem::Message { role, text, .. } => println!(
+                "  [{role:?}] {}",
+                text.chars().take(300).collect::<String>()
+            ),
+            AgentItem::Tool {
+                name,
+                status,
+                output,
+                ..
+            } => println!(
+                "  [tool {status:?}] {name} :: {}",
+                output
+                    .chars()
+                    .take(160)
+                    .collect::<String>()
+                    .replace('\n', " ⏎ ")
+            ),
+        }
+    }
+}
+
+/// Real Codex, real model (uses the signed-in account's quota):
+/// `cargo test --lib real_codex_round_trip -- --ignored --nocapture`.
+/// A temporary Space and Agent Change only; nothing else is touched.
+#[test]
+#[ignore]
+fn real_codex_round_trip() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let engine = LocalEngine::open(&root.join("metadata")).unwrap();
+    let notes = root.join("notes");
+    std::fs::create_dir_all(&notes).unwrap();
+    std::fs::write(
+        notes.join("README.md"),
+        "# Test Space\n\nA disposable CoWiki test Space.\n",
+    )
+    .unwrap();
+    let space = engine.add_space("Notes", "notes", &notes).unwrap();
+    let gate = AgentExecutionGate::default();
+    let runtime = AgentRuntime::new(
+        engine.clone(),
+        gate.clone(),
+        SessionStore::new(&root.join("metadata")),
+        Arc::new(Collector(Mutex::new(Vec::new()))),
+        Arc::new(super::LocalLauncher),
+        None,
+    );
+    let change = engine.create_agent_change(&space.slug, "Codex").unwrap();
+    let id = runtime
+        .create_session(CreateSession {
+            space_slug: space.slug.clone(),
+            mode: AgentMode::Background,
+            change_id: Some(change.id.clone()),
+            agent: AgentKind::Codex,
+            title: Some("Real Codex check".into()),
+        })
+        .unwrap()
+        .session_id;
+
+    // 1. Write a file inside the Agent Change only.
+    runtime.send(&id, "Create a file named hello.md in the current directory whose only content is the line: hello from codex. Do nothing else and reply with one short sentence.").unwrap();
+    let first = wait_long(&runtime, &id, "the write turn", |snapshot| {
+        !snapshot.status.is_busy() || snapshot.status == AgentStatus::Waiting
+    });
+    print_items("write", &first);
+    if first.status == AgentStatus::Waiting {
+        let approval = &first.approvals[0];
+        println!(
+            "approval requested: {:?} {:?}",
+            approval.title, approval.command
+        );
+        runtime.answer_approval(&id, &approval.id, true).unwrap();
+    }
+    let first = wait_long(&runtime, &id, "the write turn to finish", |snapshot| {
+        !snapshot.status.is_busy()
+    });
+    print_items("write done", &first);
+    assert_eq!(first.status, AgentStatus::Idle);
+    let worktree = engine
+        .agent_change_worktree(&space.slug, &change.id)
+        .unwrap();
+    assert!(
+        worktree.join("hello.md").exists(),
+        "Codex did not write in the Change worktree"
+    );
+    assert!(
+        !notes.join("hello.md").exists(),
+        "the Draft must not change before review"
+    );
+
+    // 2. Network is outside the sandbox: Codex must ask, and CoWiki denies.
+    runtime.send(&id, "Run exactly this shell command and report its output: curl -sS -m 5 -I https://example.com").unwrap();
+    let second = wait_long(&runtime, &id, "the network turn", |snapshot| {
+        !snapshot.status.is_busy() || snapshot.status == AgentStatus::Waiting
+    });
+    print_items("network", &second);
+    if second.status == AgentStatus::Waiting {
+        let approval = &second.approvals[0];
+        println!(
+            "network approval: {:?} {:?} {:?}",
+            approval.title, approval.command, approval.description
+        );
+        runtime.answer_approval(&id, &approval.id, false).unwrap();
+    }
+    let second = wait_long(&runtime, &id, "the network turn to finish", |snapshot| {
+        !snapshot.status.is_busy()
+    });
+    print_items("network done", &second);
+
+    // 3. Stop a long command.
+    runtime.send(&id, "Run this shell command and wait for it to finish: for i in $(seq 1 120); do echo $i; sleep 1; done").unwrap();
+    let running = wait_long(&runtime, &id, "the long command", |snapshot| {
+        snapshot.status == AgentStatus::Waiting
+            || snapshot.items.iter().any(|item| {
+                matches!(
+                    item,
+                    AgentItem::Tool {
+                        status: ToolStatus::Running,
+                        tool_kind: super::contract::ToolKind::Command,
+                        ..
+                    }
+                )
+            })
+            || !snapshot.status.is_busy()
+    });
+    print_items("long", &running);
+    if running.status == AgentStatus::Waiting {
+        runtime
+            .answer_approval(&id, &running.approvals[0].id, true)
+            .unwrap();
+        std::thread::sleep(Duration::from_secs(3));
+    }
+    let stop_started = Instant::now();
+    runtime.stop(&id).unwrap();
+    let stopped = wait_long(&runtime, &id, "Stop", |snapshot| !snapshot.status.is_busy());
+    println!("stopped in {:?}", stop_started.elapsed());
+    print_items("stopped", &stopped);
+    assert_eq!(stopped.status, AgentStatus::Stopped);
+
+    // 4. Review: closing the Change ends the idle provider, then merge.
+    assert!(runtime
+        .prepare_change_close(&space.slug, &change.id)
+        .is_ok());
+    let preparation = runtime
+        .prepare_change_close(&space.slug, &change.id)
+        .unwrap();
+    let lease = gate.begin_close(&space.slug, &change.id).unwrap();
+    let merged = engine.merge_agent_change(&space.slug, &change.id).unwrap();
+    preparation.commit("merged into the Draft");
+    drop(lease);
+    println!("merge status: {}", merged.status);
+    assert!(
+        notes.join("hello.md").exists(),
+        "the reviewed change reached the Draft"
+    );
+    assert!(runtime.snapshot(&id).unwrap().closed);
+    runtime.shutdown_all();
 }

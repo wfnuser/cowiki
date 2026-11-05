@@ -8,8 +8,8 @@ const contentHeader = readFileSync(
   'utf8',
 );
 const design = readFileSync(new URL('../src/lib/design.ts', import.meta.url), 'utf8');
-const agentTerminalPanel = readFileSync(
-  new URL('../src/components/terminal/AgentTerminalPanel.tsx', import.meta.url),
+const agentPanel = readFileSync(
+  new URL('../src/components/agent/AgentPanel.tsx', import.meta.url),
   'utf8',
 );
 const spacePanel = readFileSync(
@@ -32,7 +32,7 @@ test('the page, Space, and Agent panel headers share one visual baseline', () =>
     /height: APP_HEADER_HEIGHT,\s+minHeight: APP_HEADER_HEIGHT/,
   );
   assert.match(
-    agentTerminalPanel,
+    agentPanel,
     /height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT/,
   );
   assert.match(
@@ -41,17 +41,13 @@ test('the page, Space, and Agent panel headers share one visual baseline', () =>
   );
 });
 
-test('Agent tabs and header actions share the centered control line', () => {
+test('the Agent panel header keeps its controls on one centered line', () => {
   assert.match(
-    agentTerminalPanel,
-    /className="flex shrink-0 items-center border-b/,
+    agentPanel,
+    /className="flex shrink-0 items-center gap-1 border-b/,
   );
-  assert.match(
-    agentTerminalPanel,
-    /className="flex min-w-0 flex-1 items-center gap-0\.5/,
-  );
-  assert.equal(agentTerminalPanel.includes('className="mb-1.5 shrink-0'), false);
-  assert.equal(agentTerminalPanel.includes('className="mb-1.5 ml-1'), false);
+  assert.equal(agentPanel.includes('className="mb-1.5 shrink-0'), false);
+  assert.equal(agentPanel.includes('className="mb-1.5 ml-1'), false);
 });
 
 test('long breadcrumbs cannot shrink or wrap the header actions', () => {

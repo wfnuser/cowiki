@@ -57,6 +57,8 @@ pub enum ToolStatus {
     Completed,
     Failed,
     Declined,
+    /// The turn was stopped (or the Agent exited) while the step ran.
+    Stopped,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

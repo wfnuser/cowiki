@@ -437,7 +437,7 @@ impl CodexProvider {
                 append: !completed && str_of(item, "text").is_none_or(str::is_empty),
             },
             "commandExecution" => tool(
-                str_of(item, "command").unwrap_or("command").to_string(),
+                display_command(str_of(item, "command").unwrap_or("command")),
                 ToolKind::Command,
                 completed.then(|| {
                     str_of(item, "aggregatedOutput")
@@ -698,6 +698,39 @@ impl CodexProvider {
     }
 }
 
+/// Codex runs commands as `/bin/zsh -lc '<command>'`; show the command.
+pub fn display_command(command: &str) -> String {
+    let trimmed = command.trim();
+    let inner = [
+        "/bin/zsh -lc ",
+        "/bin/bash -lc ",
+        "/bin/sh -c ",
+        "zsh -lc ",
+        "bash -lc ",
+    ]
+    .iter()
+    .find_map(|prefix| trimmed.strip_prefix(prefix));
+    let Some(inner) = inner else {
+        return trimmed.to_string();
+    };
+    let inner = inner.trim();
+    if inner.len() >= 2
+        && inner.starts_with('\'')
+        && inner.ends_with('\'')
+        && !inner[1..inner.len() - 1].contains('\'')
+    {
+        return inner[1..inner.len() - 1].to_string();
+    }
+    if inner.len() >= 2
+        && inner.starts_with('"')
+        && inner.ends_with('"')
+        && !inner[1..inner.len() - 1].contains(['"', '\\', '$', '`'])
+    {
+        return inner[1..inner.len() - 1].to_string();
+    }
+    trimmed.to_string()
+}
+
 fn request_key(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
@@ -837,5 +870,23 @@ impl Provider for CodexProvider {
 
     fn is_alive(&self) -> bool {
         self.rpc.get().is_some_and(|rpc| rpc.is_alive())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::display_command;
+
+    #[test]
+    fn shows_the_command_inside_codex_shell_wrappers() {
+        assert_eq!(
+            display_command("/bin/zsh -lc 'curl -sS -I https://example.com'"),
+            "curl -sS -I https://example.com"
+        );
+        assert_eq!(display_command("/bin/zsh -lc \"ls docs\""), "ls docs");
+        // Anything with nested quoting or expansion is shown as Codex ran it.
+        let quoted = "/bin/zsh -lc \"printf '%s\\n' 'x' > a.md\"";
+        assert_eq!(display_command(quoted), quoted);
+        assert_eq!(display_command("ls"), "ls");
     }
 }

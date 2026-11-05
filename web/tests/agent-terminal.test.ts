@@ -103,7 +103,7 @@ test('routes terminal events only to their owning session', () => {
   assert.equal(belongsToTerminalSession(null, 'terminal-a'), false);
 });
 
-test('collapsing the Agent panel hides it without unmounting terminal sessions', () => {
+test('collapsing the Agent panel hides it without unmounting native sessions', () => {
   const mainLayout = readFileSync(
     new URL('../src/pages/MainLayout.tsx', import.meta.url),
     'utf8',
@@ -112,7 +112,7 @@ test('collapsing the Agent panel hides it without unmounting terminal sessions',
     mainLayout,
     /\{desktop && activeWorkspace\?\.localPath && \(\s*<div hidden=\{!agentPanelOpen\}/,
   );
-  assert.match(mainLayout, /hidden=\{!agentPanelOpen\}[\s\S]*<AgentTerminalPanel/);
+  assert.match(mainLayout, /hidden=\{!agentPanelOpen\}[\s\S]*<AgentPanel\b/);
   assert.doesNotMatch(
     mainLayout,
     /desktop && agentPanelOpen && activeWorkspace\?\.localPath/,

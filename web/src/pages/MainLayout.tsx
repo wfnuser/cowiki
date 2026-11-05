@@ -67,9 +67,9 @@ import { showsRoute, viewForRoute } from '../lib/route-view';
 import { isHtmlPath } from '../lib/okf-pages';
 import { chooseLocalSpaceDirectory, localSpaceIdentityFromPath } from '@/local-space';
 import {
-  AgentTerminalPanel,
+  AgentPanel,
   type AgentPanelOpenRequest,
-} from '@/components/terminal/AgentTerminalPanel';
+} from '@/components/agent/AgentPanel';
 import {
   conceptIdFromPath,
   conceptPath,
@@ -1666,7 +1666,7 @@ export function MainLayout() {
                       color: agentPanelOpen ? C.accent : C.muted,
                       background: agentPanelOpen ? C.accentSoft : 'transparent',
                     }}
-                    title="Open Codex or Claude in this Space"
+                    title="Open the Agent sidebar for this Space"
                   >
                     <Bot size={14} /> Agent
                   </button>
@@ -1960,7 +1960,7 @@ export function MainLayout() {
             }}>
               <div
                 role="separator"
-                aria-label="Resize agent terminal"
+                aria-label="Resize agent panel"
                 aria-orientation="vertical"
                 aria-valuemin={320}
                 aria-valuemax={720}
@@ -1984,9 +1984,10 @@ export function MainLayout() {
                   opacity: resizingAgentPanel ? 0.45 : 1,
                 }}
               />
-              <AgentTerminalPanel
+              {/* Native Agent sessions live in the desktop backend: hiding or
+                  remounting this panel never stops or re-sends a task. */}
+              <AgentPanel
                 key={activeWorkspace.id}
-                spacePath={activeWorkspace.localPath}
                 spaceSlug={activeWorkspace.slug}
                 defaultAgent={clientSettings.defaultAgent}
                 openRequest={agentOpenRequest}
@@ -1996,6 +1997,7 @@ export function MainLayout() {
                   ));
                 }}
                 onClose={() => setAgentPanelOpen(false)}
+                onOpenChanges={(changeId) => openReviewDetail({ kind: 'local-agent', changeId })}
               />
             </div>
           )}
