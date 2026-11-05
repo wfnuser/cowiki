@@ -9,7 +9,7 @@ use super::permissions::{
 use super::provider::{
     EventSink, OpenError, Opened, Provider, ProviderConfig, ProviderEvent, TurnOutcome,
 };
-use super::rpc::{Incoming, RpcError, RpcProcess};
+use super::rpc::{Framing, Incoming, RpcError, RpcProcess};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -94,7 +94,7 @@ pub fn open(
         let sink = sink.clone();
         Box::new(move |reason: String| sink(ProviderEvent::Exited { reason }))
     };
-    let rpc = RpcProcess::spawn("Codex", &launch, false, on_incoming, on_exit)
+    let rpc = RpcProcess::spawn("Codex", &launch, Framing::Codex, on_incoming, on_exit)
         .map_err(OpenError::Failed)?;
     let _ = provider.rpc.set(rpc.clone());
     match handshake(&provider, &rpc, &config, resume) {

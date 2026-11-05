@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Deterministic Agent Client Protocol (v1) agent over stdio, shaped like
-// `grok agent stdio` (Grok Build 1.0.67) and `claude-agent-acp`. No network,
+// `grok agent stdio` (Grok Build 1.0.67). No network,
 // no credentials. Usage: node fake-acp-agent.mjs <scenario> [agent args]
 // Every message received is appended to $FAKE_LOG as one JSON line.
 import { appendFileSync } from 'node:fs';

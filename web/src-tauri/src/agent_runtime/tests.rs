@@ -39,6 +39,7 @@ impl ProviderLauncher for FakeLauncher {
     ) -> Result<Opened, OpenError> {
         let fixture = match config.agent {
             AgentKind::Codex => "fake-codex-app-server.mjs",
+            AgentKind::Claude => "fake-claude-code.mjs",
             _ => "fake-acp-agent.mjs",
         };
         config.launch.program = self.node.clone();
@@ -177,6 +178,45 @@ impl Harness {
         self.log()
             .into_iter()
             .filter(|message| message.get("method").and_then(Value::as_str) == Some(method))
+            .collect()
+    }
+
+    /// Claude Code fake: messages CoWiki wrote of one `type`.
+    fn claude(&self, kind: &str) -> Vec<Value> {
+        self.log()
+            .into_iter()
+            .filter(|message| message.get("type").and_then(Value::as_str) == Some(kind))
+            .collect()
+    }
+
+    fn claude_requests(&self, subtype: &str) -> Vec<Value> {
+        self.claude("control_request")
+            .into_iter()
+            .filter(|message| {
+                message.pointer("/request/subtype").and_then(Value::as_str) == Some(subtype)
+            })
+            .collect()
+    }
+
+    /// The `response` payloads CoWiki sent back to Claude Code's requests.
+    fn claude_answers(&self) -> Vec<Value> {
+        self.claude("control_response")
+            .into_iter()
+            .map(|message| message["response"].clone())
+            .collect()
+    }
+
+    fn claude_argv(&self) -> Vec<Vec<String>> {
+        self.log()
+            .into_iter()
+            .filter_map(|message| {
+                message.get("argv").and_then(Value::as_array).map(|argv| {
+                    argv.iter()
+                        .filter_map(Value::as_str)
+                        .map(ToOwned::to_owned)
+                        .collect()
+                })
+            })
             .collect()
     }
 
@@ -723,7 +763,7 @@ fn acp_streams_messages_tools_and_plan() {
 #[test]
 fn acp_permissions_choose_one_time_options_only() {
     let harness = Harness::new("permission");
-    let id = harness.create(AgentKind::Claude, AgentMode::Live, None);
+    let id = harness.create(AgentKind::OpenCode, AgentMode::Live, None);
     harness.runtime.send(&id, "touch").unwrap();
     let waiting = harness.wait(&id, "an approval", |snapshot| {
         snapshot.status == AgentStatus::Waiting
@@ -808,7 +848,7 @@ fn acp_signed_out_and_old_protocols_are_reported() {
 #[test]
 fn acp_unattended_modes_are_switched_back_to_asking() {
     let harness = Harness::new("bypass");
-    let id = harness.create(AgentKind::Claude, AgentMode::Live, None);
+    let id = harness.create(AgentKind::OpenCode, AgentMode::Live, None);
     harness.runtime.send(&id, "hi").unwrap();
     harness.wait(&id, "the turn", |snapshot| {
         snapshot.status == AgentStatus::Idle
@@ -833,6 +873,332 @@ fn acp_file_system_and_terminal_requests_are_refused() {
         .responses()
         .iter()
         .any(|response| response.pointer("/error/code").and_then(Value::as_i64) == Some(-32601)));
+}
+
+fn flag<'a>(argv: &'a [String], name: &str) -> Option<&'a str> {
+    argv.iter()
+        .position(|arg| arg == name)
+        .and_then(|index| argv.get(index + 1))
+        .map(String::as_str)
+}
+
+#[test]
+fn claude_streams_text_and_tools_over_one_process() {
+    let harness = Harness::new("normal");
+    let id = harness.create(AgentKind::Claude, AgentMode::Live, None);
+    harness.runtime.send(&id, "first").unwrap();
+    let first = harness.wait(&id, "the first answer", |snapshot| {
+        snapshot.status == AgentStatus::Idle && assistant_text(snapshot).contains("(first)")
+    });
+    assert_eq!(
+        assistant_text(&first),
+        "Hello from Claude (first)",
+        "streamed text is replaced, not doubled"
+    );
+    assert!(!assistant_text(&first).contains("SUBAGENT"));
+    assert_eq!(first.model.as_deref(), Some("claude-fake"));
+    assert_eq!(
+        tool(&first, "Read README.md"),
+        Some((ToolStatus::Completed, "# Notes".into()))
+    );
+    assert!(tool(&first, "Update the plan")
+        .unwrap()
+        .1
+        .contains("[completed] Read the note"));
+    assert_eq!(tool(&first, "Thinking").unwrap().0, ToolStatus::Completed);
+    let thread = first.thread_id.clone().unwrap();
+    assert!(
+        uuid::Uuid::parse_str(&thread).is_ok(),
+        "CoWiki picks the session id"
+    );
+
+    harness.runtime.send(&id, "second").unwrap();
+    harness.wait(&id, "the second answer", |snapshot| {
+        snapshot.status == AgentStatus::Idle && assistant_text(snapshot).contains("(second)")
+    });
+    let argv = harness.claude_argv();
+    assert_eq!(argv.len(), 1, "both turns ran in one Claude Code process");
+    let argv = &argv[0];
+    assert_eq!(flag(argv, "--session-id"), Some(thread.as_str()));
+    assert_eq!(flag(argv, "--permission-mode"), Some("acceptEdits"));
+    assert_eq!(flag(argv, "--permission-prompt-tool"), Some("stdio"));
+    assert_eq!(
+        flag(argv, "--setting-sources"),
+        Some("user"),
+        "a Space's own .claude settings never load"
+    );
+    assert!(argv.iter().any(|arg| arg == "--strict-mcp-config"));
+    assert!(flag(argv, "--disallowedTools")
+        .unwrap()
+        .contains("AskUserQuestion"));
+    assert!(!argv
+        .iter()
+        .any(|arg| arg.contains("dangerously") || arg == "bypassPermissions"));
+    let initialize = &harness.claude_requests("initialize")[0]["request"];
+    assert_eq!(
+        initialize["hooks"]["PreToolUse"][0]["matcher"],
+        "Write|Edit|MultiEdit|NotebookEdit"
+    );
+    let users = harness.claude("user");
+    assert_eq!(users.len(), 2);
+    assert_eq!(users[1]["message"]["content"], "second");
+    assert_eq!(users[1]["session_id"], thread.as_str());
+}
+
+#[test]
+fn claude_approvals_allow_one_action_and_never_add_rules() {
+    let harness = Harness::new("permission");
+    let id = harness.create(AgentKind::Claude, AgentMode::Live, None);
+    harness.runtime.send(&id, "touch").unwrap();
+    let waiting = harness.wait(&id, "an approval", |snapshot| {
+        snapshot.status == AgentStatus::Waiting
+    });
+    let approval = &waiting.approvals[0];
+    assert_eq!(approval.command.as_deref(), Some("touch notes.md"));
+    assert_eq!(approval.title, "Run a command");
+    assert_eq!(approval.description, "Create a note");
+    assert_eq!(
+        approval.cwd.as_deref(),
+        Some(harness.root.join("notes").to_string_lossy().as_ref())
+    );
+    harness
+        .runtime
+        .answer_approval(&id, &approval.id, true)
+        .unwrap();
+    assert!(
+        harness
+            .runtime
+            .answer_approval(&id, &approval.id, true)
+            .is_err(),
+        "an approval is answered once"
+    );
+    let done = harness.wait(&id, "the turn", |snapshot| {
+        snapshot.status == AgentStatus::Idle
+    });
+    assert_eq!(
+        tool(&done, "touch notes.md").unwrap().0,
+        ToolStatus::Completed
+    );
+
+    harness.runtime.send(&id, "again").unwrap();
+    let waiting = harness.wait(&id, "a second approval", |snapshot| {
+        snapshot.status == AgentStatus::Waiting
+    });
+    harness
+        .runtime
+        .answer_approval(&id, &waiting.approvals[0].id, false)
+        .unwrap();
+    let done = harness.wait(&id, "the declined turn", |snapshot| {
+        snapshot.status == AgentStatus::Idle
+    });
+    assert_eq!(
+        tool(&done, "touch again.md").unwrap().0,
+        ToolStatus::Declined
+    );
+    let answers = harness.claude_answers();
+    let decisions = answers
+        .iter()
+        .filter_map(|answer| answer.pointer("/response/behavior").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(decisions, vec!["allow", "deny"]);
+    assert_eq!(
+        answers[0]["response"]["updatedInput"]["command"],
+        "touch notes.md"
+    );
+    assert!(
+        answers
+            .iter()
+            .all(|answer| answer.pointer("/response/updatedPermissions").is_none()),
+        "no session or permanent rule"
+    );
+}
+
+#[test]
+fn claude_file_writes_outside_the_space_are_denied() {
+    let harness = Harness::new("outside-write");
+    let id = harness.create(AgentKind::Claude, AgentMode::Live, None);
+    harness.runtime.send(&id, "write").unwrap();
+    let done = harness.wait(&id, "the turn", |snapshot| {
+        snapshot.status == AgentStatus::Idle
+    });
+    let answers = harness.claude_answers();
+    let hooks = answers
+        .iter()
+        .filter(|answer| {
+            answer
+                .get("response")
+                .is_some_and(|response| response.get("behavior").is_none())
+        })
+        .collect::<Vec<_>>();
+    // initialize is answered by the fake, so only hook answers carry no behavior.
+    assert_eq!(
+        hooks[0]["response"]["hookSpecificOutput"]["permissionDecision"],
+        "deny"
+    );
+    assert_eq!(
+        hooks[1]["response"],
+        serde_json::json!({}),
+        "a write inside the Space continues normally"
+    );
+    assert_eq!(
+        tool(&done, "Write /etc/cowiki-outside.md").unwrap().0,
+        ToolStatus::Declined
+    );
+    assert_eq!(
+        tool(&done, "Write inside.md").unwrap().0,
+        ToolStatus::Completed
+    );
+    let edit = answers
+        .iter()
+        .find(|answer| answer.pointer("/response/behavior").is_some())
+        .unwrap();
+    assert_eq!(
+        edit["response"]["behavior"], "deny",
+        "an outside write never becomes a card"
+    );
+    assert_eq!(
+        tool(&done, "Edit ../outside.md").unwrap().0,
+        ToolStatus::Declined
+    );
+    assert!(done.approvals.is_empty());
+}
+
+#[test]
+fn claude_stop_interrupts_the_running_turn() {
+    let harness = Harness::new("interrupt");
+    let id = harness.create(AgentKind::Claude, AgentMode::Live, None);
+    harness.runtime.send(&id, "long").unwrap();
+    harness.wait(&id, "streaming", |snapshot| {
+        assistant_text(snapshot).contains('.')
+    });
+    harness.runtime.stop(&id).unwrap();
+    let stopped = harness.settled(&id);
+    assert_eq!(stopped.status, AgentStatus::Stopped);
+    assert_eq!(harness.claude_requests("interrupt").len(), 1);
+    assert_eq!(tool(&stopped, "sleep 100").unwrap().0, ToolStatus::Stopped);
+    assert!(stopped.error.is_none(), "{:?}", stopped.error);
+}
+
+#[test]
+fn claude_stop_while_waiting_denies_the_approval() {
+    let harness = Harness::new("interrupt-approval");
+    let id = harness.create(AgentKind::Claude, AgentMode::Live, None);
+    harness.runtime.send(&id, "clean").unwrap();
+    harness.wait(&id, "an approval", |snapshot| {
+        snapshot.status == AgentStatus::Waiting
+    });
+    harness.runtime.stop(&id).unwrap();
+    let stopped = harness.settled(&id);
+    assert_eq!(stopped.status, AgentStatus::Stopped);
+    assert!(stopped.approvals.is_empty());
+    let denial = harness
+        .claude_answers()
+        .into_iter()
+        .find(|answer| answer.pointer("/response/behavior").is_some())
+        .unwrap();
+    assert_eq!(denial["response"]["behavior"], "deny");
+    assert_eq!(denial["response"]["interrupt"], true);
+    assert_eq!(
+        tool(&stopped, "rm -rf build").unwrap().0,
+        ToolStatus::Stopped
+    );
+}
+
+#[test]
+fn claude_withdrawn_permission_prompts_leave_the_sidebar() {
+    let harness = Harness::new("cancel-request");
+    let id = harness.create(AgentKind::Claude, AgentMode::Live, None);
+    harness.runtime.send(&id, "fetch").unwrap();
+    harness.wait(&id, "an approval", |snapshot| {
+        snapshot.status == AgentStatus::Waiting
+    });
+    let done = harness.wait(&id, "the turn", |snapshot| {
+        snapshot.status == AgentStatus::Idle
+    });
+    assert!(done.approvals.is_empty());
+    assert_eq!(
+        tool(&done, "Fetch https://example.com").unwrap().0,
+        ToolStatus::Failed
+    );
+}
+
+#[test]
+fn claude_resume_uses_the_saved_conversation_or_reports_it_missing() {
+    let mut harness = Harness::new("normal");
+    let id = harness.create(AgentKind::Claude, AgentMode::Live, None);
+    harness.runtime.send(&id, "first").unwrap();
+    let first = harness.wait(&id, "the turn", |snapshot| {
+        snapshot.status == AgentStatus::Idle && snapshot.thread_id.is_some()
+    });
+    let thread = first.thread_id.unwrap();
+    harness.restart();
+    harness.runtime.send(&id, "again").unwrap();
+    harness.wait(&id, "the resumed turn", |snapshot| {
+        snapshot.status == AgentStatus::Idle && assistant_text(snapshot).contains("(again)")
+    });
+    let argv = harness.claude_argv();
+    assert_eq!(argv.len(), 2);
+    assert_eq!(flag(&argv[1], "--resume"), Some(thread.as_str()));
+    assert_eq!(flag(&argv[1], "--session-id"), None);
+
+    harness.restart();
+    harness.scenario("resume-missing");
+    harness.runtime.send(&id, "once more").unwrap();
+    let failed = harness.settled(&id);
+    assert_eq!(failed.status, AgentStatus::Failed);
+    let error = failed.error.clone().unwrap_or_default();
+    assert!(error.contains("did not start a new one"), "{error}");
+    assert_eq!(
+        harness.claude("user").len(),
+        2,
+        "the message was not sent anywhere else"
+    );
+}
+
+#[test]
+fn claude_unsafe_modes_and_sign_in_failures_are_reported() {
+    let harness = Harness::new("bypass");
+    let id = harness.create(AgentKind::Claude, AgentMode::Live, None);
+    harness.runtime.send(&id, "hi").unwrap();
+    let failed = harness.settled(&id);
+    let error = failed.error.clone().unwrap_or_default();
+    assert!(error.contains("bypassPermissions"), "{error}");
+    assert!(
+        harness.claude("user").is_empty(),
+        "nothing was sent to an unsafe session"
+    );
+
+    harness.scenario("auth");
+    harness.runtime.send(&id, "hi").unwrap();
+    let failed = harness.settled(&id);
+    let error = failed.error.clone().unwrap_or_default();
+    assert!(error.contains("not signed in"), "{error}");
+    assert!(
+        !assistant_text(&failed).contains("Not logged in"),
+        "the CLI's error is not a reply"
+    );
+}
+
+#[test]
+fn claude_requests_cowiki_does_not_provide_fail_closed() {
+    let harness = Harness::new("unknown-request");
+    let id = harness.create(AgentKind::Claude, AgentMode::Live, None);
+    harness.runtime.send(&id, "hi").unwrap();
+    harness.wait(&id, "the turn", |snapshot| {
+        snapshot.status == AgentStatus::Idle
+    });
+    let answers = harness.claude_answers();
+    assert!(answers.iter().any(|answer| answer["subtype"] == "error"
+        && answer["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("mcp_message")));
+    assert!(
+        answers
+            .iter()
+            .all(|answer| answer["request_id"] != "dialog-1"),
+        "an undeclared dialog is never answered"
+    );
 }
 
 #[test]
@@ -1041,6 +1407,173 @@ fn real_codex_round_trip() {
     assert!(runtime
         .prepare_change_close(&space.slug, &change.id)
         .is_ok());
+    let preparation = runtime
+        .prepare_change_close(&space.slug, &change.id)
+        .unwrap();
+    let lease = gate.begin_close(&space.slug, &change.id).unwrap();
+    let merged = engine.merge_agent_change(&space.slug, &change.id).unwrap();
+    preparation.commit("merged into the Draft");
+    drop(lease);
+    println!("merge status: {}", merged.status);
+    assert!(
+        notes.join("hello.md").exists(),
+        "the reviewed change reached the Draft"
+    );
+    assert!(runtime.snapshot(&id).unwrap().closed);
+    runtime.shutdown_all();
+}
+
+/// LocalLauncher with a cheaper model, for the real Claude check.
+struct HaikuLauncher;
+
+impl ProviderLauncher for HaikuLauncher {
+    fn open(
+        &self,
+        mut config: ProviderConfig,
+        resume: Option<String>,
+        sink: EventSink,
+    ) -> Result<Opened, OpenError> {
+        config.launch.program = super::native_executable(config.agent).expect("claude on PATH");
+        config.launch.env = super::environment::agent_environment();
+        config.launch.args = vec!["--model".into(), "haiku".into()];
+        super::open_with_protocol(config, resume, sink)
+    }
+}
+
+/// Real Claude Code, real model (haiku, uses the signed-in account's quota):
+/// `cargo test --lib real_claude_round_trip -- --ignored --nocapture`.
+/// A temporary Space and Agent Change only; nothing else is touched.
+#[test]
+#[ignore]
+fn real_claude_round_trip() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let engine = LocalEngine::open(&root.join("metadata")).unwrap();
+    let notes = root.join("notes");
+    std::fs::create_dir_all(&notes).unwrap();
+    std::fs::write(
+        notes.join("README.md"),
+        "# Test Space\n\nA disposable CoWiki test Space.\n",
+    )
+    .unwrap();
+    let space = engine.add_space("Notes", "notes", &notes).unwrap();
+    let gate = AgentExecutionGate::default();
+    let runtime = AgentRuntime::new(
+        engine.clone(),
+        gate.clone(),
+        SessionStore::new(&root.join("metadata")),
+        Arc::new(Collector(Mutex::new(Vec::new()))),
+        Arc::new(HaikuLauncher),
+        None,
+    );
+    let change = engine.create_agent_change(&space.slug, "Claude").unwrap();
+    let id = runtime
+        .create_session(CreateSession {
+            space_slug: space.slug.clone(),
+            mode: AgentMode::Background,
+            change_id: Some(change.id.clone()),
+            agent: AgentKind::Claude,
+            title: Some("Real Claude check".into()),
+        })
+        .unwrap()
+        .session_id;
+    let settle = |what: &str| {
+        let snapshot = wait_long(&runtime, &id, what, |snapshot| {
+            !snapshot.status.is_busy() || snapshot.status == AgentStatus::Waiting
+        });
+        print_items(what, &snapshot);
+        snapshot
+    };
+
+    // 1. A file edit inside the Agent Change applies without a card.
+    runtime.send(&id, "Use the Write tool to create a file named hello.md in the current directory whose only content is the line: hello from claude. Do nothing else and reply with one short sentence.").unwrap();
+    let first = settle("write");
+    assert_eq!(
+        first.status,
+        AgentStatus::Idle,
+        "no approval for an in-Space edit"
+    );
+    let worktree = engine
+        .agent_change_worktree(&space.slug, &change.id)
+        .unwrap();
+    assert!(
+        worktree.join("hello.md").exists(),
+        "Claude did not write in the Change worktree"
+    );
+    assert!(
+        !notes.join("hello.md").exists(),
+        "the Draft must not change before review"
+    );
+
+    // 2. A write outside the Space is denied by CoWiki's hook.
+    let outside = std::env::temp_dir().join(format!(
+        "cowiki-outside-{}.md",
+        uuid::Uuid::new_v4().simple()
+    ));
+    runtime.send(&id, &format!("Use the Write tool to create the file {} containing the word outside. If it is refused, say so in one sentence and stop.", outside.display())).unwrap();
+    let mut second = settle("outside write");
+    while second.status == AgentStatus::Waiting {
+        println!("unexpected card: {:?}", second.approvals[0]);
+        runtime
+            .answer_approval(&id, &second.approvals[0].id, false)
+            .unwrap();
+        second = settle("outside write (declined)");
+    }
+    assert!(!outside.exists(), "a write outside the Space happened");
+
+    // 3. A network command asks; CoWiki declines.
+    runtime.send(&id, "Run exactly this shell command with the Bash tool and report its output: curl -sS -m 5 -I https://example.com").unwrap();
+    let third = settle("network");
+    if third.status == AgentStatus::Waiting {
+        let approval = &third.approvals[0];
+        println!(
+            "network approval: {:?} {:?} {:?}",
+            approval.title, approval.command, approval.description
+        );
+        runtime.answer_approval(&id, &approval.id, false).unwrap();
+    } else {
+        println!("Claude did not ask before the network command");
+    }
+    settle("network done");
+
+    // 4. Stop a long command.
+    runtime.send(&id, "Run this shell command with the Bash tool in the foreground and wait for it to finish: for i in $(seq 1 120); do echo $i; sleep 1; done").unwrap();
+    let running = wait_long(&runtime, &id, "the long command", |snapshot| {
+        snapshot.status == AgentStatus::Waiting
+            || snapshot.items.iter().any(|item| {
+                matches!(
+                    item,
+                    AgentItem::Tool {
+                        status: ToolStatus::Running,
+                        tool_kind: super::contract::ToolKind::Command,
+                        ..
+                    }
+                )
+            })
+            || !snapshot.status.is_busy()
+    });
+    print_items("long", &running);
+    if running.status == AgentStatus::Waiting {
+        runtime
+            .answer_approval(&id, &running.approvals[0].id, true)
+            .unwrap();
+    }
+    std::thread::sleep(Duration::from_secs(3));
+    let stop_started = Instant::now();
+    runtime.stop(&id).unwrap();
+    let stopped = wait_long(&runtime, &id, "Stop", |snapshot| !snapshot.status.is_busy());
+    println!("stopped in {:?}", stop_started.elapsed());
+    print_items("stopped", &stopped);
+    assert_eq!(stopped.status, AgentStatus::Stopped);
+
+    // 5. The same conversation continues after Stop.
+    runtime
+        .send(&id, "Reply with exactly the word: continued")
+        .unwrap();
+    let continued = settle("continue");
+    assert_eq!(continued.status, AgentStatus::Idle);
+
+    // 6. Review: closing the Change ends the idle provider, then merge.
     let preparation = runtime
         .prepare_change_close(&space.slug, &change.id)
         .unwrap();

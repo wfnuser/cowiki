@@ -38,9 +38,8 @@ pub trait EventEmitter: Send + Sync {
 pub fn native_protocol(agent: AgentKind) -> Option<&'static str> {
     match agent {
         AgentKind::Codex => Some("codex-app-server"),
-        AgentKind::Claude | AgentKind::Grok | AgentKind::OpenCode | AgentKind::Hermes => {
-            Some("acp")
-        }
+        AgentKind::Claude => Some("claude-stream-json"),
+        AgentKind::Grok | AgentKind::OpenCode | AgentKind::Hermes => Some("acp"),
         AgentKind::Antigravity => None,
     }
 }

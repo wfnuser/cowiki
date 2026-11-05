@@ -1,13 +1,16 @@
 //! Native readiness probes and sign-in, without a login terminal.
 //!
 //! Codex: `account/read`, then `account/login/start` returns an auth URL that
-//! CoWiki validates before opening the system browser. ACP agents: the
-//! advertised `authenticate` method (the agent runs its own browser flow).
+//! CoWiki validates before opening the system browser. Claude Code:
+//! `claude auth status --json`, and `claude auth login` runs its own browser
+//! flow. ACP agents: the advertised `authenticate` method (the agent runs its
+//! own browser flow).
 
 use super::acp;
+use super::claude;
 use super::environment::agent_environment;
 use super::registry::native_protocol;
-use super::rpc::{Incoming, LaunchSpec, RpcError, RpcProcess};
+use super::rpc::{Framing, Incoming, LaunchSpec, RpcError, RpcProcess};
 use super::{native_executable, not_installed_message};
 use crate::terminal::{agent_display_name, first_nonempty_line, AgentKind};
 use serde::Serialize;
@@ -92,17 +95,25 @@ pub fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
         })
 }
 
-fn cli_version(executable: &Path, environment: &[(String, String)]) -> Option<String> {
+/// Runs a short CLI command (no shell, no input) and returns its stdout,
+/// or None when it could not start or did not finish within `timeout`.
+fn run_quiet(
+    executable: &Path,
+    args: &[&str],
+    environment: &[(String, String)],
+    timeout: Duration,
+) -> Option<String> {
     let mut child = Command::new(executable)
-        .arg("--version")
+        .args(args)
+        .current_dir(probe_directory())
         .env_clear()
         .envs(environment.iter().map(|(key, value)| (key, value)))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    let deadline = Instant::now() + Duration::from_secs(6);
+    let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
@@ -115,8 +126,60 @@ fn cli_version(executable: &Path, environment: &[(String, String)]) -> Option<St
         }
     }
     let output = child.wait_with_output().ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn cli_version(executable: &Path, environment: &[(String, String)]) -> Option<String> {
+    let text = run_quiet(
+        executable,
+        &["--version"],
+        environment,
+        Duration::from_secs(6),
+    )?;
     first_nonempty_line(&crate::terminal::strip_terminal_control_sequences(&text))
+}
+
+/// `claude auth status --json` (Claude Code 2.1 and newer).
+pub fn claude_auth_status(executable: &Path, environment: &[(String, String)]) -> Option<Value> {
+    let text = run_quiet(
+        executable,
+        &["auth", "status", "--json"],
+        environment,
+        Duration::from_secs(10),
+    )?;
+    serde_json::from_str::<Value>(text.trim())
+        .ok()
+        .filter(|status| status.get("loggedIn").is_some())
+}
+
+pub fn claude_account_label(status: &Value) -> Option<String> {
+    let email = status.get("email").and_then(Value::as_str);
+    let provider = status.get("apiProvider").and_then(Value::as_str);
+    let method = status.get("authMethod").and_then(Value::as_str);
+    let plan = status
+        .get("subscriptionType")
+        .and_then(Value::as_str)
+        .filter(|plan| !plan.is_empty())
+        .map(|plan| {
+            let mut letters = plan.chars();
+            letters
+                .next()
+                .map(|first| first.to_uppercase().collect::<String>() + letters.as_str())
+                .unwrap_or_default()
+        });
+    let name = match (provider, method) {
+        (Some(provider), _) if provider != "firstParty" => provider.to_string(),
+        (_, Some("claude.ai")) => match plan {
+            Some(plan) => format!("Claude {plan}"),
+            None => "Claude".to_string(),
+        },
+        (_, Some(method)) if !method.is_empty() => method.to_string(),
+        _ => return email.map(ToOwned::to_owned),
+    };
+    Some(match email {
+        Some(email) => format!("{name} ({email})"),
+        None => name,
+    })
 }
 
 fn probe_directory() -> PathBuf {
@@ -131,8 +194,9 @@ fn spawn_quiet(
     program: &Path,
     args: &[&str],
     extra_env: &[(&str, &str)],
+    framing: Framing,
 ) -> Result<Arc<RpcProcess>, String> {
-    let (process, _) = spawn_listening(label, program, args, extra_env)?;
+    let (process, _) = spawn_listening(label, program, args, extra_env, framing)?;
     Ok(process)
 }
 
@@ -141,6 +205,7 @@ fn spawn_listening(
     program: &Path,
     args: &[&str],
     extra_env: &[(&str, &str)],
+    framing: Framing,
 ) -> Result<(Arc<RpcProcess>, Notifications), String> {
     let mut env = agent_environment();
     env.retain(|(key, _)| !extra_env.iter().any(|(fixed, _)| fixed == key));
@@ -160,7 +225,7 @@ fn spawn_listening(
     let process = RpcProcess::spawn(
         label,
         &spec,
-        args.first() != Some(&"app-server"),
+        framing,
         Arc::new(move |incoming| {
             if let Incoming::Notification { method, params } = incoming {
                 if let Ok(sender) = sender.lock() {
@@ -254,6 +319,7 @@ pub fn probe(agent: AgentKind) -> NativeReadiness {
                 &executable,
                 &["app-server", "--listen", "stdio://"],
                 &[],
+                Framing::Codex,
             ) {
                 Ok(rpc) => rpc,
                 Err(error) => {
@@ -299,7 +365,7 @@ pub fn probe(agent: AgentKind) -> NativeReadiness {
                     ..base
                 };
             };
-            let rpc = match spawn_quiet(name, &executable, &args, &env) {
+            let rpc = match spawn_quiet(name, &executable, &args, &env, Framing::JsonRpc2) {
                 Ok(rpc) => rpc,
                 Err(error) => {
                     return NativeReadiness {
@@ -343,11 +409,67 @@ pub fn probe(agent: AgentKind) -> NativeReadiness {
                 },
             }
         }
+        "claude-stream-json" => {
+            let Some(status) = claude_auth_status(&executable, &environment) else {
+                return NativeReadiness {
+                    status: NativeStatus::Incompatible,
+                    message: Some(
+                        "This Claude Code is too old for the sidebar. Update it with `claude update`, then check again."
+                            .into(),
+                    ),
+                    ..base
+                };
+            };
+            let account = claude_account_label(&status);
+            if status.get("loggedIn").and_then(Value::as_bool) != Some(true) {
+                return NativeReadiness {
+                    status: NativeStatus::SignedOut,
+                    message: Some("Claude Code is installed but not signed in".into()),
+                    can_sign_in: true,
+                    ..base
+                };
+            }
+            match claude_handshake(&executable) {
+                Ok(()) => NativeReadiness {
+                    account,
+                    can_sign_in: true,
+                    ..base
+                },
+                Err(error) => NativeReadiness {
+                    status: NativeStatus::Incompatible,
+                    message: Some(
+                        "This Claude Code did not answer the stream-json handshake. Update it with `claude update`, then check again."
+                            .into(),
+                    ),
+                    detail: Some(error),
+                    account,
+                    ..base
+                },
+            }
+        }
         _ => NativeReadiness {
             status: NativeStatus::Unsupported,
             ..base
         },
     }
+}
+
+/// Starts Claude Code the way a session does (without a conversation and
+/// without saving one), sends `initialize`, and stops it. No model call.
+fn claude_handshake(executable: &Path) -> Result<(), String> {
+    let args = claude::probe_args();
+    let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+    let rpc = spawn_quiet(
+        "Claude Code",
+        executable,
+        &args,
+        &[],
+        Framing::ClaudeControl,
+    )?;
+    let result = rpc.request("initialize", claude::initialize_params(), PROBE_TIMEOUT);
+    let _ = rpc.shutdown(Duration::from_millis(1500));
+    let response = result.map_err(|error| error.to_string())?;
+    claude::check_initialize(&response).map_err(|error| error.message().to_string())
 }
 
 /// Only HTTPS URLs on the provider's own sign-in hosts are opened.
@@ -448,6 +570,7 @@ impl AgentAuth {
                     &executable,
                     &["app-server", "--listen", "stdio://"],
                     &[],
+                    Framing::Codex,
                 )?;
                 let started = codex_initialize(&rpc).and_then(|_| {
                     rpc.request(
@@ -547,7 +670,13 @@ impl AgentAuth {
             Some("acp") => {
                 let (args, env) =
                     acp::launch_args(agent).ok_or_else(|| format!("{name} cannot sign in here"))?;
-                let rpc = spawn_quiet(&format!("{name} sign-in"), &executable, &args, &env)?;
+                let rpc = spawn_quiet(
+                    &format!("{name} sign-in"),
+                    &executable,
+                    &args,
+                    &env,
+                    Framing::JsonRpc2,
+                )?;
                 let initialized =
                     match rpc.request("initialize", acp::initialize_params(), PROBE_TIMEOUT) {
                         Ok(value) => value,
@@ -597,6 +726,55 @@ impl AgentAuth {
                     already_open: false,
                 })
             }
+            Some("claude-stream-json") => {
+                // `claude auth login` opens the browser and waits for it.
+                let rpc = spawn_quiet(
+                    "Claude Code sign-in",
+                    &executable,
+                    &["auth", "login"],
+                    &[],
+                    Framing::Codex,
+                )?;
+                self.logins
+                    .lock()
+                    .map_err(|_| "sign-in state is unavailable".to_string())?
+                    .insert(
+                        agent,
+                        LoginProcess {
+                            rpc: rpc.clone(),
+                            login_id: None,
+                        },
+                    );
+                let auth = self.clone();
+                std::thread::spawn(move || {
+                    let finished = rpc.wait_exit(LOGIN_TIMEOUT);
+                    let signed_in = finished
+                        && claude_auth_status(&executable, &agent_environment())
+                            .and_then(|status| status.get("loggedIn").and_then(Value::as_bool))
+                            == Some(true);
+                    let (status, message) = if signed_in {
+                        ("completed", None)
+                    } else if !finished {
+                        ("failed", Some("Sign-in timed out".to_string()))
+                    } else if auth.login_cancelled(agent, &rpc) {
+                        ("cancelled", None)
+                    } else {
+                        (
+                            "failed",
+                            Some(
+                                rpc.exit_reason()
+                                    .unwrap_or_else(|| "Claude Code did not sign in".into()),
+                            ),
+                        )
+                    };
+                    auth.finish_login(agent, &rpc, status, message, &notify);
+                });
+                Ok(LoginStarted {
+                    agent,
+                    url: None,
+                    already_open: false,
+                })
+            }
             _ => Err(format!(
                 "{name} signs in through its own app. Sign in there, then check again."
             )),
@@ -626,6 +804,15 @@ impl AgentAuth {
             status,
             message,
         });
+    }
+
+    /// A sign-in that `cancel_login` already removed.
+    fn login_cancelled(&self, agent: AgentKind, rpc: &Arc<RpcProcess>) -> bool {
+        self.logins.lock().is_ok_and(|logins| {
+            !logins
+                .get(&agent)
+                .is_some_and(|login| Arc::ptr_eq(&login.rpc, rpc))
+        })
     }
 
     pub fn cancel_login(&self, agent: AgentKind) -> Result<(), String> {
@@ -675,6 +862,19 @@ mod tests {
         );
         assert!(validate_auth_url("javascript:alert(1)", CODEX_AUTH_HOSTS).is_err());
         assert!(validate_auth_url("file:///etc/passwd", CODEX_AUTH_HOSTS).is_err());
+    }
+
+    #[test]
+    fn claude_accounts_read_like_the_cli() {
+        let status = json!({"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty", "email": "a@b.c", "subscriptionType": "pro"});
+        assert_eq!(
+            claude_account_label(&status).as_deref(),
+            Some("Claude Pro (a@b.c)")
+        );
+        let bedrock =
+            json!({"loggedIn": true, "authMethod": "third_party", "apiProvider": "bedrock"});
+        assert_eq!(claude_account_label(&bedrock).as_deref(), Some("bedrock"));
+        assert_eq!(claude_account_label(&json!({"loggedIn": false})), None);
     }
 
     #[test]

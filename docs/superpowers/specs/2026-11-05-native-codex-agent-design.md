@@ -7,8 +7,15 @@
 ## 0. 实施时的调整（2026-11-05，用户在实施中提出）
 
 - **Grok 一并支持**（“grok 這些可以也支持一下”）。本机 Grok Build 1.0.67 提供 `grok agent stdio`，讲 Agent Client Protocol（ACP v1）。因此新增一个通用 ACP 适配器，Grok 第一个使用；OpenCode（`opencode acp`）、Hermes（`hermes acp`）走同一适配器，是否可用由就绪探测在运行时的 ACP 握手确认，不预先声称支持。
-- **Claude 走 ACP**（“claude 不能也接 acp 嗎？”）。Claude Code 本体没有 ACP 模式（2.1.318 已核对），ACP 项目维护的适配器 `@agentclientprotocol/claude-agent-acp`（前身 Zed 的 `claude-code-acp`）包装 Claude Agent SDK、在 stdio 上讲 ACP。CoWiki 在 PATH 上找到 `claude-agent-acp`（或 `claude-code-acp`）就用同一个 ACP 适配器；未安装时就绪状态给出安装命令。CoWiki 自身仍不打包 Node sidecar，也不自行实现 Claude 的私有 stream-json 控制协议。
-- 因此第 1 节“第一版只接 Codex”、“不做 Claude SDK 接入”改为：Codex 用 app-server，其它 Agent 用 ACP；Antigravity CLI 没有结构化协议，仍明确标为暂不可用。
+- **Claude 直接驱动 `claude`，不需要另装适配器**（先是“claude 不能也接 acp 嗎？”，随后“最好是用户只装了 claude 我们的应用打开就可以用”）。Claude Code 本体没有 ACP 模式（2.1.318 已核对）；ACP 的 `claude-agent-acp` 与 Bramble 用的 Claude Agent SDK 都是在 stdio 上用 `claude -p --input-format stream-json --output-format stream-json --permission-prompt-tool stdio` 与 CLI 对话。CoWiki 在 Rust 里直接讲这套控制协议（按 `@anthropic-ai/claude-agent-sdk` 0.3.314 的类型定义和真实 2.1.318 核对），所以只需装好并登录 `claude`，不需要 Node 或任何适配器。这是 SDK 使用的协议，不是公开文档承诺的稳定接口：握手失败、权限模式不符时拒绝启动并提示 `claude update`，不回退到终端。
+- Claude 的权限边界：
+  - 以 `acceptEdits` 启动，初始化后核对 CLI 报告的 `current_permission_mode`，不符就拒绝启动。工作目录内的文件编辑与 Codex 的 workspace-write 一样直接生效。
+  - 初始化时注册 PreToolUse hook，工作目录外的 Write/Edit/MultiEdit/NotebookEdit 一律拒绝，不受用户 allow 规则或 additionalDirectories 影响。
+  - 其余需要许可的操作（多数 Bash 命令、WebFetch 等）走 `can_use_tool`，变成审批卡片，只放行一次，从不回写 `updatedPermissions`。
+  - 只加载用户级设置（`--setting-sources user`，登录、代理、模型照常）；Space 自己的 `.claude/` 设置和 hook 不加载；`--strict-mcp-config` 只挂 CoWiki 自己的只读 MCP。
+  - 禁用需要终端交互或会在 CoWiki 外排程的工具（AskUserQuestion、ExitPlanMode、Cron*、ScheduleWakeup、RemoteTrigger）。
+- 就绪探测与登录：Claude 用 `claude auth status --json`，再做一次 stream-json 握手，不调用模型；登录由 `claude auth login` 打开浏览器完成。
+- 因此第 1 节“第一版只接 Codex”、“不做 Claude SDK 接入”改为：Codex 用 app-server，Claude 用 CLI 自带的 stream-json 控制协议，其它 Agent 用 ACP；Antigravity CLI 没有结构化协议，仍明确标为暂不可用。
 - ACP 的权限边界：只选 `allow_once` / `reject_once`，从不选 `allow_always`；会话若以绕过审批的模式启动（如 `bypassPermissions`、`acceptEdits`、`dontAsk`），先 `session/set_mode` 切回 `default`，切不回就拒绝启动；不向 Agent 提供 CoWiki 的文件系统或终端（`fs/*`、`terminal/*` 返回不支持）。Grok 额外以 `GROK_SANDBOX=workspace` 启动（进程级 Seatbelt：只写工作目录、/tmp、~/.grok），其子进程网络在 macOS 上是否被限制未验证。
 - 应用契约里消息与工具步骤合并为一条按时间排序的 `items` 时间线（`{type: 'message' | 'tool'}`），其余字段与计划 T1 一致。
 

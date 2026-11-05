@@ -7,7 +7,7 @@ use super::permissions::acp_option;
 use super::provider::{
     EventSink, OpenError, Opened, Provider, ProviderConfig, ProviderEvent, TurnOutcome,
 };
-use super::rpc::{Incoming, RpcError, RpcProcess};
+use super::rpc::{Framing, Incoming, RpcError, RpcProcess};
 use crate::terminal::AgentKind;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -38,9 +38,6 @@ pub fn launch_args(agent: AgentKind) -> Option<AcpLaunch> {
                 ("GROK_DEFAULT_PERMISSION_MODE", "default"),
             ],
         )),
-        // `claude-agent-acp` speaks ACP on stdio without arguments and uses
-        // Claude Code's own sign-in and settings.
-        AgentKind::Claude => Some((vec![], vec![])),
         AgentKind::OpenCode => Some((vec!["acp"], vec![])),
         AgentKind::Hermes => Some((vec!["acp"], vec![])),
         _ => None,
@@ -132,7 +129,7 @@ pub fn open(
         let sink = sink.clone();
         Box::new(move |reason: String| sink(ProviderEvent::Exited { reason }))
     };
-    let rpc = RpcProcess::spawn(&label, &launch, true, on_incoming, on_exit)
+    let rpc = RpcProcess::spawn(&label, &launch, Framing::JsonRpc2, on_incoming, on_exit)
         .map_err(OpenError::Failed)?;
     let _ = provider.rpc.set(rpc.clone());
     match handshake(&provider, &rpc, &config, resume) {

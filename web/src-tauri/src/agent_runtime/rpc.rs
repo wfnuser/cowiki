@@ -1,8 +1,10 @@
-//! Newline-delimited JSON-RPC over a child process's stdio.
+//! Newline-delimited JSON messages over a child process's stdio.
 //!
-//! Codex app-server omits the `jsonrpc` field; ACP agents require
-//! `"jsonrpc": "2.0"`. Responses are matched by request id, never by arrival
-//! order. The child runs in its own process group, which is the only group a
+//! Three framings share one reader: Codex app-server (JSON-RPC without the
+//! `jsonrpc` field), ACP agents (`"jsonrpc": "2.0"`), and Claude Code's
+//! stream-json control protocol (`control_request` / `control_response`
+//! envelopes next to its conversation messages). Responses are matched by
+//! request id, never by arrival order. The child runs in its own process group, which is the only group a
 //! shutdown signals: other Codex/Grok sessions the user runs are untouched.
 
 use serde_json::{json, Value};
@@ -20,6 +22,22 @@ use std::time::{Duration, Instant};
 pub const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
 /// Stderr bytes kept for error messages (the newest ones).
 pub const MAX_STDERR_BYTES: usize = 64 * 1024;
+
+/// How requests, responses and notifications are put on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Framing {
+    /// JSON-RPC 2.0 shapes without the `jsonrpc` field (Codex app-server).
+    Codex,
+    /// JSON-RPC 2.0 with `"jsonrpc": "2.0"` (Agent Client Protocol).
+    JsonRpc2,
+    /// Claude Code `--input-format stream-json --output-format stream-json`:
+    /// a request is `{"type":"control_request","request_id","request":{"subtype",…}}`
+    /// and its answer a `control_response`. Every other line (`assistant`,
+    /// `user`, `system`, `result`, `stream_event`, …) arrives as a
+    /// notification whose method is its `type` and whose params are the
+    /// whole message.
+    ClaudeControl,
+}
 
 #[derive(Debug, Clone)]
 pub struct LaunchSpec {
@@ -112,13 +130,14 @@ struct Shared {
     exited: Mutex<Option<String>>,
     exit_signal: Condvar,
     stderr: Mutex<String>,
+    framing: Framing,
 }
 
 pub struct RpcProcess {
     shared: Arc<Shared>,
     next_id: AtomicU64,
     pid: u32,
-    jsonrpc: bool,
+    framing: Framing,
     label: String,
 }
 
@@ -129,7 +148,7 @@ impl RpcProcess {
     pub fn spawn(
         label: &str,
         spec: &LaunchSpec,
-        jsonrpc: bool,
+        framing: Framing,
         on_incoming: IncomingHandler,
         on_exit: ExitHandler,
     ) -> Result<Arc<Self>, String> {
@@ -163,6 +182,7 @@ impl RpcProcess {
             exited: Mutex::new(None),
             exit_signal: Condvar::new(),
             stderr: Mutex::new(String::new()),
+            framing,
         });
         if let Some(stderr) = stderr {
             let shared = shared.clone();
@@ -179,7 +199,7 @@ impl RpcProcess {
             shared,
             next_id: AtomicU64::new(1),
             pid,
-            jsonrpc,
+            framing,
             label: label.to_string(),
         }))
     }
@@ -206,7 +226,7 @@ impl RpcProcess {
     }
 
     fn write(&self, mut message: Value) -> Result<(), RpcError> {
-        if self.jsonrpc {
+        if self.framing == Framing::JsonRpc2 {
             if let Some(object) = message.as_object_mut() {
                 object.insert("jsonrpc".into(), Value::String("2.0".into()));
             }
@@ -243,7 +263,24 @@ impl RpcProcess {
             .lock()
             .map_err(|_| RpcError::Io("pending lock poisoned".into()))?
             .insert(id, sender);
-        if let Err(error) = self.write(json!({"id": id, "method": method, "params": params})) {
+        let message = match self.framing {
+            Framing::ClaudeControl => {
+                let mut request = match params {
+                    Value::Object(object) => object,
+                    Value::Null => serde_json::Map::new(),
+                    other => {
+                        self.forget(id);
+                        return Err(RpcError::Io(format!(
+                            "{method} needs an object of parameters, not {other}"
+                        )));
+                    }
+                };
+                request.insert("subtype".into(), Value::String(method.to_string()));
+                json!({"type": "control_request", "request_id": id.to_string(), "request": request})
+            }
+            _ => json!({"id": id, "method": method, "params": params}),
+        };
+        if let Err(error) = self.write(message) {
             self.forget(id);
             return Err(error);
         }
@@ -270,12 +307,29 @@ impl RpcProcess {
         self.write(json!({"method": method, "params": params}))
     }
 
+    /// Writes one message as it is (Claude Code's `user` messages).
+    pub fn send(&self, message: Value) -> Result<(), RpcError> {
+        self.write(message)
+    }
+
     pub fn respond(&self, id: &Value, result: Value) -> Result<(), RpcError> {
-        self.write(json!({"id": id, "result": result}))
+        match self.framing {
+            Framing::ClaudeControl => self.write(json!({
+                "type": "control_response",
+                "response": {"subtype": "success", "request_id": id, "response": result},
+            })),
+            _ => self.write(json!({"id": id, "result": result})),
+        }
     }
 
     pub fn respond_error(&self, id: &Value, code: i64, message: &str) -> Result<(), RpcError> {
-        self.write(json!({"id": id, "error": {"code": code, "message": message}}))
+        match self.framing {
+            Framing::ClaudeControl => self.write(json!({
+                "type": "control_response",
+                "response": {"subtype": "error", "request_id": id, "error": message},
+            })),
+            _ => self.write(json!({"id": id, "error": {"code": code, "message": message}})),
+        }
     }
 
     /// Ends the process group: close stdin, SIGTERM, then SIGKILL after
@@ -461,6 +515,10 @@ fn dispatch(line: &[u8], shared: &Shared, on_incoming: &IncomingHandler) {
         ));
         return;
     };
+    if shared.framing == Framing::ClaudeControl {
+        dispatch_claude(message.clone(), shared, on_incoming);
+        return;
+    }
     let method = object.get("method").and_then(Value::as_str);
     match (method, object.get("id")) {
         (Some(method), Some(id)) if !id.is_null() => on_incoming(Incoming::Request {
@@ -499,6 +557,70 @@ fn dispatch(line: &[u8], shared: &Shared, on_incoming: &IncomingHandler) {
             let _ = reply.send(result);
         }
         (None, None) => {}
+    }
+}
+
+fn dispatch_claude(message: Value, shared: &Shared, on_incoming: &IncomingHandler) {
+    let kind = message
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    match kind.as_str() {
+        "control_response" => {
+            let response = message.get("response").cloned().unwrap_or(Value::Null);
+            let Some(id) = response.get("request_id").and_then(response_id) else {
+                return;
+            };
+            let reply = shared
+                .pending
+                .lock()
+                .ok()
+                .and_then(|mut pending| pending.take(id));
+            let Some(reply) = reply else {
+                return;
+            };
+            let result = if response.get("subtype").and_then(Value::as_str) == Some("error") {
+                Err(RpcError::Remote {
+                    code: -32000,
+                    message: response
+                        .get("error")
+                        .and_then(Value::as_str)
+                        .unwrap_or("request failed")
+                        .to_string(),
+                    data: None,
+                })
+            } else {
+                Ok(response
+                    .get("response")
+                    .cloned()
+                    .unwrap_or_else(|| json!({})))
+            };
+            let _ = reply.send(result);
+        }
+        "control_request" => {
+            let request = message.get("request").cloned().unwrap_or(Value::Null);
+            match (
+                message.get("request_id"),
+                request.get("subtype").and_then(Value::as_str),
+            ) {
+                (Some(id), Some(subtype)) if !id.is_null() => on_incoming(Incoming::Request {
+                    id: id.clone(),
+                    method: subtype.to_string(),
+                    params: request.clone(),
+                }),
+                _ => on_incoming(Incoming::Diagnostic(
+                    "ignored a control request without an id or subtype".into(),
+                )),
+            }
+        }
+        "" => on_incoming(Incoming::Diagnostic(
+            "ignored a message without a type".into(),
+        )),
+        _ => on_incoming(Incoming::Notification {
+            method: kind,
+            params: message,
+        }),
     }
 }
 
@@ -616,7 +738,7 @@ mod tests {
         let process = RpcProcess::spawn(
             "fake",
             &shell(script),
-            false,
+            Framing::Codex,
             Arc::new(|_| {}),
             Box::new(|_| {}),
         )
@@ -639,7 +761,7 @@ mod tests {
         let process = RpcProcess::spawn(
             "fake",
             &shell("read a; echo boom >&2; exit 3"),
-            true,
+            Framing::JsonRpc2,
             Arc::new(|_| {}),
             Box::new(|_| {}),
         )
@@ -659,7 +781,7 @@ mod tests {
         let process = RpcProcess::spawn(
             "fake",
             &shell("sleep 30 & sleep 30 & wait"),
-            false,
+            Framing::Codex,
             Arc::new(|_| {}),
             Box::new(|_| {}),
         )
@@ -682,7 +804,7 @@ mod tests {
         let process = RpcProcess::spawn(
             "fake",
             &shell("sleep 30"),
-            false,
+            Framing::Codex,
             Arc::new(|_| {}),
             Box::new(|_| {}),
         )
@@ -702,7 +824,7 @@ mod tests {
         let process = RpcProcess::spawn(
             "fake",
             &shell("sleep 30"),
-            false,
+            Framing::Codex,
             Arc::new(|_| {}),
             Box::new(|_| {}),
         )

@@ -124,6 +124,68 @@ pub fn acp_option(options: &[Value], allow: bool) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+/// Claude Code runs in `acceptEdits`: file edits inside its working
+/// directory apply without asking (as Codex's workspace-write sandbox does),
+/// everything else that needs permission asks CoWiki.
+pub const CLAUDE_PERMISSION_MODE: &str = "acceptEdits";
+
+/// Claude Code's built-in tools that write files, and the input field that
+/// names the file.
+pub fn claude_file_target(tool_name: &str, input: &Value) -> Option<Option<String>> {
+    let field = match tool_name {
+        "Write" | "Edit" | "MultiEdit" => "file_path",
+        "NotebookEdit" => "notebook_path",
+        _ => return None,
+    };
+    Some(
+        input
+            .get(field)
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+    )
+}
+
+/// Whether `path` (absolute, or relative to `cwd`) stays inside `cwd`
+/// after symlinks: the nearest existing ancestor is resolved, so a link that
+/// points out of the Space, `..`, or `/tmp` vs `/private/tmp` cannot cross
+/// the boundary.
+pub fn inside_workspace(path: &str, cwd: &Path) -> bool {
+    use std::path::Component;
+    let Ok(root) = cwd.canonicalize() else {
+        return false;
+    };
+    let candidate = Path::new(path);
+    let candidate = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        cwd.join(candidate)
+    };
+    if candidate
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return false;
+    }
+    let mut existing = candidate.as_path();
+    let mut rest = Vec::new();
+    loop {
+        if let Ok(resolved) = existing.canonicalize() {
+            let mut full = resolved;
+            for part in rest.iter().rev() {
+                full.push(part);
+            }
+            return full.starts_with(&root);
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                existing = parent;
+            }
+            _ => return false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,5 +245,34 @@ mod tests {
         assert_eq!(acp_option(&options, true).as_deref(), Some("once"));
         assert_eq!(acp_option(&options, false).as_deref(), Some("no"));
         assert_eq!(acp_option(&options[..1], true), None);
+    }
+
+    #[test]
+    fn claude_file_writes_stay_inside_the_workspace() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let space = root.join("space");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(space.join("notes")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let inside = |path: &str| inside_workspace(path, &space);
+        assert!(inside(space.join("a.md").to_str().unwrap()));
+        assert!(inside(space.join("new/dir/b.md").to_str().unwrap()));
+        assert!(inside("notes/c.md"));
+        assert!(!inside(outside.join("x.md").to_str().unwrap()));
+        assert!(!inside(space.join("../outside/x.md").to_str().unwrap()));
+        assert!(!inside("../outside/x.md"));
+        assert!(!inside("/etc/hosts"));
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, space.join("link")).unwrap();
+            assert!(!inside(space.join("link/x.md").to_str().unwrap()));
+        }
+        assert_eq!(
+            claude_file_target("Write", &json!({"file_path": "/a"})),
+            Some(Some("/a".into()))
+        );
+        assert_eq!(claude_file_target("NotebookEdit", &json!({})), Some(None));
+        assert_eq!(claude_file_target("Bash", &json!({"command": "ls"})), None);
     }
 }

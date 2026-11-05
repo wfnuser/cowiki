@@ -2,12 +2,14 @@
 //!
 //! Rust owns every provider process, session, approval and record; React
 //! only receives typed snapshots (`agent:event`) and calls the commands in
-//! [`commands`]. Providers: Codex (`codex app-server`) and Agent Client
-//! Protocol agents: Grok (`grok agent stdio`), Claude Code through the ACP
-//! adapter (`claude-agent-acp`), and others the probe confirms.
+//! [`commands`]. Providers: Codex (`codex app-server`), Claude Code (its
+//! own stream-json control protocol, the one the Claude Agent SDK uses), and
+//! Agent Client Protocol agents: Grok (`grok agent stdio`) and others the
+//! probe confirms.
 
 pub mod acp;
 pub mod auth;
+pub mod claude;
 pub mod codex;
 pub mod commands;
 pub mod contract;
@@ -21,9 +23,7 @@ pub mod store;
 #[cfg(test)]
 mod tests;
 
-use crate::terminal::{
-    agent_display_name, resolve_agent_executable, resolve_named_executable, AgentKind,
-};
+use crate::terminal::{agent_display_name, resolve_agent_executable, AgentKind};
 use provider::{EventSink, OpenError, Opened, ProviderConfig, ProviderLauncher};
 use std::path::PathBuf;
 
@@ -36,7 +36,8 @@ pub fn open_with_protocol(
 ) -> Result<Opened, OpenError> {
     match config.agent {
         AgentKind::Codex => codex::open(config, resume, sink),
-        AgentKind::Claude | AgentKind::Grok | AgentKind::OpenCode | AgentKind::Hermes => {
+        AgentKind::Claude => claude::open(config, resume, sink),
+        AgentKind::Grok | AgentKind::OpenCode | AgentKind::Hermes => {
             acp::open(config, resume, sink)
         }
         AgentKind::Antigravity => Err(OpenError::Incompatible(
@@ -64,20 +65,15 @@ impl ProviderLauncher for LocalLauncher {
     }
 }
 
-/// The program a native session starts. Claude Code itself has no ACP mode
-/// (checked with 2.1.318); the ACP project's adapter wraps the Claude Agent
-/// SDK and speaks ACP on stdio.
+/// The program a native session starts: the agent's own CLI, found the same
+/// way the terminal finds it. Nothing else needs to be installed.
 pub fn native_executable(agent: AgentKind) -> Option<PathBuf> {
-    match agent {
-        AgentKind::Claude => resolve_named_executable("claude-agent-acp")
-            .or_else(|| resolve_named_executable("claude-code-acp")),
-        other => resolve_agent_executable(other),
-    }
+    resolve_agent_executable(agent)
 }
 
 pub fn not_installed_message(agent: AgentKind) -> String {
     match agent {
-        AgentKind::Claude => "Claude Code runs in the sidebar through its ACP adapter. Install it with `npm install -g @agentclientprotocol/claude-agent-acp` (it uses your existing Claude Code sign-in), then check again.".to_string(),
+        AgentKind::Claude => "Claude Code is not installed or is not on PATH. Install Claude Code and sign in once, then check again.".to_string(),
         other => format!("{} is not installed or is not on PATH", agent_display_name(other)),
     }
 }

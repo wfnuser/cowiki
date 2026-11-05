@@ -1,6 +1,6 @@
 //! The app-level contract the renderer consumes. Provider protocols (Codex
-//! app-server, ACP, Claude stream-json) are normalized into these types; raw
-//! provider objects never reach React.
+//! app-server, Claude Code stream-json, ACP) are normalized into these types;
+//! raw provider objects never reach React.
 
 use crate::terminal::AgentKind;
 use serde::{Deserialize, Serialize};
