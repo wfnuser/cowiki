@@ -498,6 +498,11 @@ impl LocalEngine {
             .find(|space| space.local_path == path))
     }
 
+    /// CoWiki's private metadata directory (never inside a Space).
+    pub fn metadata_dir(&self) -> &Path {
+        &self.metadata_dir
+    }
+
     pub fn find_space(&self, slug: &str) -> Result<Space, String> {
         self.list_spaces()?
             .into_iter()

@@ -178,7 +178,7 @@ fn rpc_error(id: Value, code: i64, message: String) -> Value {
 }
 
 fn tool_definitions() -> Vec<Value> {
-    vec![
+    let mut tools = vec![
         json!({
             "name": "get_space_context",
             "description": "Describe the current CoWiki Space and its local knowledge boundary.",
@@ -226,7 +226,12 @@ fn tool_definitions() -> Vec<Value> {
                 "additionalProperties": false
             }
         }),
-    ]
+    ];
+    // Every tool only reads the Space, so clients may run them without asking.
+    for tool in &mut tools {
+        tool["annotations"] = json!({"readOnlyHint": true, "destructiveHint": false});
+    }
+    tools
 }
 
 pub fn run_stdio(metadata_dir: &Path, space_slug: &str) -> Result<(), String> {
