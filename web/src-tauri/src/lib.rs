@@ -1,3 +1,5 @@
+mod agent_execution_gate;
+mod agent_runtime;
 mod cloud_sync;
 mod extract;
 mod html_assets;
@@ -471,31 +473,92 @@ fn local_list_agent_changes(
     engine.list_agent_changes(&space_slug)
 }
 
-#[tauri::command]
-fn local_merge_agent_change(
-    engine: State<'_, LocalEngine>,
-    terminals: State<'_, terminal::TerminalState>,
-    space_slug: String,
-    change_id: String,
+#[derive(Clone, Copy)]
+enum ChangeClose {
+    Merge,
+    Discard,
+}
+
+/// Merge or discard an Agent Change with every local Agent runtime kept out.
+/// Order: native sessions settle (idle provider processes end and are
+/// confirmed gone), then the shared start/close gate, then the Draft mutation
+/// lock. Agent starts only touch the gate and never wait on the mutation lock.
+fn close_agent_change(
+    engine: &LocalEngine,
+    gate: &agent_execution_gate::AgentExecutionGate,
+    agents: &agent_runtime::registry::AgentRuntime,
+    space_slug: &str,
+    change_id: &str,
+    action: ChangeClose,
 ) -> Result<AgentChange, String> {
-    // Lock order is terminal close gate, then Draft mutation. Terminal starts
-    // only touch their registry and never wait on the mutation lock.
-    let _closing = terminals.begin_change_close(&space_slug, &change_id)?;
+    let preparation = agents.prepare_change_close(space_slug, change_id)?;
+    let _closing = gate.begin_close(space_slug, change_id)?;
     let _mutation = engine.lock_mutations()?;
-    engine.merge_agent_change(&space_slug, &change_id)
+    let change = match action {
+        ChangeClose::Merge => engine.merge_agent_change(space_slug, change_id)?,
+        ChangeClose::Discard => engine.discard_agent_change(space_slug, change_id)?,
+    };
+    if !matches!(change.status.as_str(), "open" | "needsResolution") {
+        preparation.commit(match action {
+            ChangeClose::Merge => "merged into the Draft",
+            ChangeClose::Discard => "discarded",
+        });
+    }
+    Ok(change)
 }
 
 #[tauri::command]
-fn local_discard_agent_change(
+async fn local_merge_agent_change(
     engine: State<'_, LocalEngine>,
-    terminals: State<'_, terminal::TerminalState>,
+    gate: State<'_, agent_execution_gate::AgentExecutionGate>,
+    agents: State<'_, agent_runtime::commands::AgentState>,
     space_slug: String,
     change_id: String,
 ) -> Result<AgentChange, String> {
-    // Keep the same order as merge to avoid a registry/mutation lock cycle.
-    let _closing = terminals.begin_change_close(&space_slug, &change_id)?;
-    let _mutation = engine.lock_mutations()?;
-    engine.discard_agent_change(&space_slug, &change_id)
+    let (engine, gate, runtime) = (
+        engine.inner().clone(),
+        gate.inner().clone(),
+        agents.runtime.clone(),
+    );
+    tauri::async_runtime::spawn_blocking(move || {
+        close_agent_change(
+            &engine,
+            &gate,
+            &runtime,
+            &space_slug,
+            &change_id,
+            ChangeClose::Merge,
+        )
+    })
+    .await
+    .map_err(|error| format!("merge task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn local_discard_agent_change(
+    engine: State<'_, LocalEngine>,
+    gate: State<'_, agent_execution_gate::AgentExecutionGate>,
+    agents: State<'_, agent_runtime::commands::AgentState>,
+    space_slug: String,
+    change_id: String,
+) -> Result<AgentChange, String> {
+    let (engine, gate, runtime) = (
+        engine.inner().clone(),
+        gate.inner().clone(),
+        agents.runtime.clone(),
+    );
+    tauri::async_runtime::spawn_blocking(move || {
+        close_agent_change(
+            &engine,
+            &gate,
+            &runtime,
+            &space_slug,
+            &change_id,
+            ChangeClose::Discard,
+        )
+    })
+    .await
+    .map_err(|error| format!("discard task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -683,6 +746,17 @@ pub fn run() {
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_kill,
+            agent_runtime::commands::agent_probe_native,
+            agent_runtime::commands::agent_login_start,
+            agent_runtime::commands::agent_login_cancel,
+            agent_runtime::commands::agent_list_sessions,
+            agent_runtime::commands::agent_create_session,
+            agent_runtime::commands::agent_snapshot,
+            agent_runtime::commands::agent_send,
+            agent_runtime::commands::agent_stop,
+            agent_runtime::commands::agent_resume,
+            agent_runtime::commands::agent_answer_approval,
+            agent_runtime::commands::agent_remove_session,
         ])
         .setup(|app| {
             // Keep the small, rebuildable index beside the previous local
@@ -702,8 +776,36 @@ pub fn run() {
             engine
                 .import_legacy_spaces(&cowiki_home)
                 .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
+            // Terminals and native sessions share one Change start/close gate.
+            let gate = agent_execution_gate::AgentExecutionGate::default();
+            let mcp =
+                std::env::current_exe()
+                    .ok()
+                    .map(|command| agent_runtime::provider::McpLaunch {
+                        command,
+                        args: vec![
+                            "--mcp".to_string(),
+                            "--metadata-dir".to_string(),
+                            engine.metadata_dir().to_string_lossy().into_owned(),
+                        ],
+                    });
+            let runtime = agent_runtime::registry::AgentRuntime::new(
+                engine.clone(),
+                gate.clone(),
+                agent_runtime::store::SessionStore::new(engine.metadata_dir()),
+                std::sync::Arc::new(agent_runtime::commands::TauriEmitter(app.handle().clone())),
+                std::sync::Arc::new(agent_runtime::LocalLauncher),
+                mcp,
+            );
+            app.manage(agent_runtime::commands::AgentState {
+                runtime,
+                auth: agent_runtime::auth::AgentAuth::new(std::sync::Arc::new(|url: &str| {
+                    open_system_browser(url)
+                })),
+            });
             app.manage(engine);
-            app.manage(terminal::TerminalState::default());
+            app.manage(terminal::TerminalState::with_gate(gate.clone()));
+            app.manage(gate);
 
             let window_builder =
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
@@ -724,6 +826,12 @@ pub fn run() {
         .run(|app, event| {
             // Keep edits made since the last checkpoint when the app quits.
             if let tauri::RunEvent::Exit = event {
+                // End every Agent process CoWiki started; running work is
+                // recorded as interrupted and never replayed.
+                if let Some(agents) = app.try_state::<agent_runtime::commands::AgentState>() {
+                    agents.auth.shutdown();
+                    agents.runtime.shutdown_all();
+                }
                 if let Some(engine) = app.try_state::<LocalEngine>() {
                     if let Ok(_mutation) = engine.lock_mutations() {
                         engine.checkpoint_unsaved_drafts();

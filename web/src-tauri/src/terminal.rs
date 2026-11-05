@@ -4,11 +4,13 @@
 //! kill that session. Commands are intentionally restricted to supported
 //! agents; arbitrary command execution is left to the interactive shell.
 
+#[cfg(test)]
+use crate::agent_execution_gate::CloseLease;
+use crate::agent_execution_gate::{AgentExecutionGate, ExecutionScope, StartLease};
 use crate::local_engine::LocalEngine;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::fmt;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 #[cfg(unix)]
@@ -46,7 +48,7 @@ pub enum TerminalMode {
 }
 
 impl TerminalMode {
-    fn prompt(self) -> &'static str {
+    pub(crate) fn prompt(self) -> &'static str {
         match self {
             Self::Live => "You are editing the current Draft working tree directly. Re-read files immediately before every edit and never overwrite concurrent human or Agent changes.",
             Self::Background => "You are in a CoWiki-managed background worktree captured from the Draft at dispatch time. Only edit files in this worktree. Do not checkout, merge, commit, or push; CoWiki collects the result and merges it into the latest Draft after review.",
@@ -55,7 +57,7 @@ impl TerminalMode {
 }
 
 impl AgentKind {
-    fn command(self) -> &'static str {
+    pub(crate) fn command(self) -> &'static str {
         match self {
             Self::Codex => "codex",
             Self::Claude => "claude",
@@ -147,10 +149,13 @@ struct TerminalIdentity {
     change_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct AgentChangeIdentity {
-    space_slug: String,
-    change_id: String,
+impl TerminalIdentity {
+    fn scope(&self) -> ExecutionScope {
+        match self.change_id.as_deref() {
+            Some(change_id) => ExecutionScope::background(&self.space_slug, change_id),
+            None => ExecutionScope::live(&self.space_slug),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,19 +169,19 @@ struct TerminalSlot {
     identity: TerminalIdentity,
     phase: TerminalPhase,
     session: Option<TerminalSession>,
+    // Held from reservation until the exit watcher removes the slot, so a
+    // Stopping PTY still blocks Agent Change merge/discard.
+    _lease: StartLease,
 }
 
 impl TerminalSlot {
-    fn starting(identity: TerminalIdentity) -> Self {
+    fn starting(identity: TerminalIdentity, lease: StartLease) -> Self {
         Self {
             identity,
             phase: TerminalPhase::Starting,
             session: None,
+            _lease: lease,
         }
-    }
-
-    fn identity(&self) -> &TerminalIdentity {
-        &self.identity
     }
 
     fn running(&self) -> Option<&TerminalSession> {
@@ -199,7 +204,6 @@ impl TerminalSlot {
 #[derive(Default)]
 struct TerminalRegistry {
     sessions: HashMap<String, TerminalSlot>,
-    closing_changes: HashSet<AgentChangeIdentity>,
 }
 
 #[derive(Clone)]
@@ -229,11 +233,7 @@ impl TerminalRegistry {
 pub struct TerminalState {
     registry: Arc<Mutex<TerminalRegistry>>,
     readiness: Arc<Mutex<HashMap<AgentKind, CachedAgentReadiness>>>,
-}
-
-pub(crate) struct TerminalChangeGuard {
-    registry: Arc<Mutex<TerminalRegistry>>,
-    identity: AgentChangeIdentity,
+    gate: AgentExecutionGate,
 }
 
 struct TerminalStartReservation {
@@ -269,24 +269,16 @@ impl Drop for TerminalStartReservation {
     }
 }
 
-impl fmt::Debug for TerminalChangeGuard {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("TerminalChangeGuard")
-            .field("identity", &self.identity)
-            .finish()
-    }
-}
-
-impl Drop for TerminalChangeGuard {
-    fn drop(&mut self) {
-        if let Ok(mut registry) = self.registry.lock() {
-            registry.closing_changes.remove(&self.identity);
+impl TerminalState {
+    /// Terminals and native Agent sessions must share one gate so neither can
+    /// bypass the other's Change merge/discard protection.
+    pub fn with_gate(gate: AgentExecutionGate) -> Self {
+        Self {
+            gate,
+            ..Self::default()
         }
     }
-}
 
-impl TerminalState {
     fn cache_readiness(&self, value: AgentReadiness) {
         if let Ok(mut cache) = self.readiness.lock() {
             cache.insert(
@@ -321,27 +313,11 @@ impl TerminalState {
         if registry.sessions.contains_key(session_id) {
             return Err("terminal session already exists".to_string());
         }
-        if let Some(change_id) = identity.change_id.as_ref() {
-            let change = AgentChangeIdentity {
-                space_slug: identity.space_slug.clone(),
-                change_id: change_id.clone(),
-            };
-            if registry.closing_changes.contains(&change) {
-                return Err("Agent Change is being closed; its terminal cannot restart".to_string());
-            }
-        } else if registry
-            .closing_changes
-            .iter()
-            .any(|change| change.space_slug == identity.space_slug)
-        {
-            return Err(
-                "Agent Change in this Space is being closed; a Live terminal cannot start"
-                    .to_string(),
-            );
-        }
-        registry
-            .sessions
-            .insert(session_id.to_string(), TerminalSlot::starting(identity));
+        let lease = self.gate.reserve_start(identity.scope())?;
+        registry.sessions.insert(
+            session_id.to_string(),
+            TerminalSlot::starting(identity, lease),
+        );
         Ok(())
     }
 
@@ -391,45 +367,11 @@ impl TerminalState {
         registry.mark_stopping(session_id)
     }
 
-    pub(crate) fn begin_change_close(
-        &self,
-        space_slug: &str,
-        change_id: &str,
-    ) -> Result<TerminalChangeGuard, String> {
-        let identity = AgentChangeIdentity {
-            space_slug: space_slug.to_string(),
-            change_id: change_id.to_string(),
-        };
-        let mut registry = self
-            .registry
-            .lock()
-            .map_err(|_| "terminal state is unavailable".to_string())?;
-        let blocking_terminal = registry.sessions.values().find(|slot| {
-            let terminal = slot.identity();
-            terminal.space_slug == identity.space_slug
-                && (terminal.change_id.is_none()
-                    || terminal.change_id.as_deref() == Some(identity.change_id.as_str()))
-        });
-        if let Some(slot) = blocking_terminal {
-            if slot.identity().change_id.is_none() {
-                return Err(
-                    "Stop the active Live terminal before merging or discarding an Agent Change in this Space."
-                        .to_string(),
-                );
-            }
-            return Err(
-                "Stop the active background terminal before merging or discarding this Agent Change."
-                    .to_string(),
-            );
-        }
-        if !registry.closing_changes.insert(identity.clone()) {
-            return Err("Agent Change is already being closed".to_string());
-        }
-        drop(registry);
-        Ok(TerminalChangeGuard {
-            registry: self.registry.clone(),
-            identity,
-        })
+    /// Tests use the terminal's own view of the shared gate; production
+    /// merge/discard goes through `AgentExecutionGate::begin_close` directly.
+    #[cfg(test)]
+    fn begin_change_close(&self, space_slug: &str, change_id: &str) -> Result<CloseLease, String> {
+        self.gate.begin_close(space_slug, change_id)
     }
 }
 
@@ -594,7 +536,7 @@ fn validate_task_prompt(value: Option<&str>) -> Result<Option<String>, String> {
     Ok(Some(value.to_string()))
 }
 
-const SPACE_PROTOCOL: &str = "You are maintaining a CoWiki knowledge Space. Markdown files are the source of truth. Follow the Open Knowledge Format, the Space's own rules, and its arbitrary OKF hierarchy; never invent fixed wiki, entities, or concepts directories. Local maintenance never requires a CoWiki API key or server. Before answering about the Space, search and read the relevant pages, then cite their relative paths. When the cowiki MCP tools are available, use them for retrieval; otherwise use normal file and text-search tools. Before claiming that knowledge is absent, search and list evidence first. Raw sources are immutable. Integrate durable knowledge into the maintained wiki, reconcile contradictions, keep links/index/log consistent, and make every change reversible. Re-read a file immediately before editing it; never silently overwrite concurrent human changes. Do not commit, checkout, merge, push, or edit CoWiki SQLite metadata.";
+pub(crate) const SPACE_PROTOCOL: &str = "You are maintaining a CoWiki knowledge Space. Markdown files are the source of truth. Follow the Open Knowledge Format, the Space's own rules, and its arbitrary OKF hierarchy; never invent fixed wiki, entities, or concepts directories. Local maintenance never requires a CoWiki API key or server. Before answering about the Space, search and read the relevant pages, then cite their relative paths. When the cowiki MCP tools are available, use them for retrieval; otherwise use normal file and text-search tools. Before claiming that knowledge is absent, search and list evidence first. Raw sources are immutable. Integrate durable knowledge into the maintained wiki, reconcile contradictions, keep links/index/log consistent, and make every change reversible. Re-read a file immediately before editing it; never silently overwrite concurrent human changes. Do not commit, checkout, merge, push, or edit CoWiki SQLite metadata.";
 
 const AGENT_PROMPT_ENV: &str = "COWIKI_AGENT_PROMPT";
 const CLAUDE_MCP_CONFIG_ENV: &str = "COWIKI_CLAUDE_MCP_CONFIG";
@@ -721,6 +663,55 @@ fn readiness_error(readiness: &AgentReadiness) -> String {
         .message
         .clone()
         .unwrap_or_else(|| format!("{} is not ready", readiness.agent.command()))
+}
+
+/// The same login-shell lookup the terminal uses, for runtimes that start the
+/// CLI directly with a fixed argv.
+pub(crate) fn resolve_agent_executable(agent: AgentKind) -> Option<PathBuf> {
+    resolve_named_executable(agent.command())
+}
+
+/// Finds `command` through the login shell, then the usual install folders.
+pub(crate) fn resolve_named_executable(command: &str) -> Option<PathBuf> {
+    let shell = resolve_agent_lookup_shell();
+    #[cfg(not(windows))]
+    let lookup_text = run_shell_command(
+        &shell,
+        &format!("command -v {}", shell_quote(command)),
+        Duration::from_secs(4),
+    )
+    .ok()
+    .filter(|output| output.status.success())
+    .map(|output| strip_terminal_control_sequences(&String::from_utf8_lossy(&output.stdout)));
+    #[cfg(windows)]
+    let lookup_text: Option<String> = None;
+    let shell_candidate = lookup_text
+        .as_deref()
+        .into_iter()
+        .flat_map(str::lines)
+        .map(|line| PathBuf::from(line.trim()))
+        .find(|candidate| {
+            candidate.is_absolute()
+                && candidate.file_name().and_then(|name| name.to_str()) == Some(command)
+                && is_executable_file(candidate)
+        });
+    shell_candidate.or_else(|| {
+        agent_search_directories()
+            .into_iter()
+            .filter_map(|directory| directory.join(command).canonicalize().ok())
+            .find(|candidate| is_executable_file(candidate))
+    })
+}
+
+pub(crate) fn agent_display_name(agent: AgentKind) -> &'static str {
+    match agent {
+        AgentKind::Codex => "Codex",
+        AgentKind::Claude => "Claude Code",
+        AgentKind::Grok => "Grok",
+        AgentKind::Antigravity => "Antigravity CLI",
+        AgentKind::OpenCode => "OpenCode",
+        AgentKind::Hermes => "Hermes Agent",
+    }
 }
 
 fn probe_agent(agent: AgentKind) -> AgentReadiness {
@@ -904,7 +895,7 @@ fn is_executable_file(candidate: &Path) -> bool {
     }
 }
 
-fn agent_search_directories() -> Vec<PathBuf> {
+pub(crate) fn agent_search_directories() -> Vec<PathBuf> {
     let mut directories = std::env::var_os("PATH")
         .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
         .unwrap_or_default();
@@ -966,7 +957,7 @@ fn run_probe_command(
     return run_shell_command(shell, &command, timeout);
 }
 
-fn run_shell_command(
+pub(crate) fn run_shell_command(
     shell: &Path,
     shell_command: &str,
     timeout: Duration,
@@ -1044,7 +1035,7 @@ fn probe_output_text(output: &Output) -> String {
         .collect()
 }
 
-fn strip_terminal_control_sequences(value: &str) -> String {
+pub(crate) fn strip_terminal_control_sequences(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     let mut characters = value.chars().peekable();
     while let Some(character) = characters.next() {
@@ -1064,7 +1055,7 @@ fn strip_terminal_control_sequences(value: &str) -> String {
     output
 }
 
-fn first_nonempty_line(value: &str) -> Option<String> {
+pub(crate) fn first_nonempty_line(value: &str) -> Option<String> {
     value
         .lines()
         .map(str::trim)
@@ -1141,7 +1132,7 @@ fn ensure_antigravity_mcp_config(
     })
 }
 
-fn toml_string(value: &str) -> String {
+pub(crate) fn toml_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('\"', "\\\""))
 }
 
@@ -1332,7 +1323,7 @@ fn resolve_shell() -> PathBuf {
     }
 }
 
-fn resolve_agent_lookup_shell() -> PathBuf {
+pub(crate) fn resolve_agent_lookup_shell() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
         PathBuf::from("/bin/zsh")
@@ -1773,7 +1764,7 @@ mod tests {
             .unwrap();
 
         let active_error = state.begin_change_close("notes", "change-1").unwrap_err();
-        assert!(active_error.contains("active background terminal"));
+        assert!(active_error.contains("active background Agent"));
 
         state.release_session("terminal:active");
         let closing = state.begin_change_close("notes", "change-1").unwrap();
@@ -1798,7 +1789,7 @@ mod tests {
             .unwrap();
 
         let active_error = state.begin_change_close("notes", "change-1").unwrap_err();
-        assert!(active_error.contains("active Live terminal"));
+        assert!(active_error.contains("active Live Agent"));
 
         state.release_session("terminal:live");
         let closing = state.begin_change_close("notes", "change-1").unwrap();
@@ -1861,7 +1852,7 @@ mod tests {
         }
 
         let stopping_error = state.begin_change_close("notes", "change-1").unwrap_err();
-        assert!(stopping_error.contains("active background terminal"));
+        assert!(stopping_error.contains("active background Agent"));
 
         let exited = (0..100).any(|_| {
             if child.try_wait().unwrap().is_some() {
