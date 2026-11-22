@@ -1,0 +1,24 @@
+[package]
+name = "cowiki-knowledge"
+version = "0.1.0"
+edition = "2021"
+description = "Local-first Open Knowledge Format (OKF v0.3), hybrid lexical/vector/graph SQLite knowledge index, and bundle validator for CoWiki"
+license = "Apache-2.0"
+
+[features]
+default = []
+remote-embeddings = ["dep:reqwest"]
+
+[dependencies]
+libc = "0.2"
+percent-encoding = "2"
+pulldown-cmark = "0.13"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+tempfile = "3"
+time = { version = "=0.3.44", features = ["formatting"] }
+walkdir = "2"

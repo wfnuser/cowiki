@@ -36,7 +36,7 @@ function Highlight({ text, q }: { text: string; q: string }) {
 
 type Row =
   | { kind: 'keyword'; slug: string; path?: string; title: string; snippet: string; titleMatch: boolean }
-  | { kind: 'semantic'; slug: string; title: string; summary: string; source: string };
+  | { kind: 'semantic'; slug: string; path?: string; title: string; summary: string; source: string };
 
 /**
  * Feishu-style search palette: centered modal over a dimmed canvas.
@@ -96,14 +96,24 @@ export function SearchModal({
     setKwLoading(true);
     kwTimer.current = setTimeout(() => {
       searchWorkspace(workspaceSlug, q.trim(), 'keyword')
-        .then((r) => { setKw(r.keyword); setSel(0); })
-        .catch(() => setKw([]))
+        .then((r) => {
+          setKw(r.keyword);
+          if (isDesktopClient()) {
+            setSem(r.semantic);
+          }
+          setSel(0);
+        })
+        .catch(() => {
+          setKw([]);
+          if (isDesktopClient()) {
+            setSem([]);
+          }
+        })
         .finally(() => setKwLoading(false));
     }, 120);
     if (isDesktopClient()) {
-      // The local index is intentionally lexical in V1. Do not scan the same
-      // repository twice for an empty semantic result.
-      setSem([]);
+      // Desktop local_search returns lexical hits and hybrid vector/graph-related
+      // hits in a single round-trip, avoiding a second repository scan.
       setSemLoading(false);
     } else {
       setSemLoading(true);
@@ -130,9 +140,10 @@ export function SearchModal({
     const seen = new Set(out.map((hit) => hit.slug));
     for (const h of sem ?? []) {
       const slug = conceptIdFromPath(h.slug);
-      if (!seen.has(slug)) {
-        out.push({ kind: 'semantic', slug, title: h.title, summary: h.summary, source: h.source });
-      }
+      const path = conceptPath(slug);
+      if (!isSearchableConceptPath(path) || seen.has(slug)) continue;
+      seen.add(slug);
+      out.push({ kind: 'semantic', slug, path, title: h.title, summary: h.summary, source: h.source });
     }
     return out;
   }, [kw, sem]);
@@ -141,7 +152,7 @@ export function SearchModal({
   const pick = useCallback((row: Row | undefined) => {
     if (!row) return;
     onClose();
-    onSelectPage(row.slug, row.kind === 'keyword' ? row.path : undefined);
+    onSelectPage(row.slug, row.path);
   }, [onClose, onSelectPage]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -254,13 +265,13 @@ export function SearchModal({
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           <Highlight text={row.title} q={q} />
                         </span>
-                        {row.kind === 'semantic' && row.source === 'draft' && (
+                        {row.kind === 'semantic' && (row.source === 'draft' || row.source === 'graph' || row.source === 'vector') && (
                           <span style={{
                             fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 999,
                             background: C.accentSoft, color: C.accent, flexShrink: 0,
                             border: `1px solid ${sel === i ? C.accent : 'transparent'}`,
                           }}>
-                            draft
+                            {row.source === 'graph' ? 'linked' : row.source === 'vector' ? 'related' : row.source}
                           </span>
                         )}
                       </div>

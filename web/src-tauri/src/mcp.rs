@@ -140,6 +140,23 @@ fn handle_tool_call(
                     .get("use_okf_governance")
                     .or_else(|| arguments.get("useOkfGovernance"))
                     .and_then(Value::as_bool),
+                use_lexical: arguments
+                    .get("use_lexical")
+                    .or_else(|| arguments.get("useLexical"))
+                    .and_then(Value::as_bool),
+                use_vector: arguments
+                    .get("use_vector")
+                    .or_else(|| arguments.get("useVector"))
+                    .and_then(Value::as_bool),
+                use_graph_expansion: arguments
+                    .get("use_graph_expansion")
+                    .or_else(|| arguments.get("useGraphExpansion"))
+                    .and_then(Value::as_bool),
+                scope_filter: arguments
+                    .get("scope_filter")
+                    .or_else(|| arguments.get("scopeFilter"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
                 as_of_date: arguments
                     .get("as_of_date")
                     .or_else(|| arguments.get("asOfDate"))
@@ -198,7 +215,7 @@ fn handle_tool_call(
 
 fn get_space_context(engine: &LocalEngine, space_slug: &str) -> Result<Value, String> {
     let space = engine.find_space(space_slug)?;
-    let page_count = engine.indexed_page_count(space_slug)?;
+    let stats = engine.index_stats(space_slug)?;
     let declared_okf = crate::okf::declared_version(&space.local_path)?
         .unwrap_or_else(|| crate::okf::OKF_VERSION.to_string());
     let root = space.local_path.clone();
@@ -208,7 +225,8 @@ fn get_space_context(engine: &LocalEngine, space_slug: &str) -> Result<Value, St
         "okfVersion": declared_okf,
         "supportedOkfVersions": crate::okf::SUPPORTED_OKF_VERSIONS,
         "rootIndex": "index.md",
-        "indexedPageCount": page_count,
+        "indexedPageCount": stats.indexed_pages,
+        "indexStats": stats,
         "markdownIsSourceOfTruth": true,
         "guidance": [
             "Search before answering questions about this Space; use hybrid_search for multi-hop budgeted evidence with line citations.",
@@ -270,7 +288,7 @@ fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "hybrid_search",
-            "description": "Run budgeted section-level BM25 retrieval with hub-dampened 1-hop/2-hop link-graph expansion, OKF v0.3 governance filtering, redirect resolution, and line-range citations.",
+            "description": "Run budgeted section-level BM25 + dense semantic vector RRF retrieval with hub-dampened 1-hop/2-hop link-graph expansion (including #anchor section links), OKF v0.3 governance filtering, redirect resolution, and line-range citations.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -282,6 +300,10 @@ fn tool_definitions() -> Vec<Value> {
                     "exclude_retired": {"type": "boolean", "default": true},
                     "follow_redirects": {"type": "boolean", "default": true},
                     "use_okf_governance": {"type": "boolean", "default": true},
+                    "use_lexical": {"type": "boolean", "default": true},
+                    "use_vector": {"type": "boolean", "default": true},
+                    "use_graph_expansion": {"type": "boolean", "default": true},
+                    "scope_filter": {"type": "string"},
                     "as_of_date": {"type": "string"}
                 },
                 "required": ["query"],

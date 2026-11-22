@@ -21,7 +21,7 @@ use crate::web_source::{self, WebSourceSnapshot};
 
 mod agent_changes;
 mod comments;
-pub use crate::knowledge_index::{BrokenLink, HybridSearchOptions, HybridSearchResult};
+pub use crate::knowledge_index::{BrokenLink, HybridSearchOptions, HybridSearchResult, IndexStats};
 pub use crate::okf::OkfValidationReport;
 pub use agent_changes::AgentChange;
 pub use comments::{CommentMember, PageComment, PageCommentsResponse};
@@ -243,10 +243,19 @@ pub struct SourceContent {
     pub content: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct SemanticHit {
+    pub slug: String,
+    pub title: String,
+    pub summary: String,
+    pub similarity: f64,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SearchResponse {
     pub keyword: Vec<SearchHit>,
-    pub semantic: Vec<SearchHit>,
+    pub semantic: Vec<SemanticHit>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1280,15 +1289,73 @@ impl LocalEngine {
         limit: usize,
     ) -> Result<SearchResponse, String> {
         let space = self.find_space(space_slug)?;
-        let keyword = self
-            .search_pages(space_slug, query, limit)?
+        if query.trim().is_empty() {
+            return Ok(SearchResponse {
+                keyword: Vec::new(),
+                semantic: Vec::new(),
+            });
+        }
+        let mut db = self
+            .db
+            .lock()
+            .map_err(|_| "local database lock poisoned".to_string())?;
+        self.refresh_search_index(&mut db, &space)?;
+        let keyword: Vec<SearchHit> = knowledge_index::search(&db, &space.id, query, limit)?
             .into_iter()
             .filter_map(|hit| ui_search_hit(&space.local_path, hit))
             .collect();
-        Ok(SearchResponse {
-            keyword,
-            semantic: Vec::new(),
-        })
+
+        let keyword_slugs: HashSet<String> = keyword.iter().map(|hit| hit.slug.clone()).collect();
+        let semantic_limit = limit.clamp(1, 8);
+        self.prepare_backlinks(&mut db, &space.id)?;
+        let hybrid = knowledge_index::hybrid_search(
+            &db,
+            &space.id,
+            &space.local_path,
+            query,
+            &HybridSearchOptions {
+                token_budget: Some(1200),
+                max_hops: Some(2),
+                seed_top_k: Some(6),
+                include_backlinks: Some(true),
+                exclude_retired: Some(true),
+                follow_redirects: Some(true),
+                use_okf_governance: Some(true),
+                use_lexical: Some(true),
+                use_vector: Some(true),
+                use_graph_expansion: Some(true),
+                ..Default::default()
+            },
+        )?;
+
+        let mut seen_semantic = HashSet::new();
+        let mut semantic = Vec::new();
+        for item in hybrid.evidence {
+            let Some(slug) = ui_concept_slug(&item.page_path) else {
+                continue;
+            };
+            if keyword_slugs.contains(&slug) || !seen_semantic.insert(slug.clone()) {
+                continue;
+            }
+            let summary = format_semantic_summary(&item);
+            let source = match item.retrieval_channel.as_str() {
+                "graph_1hop" | "graph_2hop" | "graph_anchor" => "graph".to_string(),
+                "vector" => "vector".to_string(),
+                _ => "hybrid".to_string(),
+            };
+            semantic.push(SemanticHit {
+                slug,
+                title: item.page_title,
+                summary,
+                similarity: item.score,
+                source,
+            });
+            if semantic.len() >= semantic_limit {
+                break;
+            }
+        }
+
+        Ok(SearchResponse { keyword, semantic })
     }
 
     pub fn list_backlinks(
@@ -1343,6 +1410,7 @@ impl LocalEngine {
         okf::validate_bundle(&space.local_path, as_of, check_links)
     }
 
+    #[cfg(test)]
     pub fn indexed_page_count(&self, space_slug: &str) -> Result<usize, String> {
         let space = self.find_space(space_slug)?;
         let mut db = self
@@ -1351,6 +1419,17 @@ impl LocalEngine {
             .map_err(|_| "local database lock poisoned".to_string())?;
         self.refresh_search_index(&mut db, &space)?;
         knowledge_index::page_count(&db, &space.id)
+    }
+
+    pub fn index_stats(&self, space_slug: &str) -> Result<IndexStats, String> {
+        let space = self.find_space(space_slug)?;
+        let mut db = self
+            .db
+            .lock()
+            .map_err(|_| "local database lock poisoned".to_string())?;
+        self.refresh_search_index(&mut db, &space)?;
+        self.prepare_backlinks(&mut db, &space.id)?;
+        knowledge_index::index_stats(&db, &space.id)
     }
 
     pub fn get_page_by_path(
@@ -2049,8 +2128,8 @@ fn stage_deterministic_okf_artifacts(
     Ok(())
 }
 
-fn ui_search_hit(_root: &Path, mut hit: SearchHit) -> Option<SearchHit> {
-    let without_extension = hit.path.strip_suffix(".md").unwrap_or(&hit.path);
+fn ui_concept_slug(path: &str) -> Option<String> {
+    let without_extension = path.strip_suffix(".md").unwrap_or(path);
     if without_extension == "index"
         || without_extension == "log"
         || without_extension.ends_with("/index")
@@ -2059,7 +2138,29 @@ fn ui_search_hit(_root: &Path, mut hit: SearchHit) -> Option<SearchHit> {
     {
         return None;
     }
-    hit.slug = without_extension.to_string();
+    Some(without_extension.to_string())
+}
+
+fn format_semantic_summary(item: &knowledge_index::HybridEvidenceItem) -> String {
+    let body_line = item
+        .text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let excerpt: String = body_line.chars().take(140).collect();
+    if item.section_heading.is_empty() || item.section_heading == item.page_title {
+        excerpt
+    } else if excerpt.is_empty() {
+        item.section_heading.clone()
+    } else {
+        format!("{} — {}", item.section_heading, excerpt)
+    }
+}
+
+fn ui_search_hit(_root: &Path, mut hit: SearchHit) -> Option<SearchHit> {
+    hit.slug = ui_concept_slug(&hit.path)?;
     Some(hit)
 }
 
@@ -6460,5 +6561,28 @@ mod tests {
         assert!(paths.contains(&"service.md"));
         assert!(paths.contains(&"ledger.md"));
         assert!(paths.contains(&"Retention Policy.md"));
+
+        // Desktop Cmd+K search returns direct keyword hits plus graph/vector
+        // related pages in `semantic` in a single round-trip, never leaking
+        // reserved docs or `.cowiki/sources/`.
+        let desktop_search = engine.search(&space.slug, "Billing Service", 10).unwrap();
+        assert_eq!(desktop_search.keyword.len(), 1);
+        assert_eq!(desktop_search.keyword[0].slug, "service");
+        let semantic_slugs: Vec<&str> = desktop_search
+            .semantic
+            .iter()
+            .map(|hit| hit.slug.as_str())
+            .collect();
+        assert!(
+            semantic_slugs.contains(&"ledger"),
+            "expected linked page 'ledger' in desktop semantic hits, got: {desktop_search:?}"
+        );
+
+        let stats = engine.index_stats(&space.slug).unwrap();
+        assert_eq!(stats.schema_version, 4);
+        assert!(stats.indexed_pages >= 3);
+        assert!(stats.knowledge_units >= 3);
+        assert!(stats.cached_embeddings >= 3);
+        assert!(stats.page_links >= 2);
     }
 }
