@@ -21,10 +21,13 @@ own writes, Git history, or review state.
 
 | Tool | Purpose |
 | --- | --- |
-| `get_space_context` | Return the selected Space root and OKF context. |
-| `search_pages` | Search indexed titles and Markdown bodies. |
-| `get_page` | Read a page by its Space-relative path. |
+| `get_space_context` | Return the selected Space root and OKF context (`0.1` / `0.2` / `0.3`). |
+| `search_pages` | Search indexed titles and Markdown bodies with OKF v0.3 governance filtering and redirect resolution. |
+| `hybrid_search` | Run budgeted section-level BM25 retrieval with hub-dampened 1-hop/2-hop link-graph expansion and line-range citations. |
+| `get_page` | Read a page and its parsed OKF v0.3 metadata by its Space-relative path. |
 | `list_backlinks` | Find pages that link to a document. |
+| `list_broken_links` | List unresolved internal Markdown links and wikilinks in the Space. |
+| `validate_okf` | Run read-only OKF v0.3 conformance, staleness, trust-reset, redirect, and link diagnostics. |
 
 The embedded server deliberately has no write, ingest, commit, branch, merge,
 or review tools. Agents edit ordinary Markdown with their filesystem tools.

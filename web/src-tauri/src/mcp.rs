@@ -106,11 +106,63 @@ fn handle_tool_call(
                 .search_pages(space_slug, query, limit)
                 .map(|results| json!({"results": results}))
         }
+        "hybrid_search" => {
+            let query = required_string(&arguments, "query")?;
+            let options = crate::local_engine::HybridSearchOptions {
+                token_budget: arguments
+                    .get("token_budget")
+                    .or_else(|| arguments.get("tokenBudget"))
+                    .and_then(Value::as_u64)
+                    .map(|value| value as usize),
+                max_hops: arguments
+                    .get("max_hops")
+                    .or_else(|| arguments.get("maxHops"))
+                    .and_then(Value::as_u64)
+                    .map(|value| value as usize),
+                seed_top_k: arguments
+                    .get("seed_top_k")
+                    .or_else(|| arguments.get("seedTopK"))
+                    .and_then(Value::as_u64)
+                    .map(|value| value as usize),
+                include_backlinks: arguments
+                    .get("include_backlinks")
+                    .or_else(|| arguments.get("includeBacklinks"))
+                    .and_then(Value::as_bool),
+                exclude_retired: arguments
+                    .get("exclude_retired")
+                    .or_else(|| arguments.get("excludeRetired"))
+                    .and_then(Value::as_bool),
+                follow_redirects: arguments
+                    .get("follow_redirects")
+                    .or_else(|| arguments.get("followRedirects"))
+                    .and_then(Value::as_bool),
+                use_okf_governance: arguments
+                    .get("use_okf_governance")
+                    .or_else(|| arguments.get("useOkfGovernance"))
+                    .and_then(Value::as_bool),
+                as_of_date: arguments
+                    .get("as_of_date")
+                    .or_else(|| arguments.get("asOfDate"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            };
+            engine
+                .hybrid_search(space_slug, query, &options)
+                .and_then(|bundle| serde_json::to_value(bundle).map_err(|e| e.to_string()))
+        }
         "get_page" => {
             let path = required_string(&arguments, "path")?;
-            engine
-                .get_page_by_path(space_slug, path)
-                .and_then(|page| serde_json::to_value(page).map_err(|e| e.to_string()))
+            engine.get_page_by_path(space_slug, path).and_then(|page| {
+                let okf_metadata = crate::okf::parse_metadata(&page.body);
+                let mut value = serde_json::to_value(page).map_err(|e| e.to_string())?;
+                if let Some(map) = value.as_object_mut() {
+                    map.insert(
+                        "okfMetadata".to_string(),
+                        serde_json::to_value(okf_metadata).map_err(|e| e.to_string())?,
+                    );
+                }
+                Ok(value)
+            })
         }
         "list_backlinks" => {
             let path = required_string(&arguments, "path")?;
@@ -121,6 +173,20 @@ fn handle_tool_call(
         "list_broken_links" => engine
             .list_broken_links(space_slug)
             .map(|results| json!({"results": results})),
+        "validate_okf" => {
+            let as_of = arguments
+                .get("as_of")
+                .or_else(|| arguments.get("asOf"))
+                .and_then(Value::as_str);
+            let check_links = arguments
+                .get("check_links")
+                .or_else(|| arguments.get("checkLinks"))
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            engine
+                .validate_okf(space_slug, as_of, check_links)
+                .and_then(|report| serde_json::to_value(report).map_err(|e| e.to_string()))
+        }
         _ => Err(format!("unknown or unavailable read-only tool: {name}")),
     })();
 
@@ -133,19 +199,24 @@ fn handle_tool_call(
 fn get_space_context(engine: &LocalEngine, space_slug: &str) -> Result<Value, String> {
     let space = engine.find_space(space_slug)?;
     let page_count = engine.indexed_page_count(space_slug)?;
+    let declared_okf = crate::okf::declared_version(&space.local_path)?
+        .unwrap_or_else(|| crate::okf::OKF_VERSION.to_string());
     let root = space.local_path.clone();
     Ok(json!({
         "space": space,
         "root": root,
-        "okfVersion": crate::okf::OKF_VERSION,
+        "okfVersion": declared_okf,
+        "supportedOkfVersions": crate::okf::SUPPORTED_OKF_VERSIONS,
         "rootIndex": "index.md",
         "indexedPageCount": page_count,
         "markdownIsSourceOfTruth": true,
         "guidance": [
-            "Search before answering questions about this Space.",
+            "Search before answering questions about this Space; use hybrid_search for multi-hop budgeted evidence with line citations.",
             "Start from index.md and follow progressive-disclosure links when exploring.",
             "Read the relevant pages and cite their relative file paths.",
+            "Respect OKF v0.3 governance fields (status, stale_after, trust_tier, verified, redirect_to) and demote verified: true to false (trust_tier: agent_draft, generated: true) when an agent edits a human-verified page.",
             "Use standard Markdown links as the portable relationship graph; wikilinks are an extension.",
+            "Use validate_okf for read-only conformance, staleness, redirect, and broken-link diagnostics.",
             "The index is derived; Markdown files are the source of truth."
         ]
     }))
@@ -186,7 +257,7 @@ fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "search_pages",
-            "description": "Search Markdown pages by title and body text. Returns ranked file evidence and snippets.",
+            "description": "Search Markdown pages by title and body text with OKF v0.3 governance filtering and redirect resolution. Returns ranked file evidence and snippets.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -198,8 +269,28 @@ fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "hybrid_search",
+            "description": "Run budgeted section-level BM25 retrieval with hub-dampened 1-hop/2-hop link-graph expansion, OKF v0.3 governance filtering, redirect resolution, and line-range citations.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "minLength": 1},
+                    "token_budget": {"type": "integer", "minimum": 64, "maximum": 16000, "default": 1200},
+                    "max_hops": {"type": "integer", "minimum": 0, "maximum": 2, "default": 2},
+                    "seed_top_k": {"type": "integer", "minimum": 1, "maximum": 20, "default": 6},
+                    "include_backlinks": {"type": "boolean", "default": true},
+                    "exclude_retired": {"type": "boolean", "default": true},
+                    "follow_redirects": {"type": "boolean", "default": true},
+                    "use_okf_governance": {"type": "boolean", "default": true},
+                    "as_of_date": {"type": "string"}
+                },
+                "required": ["query"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
             "name": "get_page",
-            "description": "Read one Markdown page by its path relative to the Space root.",
+            "description": "Read one Markdown page and its parsed OKF v0.3 metadata by its path relative to the Space root.",
             "inputSchema": {
                 "type": "object",
                 "properties": {"path": {"type": "string", "minLength": 1}},
@@ -223,6 +314,18 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {},
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "validate_okf",
+            "description": "Validate the current Space against OKF v0.3 conformance, staleness, trust-reset, redirect, and link diagnostics (read-only).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "as_of": {"type": "string"},
+                    "check_links": {"type": "boolean", "default": true}
+                },
                 "additionalProperties": false
             }
         }),
@@ -297,14 +400,91 @@ mod tests {
             vec![
                 "get_space_context",
                 "search_pages",
+                "hybrid_search",
                 "get_page",
                 "list_backlinks",
                 "list_broken_links",
+                "validate_okf",
             ]
         );
         assert!(!names
             .iter()
             .any(|name| name.contains("put") || name.contains("write")));
+    }
+
+    #[test]
+    fn mcp_hybrid_search_and_validate_okf_work_end_to_end() {
+        let (temp, engine, slug) = setup();
+        let root = temp.path().join("space");
+        std::fs::write(
+            root.join("sync.md"),
+            "---\ntype: Note\ntitle: Sync\nstatus: active\nverified: true\n---\n\n# Sync\n\nReplication notes referencing [Deep Policy](policy.md).\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("policy.md"),
+            "---\ntype: Policy\ntitle: Deep Policy\nstatus: active\n---\n\n# Deep Policy\n\nConflict resolution uses deterministic timestamps.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("stale.md"),
+            "---\ntype: Note\ntitle: Stale Draft\ntrust_tier: agent_draft\nverified: true\ngenerated: true\nstale_after: \"2024-01-01\"\n---\n\n# Stale Draft\n\nNeeds re-verification.\n",
+        )
+        .unwrap();
+
+        let hybrid = super::handle_request(
+            &engine,
+            &slug,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 10,
+                "method": "tools/call",
+                "params": {
+                    "name": "hybrid_search",
+                    "arguments": {
+                        "query": "network optional deterministic timestamps",
+                        "token_budget": 500,
+                        "max_hops": 2
+                    }
+                }
+            }),
+        );
+        assert_eq!(hybrid["result"]["isError"], false, "{hybrid}");
+        let evidence = hybrid["result"]["structuredContent"]["evidence"]
+            .as_array()
+            .unwrap();
+        assert!(!evidence.is_empty());
+        assert!(
+            hybrid["result"]["structuredContent"]["tokensUsed"]
+                .as_u64()
+                .unwrap()
+                <= 500
+        );
+        let paths: Vec<&str> = evidence
+            .iter()
+            .filter_map(|item| item["pagePath"].as_str())
+            .collect();
+        assert!(paths.contains(&"local-first.md"));
+        assert!(paths.contains(&"sync.md"));
+
+        let audit = super::handle_request(
+            &engine,
+            &slug,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "tools/call",
+                "params": {
+                    "name": "validate_okf",
+                    "arguments": {"as_of": "2026-11-22", "check_links": true}
+                }
+            }),
+        );
+        assert_eq!(audit["result"]["isError"], false, "{audit}");
+        let structured = &audit["result"]["structuredContent"];
+        assert_eq!(structured["valid"], false);
+        assert_eq!(structured["summaryByCode"]["trust_reset_violation"], 1);
+        assert_eq!(structured["summaryByCode"]["expired_stale_after"], 1);
     }
 
     #[test]
