@@ -31,52 +31,58 @@ export function AgentApprovalCard({
     <section
       role="group"
       aria-label={`Approval needed: ${approval.title}`}
-      className="rounded-lg border border-amber/30 bg-amber-soft/60 p-2.5"
+      className="rounded-xl border border-border bg-panel p-3 shadow-[var(--shadow-card)]"
     >
-      <div className="flex items-center gap-1.5 text-xs font-semibold text-text">
-        <Icon className="size-3.5 shrink-0 text-amber" aria-hidden />
-        <span className="min-w-0 truncate">{approval.title}</span>
-        <span className="ml-auto shrink-0 text-[10px] font-medium uppercase tracking-wide text-amber">Needs approval</span>
+      <div className="flex items-start gap-2">
+        <span className="mt-px flex size-5 shrink-0 items-center justify-center rounded-md bg-amber-soft text-amber">
+          <Icon className="size-3" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13px] font-medium leading-5 text-text">{approval.title}</p>
+          {approval.description && (
+            <p className="text-[12px] leading-[1.5] text-text-secondary">{approval.description}</p>
+          )}
+        </div>
       </div>
       {approval.command && (
         <pre
-          className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-all rounded-md bg-bg px-2 py-1.5 text-[11px] text-text"
+          className="mt-2.5 max-h-28 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-bg-secondary px-2.5 py-2 text-[11.5px] leading-relaxed text-text"
           style={{ fontFamily: fonts.mono }}
         >
           {approval.command}
         </pre>
       )}
       {approval.paths.length > 0 && (
-        <ul className="mt-2 space-y-0.5 text-[11px] text-text-secondary" style={{ fontFamily: fonts.mono }}>
+        <ul className="mt-2.5 space-y-0.5 rounded-lg bg-bg-secondary px-2.5 py-2 text-[11.5px] text-text-secondary" style={{ fontFamily: fonts.mono }}>
           {approval.paths.slice(0, 8).map((path) => <li key={path} className="truncate">{path}</li>)}
           {approval.paths.length > 8 && <li>…and {approval.paths.length - 8} more</li>}
         </ul>
       )}
-      {approval.cwd && approval.kind === 'command' && (
-        <p className="mt-1 truncate text-[10px] text-text-tertiary">in {approval.cwd}</p>
-      )}
-      {approval.description && (
-        <p className="mt-1.5 text-[11px] leading-relaxed text-text-secondary">{approval.description}</p>
-      )}
-      <div className="mt-2 flex gap-1.5">
-        <Button
-          size="xs"
-          className="bg-accent text-on-accent hover:bg-accent-hover"
-          disabled={pending !== null}
-          aria-label={`Allow once: ${approval.title}`}
-          onClick={() => void answer('allow')}
-        >
-          Allow once
-        </Button>
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={pending !== null}
-          aria-label={`Deny: ${approval.title}`}
-          onClick={() => void answer('deny')}
-        >
-          Deny
-        </Button>
+      <div className="mt-3 flex items-center gap-2">
+        {approval.cwd && approval.kind === 'command' && (
+          <p className="min-w-0 flex-1 truncate text-[11px] text-text-tertiary" title={approval.cwd}>in {approval.cwd}</p>
+        )}
+        <div className="ml-auto flex shrink-0 gap-1.5">
+          <Button
+            size="xs"
+            variant="outline"
+            className="h-7 px-3"
+            disabled={pending !== null}
+            aria-label={`Deny: ${approval.title}`}
+            onClick={() => void answer('deny')}
+          >
+            Deny
+          </Button>
+          <Button
+            size="xs"
+            className="h-7 bg-accent px-3 text-on-accent hover:bg-accent-hover"
+            disabled={pending !== null}
+            aria-label={`Allow once: ${approval.title}`}
+            onClick={() => void answer('allow')}
+          >
+            Allow once
+          </Button>
+        </div>
       </div>
     </section>
   );

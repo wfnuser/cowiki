@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ExternalLink, Layers, LoaderCircle, PauseCircle, RefreshCw, RotateCcw } from 'lucide-react';
+import { ArrowUpRight, FileText, LoaderCircle, PauseCircle, RefreshCw, RotateCcw, SlidersHorizontal } from 'lucide-react';
+import { Popover as PopoverPrimitive } from 'radix-ui';
 
 import { withObsidianReader } from '@/components/ObsidianReader';
+import { NumberField } from '@/components/ui/number-field';
 import { listCardSources, readCardReviews, writeCardReviews } from '@/local-api';
 import { C } from '@/lib/design';
 import { dateKey } from '@/lib/journal';
 import { obsidianToReaderMarkdown } from '@/lib/obsidian-markdown';
+import { cn } from '@/lib/utils';
 import {
   adoptMovedCards,
   answerCard,
@@ -30,10 +33,10 @@ import {
 
 const MARKDOWN = withObsidianReader(undefined);
 // Logseq's answers and shortcuts (f / t / r), with 1-3 as well.
-const SCORES: Array<{ score: Score; label: string; keys: string[]; tone: string }> = [
-  { score: 1, label: 'Forgotten', keys: ['f', '1'], tone: C.red },
-  { score: 3, label: 'Took a while', keys: ['t', '2'], tone: C.line },
-  { score: 5, label: 'Remembered', keys: ['r', '3'], tone: C.green },
+const SCORES: Array<{ score: Score; label: string; keys: string[] }> = [
+  { score: 1, label: 'Forgotten', keys: ['f', '1'] },
+  { score: 3, label: 'Took a while', keys: ['t', '2'] },
+  { score: 5, label: 'Remembered', keys: ['r', '3'] },
 ];
 
 interface FlashcardsViewProps {
@@ -179,56 +182,59 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
     const schedule = scheduleOf(store, current);
     const intervals = previewIntervals(schedule, store.ofMatrix);
     const fresh = isNew(store, current);
+    const quiet = 'inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-3.5';
     return (
-      <section style={{ width: 'min(720px, 100%)', margin: '0 auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, fontSize: 12.5, color: C.muted }}>
-          <span>{session?.length ?? 0} left · {fresh ? 'New' : `Review #${schedule.repeats + 1}`}</span>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button type="button" onClick={() => onOpenSource(current.path)} style={ghostButton} title={current.path}>
-              <ExternalLink size={13} /> Open source
+      <section className="mx-auto" style={{ width: 'min(680px, 100%)' }}>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <span className="text-[12.5px] text-text-tertiary">
+            <span className="tabular-nums">{session?.length ?? 0}</span> left · {fresh ? 'New' : `Review ${schedule.repeats + 1}`}
+          </span>
+          <div className="flex items-center">
+            <button type="button" onClick={() => onOpenSource(current.path)} className={quiet} title={current.path}>
+              <ArrowUpRight /> Open note
             </button>
-            <button type="button" onClick={suspend} style={ghostButton} title="Stop showing this card until you resume it.">
-              <PauseCircle size={13} /> Suspend
+            <button type="button" onClick={suspend} className={quiet} title="Stop showing this card until you resume it">
+              <PauseCircle /> Suspend
             </button>
-            <button
-              type="button"
-              onClick={reset}
-              disabled={fresh}
-              style={{ ...ghostButton, opacity: fresh ? 0.5 : 1 }}
-              title="Reset this card so that you can review it again from the start."
-            >
-              <RotateCcw size={13} /> Reset
+            <button type="button" onClick={reset} disabled={fresh} className={quiet} title="Review this card again from the start">
+              <RotateCcw /> Reset
             </button>
-            <button type="button" onClick={endSession} style={ghostButton}>End</button>
+            <button type="button" onClick={endSession} className={cn(quiet, 'text-text-secondary')}>End</button>
           </div>
         </div>
-        {error && <div role="alert" style={{ marginBottom: 12, color: C.red, fontSize: 12.5 }}>{error}</div>}
-        <div style={cardStyle}>
+        {error && <div role="alert" className="mb-3 text-[12.5px] text-red">{error}</div>}
+        <div className="min-h-56 rounded-xl border border-border bg-panel px-8 py-7 shadow-[var(--shadow-rest)]">
           {changedSinceReview(store, current) && (
-            <div style={{ marginBottom: 10, fontSize: 12, color: C.amber }}>The answer changed in the note since you last reviewed this card.</div>
+            <p className="mb-3 flex items-center gap-1.5 text-[12px] text-amber"><span className="size-1.5 rounded-full bg-current" />The answer changed since your last review.</p>
           )}
           <CardText text={renderCloze(current.front, revealed)} />
           {revealed && current.back && (
             <>
-              <hr style={{ border: 'none', borderTop: `1px solid ${C.line}`, margin: '18px 0' }} />
+              <div className="my-5 h-px bg-border-soft" />
               <CardText text={renderCloze(current.back, true)} />
             </>
           )}
         </div>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 16 }}>
+        <div className="mt-4 flex justify-center gap-2">
           {!revealed ? (
             <>
-              <button type="button" onClick={() => setRevealed(true)} style={primaryButton}>
-                {current.cloze && !current.back ? 'Show clozes' : 'Show answer'} <kbd style={kbd}>Space</kbd>
+              <button type="button" onClick={() => setRevealed(true)} className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-[13px] font-medium text-on-accent transition-colors hover:bg-accent-hover">
+                {current.cloze && !current.back ? 'Show clozes' : 'Show answer'}
+                <kbd className="rounded border border-on-accent/40 px-1 text-[10.5px] font-normal">Space</kbd>
               </button>
-              <button type="button" onClick={advance} style={ghostButton}>
-                Next <kbd style={{ ...kbd, borderColor: C.line }}>n</kbd>
+              <button type="button" onClick={advance} className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-[13px] text-text-secondary transition-colors hover:bg-bg-hover">
+                Skip <kbd className="rounded border border-border px-1 text-[10.5px] text-text-tertiary">n</kbd>
               </button>
             </>
           ) : SCORES.map((item) => (
-            <button key={item.score} type="button" onClick={() => rate(item.score)} style={{ ...ratingButton, borderColor: item.tone }}>
-              <span style={{ fontWeight: 650 }}>{item.label}</span>
-              <span style={{ fontSize: 11, color: C.muted }}>{intervals[item.score]} · {item.keys[0]}</span>
+            <button
+              key={item.score}
+              type="button"
+              onClick={() => rate(item.score)}
+              className="flex min-w-28 flex-col items-center gap-0.5 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-text transition-colors hover:border-border-hover hover:bg-bg-hover"
+            >
+              {item.label}
+              <span className="text-[11px] font-normal text-text-tertiary">{intervals[item.score]} · {item.keys[0]}</span>
             </button>
           ))}
         </div>
@@ -236,75 +242,94 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
     );
   }
 
+  // Only counts worth reading: a zero says nothing.
+  const summary = ([
+    [stats.due, 'due'],
+    [stats.fresh, 'new'],
+    [stats.total, stats.total === 1 ? 'card' : 'cards'],
+    [stats.suspended, 'suspended'],
+  ] as Array<[number, string]>).filter(([value, label]) => value > 0 || label.startsWith('card'));
+
   return (
-    <section style={{ width: 'min(760px, 100%)', margin: '0 auto' }}>
-      <header style={{ marginBottom: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Layers size={20} color={C.accent} strokeWidth={1.8} />
-            <h1 className="page-title page-title--compact" style={{ margin: 0 }}>Flashcards</h1>
-          </div>
-          <button type="button" onClick={() => setReloadKey((key) => key + 1)} style={ghostButton}>
-            <RefreshCw size={13} /> Refresh
+    <section className="mx-auto" style={{ width: 'min(720px, 100%)' }}>
+      <header className="mb-5 flex items-center justify-between gap-4">
+        <h1 className="page-title page-title--compact" style={{ margin: 0 }}>Flashcards</h1>
+        <div className="flex items-center">
+          <PopoverPrimitive.Root>
+            <PopoverPrimitive.Trigger asChild>
+              <button type="button" aria-label="Daily limits" title="Daily limits" className="flex size-8 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text">
+                <SlidersHorizontal className="size-3.5" />
+              </button>
+            </PopoverPrimitive.Trigger>
+            <PopoverPrimitive.Portal>
+              <PopoverPrimitive.Content align="end" sideOffset={6} className="z-[200] w-60 rounded-lg border border-border bg-panel p-3 shadow-[var(--shadow-popover)]">
+                <p className="mb-2 text-[12.5px] font-medium text-text">Daily limits</p>
+                <div className="flex flex-col gap-2 text-[12.5px] text-text-secondary">
+                  <span className="flex items-center justify-between gap-3">
+                    New cards
+                    <NumberField label="New cards per day" value={store.settings.newPerDay} onChange={(value) => updateSetting('newPerDay', String(value))} />
+                  </span>
+                  <span className="flex items-center justify-between gap-3">
+                    Reviews
+                    <NumberField label="Reviews per day" value={store.settings.reviewsPerDay} step={10} onChange={(value) => updateSetting('reviewsPerDay', String(value))} />
+                  </span>
+                </div>
+              </PopoverPrimitive.Content>
+            </PopoverPrimitive.Portal>
+          </PopoverPrimitive.Root>
+          <button type="button" onClick={() => setReloadKey((key) => key + 1)} aria-label="Refresh" title="Refresh" className="flex size-8 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text">
+            <RefreshCw className="size-3.5" />
           </button>
         </div>
-        <p style={{ margin: 0, color: C.muted, fontSize: 13 }}>
-          Any bullet tagged <code>#card</code> is a card and its child bullets are the answer, as in Logseq. Your review history stays on this device and never changes the notes.
-        </p>
       </header>
 
-      {error && <div role="alert" style={{ marginBottom: 12, color: C.red, fontSize: 12.5 }}>{error}</div>}
+      {error && <div role="alert" className="mb-3 text-[12.5px] text-red">{error}</div>}
 
       {loading ? (
-        <div style={emptyState}><LoaderCircle size={15} className="animate-spin" /> Collecting cards…</div>
+        <p className="flex items-center gap-2 py-10 text-[12.5px] text-text-tertiary"><LoaderCircle className="size-3.5 animate-spin" /> Collecting cards…</p>
       ) : (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 14 }}>
-            {([['Due', stats.due], ['New', stats.fresh], ['Total', stats.total], ['Suspended', stats.suspended]] as Array<[string, number]>).map(([label, value]) => (
-              <div key={label} style={tile}>
-                <div style={{ fontSize: 20, fontWeight: 650, color: C.ink }}>{value}</div>
-                <div style={{ fontSize: 11.5, color: C.muted }}>{label}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
+          <div className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-2">
             <button
               type="button"
               disabled={queue.length === 0}
               onClick={() => { setSession(queue); setReviewed(0); setRevealed(false); }}
-              style={{ ...primaryButton, opacity: queue.length === 0 ? 0.5 : 1 }}
+              className="inline-flex h-9 items-center rounded-lg bg-accent px-4 text-[13px] font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:bg-bg-active disabled:text-text-tertiary"
             >
-              {queue.length === 0 ? 'Nothing to review today' : `Review now · ${queue.length}`}
+              {queue.length === 0 ? 'Nothing to review' : `Review ${queue.length}`}
             </button>
-            <label style={settingLabel}>
-              New per day
-              <input type="number" min={0} value={store.settings.newPerDay} onChange={(event) => updateSetting('newPerDay', event.target.value)} style={numberInput} />
-            </label>
-            <label style={settingLabel}>
-              Reviews per day
-              <input type="number" min={0} value={store.settings.reviewsPerDay} onChange={(event) => updateSetting('reviewsPerDay', event.target.value)} style={numberInput} />
-            </label>
-            {reviewed > 0 && <span style={{ fontSize: 12, color: C.muted }}>{reviewed} reviewed this session</span>}
-            {stats.changed > 0 && <span style={{ fontSize: 12, color: C.amber }}>{stats.changed} changed since last review</span>}
+            <span className="text-[12.5px] text-text-tertiary">
+              {summary.map(([value, label], index) => (
+                <span key={label}>{index > 0 && ' · '}<span className="tabular-nums text-text-secondary">{value}</span> {label}</span>
+              ))}
+              {reviewed > 0 && <> · {reviewed} reviewed now</>}
+              {stats.changed > 0 && <span className="text-amber"> · {stats.changed} changed</span>}
+            </span>
           </div>
 
           {decks.length === 0 ? (
-            <div style={emptyState}>
-              No cards yet. Add <code>#card</code> to any bullet in your notes; its indented child bullets are the answer.
-            </div>
+            <p className="py-10 text-center text-[12.5px] text-text-tertiary">No cards yet. Tag a bullet with <code className="font-mono">#card</code>; its child bullets are the answer.</p>
           ) : (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0, border: `1px solid ${C.line}`, borderRadius: 10, background: C.panel }}>
-              {decks.map(([path, items], index) => {
+            <ul className="m-0 list-none border-t border-border-soft p-0">
+              {decks.map(([path, items]) => {
                 const deck = deckStats(items, store, now);
                 return (
-                  <li key={path} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderTop: index === 0 ? 'none' : `1px solid ${C.lineSoft}` }}>
-                    <button type="button" onClick={() => onOpenSource(path)} style={linkButton} title={path}>
-                      {path.replace(/\.md$/i, '')}
+                  <li key={path} className="border-b border-border-soft">
+                    <button
+                      type="button"
+                      onClick={() => onOpenSource(path)}
+                      className="group flex w-full items-center gap-2.5 px-2 py-2.5 text-left transition-colors hover:bg-bg-hover/60"
+                      title={path}
+                    >
+                      <FileText className="size-3.5 shrink-0 text-text-faint" aria-hidden />
+                      <span className="min-w-0 flex-1 truncate text-[13.5px] text-text">{path.replace(/\.md$/i, '')}</span>
+                      <span className="shrink-0 text-[12px] tabular-nums text-text-tertiary">
+                        {deck.due > 0 && <span className="text-text-secondary">{deck.due} due · </span>}
+                        {deck.total} {deck.total === 1 ? 'card' : 'cards'}
+                        {deck.suspended > 0 ? ` · ${deck.suspended} suspended` : ''}
+                      </span>
+                      <ArrowUpRight className="size-3 shrink-0 text-text-faint opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
                     </button>
-                    <span style={{ marginLeft: 'auto', fontSize: 12, color: C.muted, whiteSpace: 'nowrap' }}>
-                      {deck.total} {deck.total === 1 ? 'card' : 'cards'} · {deck.due} due · {deck.fresh} new
-                      {deck.suspended > 0 ? ` · ${deck.suspended} suspended` : ''}
-                    </span>
                   </li>
                 );
               })}
@@ -315,49 +340,3 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
     </section>
   );
 }
-
-const ghostButton: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 9px',
-  border: `1px solid ${C.line}`, borderRadius: 7, background: C.panel,
-  color: C.ink2, fontSize: 12, fontWeight: 620, cursor: 'pointer',
-};
-
-const primaryButton: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', border: 'none', borderRadius: 8,
-  background: C.accent, color: C.onAccent, fontSize: 13, fontWeight: 650, cursor: 'pointer',
-};
-
-const ratingButton: React.CSSProperties = {
-  display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 92, padding: '8px 12px',
-  border: `1px solid ${C.line}`, borderRadius: 9, background: C.panel, color: C.ink, fontSize: 13, cursor: 'pointer',
-};
-
-const kbd: React.CSSProperties = {
-  marginLeft: 6, padding: '0 5px', borderRadius: 4, border: `1px solid color-mix(in srgb, ${C.onAccent} 45%, transparent)`, fontSize: 10.5,
-};
-
-const cardStyle: React.CSSProperties = {
-  minHeight: 220, padding: '28px 30px', border: `1px solid ${C.line}`, borderRadius: 14, background: C.panel,
-};
-
-const tile: React.CSSProperties = {
-  padding: '12px 14px', border: `1px solid ${C.line}`, borderRadius: 10, background: C.panel,
-};
-
-const linkButton: React.CSSProperties = {
-  padding: 0, border: 'none', background: 'transparent', color: C.accent, fontSize: 13, cursor: 'pointer',
-  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left',
-};
-
-const emptyState: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 120,
-  border: `1px dashed ${C.line}`, borderRadius: 11, color: C.muted, fontSize: 12.5, textAlign: 'center', padding: 16, lineHeight: 1.6,
-};
-
-const settingLabel: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: C.muted,
-};
-
-const numberInput: React.CSSProperties = {
-  width: 64, padding: '4px 6px', border: `1px solid ${C.line}`, borderRadius: 6, background: C.bg, color: C.ink, fontSize: 12.5,
-};

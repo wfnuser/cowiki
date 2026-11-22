@@ -11,12 +11,12 @@ export const MODULES: Array<{ id: Exclude<ModuleId, 'journal'>; label: string; d
   {
     id: 'tasks',
     label: 'Tasks',
-    description: 'Collects checkbox tasks from every page into Today, This week (a board), Upcoming and Done lists.',
+    description: 'Gather checkbox tasks from every page into Today, This week and Upcoming.',
   },
   {
     id: 'flashcards',
     label: 'Flashcards',
-    description: 'Spaced repetition as in Logseq: tag any bullet #card and its children are the answer. Each review is saved in the note.',
+    description: 'Review bullets tagged #card with spaced repetition. Review history stays on this device.',
   },
 ];
 

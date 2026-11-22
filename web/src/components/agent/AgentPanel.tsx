@@ -1,6 +1,5 @@
 import {
   Bot,
-  Check,
   ChevronDown,
   GitBranch,
   GitCompare,
@@ -26,11 +25,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { InlineFeedback } from '@/components/ui/inline-feedback';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { agentDefinition, SUPPORTED_AGENTS, type AgentKind } from '@/lib/agents';
 import {
   canResume,
   canSend,
   isBusy,
+  shortVersion,
   statusLabel,
   type AgentMode,
   type AgentSnapshot,
@@ -73,7 +74,7 @@ function errorText(cause: unknown): string {
 
 function titleFor(text: string): string {
   const line = text.trim().split('\n')[0] ?? '';
-  return line.length > 60 ? `${line.slice(0, 57)}…` : line || 'New task';
+  return line.length > 60 ? `${line.slice(0, 57)}…` : line || 'New session';
 }
 
 export function readinessFeedback(agent: AgentKind, readiness: NativeReadiness): Feedback | null {
@@ -96,6 +97,8 @@ export function readinessFeedback(agent: AgentKind, readiness: NativeReadiness):
 
 function StatusPill({ snapshot }: { snapshot: AgentSnapshot }) {
   const busy = isBusy(snapshot.status);
+  // A ready session needs no label; only states worth noticing show.
+  if (snapshot.status === 'idle' && !snapshot.closed) return null;
   const tone = snapshot.closed
     ? 'text-text-tertiary'
     : snapshot.status === 'waiting'
@@ -106,8 +109,10 @@ function StatusPill({ snapshot }: { snapshot: AgentSnapshot }) {
           ? 'text-accent'
           : 'text-text-tertiary';
   return (
-    <span className={cn('flex shrink-0 items-center gap-1 text-[11px] font-medium', tone)} role="status">
-      {busy && <LoaderCircle className="size-3 animate-spin" aria-hidden />}
+    <span className={cn('flex shrink-0 items-center gap-1.5 px-1 text-[11px] font-medium', tone)} role="status">
+      {busy
+        ? <LoaderCircle className="size-3 animate-spin" aria-hidden />
+        : <span className="size-1.5 rounded-full bg-current" aria-hidden />}
       {statusLabel(snapshot)}
     </span>
   );
@@ -122,7 +127,7 @@ function ReadinessLine({ agent, state, onCheck, onSignIn, onCancelSignIn }: {
 }) {
   if (state.phase !== 'settled' || !state.readiness) {
     return (
-      <p className="flex items-center gap-1.5 text-[11px] text-text-tertiary">
+      <p className="flex items-center gap-1.5 text-[11.5px] text-text-tertiary">
         <LoaderCircle className="size-3 animate-spin" aria-hidden /> Checking {agentName(agent)}…
       </p>
     );
@@ -130,10 +135,13 @@ function ReadinessLine({ agent, state, onCheck, onSignIn, onCancelSignIn }: {
   const readiness = state.readiness;
   const feedback = readinessFeedback(agent, readiness);
   if (!feedback) {
+    const version = shortVersion(readiness.version);
     return (
-      <p className="flex items-center gap-1.5 text-[11px] text-text-tertiary">
-        <Check className="size-3 text-green" aria-hidden />
-        {[readiness.version, readiness.account].filter(Boolean).join(' · ') || `${agentName(agent)} is ready`}
+      <p className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-text-tertiary" title={readiness.version ?? undefined}>
+        <span className="size-1.5 shrink-0 rounded-full bg-green" aria-hidden />
+        <span className="truncate">
+          {[`${agentName(agent)}${version ? ` ${version}` : ''} is ready`, readiness.account].filter(Boolean).join(' · ')}
+        </span>
       </p>
     );
   }
@@ -326,7 +334,7 @@ export function AgentPanel({
       .catch((cause) => setFeedback({ title: 'Could not remove the session', description: errorText(cause) }));
   };
 
-  const newTask = (mode: AgentMode) => {
+  const newSession = (mode: AgentMode) => {
     setDraftMode(mode);
     setSelectedId(null);
     setComposingNew(true);
@@ -346,35 +354,38 @@ export function AgentPanel({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-left hover:bg-panel/65"
+              className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-bg-hover data-[state=open]:bg-bg-hover"
               aria-label="Choose Agent session"
             >
-              <Bot className="size-3.5 shrink-0 text-accent" aria-hidden />
-              <span className="min-w-0 truncate text-xs font-semibold text-text">
-                {active ? active.title : 'New task'}
+              <span className="min-w-0 truncate text-[13px] font-semibold text-text">
+                {active ? active.title : 'New session'}
               </span>
-              <ChevronDown className="size-3 shrink-0 text-text-tertiary" aria-hidden />
+              <ChevronDown className="size-3.5 shrink-0 text-text-tertiary" aria-hidden />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-72">
-            <DropdownMenuItem onSelect={() => newTask('live')}><Plus /> New task</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => newSession('live')}><Plus /> New session</DropdownMenuItem>
             {visibleSessions.length > 0 && <DropdownMenuSeparator />}
-            {visibleSessions.length > 0 && <DropdownMenuLabel className="text-xs text-text-tertiary">Sessions in this Space</DropdownMenuLabel>}
+            {visibleSessions.length > 0 && <DropdownMenuLabel className="text-[11px] font-medium text-text-tertiary">Recent in this Space</DropdownMenuLabel>}
             {visibleSessions.slice(0, 30).map((session) => (
               <DropdownMenuItem
                 key={session.sessionId}
+                className={cn(session.sessionId === active?.sessionId && 'bg-bg-hover')}
                 onSelect={() => {
                   setSelectedId(session.sessionId);
                   setComposingNew(false);
                 }}
               >
-                {session.mode === 'background' ? <GitBranch /> : <Bot />}
+                {session.mode === 'background' ? <GitBranch className="text-text-tertiary" /> : <Bot className="text-text-tertiary" />}
                 <span className="min-w-0 flex-1 truncate">{session.title}</span>
-                <span className="shrink-0 text-[10px] text-text-tertiary">{statusLabel(session)}</span>
+                {!(session.status === 'idle' && !session.closed) && (
+                  <span className="shrink-0 text-[10.5px] text-text-tertiary">{statusLabel(session)}</span>
+                )}
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+        <div className="flex-1" />
         {active && <StatusPill snapshot={active} />}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -383,8 +394,8 @@ export function AgentPanel({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-60">
-            <DropdownMenuItem onSelect={() => newTask('live')}><Bot /> New task in Current Draft</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => newTask('background')}><GitBranch /> New Agent Change</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => newSession('live')}><Bot /> New session in Current Draft</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => newSession('background')}><GitBranch /> New Agent Change</DropdownMenuItem>
             {active?.changeId && onOpenChanges && (
               <DropdownMenuItem onSelect={() => onOpenChanges(active.changeId!)}><GitCompare /> View changes</DropdownMenuItem>
             )}
@@ -408,18 +419,8 @@ export function AgentPanel({
 
       {active ? (
         <>
-          <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-1.5 text-[11px] text-text-tertiary">
-            <span className="shrink-0 font-medium text-text-secondary">{agentName(active.provider)}</span>
-            {active.model && <span className="truncate">{active.model}</span>}
-            <span className="ml-auto shrink-0">{active.mode === 'background' ? 'Agent Change' : 'Current Draft'}</span>
-            {active.changeId && onOpenChanges && (
-              <button type="button" className="shrink-0 text-accent hover:underline" onClick={() => onOpenChanges(active.changeId!)}>
-                View changes
-              </button>
-            )}
-          </div>
           <AgentTranscript snapshot={active} />
-          <div className="shrink-0 space-y-2 px-3">
+          <div className="shrink-0 space-y-2 px-3 empty:hidden">
             {active.error && (
               <InlineFeedback compact title="The Agent stopped with an error" details={active.error} className="mt-2" />
             )}
@@ -435,10 +436,23 @@ export function AgentPanel({
           </div>
           <AgentComposer
             placeholder={`Ask ${agentName(active.provider)}…`}
-            disabledReason={active.closed ? 'This Agent Change is closed. Start a new task to keep working.' : null}
+            disabledReason={active.closed ? 'This Agent Change is closed. Start a new session to keep working.' : null}
             busy={activeBusy || busyAction}
             stopping={active.status === 'stopping'}
             resumable={canResume(active)}
+            meta={(
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="shrink-0 text-text-secondary">{agentName(active.provider)}</span>
+                {active.model && <span className="min-w-0 truncate" title={active.model}>{active.model}</span>}
+                <span aria-hidden>·</span>
+                <span className="shrink-0">{active.mode === 'background' ? 'Agent Change' : 'Current Draft'}</span>
+                {active.changeId && onOpenChanges && (
+                  <button type="button" className="shrink-0 text-accent hover:underline" onClick={() => onOpenChanges(active.changeId!)}>
+                    View changes
+                  </button>
+                )}
+              </span>
+            )}
             onSend={(text) => (canSend(active) ? sendToActive(text) : Promise.resolve(false))}
             onStop={activeBusy ? stop : undefined}
             onResume={resume}
@@ -446,34 +460,28 @@ export function AgentPanel({
         </>
       ) : (
         <>
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6">
-            <div className="mx-auto flex max-w-80 flex-col gap-3">
-              <div className="flex items-center gap-2">
-                <div className="flex size-9 items-center justify-center rounded-lg border border-accent/20 bg-accent-soft">
-                  <Bot className="size-5 text-accent" aria-hidden />
-                </div>
-                <div>
-                  <h2 className="text-sm font-semibold text-text">Work with an Agent</h2>
-                  <p className="text-[11px] text-text-tertiary">Runs on this computer. You approve each command.</p>
-                </div>
-              </div>
-              <label className="flex flex-col gap-1 text-[11px] font-medium text-text-tertiary">
-                Agent
-                <select
-                  aria-label="Agent for new tasks"
-                  className="rounded-md border border-border bg-panel px-2 py-1.5 text-xs text-text"
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-5">
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[12px] font-medium text-text-secondary" id="agent-for-new-sessions">Agent</span>
+                <Select
                   value={draftAgent}
-                  onChange={(event) => {
-                    setDraftAgent(event.target.value as AgentKind);
+                  onValueChange={(value) => {
+                    setDraftAgent(value as AgentKind);
                     setFeedback(null);
                   }}
                 >
-                  {SUPPORTED_AGENTS.map((agent) => <option key={agent} value={agent}>{agentName(agent)}</option>)}
-                </select>
-              </label>
-              <fieldset className="flex flex-col gap-1">
-                <legend className="mb-1 text-[11px] font-medium text-text-tertiary">Where it works</legend>
-                <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-panel p-0.5" role="radiogroup" aria-label="Where it works">
+                  <SelectTrigger className="w-full" aria-label="Agent for new sessions">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SUPPORTED_AGENTS.map((agent) => <SelectItem key={agent} value={agent}>{agentName(agent)}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <fieldset className="flex flex-col gap-1.5">
+                <legend className="mb-1.5 text-[12px] font-medium text-text-secondary">Where it works</legend>
+                <div className="grid grid-cols-2 gap-0.5 rounded-lg bg-bg-secondary p-0.5 ring-1 ring-inset ring-border-soft" role="radiogroup" aria-label="Where it works">
                   {(['live', 'background'] as const).map((mode) => (
                     <button
                       key={mode}
@@ -481,8 +489,10 @@ export function AgentPanel({
                       role="radio"
                       aria-checked={draftMode === mode}
                       className={cn(
-                        'rounded px-2 py-1 text-[11px]',
-                        draftMode === mode ? 'bg-text text-on-accent' : 'text-text-secondary hover:bg-bg-hover',
+                        'h-7 rounded-md px-2 text-[12px] transition-colors',
+                        draftMode === mode
+                          ? 'bg-panel font-medium text-text shadow-[var(--shadow-chip)] ring-1 ring-border'
+                          : 'text-text-tertiary hover:text-text-secondary',
                       )}
                       onClick={() => setDraftMode(mode)}
                     >
@@ -490,19 +500,21 @@ export function AgentPanel({
                     </button>
                   ))}
                 </div>
-                <p className="text-[10px] leading-relaxed text-text-faint">
+                <p className="text-[11.5px] leading-[1.5] text-text-tertiary">
                   {draftMode === 'live'
                     ? 'Edits your Draft directly.'
-                    : 'Works in a separate copy; you review the result before it reaches your Draft.'}
+                    : 'Works on a separate copy. You review the result before it reaches your Draft.'}
                 </p>
               </fieldset>
-              <ReadinessLine
-                agent={draftAgent}
-                state={draftState}
-                onCheck={() => void readiness.check(draftAgent, true)}
-                onSignIn={() => void readiness.signIn(draftAgent)}
-                onCancelSignIn={() => void readiness.cancelSignIn(draftAgent)}
-              />
+              <div className="border-t border-border-soft pt-3">
+                <ReadinessLine
+                  agent={draftAgent}
+                  state={draftState}
+                  onCheck={() => void readiness.check(draftAgent, true)}
+                  onSignIn={() => void readiness.signIn(draftAgent)}
+                  onCancelSignIn={() => void readiness.cancelSignIn(draftAgent)}
+                />
+              </div>
               {feedback && (
                 <InlineFeedback compact tone={feedback.tone ?? 'error'} title={feedback.title} description={feedback.description} details={feedback.details} />
               )}
@@ -515,6 +527,12 @@ export function AgentPanel({
               : null}
             busy={busyAction}
             stopping={false}
+            meta={(
+              <span>
+                <span className="text-text-secondary">{agentName(draftAgent)}</span>
+                {' · '}{draftMode === 'background' ? 'New Agent Change' : 'Current Draft'}
+              </span>
+            )}
             onSend={startTask}
           />
         </>

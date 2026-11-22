@@ -141,7 +141,7 @@ test('collapsing the panel does not stop a running task', async ({ page }) => {
   await expect(page.getByText('Reading')).toBeVisible();
   await page.getByRole('button', { name: 'Close agent panel' }).click();
   await page.getByRole('button', { name: 'Agent', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Stop task' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop the Agent' })).toBeVisible();
   expect(state.count('agent_send')).toBe(1);
   expect(state.count('agent_stop')).toBe(0);
   expect(state.count('terminal_create')).toBe(0);
@@ -154,7 +154,7 @@ test('collapsing the panel does not stop a running task', async ({ page }) => {
   await step.click();
   await expect(page.getByText('Welcome.md:1:# Welcome')).toBeVisible();
   await shot(page, 'running');
-  await page.getByRole('button', { name: 'Stop task' }).click();
+  await page.getByRole('button', { name: 'Stop the Agent' }).click();
   await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible();
   expect(state.count('agent_stop')).toBe(1);
 });
@@ -186,7 +186,7 @@ test('a narrow panel fits and the top bar gains no controls', async ({ page }) =
   await page.getByRole('button', { name: 'Agent', exact: true }).click();
   const panel = page.locator('aside[aria-label="Agent"]');
   await expect(panel.getByRole('textbox', { name: 'Message agent' })).toBeVisible();
-  await expect(panel.getByText('codex-cli 0.166.0')).toBeVisible();
+  await expect(panel.getByText(/Codex 0\.166\.0 is ready/)).toBeVisible();
   await shot(page, 'new-task-320');
   expect(await topBarButtons()).toBe(before);
   const overflow = await panel.evaluate((element) => element.scrollWidth - element.clientWidth);
@@ -204,11 +204,11 @@ test('switching Spaces shows only that Space’s sessions and keeps the other ru
   await page.getByRole('button', { name: 'W', exact: true }).click();
   await expect(page.locator('article')).toContainText('Welcome');
   await expect(page.getByText('Personal task')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Stop task' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Stop the Agent' })).toHaveCount(0);
   await page.getByRole('button', { name: 'P', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Choose Agent session' })).toContainText('Personal task');
   await expect(page.locator('aside[aria-label="Agent"]').getByText('Reading')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Stop task' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop the Agent' })).toBeVisible();
   expect(state.count('agent_send')).toBe(1);
   expect(state.count('agent_stop')).toBe(0);
 });

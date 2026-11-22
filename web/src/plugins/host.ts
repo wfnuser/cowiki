@@ -44,7 +44,8 @@ export interface BuiltinPlugin {
     title: string;
     fields: readonly PluginTextSetting[];
     help: string;
-    preview?: (features: SpaceFeatures, now: Date) => string;
+    /** A live example shown under the fields, e.g. today's journal path. */
+    preview?: { label: string; value: (features: SpaceFeatures, now: Date) => string };
     preferences?: readonly PluginPreferenceSetting[];
   };
   launch?: { action: string; when: (preferences: PersonalPreferences) => boolean };

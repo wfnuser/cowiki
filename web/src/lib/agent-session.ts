@@ -164,3 +164,53 @@ export function summarizeTool(item: AgentToolItem): string {
     case 'stopped': return 'Stopped';
   }
 }
+
+/** A transcript entry as the sidebar draws it: a message, or a run of
+ * consecutive tool steps folded into one line. */
+export type TranscriptBlock =
+  | { type: 'message'; item: AgentMessageItem }
+  | { type: 'work'; id: string; steps: AgentToolItem[] };
+
+export function transcriptBlocks(items: readonly AgentItem[]): TranscriptBlock[] {
+  const blocks: TranscriptBlock[] = [];
+  for (const item of items) {
+    if (item.type === 'message') {
+      blocks.push({ type: 'message', item });
+      continue;
+    }
+    const last = blocks.at(-1);
+    if (last?.type === 'work') last.steps.push(item);
+    else blocks.push({ type: 'work', id: `work-${item.id}`, steps: [item] });
+  }
+  return blocks;
+}
+
+const STEP_NOUNS: Record<Exclude<ToolKind, 'think'>, [string, string]> = {
+  command: ['command', 'commands'],
+  file: ['edit', 'edits'],
+  search: ['lookup', 'lookups'],
+  mcp: ['tool call', 'tool calls'],
+  other: ['step', 'steps'],
+};
+
+/** One quiet line for a run of steps: "2 commands · 1 tool call". */
+export function workSummary(steps: readonly AgentToolItem[]): { text: string; failed: number; declined: number } {
+  const counts = new Map<Exclude<ToolKind, 'think'>, number>();
+  let thoughts = 0;
+  for (const step of steps) {
+    if (step.toolKind === 'think') thoughts += 1;
+    else counts.set(step.toolKind, (counts.get(step.toolKind) ?? 0) + 1);
+  }
+  const parts = [...counts.entries()].map(([kind, count]) => `${count} ${STEP_NOUNS[kind][count === 1 ? 0 : 1]}`);
+  if (parts.length === 0) parts.push(thoughts > 1 ? `Thought ${thoughts} times` : 'Thought');
+  return {
+    text: parts.join(' · '),
+    failed: steps.filter((step) => step.status === 'failed').length,
+    declined: steps.filter((step) => step.status === 'declined').length,
+  };
+}
+
+/** "2.1.296 (Claude Code)" or "codex-cli 0.166.0" → "2.1.296" / "0.166.0". */
+export function shortVersion(version: string | null): string | null {
+  return version?.match(/\d+\.\d+\.\d+/)?.[0] ?? null;
+}

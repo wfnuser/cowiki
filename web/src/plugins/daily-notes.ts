@@ -3,7 +3,7 @@ import { ensureDatePage } from '../lib/date-page.ts';
 import { journalPagePath } from '../lib/journal.ts';
 
 export const dailyNotesPlugin: BuiltinPlugin = {
-  id: 'journal', label: 'Daily journal', description: 'Open or create today’s Markdown journal.',
+  id: 'journal', label: 'Daily journal', description: 'Open or create today’s note.',
   enabled: (features) => features.modules.journal,
   setEnabled: (features, enabled) => ({ ...features, modules: { ...features.modules, journal: enabled } }),
   actions: [{ id: 'today', label: 'Today', icon: 'calendar', run: async ({ pages, features, now }) => {
@@ -22,8 +22,8 @@ export const dailyNotesPlugin: BuiltinPlugin = {
       { id: 'journal-template', label: 'Template page', placeholder: 'Optional, e.g. Templates/Daily.md', value: (features) => features.journal.template ?? '',
         update: (features, template) => ({ ...features, journal: { ...features.journal, template: template.trim() ? template : null } }) },
     ],
-    help: 'Formats use Obsidian/moment tokens such as YYYY-MM-DD or YYYY/MM/YYYY-MM-DD; templates support {{date}}, {{title}} and {{time}}.',
-    preview: (features, date) => `Today’s entry: ${journalPagePath(features.journal, date)}`,
+    help: 'Dates use Obsidian (moment) tokens such as YYYY-MM-DD. Templates support {{date}}, {{title}} and {{time}}.',
+    preview: { label: 'Today’s note:', value: (features, date) => journalPagePath(features.journal, date) },
     preferences: [{ id: 'journal-startup', label: 'Open today’s journal when CoWiki starts',
       value: (preferences) => preferences.openJournalOnStartup,
       update: (preferences, openJournalOnStartup) => ({ ...preferences, openJournalOnStartup }) }],

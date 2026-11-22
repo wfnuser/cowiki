@@ -234,3 +234,25 @@ test('review detail views share the ReviewBackButton chrome control', () => {
     assert.doesNotMatch(source, /const backBtnStyle|const backButtonStyle/, `${rel} must not define its own back button style`);
   }
 });
+
+test('components never use a platform control that has a CoWiki replacement', () => {
+  const offenders: string[] = [];
+  for (const { rel, source } of sourceFiles()) {
+    if (rel.startsWith('components/ui/')) continue;
+    if (/<select\b/.test(source)) offenders.push(`${rel}: <select> (use components/ui/select)`);
+    if (/type=["']number["']/.test(source)) offenders.push(`${rel}: number input (use components/ui/number-field)`);
+    if (/type=["']date["']/.test(source)) offenders.push(`${rel}: date input (use components/ui/date-picker)`);
+  }
+  assert.deepEqual(offenders, [], 'see DESIGN_SYSTEM.md, "Form controls"');
+});
+
+test('checkboxes, switches, focus and bare borders are drawn by the design system', () => {
+  assert.match(css, /input\[type="checkbox"\] \{[^}]*appearance: none/);
+  assert.match(css, /input\[type="checkbox"\]\.cw-switch \{/);
+  assert.match(css, /input\[type="number"\]::-webkit-inner-spin-button/);
+  assert.match(css, /:focus-visible \{\s*outline: 2px solid color-mix\(in srgb, var\(--color-accent\)/);
+  assert.match(css, /::file-selector-button \{ border-color: var\(--color-border\); \}/);
+  for (const token of ['popover', 'card', 'chip', 'rest']) {
+    assert.match(css, new RegExp(`--shadow-${token}:`), `missing --shadow-${token}`);
+  }
+});

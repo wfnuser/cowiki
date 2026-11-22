@@ -61,8 +61,9 @@ function DialogContent({
         data-slot="dialog-content"
         className={cn(
           // One dialog language across the app (matches SearchModal): top-anchored,
-          // warm panel, hairline border, 14px radius, layered soft shadow.
-          "fixed top-[16vh] left-[50%] z-[100] grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] gap-4 rounded-[14px] border border-border bg-panel p-6 shadow-[var(--shadow-dialog)] duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+          // warm panel, hairline border, 14px radius, layered soft shadow. It never
+          // runs past the window: tall content scrolls inside.
+          "fixed top-[16vh] left-[50%] z-[100] grid max-h-[calc(84vh-1.5rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] gap-4 overflow-y-auto rounded-[14px] border border-border bg-panel p-6 shadow-[var(--shadow-dialog)] duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           className
         )}
         {...props}

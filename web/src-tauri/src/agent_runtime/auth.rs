@@ -167,13 +167,22 @@ pub fn claude_account_label(status: &Value) -> Option<String> {
                 .map(|first| first.to_uppercase().collect::<String>() + letters.as_str())
                 .unwrap_or_default()
         });
+    // Names a person recognises; never a raw identifier like `oauth_token`.
     let name = match (provider, method) {
+        (Some("bedrock"), _) => "Amazon Bedrock".to_string(),
+        (Some("vertex"), _) => "Google Vertex AI".to_string(),
+        (Some("foundry"), _) => "Microsoft Foundry".to_string(),
         (Some(provider), _) if provider != "firstParty" => provider.to_string(),
         (_, Some("claude.ai")) => match plan {
             Some(plan) => format!("Claude {plan}"),
             None => "Claude".to_string(),
         },
-        (_, Some(method)) if !method.is_empty() => method.to_string(),
+        // A long-lived token from `claude setup-token`: the subscription.
+        (_, Some("oauth_token")) => match plan {
+            Some(plan) => format!("Claude {plan}"),
+            None => "Claude subscription".to_string(),
+        },
+        (_, Some("api_key" | "apiKey" | "console" | "api-key")) => "Anthropic API key".to_string(),
         _ => return email.map(ToOwned::to_owned),
     };
     Some(match email {
@@ -873,7 +882,23 @@ mod tests {
         );
         let bedrock =
             json!({"loggedIn": true, "authMethod": "third_party", "apiProvider": "bedrock"});
-        assert_eq!(claude_account_label(&bedrock).as_deref(), Some("bedrock"));
+        assert_eq!(
+            claude_account_label(&bedrock).as_deref(),
+            Some("Amazon Bedrock")
+        );
+        let token =
+            json!({"loggedIn": true, "authMethod": "oauth_token", "apiProvider": "firstParty"});
+        assert_eq!(
+            claude_account_label(&token).as_deref(),
+            Some("Claude subscription")
+        );
+        let unknown =
+            json!({"loggedIn": true, "authMethod": "something_new", "apiProvider": "firstParty"});
+        assert_eq!(
+            claude_account_label(&unknown),
+            None,
+            "raw identifiers are not shown"
+        );
         assert_eq!(claude_account_label(&json!({"loggedIn": false})), None);
     }
 

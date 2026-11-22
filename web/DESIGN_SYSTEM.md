@@ -15,6 +15,59 @@ copy of the palette. It also remains the home for values CSS cannot express:
 the identity palette/hash, `fonts.mono`, `radii`, `shadows`, and
 `APP_HEADER_HEIGHT`.
 
+## Interface principles
+
+Calm and spare, in the spirit of Obsidian, Notion and Bramble: the content
+leads and the chrome stays quiet. Check every new screen against these.
+
+- **Few words.** No explanatory subtitle under a page or dialog title. A
+  control gets at most one short line of help, and only when the choice is
+  not obvious. An empty state is one sentence.
+- **Hairlines, not boxes.** Separate sections with a hairline
+  (`border-border-soft`); never put a bordered card inside another bordered
+  card. Lists are rows, not a stack of cards.
+- **One thing per row.** A glyph, a name, at most one quiet value on the
+  right. Details open on hover or click.
+- **Colour as marks.** The accent fills one primary action per view (Send,
+  Review, Allow once) and small marks (a dot, an icon, today in a calendar).
+  It never fills a card or a section, and links to pages are ink or muted,
+  not orange. State colours (red, amber, blue) colour a word or a dot, not a
+  block.
+- **Sentence case.** No ALL CAPS headings or labels. Section headings are 13px,
+  weight 600, ink.
+- **Say a thing once.** If a tab already says "No date", the list under it does
+  not repeat "NO DATE · 22"; if every task in a group lives on one page, the
+  page name appears once as the group's heading.
+- **Fold the process.** An Agent's tool steps fold into one muted summary line
+  ("2 commands · 1 tool call") that opens to every step; finished steps carry
+  no check mark, only failed, declined and stopped ones get a mark.
+- **Name things by what a person knows.** Show "Claude Pro", "Codex 0.166.0",
+  "Tomorrow", never raw identifiers such as `oauth_token` or
+  `2.1.296 (Claude Code)`.
+
+## Form controls
+
+A control never shows the platform's look: no system-blue checkbox or focus
+glow, no native select menu, no number spinner, no native date field.
+
+| Need | Use |
+|------|-----|
+| Pick one of several | `components/ui/select` (Radix), never `<select>` |
+| A whole number | `components/ui/number-field` (− value +) |
+| A date | `components/ui/date-picker` (quick choices and a month grid) |
+| Check a task | `<input type="checkbox">`: `index.css` draws it (accent fill, white check) |
+| Turn a setting on or off | `<input type="checkbox" className="cw-switch">` |
+| Several fixed modes | A segmented control: a sunk track with a raised chip (see the Agent panel's "Where it works") |
+
+Focus is the accent outline from `index.css` (or the
+`--shadow-focus` ring on fields), never the system ring. A bare `border`
+uses `--color-border` (the base rule in `index.css`); Tailwind v4 would
+otherwise draw it in the text colour.
+
+Settings forms: `.settings-section` blocks separated by hairlines, each with a
+`.settings-heading`; one setting per row, its switch at the end of the row;
+fields in a two-column grid (label, input).
+
 ## Color Tokens
 
 ### Surfaces
@@ -137,6 +190,11 @@ A `.dark` variant currently overrides the sidebar tokens only.
   new chrome should prefer `raised`, `subtle`, or `focus`.
 - Dialogs are top-anchored (`top: 16vh`) rather than vertically centered,
   with `--color-dialog-scrim` `rgb(29 28 26 / 32%)` + `backdrop-blur(2px)`.
+  No dialog runs past the window: `DialogContent` caps its height and
+  scrolls. A long form (Modules & settings) is centered instead, with its
+  title and actions pinned and only the body scrolling.
+- Menus, selects and popovers share one surface: `bg-panel`, a hairline,
+  `rounded-lg` and `--shadow-popover`; items are 13px rows with a hover wash.
 - Selection color: accent-tinted `color-mix(in srgb, var(--color-accent) 18%, transparent)` inside prose.
 - Inline code: `--color-accent` on `--color-bg-hover`.
 
@@ -150,3 +208,8 @@ used) must stay WCAG-AA readable on their intended surfaces, and no
 the identity palettes, terminal theme, CodeMirror syntax, and shadow
 definitions. UI chrome in those files is not exempt and must still use
 design-system tokens.
+
+It also fails when a component uses a platform control that has a CoWiki
+replacement (`<select>`, `type="number"`, `type="date"` outside
+`components/ui`), when a new shadow is written as a raw `rgba()` instead of a
+`--shadow-*` token, or when the base border colour rule is missing.

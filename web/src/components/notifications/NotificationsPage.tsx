@@ -10,6 +10,7 @@ import {
 } from '../../api';
 import { C, spaceTileColors } from '@/lib/design';
 import { timeAgo } from '../../lib/time';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 type Tab = 'unread' | 'all';
 
@@ -337,7 +338,7 @@ export function NotificationsPage({ onUnreadChange }: { onUnreadChange?: (n: num
   );
 }
 
-/** Small unstyled-native select that inherits the design language. */
+/** A compact filter built on the shared Select (never the platform's). */
 function FilterSelect({
   value, onChange, options,
 }: {
@@ -345,20 +346,19 @@ function FilterSelect({
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
 }) {
+  // Radix reserves the empty value; map it to a private one.
+  const EMPTY = '__all__';
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      style={{
-        padding: '6px 10px', borderRadius: 7, border: `1px solid ${C.line}`,
-        background: C.panel, color: C.ink2, fontSize: 13, cursor: 'pointer',
-        fontFamily: 'inherit',
-      }}
-    >
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>{o.label}</option>
-      ))}
-    </select>
+    <Select value={value === '' ? EMPTY : value} onValueChange={(next) => onChange(next === EMPTY ? '' : next)}>
+      <SelectTrigger className="min-w-32 text-text-secondary">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o.value || EMPTY} value={o.value === '' ? EMPTY : o.value}>{o.label}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

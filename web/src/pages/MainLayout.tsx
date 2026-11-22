@@ -9,6 +9,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import ReactMarkdown from 'react-markdown';
@@ -2034,17 +2035,17 @@ export function MainLayout() {
             </div>
             <div>
               <label htmlFor="new-page-template" className="mb-1.5 block text-sm text-text-secondary">Template</label>
-              <select
-                id="new-page-template"
-                value={newPageTemplate}
-                onChange={(e) => setNewPageTemplate(e.target.value)}
-                className="w-full rounded-md border bg-transparent px-3 py-2 text-sm"
-              >
-                <option value="">Blank page</option>
-                {newPageTemplates.map((path) => (
-                  <option key={path} value={`page:${path}`}>{path.replace(/\.md$/i, '')}</option>
-                ))}
-              </select>
+              <Select value={newPageTemplate || 'blank'} onValueChange={(value) => setNewPageTemplate(value === 'blank' ? '' : value)}>
+                <SelectTrigger id="new-page-template" className="h-9 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="blank">Blank page</SelectItem>
+                  {newPageTemplates.map((path) => (
+                    <SelectItem key={path} value={`page:${path}`}>{path.replace(/\.md$/i, '')}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {newPageTemplates.length === 0 && showNewPage && (
                 <p className="mt-1.5 text-xs text-text-secondary">
                   No templates yet. Pages in the <code>{(spaceFeatures[showNewPage.id] ?? DEFAULT_SPACE_FEATURES).templates.folder || 'Templates'}</code> folder appear here.

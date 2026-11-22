@@ -1,5 +1,5 @@
 import type { PersonalPreferences, SpaceFeatures } from '../lib/space-features';
-import { C, fonts } from '../lib/design';
+import { fonts } from '../lib/design';
 import type { BuiltinPlugin } from './host';
 
 interface Props {
@@ -11,46 +11,80 @@ interface Props {
   part?: 'toggles' | 'fields' | 'preferences';
 }
 
+/** One setting per row: its name and one short line, the switch at the end. */
+export function SettingSwitch({ id, label, description, checked, disabled, onChange }: {
+  id?: string;
+  label: string;
+  description?: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-4 py-2.5 has-[:disabled]:cursor-default">
+      <span className="min-w-0 flex-1">
+        <span className="block text-[13px] font-medium leading-5 text-text">{label}</span>
+        {description && <span className="block text-[12px] leading-[1.45] text-text-tertiary">{description}</span>}
+      </span>
+      <input id={id} type="checkbox" className="cw-switch" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
+    </label>
+  );
+}
+
+export const settingsInputClass = 'h-8 w-full min-w-0 rounded-lg border border-border bg-panel px-2.5 text-[13px] text-text outline-none transition-colors placeholder:text-text-faint hover:border-border-hover focus-visible:border-accent/60 focus-visible:shadow-[var(--shadow-focus)] focus-visible:outline-none disabled:opacity-50';
+
 /** The dialog knows how to render settings, not which fields a built-in owns. */
 export function PluginSettings({ plugins, features, preferences, onFeatures, onPreferences, part }: Props) {
   return plugins.map((plugin) => (
-    <div key={plugin.id}>
+    <div key={plugin.id} className="contents">
       {(!part || part === 'toggles') && (
-        <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '6px 0', cursor: 'pointer' }}>
-          <input type="checkbox" checked={plugin.enabled(features)} style={{ marginTop: 3 }}
-            onChange={(event) => onFeatures(plugin.setEnabled(features, event.target.checked))} />
-          <span>
-            <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, color: C.ink }}>{plugin.label}</span>
-            <span style={{ display: 'block', fontSize: 12, color: C.muted }}>{plugin.description}</span>
-          </span>
-        </label>
+        <SettingSwitch
+          label={plugin.label}
+          description={plugin.description}
+          checked={plugin.enabled(features)}
+          onChange={(enabled) => onFeatures(plugin.setEnabled(features, enabled))}
+        />
       )}
       {plugin.settings && (!part || part === 'fields') && (
-        <section style={{ padding: '12px 14px', border: `1px solid ${C.line}`, borderRadius: 10, background: C.panel, opacity: plugin.enabled(features) ? 1 : 0.55 }}>
-          <h3 style={{ margin: '0 0 8px', fontSize: 11.5, fontWeight: 650, letterSpacing: '.04em', textTransform: 'uppercase', color: C.muted }}>{plugin.settings.title}</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px 12px', alignItems: 'center' }}>
+        <section className="settings-section" aria-disabled={!plugin.enabled(features)}>
+          <h3 className="settings-heading">{plugin.settings.title}</h3>
+          <div className="grid grid-cols-[112px_minmax(0,1fr)] items-center gap-x-3 gap-y-2" style={{ opacity: plugin.enabled(features) ? 1 : 0.55 }}>
             {plugin.settings.fields.map((field) => (
-              <div key={field.id} style={{ display: 'contents' }}>
-                <label htmlFor={field.id} style={{ fontSize: 12.5, color: C.ink2 }}>{field.label}</label>
-                <input id={field.id} value={field.value(features)} placeholder={field.placeholder} disabled={!plugin.enabled(features)}
+              <div key={field.id} className="contents">
+                <label htmlFor={field.id} className="text-[12.5px] text-text-secondary">{field.label}</label>
+                <input
+                  id={field.id}
+                  className={settingsInputClass}
+                  value={field.value(features)}
+                  placeholder={field.placeholder}
+                  disabled={!plugin.enabled(features)}
                   onChange={(event) => onFeatures(field.update(features, event.target.value))}
-                  style={{ width: '100%', padding: '6px 9px', border: `1px solid ${C.line}`, borderRadius: 7, background: C.bg, color: C.ink, fontSize: 13,
-                    fontFamily: field.monospace ? fonts.mono : undefined }} />
+                  style={field.monospace ? { fontFamily: fonts.mono, fontSize: 12.5 } : undefined}
+                />
               </div>
             ))}
           </div>
-          <p style={{ margin: '8px 0 0', fontSize: 11.5, color: C.muted }}>
-            {plugin.settings.preview && <><code style={{ fontFamily: fonts.mono }}>{plugin.settings.preview(features, new Date())}</code>. </>}
+          <p className="mt-2.5 text-[11.5px] leading-[1.55] text-text-tertiary">
+            {plugin.settings.preview && (
+              <span className="mb-0.5 block">
+                {plugin.settings.preview.label}{' '}
+                <code className="rounded-[4px] bg-bg-secondary px-1 py-px text-text-secondary" style={{ fontFamily: fonts.mono }}>
+                  {plugin.settings.preview.value(features, new Date())}
+                </code>
+              </span>
+            )}
             {plugin.settings.help}
           </p>
         </section>
       )}
       {(!part || part === 'preferences') && plugin.settings?.preferences?.map((setting) => (
-        <label key={setting.id} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13, color: C.ink, cursor: 'pointer' }}>
-          <input id={setting.id} type="checkbox" checked={setting.value(preferences)}
-            onChange={(event) => onPreferences(setting.update(preferences, event.target.checked))} />
-          {setting.label}
-        </label>
+        <SettingSwitch
+          key={setting.id}
+          id={setting.id}
+          label={setting.label}
+          checked={setting.value(preferences)}
+          onChange={(value) => onPreferences(setting.update(preferences, value))}
+        />
       ))}
     </div>
   ));

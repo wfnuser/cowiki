@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, CheckSquare, LoaderCircle, Play, Plus, RefreshCw } from 'lucide-react';
+import { ArrowUpRight, FileText, LoaderCircle, Play, Plus, RefreshCw } from 'lucide-react';
 
+import { DatePicker, dayLabel } from '@/components/ui/date-picker';
 import { WeekNav } from '@/components/WeekNav';
 import { listTaskSources } from '@/local-api';
-import { C } from '@/lib/design';
 import { addDays, dateKey, journalDateFromPath, startOfIsoWeek, type JournalConfig } from '@/lib/journal';
+import { cn } from '@/lib/utils';
 import {
   extractTasks,
   groupTasks,
@@ -50,11 +51,16 @@ function relativeDay(day: string, today: string): string {
   const [y, m, d] = day.split('-').map(Number);
   const [ty, tm, td] = today.split('-').map(Number);
   const diff = Math.round((new Date(y, m - 1, d).getTime() - new Date(ty, tm - 1, td).getTime()) / 86_400_000);
-  if (diff === 1) return 'Tomorrow';
   if (diff === -1) return 'Yesterday';
   if (diff < 0) return `${-diff} days ago`;
-  if (diff < 7) return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long' });
-  return day;
+  return dayLabel(day, today);
+}
+
+/** Tasks in the order given, grouped by the page they live in. */
+function byPage(items: TaskItem[]): Array<[string, TaskItem[]]> {
+  const groups = new Map<string, TaskItem[]>();
+  for (const item of items) groups.set(item.path, [...(groups.get(item.path) ?? []), item]);
+  return [...groups.entries()];
 }
 
 export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, onSetTaskStatus, onAddTask }: TasksViewProps) {
@@ -160,99 +166,88 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
     }
   };
 
-  const sections: Array<{ title: string; items: TaskItem[]; tone?: 'red' }> = filter === 'today' || filter === 'week'
+  const sections: Array<{ title: string | null; items: TaskItem[]; tone?: 'red' }> = filter === 'today'
     ? [
       { title: 'Overdue', items: groups.overdue, tone: 'red' },
-      { title: 'Today', items: groups.today },
+      { title: groups.overdue.length > 0 ? 'Today' : null, items: groups.today },
     ]
     : filter === 'upcoming'
-      ? [{ title: 'Upcoming', items: groups.upcoming }]
+      ? [{ title: null, items: groups.upcoming }]
       : filter === 'someday'
-        ? [{ title: 'No date', items: groups.someday }]
-        : [{ title: 'Recently done', items: groups.done }];
+        ? [{ title: null, items: groups.someday }]
+        : [{ title: null, items: groups.done }];
+
+  const tabs: Array<[Filter, string]> = [
+    ['today', 'Today'],
+    ['week', 'This week'],
+    ['upcoming', 'Upcoming'],
+    ['someday', 'No date'],
+    ['done', 'Done'],
+  ];
 
   return (
-    <section style={{ width: filter === 'week' ? 'min(1040px, 100%)' : 'min(760px, 100%)', margin: '0 auto' }}>
-      <header style={{ marginBottom: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <CheckSquare size={20} color={C.accent} strokeWidth={1.8} />
-            <h1 className="page-title page-title--compact" style={{ margin: 0 }}>Tasks</h1>
-          </div>
-          <button type="button" onClick={refresh} disabled={refreshing} style={ghostButton}>
-            <RefreshCw size={13} className={refreshing ? 'animate-spin' : undefined} />
-            <span>Refresh</span>
-          </button>
-        </div>
-        <p style={{ margin: 0, color: C.muted, fontSize: 13 }}>
-          Checkbox tasks from every page. Checking one here updates the line in its page.
-        </p>
+    <section className="mx-auto" style={{ width: filter === 'week' ? 'min(1040px, 100%)' : 'min(720px, 100%)' }}>
+      <header className="mb-5 flex items-center justify-between gap-4">
+        <h1 className="page-title page-title--compact" style={{ margin: 0 }}>Tasks</h1>
+        <button
+          type="button"
+          onClick={refresh}
+          disabled={refreshing}
+          aria-label="Refresh"
+          title="Refresh"
+          className="flex size-8 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text disabled:opacity-60"
+        >
+          <RefreshCw className={cn('size-3.5', refreshing && 'animate-spin')} />
+        </button>
       </header>
 
-      <form onSubmit={add} style={addRow}>
-        <Plus size={15} color={C.muted} />
-        <input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Add a task to today's journal…"
-          aria-label="New task"
-          style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', color: C.ink, fontSize: 13.5 }}
-        />
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: C.muted, fontSize: 12 }}>
-          <CalendarDays size={13} />
-          <input
-            type="date"
-            value={draftDue}
-            onChange={(event) => setDraftDue(event.target.value)}
-            aria-label="Due date"
-            style={{ border: 'none', background: 'transparent', color: C.ink2, fontSize: 12 }}
-          />
-        </label>
-        <button type="submit" disabled={!draft.trim() || adding} style={primaryButton}>
-          {adding ? 'Adding…' : 'Add'}
-        </button>
-      </form>
-
-      <nav role="tablist" aria-label="Task lists" style={{ display: 'flex', gap: 4, margin: '16px 0 14px' }}>
-        {([
-          ['today', 'Today'],
-          ['week', 'This week'],
-          ['upcoming', 'Upcoming'],
-          ['someday', 'No date'],
-          ['done', 'Done'],
-        ] as Array<[Filter, string]>).map(([id, label]) => (
+      <nav role="tablist" aria-label="Task lists" className="mb-4 flex gap-5 border-b border-border-soft">
+        {tabs.map(([id, label]) => (
           <button
             key={id}
             role="tab"
             aria-selected={filter === id}
             onClick={() => setFilter(id)}
-            style={{
-              ...tabButton,
-              background: filter === id ? C.accentSoft : 'transparent',
-              color: filter === id ? C.accentInk : C.ink2,
-            }}
+            className={cn(
+              '-mb-px flex items-center gap-1.5 border-b-2 pb-2 pt-1 text-[13px] transition-colors',
+              filter === id ? 'border-text font-medium text-text' : 'border-transparent text-text-tertiary hover:text-text-secondary',
+            )}
           >
             {label}
-            <span style={{ color: filter === id ? C.accentInk : C.faint, fontSize: 11.5 }}>{counts[id]}</span>
+            {counts[id] > 0 && <span className="text-[11.5px] font-normal tabular-nums text-text-faint">{counts[id]}</span>}
           </button>
         ))}
       </nav>
 
-      {error && (
-        <div role="alert" style={{ marginBottom: 12, color: C.red, fontSize: 12.5 }}>{error}</div>
+      {error && <div role="alert" className="mb-3 text-[12.5px] text-red">{error}</div>}
+
+      {filter !== 'week' && filter !== 'done' && (
+        <form onSubmit={add} className="group mb-2 flex items-center gap-2 rounded-md px-2 py-1 transition-colors focus-within:bg-bg-hover/60 hover:bg-bg-hover/60">
+          <Plus className="size-4 shrink-0 text-text-faint" aria-hidden />
+          <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Add a task"
+            aria-label="New task"
+            className="h-7 min-w-0 flex-1 bg-transparent text-[13.5px] text-text outline-none placeholder:text-text-faint focus-visible:outline-none"
+          />
+          {(draft.trim() || draftDue) && <DatePicker value={draftDue} onChange={setDraftDue} label="Due date" />}
+          {draft.trim() && (
+            <button type="submit" disabled={adding} className="h-7 shrink-0 rounded-md px-2.5 text-[12px] font-medium text-accent transition-colors hover:bg-accent-soft disabled:opacity-60">
+              {adding ? 'Adding…' : 'Add'}
+            </button>
+          )}
+        </form>
       )}
 
       {loading ? (
-        <div style={emptyState}><LoaderCircle size={15} className="animate-spin" /> Collecting tasks…</div>
+        <p className="flex items-center gap-2 py-10 text-[12.5px] text-text-tertiary"><LoaderCircle className="size-3.5 animate-spin" /> Collecting tasks…</p>
       ) : filter === 'week' ? (
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <WeekNav week={week} onOpenWeek={(date) => setWeek(startOfIsoWeek(date))} />
-            <span style={{ fontSize: 12, color: C.muted }}>
-              {board.done.length} done · {board.doing.length} doing · {board.todo.length} to do
-            </span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
+          <div className="grid grid-cols-3 gap-3">
             {COLUMNS.map((column) => {
               const items = board[column.status];
               return (
@@ -270,19 +265,15 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                     setDragging(null);
                     if (task) void move(task, column.status);
                   }}
-                  style={{
-                    minHeight: 160, padding: 8, borderRadius: 10, background: C.panel,
-                    border: `1px ${dropTarget === column.status ? 'dashed' : 'solid'} ${dropTarget === column.status ? C.accent : C.line}`,
-                  }}
-                >
-                  <h2 style={{ margin: '2px 4px 8px', fontSize: 11.5, fontWeight: 650, letterSpacing: '.04em', textTransform: 'uppercase', color: C.muted }}>
-                    {column.title} · {items.length}
-                  </h2>
-                  {items.length === 0 && (
-                    <div style={{ padding: '14px 6px', fontSize: 12, color: C.faint, textAlign: 'center' }}>
-                      {column.status === 'done' ? 'Nothing finished yet' : 'Drop tasks here'}
-                    </div>
+                  className={cn(
+                    'min-h-40 rounded-lg p-1.5 transition-colors',
+                    dropTarget === column.status ? 'bg-accent-soft/60 ring-1 ring-inset ring-accent/40' : 'bg-bg-secondary/70',
                   )}
+                >
+                  <h2 className="mb-1.5 flex items-center gap-1.5 px-1.5 pt-0.5 text-[12.5px] font-medium text-text-secondary">
+                    {column.title}
+                    <span className="font-normal tabular-nums text-text-faint">{items.length}</span>
+                  </h2>
                   {items.map((task) => {
                     const key = taskKey(task);
                     const day = column.status === 'done' ? task.doneDate : taskDay(task);
@@ -293,34 +284,34 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                         draggable={!pending.has(key)}
                         onDragStart={(event) => { event.dataTransfer.setData('text/plain', key); setDragging(key); }}
                         onDragEnd={() => { setDragging(null); setDropTarget(null); }}
-                        style={{
-                          marginBottom: 6, padding: '8px 9px', borderRadius: 8, border: `1px solid ${C.lineSoft}`, background: C.bg,
-                          cursor: 'grab', opacity: pending.has(key) || dragging === key ? 0.5 : 1,
-                        }}
+                        className={cn(
+                          'group mb-1.5 cursor-grab rounded-md border border-border-soft bg-panel px-2.5 py-2 shadow-[var(--shadow-rest)] transition-opacity',
+                          (pending.has(key) || dragging === key) && 'opacity-50',
+                        )}
                       >
-                        <div style={{ display: 'flex', gap: 7, alignItems: 'flex-start' }}>
+                        <div className="flex items-start gap-2">
                           <input
                             type="checkbox"
                             checked={column.status === 'done'}
                             disabled={pending.has(key)}
                             onChange={() => { void move(task, column.status === 'done' ? 'todo' : 'done'); }}
                             aria-label={column.status === 'done' ? `Reopen ${task.text}` : `Complete ${task.text}`}
-                            style={{ marginTop: 3, cursor: 'pointer' }}
+                            className="mt-[3px]"
                           />
-                          <span style={{ flex: 1, minWidth: 0, fontSize: 13, lineHeight: 1.4, color: column.status === 'done' ? C.muted : C.ink, overflowWrap: 'anywhere' }}>
+                          <span className={cn('min-w-0 flex-1 text-[13px] leading-[1.45] [overflow-wrap:anywhere]', column.status === 'done' ? 'text-text-tertiary' : 'text-text')}>
                             {readable(task.text)}
                           </span>
                           {column.status === 'todo' && (
-                            <button type="button" onClick={() => { void move(task, 'doing'); }} disabled={pending.has(key)} style={iconButton} aria-label={`Start ${task.text}`} title="Start">
-                              <Play size={12} />
+                            <button type="button" onClick={() => { void move(task, 'doing'); }} disabled={pending.has(key)} className="rounded p-0.5 text-text-faint opacity-0 transition-opacity hover:text-text group-hover:opacity-100" aria-label={`Start ${task.text}`} title="Start">
+                              <Play className="size-3" />
                             </button>
                           )}
                         </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4, paddingLeft: 21, fontSize: 11, color: C.muted }}>
-                          <button type="button" onClick={() => onOpenPage(task.path)} style={{ ...linkButton, fontSize: 11, maxWidth: 150 }} title={task.path}>
+                        <div className="mt-1 flex gap-2 pl-[23px] text-[11px] text-text-tertiary">
+                          <button type="button" onClick={() => onOpenPage(task.path)} className="max-w-40 truncate hover:text-text-secondary" title={task.path}>
                             {pageLabel(task.path)}
                           </button>
-                          {day && <span style={{ color: column.status !== 'done' && day < today ? C.red : C.muted }}>{relativeDay(day, today)}</span>}
+                          {day && <span className={cn(column.status !== 'done' && day < today && 'text-red')}>{relativeDay(day, today)}</span>}
                         </div>
                       </div>
                     );
@@ -329,119 +320,73 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
               );
             })}
           </div>
-          <p style={{ margin: '10px 2px 0', fontSize: 11.5, color: C.muted }}>
-            Drag a card to change its status. Doing is saved as <code>[/]</code> (Obsidian Tasks) or <code>DOING</code> (Logseq) in the page.
-          </p>
         </div>
       ) : sections.every((section) => section.items.length === 0) ? (
-        <div style={emptyState}>
-          {filter === 'today' ? 'Nothing due today. Add a task above or write `- [ ]` in any page.' : 'No tasks here.'}
-        </div>
+        <p className="py-10 text-center text-[12.5px] text-text-tertiary">
+          {filter === 'today' ? 'Nothing due today.' : filter === 'done' ? 'Nothing finished yet.' : 'No tasks here.'}
+        </p>
       ) : (
         sections.filter((section) => section.items.length > 0).map((section) => (
-          <div key={section.title} style={{ marginBottom: 18 }}>
-            <h2 style={{
-              margin: '0 0 6px', fontSize: 11.5, fontWeight: 650, letterSpacing: '.04em', textTransform: 'uppercase',
-              color: section.tone === 'red' ? C.red : C.muted,
-            }}>
-              {section.title} · {section.items.length}
-            </h2>
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0, border: `1px solid ${C.line}`, borderRadius: 10, background: C.panel }}>
-              {section.items.map((task, index) => {
-                const key = taskKey(task);
-                const day = task.due ?? task.scheduled ?? task.journalDate;
-                const done = task.status === 'done' || task.status === 'cancelled';
-                return (
-                  <li
-                    key={key}
-                    style={{
-                      display: 'flex', alignItems: 'flex-start', gap: 10, padding: '9px 12px',
-                      borderTop: index === 0 ? 'none' : `1px solid ${C.lineSoft}`,
-                      opacity: pending.has(key) ? 0.55 : 1,
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={done}
-                      disabled={pending.has(key)}
-                      onChange={() => { void toggle(task); }}
-                      aria-label={done ? `Reopen ${task.text}` : `Complete ${task.text}`}
-                      style={{ marginTop: 3, cursor: 'pointer' }}
-                    />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{
-                        fontSize: 13.5, color: done ? C.muted : C.ink, lineHeight: 1.45,
-                        textDecoration: task.status === 'cancelled' ? 'line-through' : undefined,
-                        overflowWrap: 'anywhere',
-                      }}>
-                        {task.priority && task.priority !== 'medium' && task.priority !== 'low' && task.priority !== 'lowest' && (
-                          <span title={`${task.priority} priority`} style={{ color: C.red, marginRight: 4 }}>!</span>
-                        )}
-                        {readable(task.text)}
-                        {task.status === 'doing' && <span style={pill(C.blueSoft, C.blue)}>doing</span>}
-                      </div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 3, fontSize: 11.5, color: C.muted }}>
-                        <button type="button" onClick={() => onOpenPage(task.path)} style={linkButton} title={task.path}>
-                          {pageLabel(task.path)}
-                        </button>
-                        {day && (
-                          <span style={{ color: !done && day < today ? C.red : C.muted }}>
-                            {task.due ? 'Due ' : task.scheduled ? 'Scheduled ' : ''}{relativeDay(day, today)}
+          <div key={section.title ?? 'all'} className="mb-5">
+            {section.title && (
+              <h2 className={cn('mb-1 px-2 text-[12.5px] font-medium', section.tone === 'red' ? 'text-red' : 'text-text-secondary')}>
+                {section.title} <span className="font-normal tabular-nums text-text-faint">{section.items.length}</span>
+              </h2>
+            )}
+            {byPage(section.items).map(([path, items]) => (
+              <div key={path} className="mb-3">
+                <button
+                  type="button"
+                  onClick={() => onOpenPage(path)}
+                  className="group flex max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary"
+                  title={path}
+                >
+                  <FileText className="size-3.5 shrink-0" aria-hidden />
+                  <span className="truncate">{pageLabel(path)}</span>
+                  <ArrowUpRight className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
+                </button>
+                <ul className="m-0 list-none p-0">
+                  {items.map((task) => {
+                    const key = taskKey(task);
+                    const day = task.due ?? task.scheduled ?? task.journalDate;
+                    const done = task.status === 'done' || task.status === 'cancelled';
+                    return (
+                      <li key={key} className={cn('flex items-start gap-2.5 rounded-md px-2 py-1.5 transition-colors hover:bg-bg-hover/60', pending.has(key) && 'opacity-55')}>
+                        <input
+                          type="checkbox"
+                          checked={done}
+                          disabled={pending.has(key)}
+                          onChange={() => { void toggle(task); }}
+                          aria-label={done ? `Reopen ${task.text}` : `Complete ${task.text}`}
+                          className="mt-[3px]"
+                        />
+                        <span className={cn(
+                          'min-w-0 flex-1 text-[13.5px] leading-[1.5] [overflow-wrap:anywhere]',
+                          done ? 'text-text-tertiary' : 'text-text',
+                          task.status === 'cancelled' && 'line-through',
+                        )}>
+                          {task.priority && task.priority !== 'medium' && task.priority !== 'low' && task.priority !== 'lowest' && (
+                            <span title={`${task.priority} priority`} className="mr-1 text-red">!</span>
+                          )}
+                          {readable(task.text)}
+                        </span>
+                        {task.status === 'doing' && <span className="mt-0.5 flex shrink-0 items-center gap-1 text-[11.5px] text-blue"><span className="size-1.5 rounded-full bg-current" />Doing</span>}
+                        {done && task.doneDate ? (
+                          <span className="mt-0.5 shrink-0 text-[11.5px] text-text-faint">{relativeDay(task.doneDate, today)}</span>
+                        ) : day && (filter !== 'today' || day !== today) && (
+                          <span className={cn('mt-0.5 shrink-0 text-[11.5px]', !done && day < today ? 'text-red' : 'text-text-tertiary')}>
+                            {relativeDay(day, today)}
                           </span>
                         )}
-                        {task.doneDate && done && <span>Done {relativeDay(task.doneDate, today)}</span>}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
           </div>
         ))
       )}
     </section>
   );
 }
-
-function pill(background: string, color: string): React.CSSProperties {
-  return {
-    marginLeft: 6, padding: '1px 6px', borderRadius: 999, background, color,
-    fontSize: 10.5, fontWeight: 650, verticalAlign: 'middle',
-  };
-}
-
-const ghostButton: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 9px',
-  border: `1px solid ${C.line}`, borderRadius: 7, background: C.panel,
-  color: C.ink2, fontSize: 12, fontWeight: 620, cursor: 'pointer',
-};
-
-const primaryButton: React.CSSProperties = {
-  padding: '5px 11px', border: 'none', borderRadius: 7, background: C.accent,
-  color: C.onAccent, fontSize: 12, fontWeight: 650, cursor: 'pointer',
-};
-
-const addRow: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px 8px 12px',
-  border: `1px solid ${C.line}`, borderRadius: 10, background: C.panel,
-};
-
-const tabButton: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px',
-  border: 'none', borderRadius: 7, fontSize: 12.5, fontWeight: 620, cursor: 'pointer',
-};
-
-const iconButton: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 3,
-  border: 'none', borderRadius: 5, background: 'transparent', color: C.muted, cursor: 'pointer',
-};
-
-const linkButton: React.CSSProperties = {
-  padding: 0, border: 'none', background: 'transparent', color: C.accent,
-  fontSize: 11.5, cursor: 'pointer', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-};
-
-const emptyState: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 140,
-  border: `1px dashed ${C.line}`, borderRadius: 11, color: C.muted, fontSize: 12.5, textAlign: 'center', padding: 16,
-};

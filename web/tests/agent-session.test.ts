@@ -8,8 +8,12 @@ import {
   canSend,
   mergeListed,
   orderedSessions,
+  shortVersion,
   statusLabel,
+  transcriptBlocks,
+  workSummary,
   type AgentSnapshot,
+  type AgentToolItem,
   type SessionMap,
 } from '../src/lib/agent-session.ts';
 
@@ -90,4 +94,29 @@ test('only idle, open sessions accept a message; interrupted ones can be continu
   assert.equal(canSend(initial('a', { closed: true })), false);
   assert.equal(canResume(initial('a', { status: 'interrupted', threadId: 't' })), true);
   assert.equal(canResume(initial('a', { status: 'interrupted' })), false, 'nothing to resume without a thread');
+});
+
+const step = (id: string, toolKind: AgentToolItem['toolKind'], status: AgentToolItem['status'] = 'completed'): AgentToolItem => ({
+  type: 'tool', id, turnId: 't', name: id, toolKind, status, output: '', truncated: false,
+});
+
+test('consecutive tool steps fold into one block between messages', () => {
+  const blocks = transcriptBlocks([
+    { type: 'message', id: 'u', role: 'user', text: 'hi', turnId: null },
+    step('a', 'think'),
+    step('b', 'command'),
+    { type: 'message', id: 'm', role: 'assistant', text: 'done', turnId: 't' },
+    step('c', 'file'),
+  ]);
+  assert.deepEqual(blocks.map((block) => block.type === 'work' ? block.steps.map((item) => item.id).join('+') : block.item.id), ['u', 'a+b', 'm', 'c']);
+});
+
+test('a run of steps reads as one short summary', () => {
+  assert.equal(workSummary([step('a', 'command'), step('b', 'command'), step('c', 'mcp'), step('d', 'think')]).text, '2 commands · 1 tool call');
+  assert.equal(workSummary([step('a', 'think'), step('b', 'think')]).text, 'Thought 2 times');
+  const summary = workSummary([step('a', 'command', 'failed'), step('b', 'file', 'declined')]);
+  assert.deepEqual([summary.failed, summary.declined], [1, 1]);
+  assert.equal(shortVersion('2.1.296 (Claude Code)'), '2.1.296');
+  assert.equal(shortVersion('codex-cli 0.166.0'), '0.166.0');
+  assert.equal(shortVersion(null), null);
 });

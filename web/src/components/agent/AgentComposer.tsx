@@ -1,8 +1,10 @@
 import { ArrowUp, LoaderCircle, Play, Square } from 'lucide-react';
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+
+const MAX_HEIGHT = 192;
 
 export function AgentComposer({
   placeholder,
@@ -10,6 +12,7 @@ export function AgentComposer({
   busy,
   stopping,
   resumable,
+  meta,
   onSend,
   onStop,
   onResume,
@@ -20,6 +23,8 @@ export function AgentComposer({
   busy: boolean;
   stopping: boolean;
   resumable?: boolean;
+  /** A quiet line under the input: which Agent, where it works. */
+  meta?: ReactNode;
   onSend: (text: string) => Promise<boolean>;
   onStop?: () => void;
   onResume?: () => void;
@@ -29,6 +34,14 @@ export function AgentComposer({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const blocked = Boolean(disabledReason);
   const canSubmit = !busy && !sending && !blocked && text.trim().length > 0;
+
+  // Grow with the text, up to a limit; then scroll.
+  useLayoutEffect(() => {
+    const element = textareaRef.current;
+    if (!element) return;
+    element.style.height = 'auto';
+    element.style.height = `${Math.min(element.scrollHeight, MAX_HEIGHT)}px`;
+  }, [text]);
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -49,55 +62,54 @@ export function AgentComposer({
   };
 
   return (
-    <div className="shrink-0 border-t border-border bg-bg px-3 pb-3 pt-2">
+    <div className="shrink-0 px-3 pb-3 pt-1">
       {resumable && !busy && (
-        <Button
-          size="xs"
-          variant="outline"
-          className="mb-2 w-full"
-          onClick={onResume}
-        >
+        <Button size="xs" variant="outline" className="mb-2 w-full" onClick={onResume}>
           <Play /> Continue this conversation
         </Button>
       )}
-      <div className={cn('rounded-lg border border-border bg-panel focus-within:border-accent/60', blocked && 'opacity-70')}>
+      <div
+        className={cn(
+          'rounded-xl border border-border bg-panel shadow-[var(--shadow-rest)] transition-[border-color,box-shadow] focus-within:border-border-hover focus-within:shadow-[var(--shadow-card)]',
+          blocked && 'bg-bg-secondary/60',
+        )}
+      >
         <textarea
           ref={textareaRef}
           aria-label="Message agent"
-          className="block max-h-48 min-h-16 w-full resize-none bg-transparent px-3 py-2 text-[13px] leading-relaxed text-text outline-none placeholder:text-text-faint disabled:cursor-not-allowed"
+          className="block w-full resize-none bg-transparent px-3 pb-1 pt-2.5 text-[13px] leading-[1.55] text-text outline-none placeholder:text-text-faint disabled:cursor-not-allowed"
+          style={{ maxHeight: MAX_HEIGHT, minHeight: 44 }}
           placeholder={disabledReason ?? placeholder}
           value={text}
           disabled={blocked}
-          rows={3}
+          rows={1}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={onKeyDown}
         />
-        <div className="flex items-center justify-end gap-1.5 px-2 pb-2">
-          <span className="mr-auto text-[10px] text-text-faint">
-            {busy ? 'Working… you can collapse the panel; the task keeps running.' : 'Enter to send · Shift+Enter for a new line'}
-          </span>
+        <div className="flex items-center gap-2 py-1.5 pl-3 pr-1.5">
+          <div className="min-w-0 flex-1 truncate text-[11px] text-text-tertiary">{meta}</div>
           {busy ? (
-            <Button
-              size="xs"
-              variant="outline"
-              aria-label="Stop task"
+            <button
+              type="button"
+              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-text text-bg transition-opacity hover:opacity-85 disabled:opacity-50"
+              aria-label="Stop the Agent"
+              title={stopping ? 'Stopping…' : 'Stop'}
               disabled={stopping || !onStop}
               onClick={onStop}
             >
-              {stopping ? <LoaderCircle className="animate-spin" /> : <Square />}
-              {stopping ? 'Stopping…' : 'Stop'}
-            </Button>
+              {stopping ? <LoaderCircle className="size-3.5 animate-spin" /> : <Square className="size-2.5 fill-current" />}
+            </button>
           ) : (
-            <Button
-              size="xs"
-              className="bg-accent text-on-accent hover:bg-accent-hover"
+            <button
+              type="button"
+              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent transition-colors hover:bg-accent-hover disabled:bg-bg-active disabled:text-text-faint"
               aria-label="Send message"
+              title="Send (Enter)"
               disabled={!canSubmit}
               onClick={() => void submit()}
             >
-              {sending ? <LoaderCircle className="animate-spin" /> : <ArrowUp />}
-              Send
-            </Button>
+              {sending ? <LoaderCircle className="size-3.5 animate-spin" /> : <ArrowUp className="size-4" strokeWidth={2.25} />}
+            </button>
           )}
         </div>
       </div>

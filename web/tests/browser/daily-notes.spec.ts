@@ -213,3 +213,21 @@ test('selecting a new Space cancels startup while the first Space is loading', a
   await expect(page.locator('article')).toContainText('Other notebook');
   expect(state.creates).toEqual([]);
 });
+
+test('the settings dialog stays inside a short window with its actions visible', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 600 });
+  await desktop(page);
+  await page.goto(origin);
+  await page.getByRole('button', { name: /Modules & settings/i }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeInViewport({ ratio: 1 });
+  await expect(dialog.getByRole('heading', { name: 'Modules & settings' })).toBeInViewport({ ratio: 1 });
+  const box = (await dialog.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(600);
+  expect(Math.abs(box.x + box.width / 2 - 550)).toBeLessThanOrEqual(1);
+  // Module switches are real checkboxes in the CoWiki style, not the platform's.
+  const toggle = dialog.getByRole('checkbox', { name: /Daily journal/ });
+  expect(await toggle.evaluate((element) => getComputedStyle(element).appearance)).toBe('none');
+});
