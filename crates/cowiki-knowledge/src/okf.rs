@@ -893,7 +893,7 @@ fn log_is_conforming(content: &str) -> bool {
     saw_date && group_has_entry
 }
 
-pub(crate) fn valid_iso_date(value: &str) -> bool {
+pub fn valid_iso_date(value: &str) -> bool {
     if value.len() != 10
         || value.as_bytes()[4] != b'-'
         || value.as_bytes()[7] != b'-'
@@ -1975,7 +1975,64 @@ fn normalize_relative_path(path: &str) -> Result<String, String> {
     Ok(segments.join("/"))
 }
 
-pub(crate) fn split_frontmatter(content: &str) -> Result<(Option<&str>, &str), String> {
+/// Canonical Space-root path containment check rejecting null bytes, absolute
+/// paths, `..` traversal, and any intermediate or terminal symlink escaping `root`.
+pub fn safe_resolve_under_space(root: &Path, page_path: &str) -> Result<(String, PathBuf), String> {
+    let trimmed = page_path.trim();
+    if trimmed.is_empty() || trimmed.contains('\0') {
+        return Err("path must be a non-empty string without null bytes".to_string());
+    }
+    let normalized = trimmed.replace('\\', "/");
+    if normalized.starts_with('/') || (normalized.len() >= 2 && normalized.as_bytes()[1] == b':') {
+        return Err(format!("absolute path is outside the Space: {page_path}"));
+    }
+    let mut parts: Vec<&str> = Vec::new();
+    for segment in normalized.split('/') {
+        match segment {
+            "" | "." => continue,
+            ".." => return Err(format!("path traversal is forbidden: {page_path}")),
+            other => parts.push(other),
+        }
+    }
+    if parts.is_empty() {
+        return Err("path must reference a file inside the Space".to_string());
+    }
+    let root_real = std::fs::canonicalize(root)
+        .map_err(|error| format!("cannot resolve Space root: {error}"))?;
+    let mut cursor = root_real.clone();
+    for part in &parts {
+        cursor.push(part);
+        if let Ok(meta) = std::fs::symlink_metadata(&cursor) {
+            if meta.file_type().is_symlink() {
+                let resolved = std::fs::canonicalize(&cursor).map_err(|_| {
+                    format!("symlink component cannot be resolved safely: {page_path}")
+                })?;
+                if !resolved.starts_with(&root_real) {
+                    return Err(format!("symlink escapes Space root: {page_path}"));
+                }
+            }
+        }
+    }
+    if cursor.exists() {
+        let final_real = std::fs::canonicalize(&cursor)
+            .map_err(|error| format!("cannot canonicalize Space path: {error}"))?;
+        if !final_real.starts_with(&root_real) {
+            return Err(format!("resolved path escapes Space root: {page_path}"));
+        }
+        let canonical_rel = final_real
+            .strip_prefix(&root_real)
+            .map_err(|_| format!("resolved path escapes Space root: {page_path}"))?
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        Ok((canonical_rel, final_real))
+    } else {
+        Ok((parts.join("/"), cursor))
+    }
+}
+
+pub fn split_frontmatter(content: &str) -> Result<(Option<&str>, &str), String> {
     let Some(after_opening) = content
         .strip_prefix("---\n")
         .or_else(|| content.strip_prefix("---\r\n"))
@@ -2492,5 +2549,41 @@ mod tests {
         assert_eq!(report.summary_by_code.get("broken_redirect"), Some(&1));
         assert_eq!(report.summary_by_code.get("redirect_cycle"), Some(&2));
         assert_eq!(report.summary_by_code.get("broken_link"), Some(&1));
+    }
+
+    #[test]
+    fn safe_resolve_under_space_blocks_traversal_and_symlink_escapes() {
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("secret.md");
+        std::fs::write(&secret, "# Secret\n").unwrap();
+
+        let bundle = tempfile::tempdir().unwrap();
+        let root = bundle.path();
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        let valid_file = root.join("notes/doc.md");
+        std::fs::write(&valid_file, "# Doc\n").unwrap();
+
+        let (rel_existing, resolved) = safe_resolve_under_space(root, "notes/doc.md").unwrap();
+        assert_eq!(rel_existing, "notes/doc.md");
+        assert_eq!(resolved, valid_file.canonicalize().unwrap());
+
+        let (rel_new, new_file) = safe_resolve_under_space(root, "notes/new-page.md").unwrap();
+        assert_eq!(rel_new, "notes/new-page.md");
+        assert_eq!(
+            new_file,
+            root.canonicalize().unwrap().join("notes/new-page.md")
+        );
+
+        assert!(safe_resolve_under_space(root, "../secret.md").is_err());
+        assert!(safe_resolve_under_space(root, "notes/../../secret.md").is_err());
+        assert!(safe_resolve_under_space(root, "/etc/passwd").is_err());
+        assert!(safe_resolve_under_space(root, "notes/bad\0.md").is_err());
+
+        #[cfg(unix)]
+        {
+            let link_path = root.join("notes/escape.md");
+            std::os::unix::fs::symlink(&secret, &link_path).unwrap();
+            assert!(safe_resolve_under_space(root, "notes/escape.md").is_err());
+        }
     }
 }

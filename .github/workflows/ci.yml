@@ -65,3 +65,32 @@ jobs:
         run: cargo build --locked
       - name: Test
         run: cargo test --locked
+
+  knowledge-bench:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates/cowiki-knowledge -> target
+            benchmarks/retrieval-bench -> target
+      - name: Check cowiki-knowledge formatting and lints
+        run: |
+          cargo fmt --all --manifest-path crates/cowiki-knowledge/Cargo.toml -- --check
+          cargo clippy --manifest-path crates/cowiki-knowledge/Cargo.toml --all-targets --all-features -- -D warnings
+      - name: Test cowiki-knowledge crate
+        run: cargo test --manifest-path crates/cowiki-knowledge/Cargo.toml --all-features
+      - name: Check standalone benchmark formatting and lints
+        run: |
+          cargo fmt --all --manifest-path benchmarks/retrieval-bench/Cargo.toml -- --check
+          cargo clippy --manifest-path benchmarks/retrieval-bench/Cargo.toml --all-targets --locked -- -D warnings
+      - name: Test standalone benchmark harness
+        run: cargo test --manifest-path benchmarks/retrieval-bench/Cargo.toml --locked
+      - name: Run standalone retrieval & governance benchmark gate
+        run: cargo run --manifest-path benchmarks/retrieval-bench/Cargo.toml --release --locked -- --scale-pages 100,500 --queries-per-thread 20 --out /tmp/cowiki-retrieval-bench.json

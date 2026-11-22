@@ -168,6 +168,10 @@ export interface HybridSearchOptions {
   excludeRetired?: boolean;
   followRedirects?: boolean;
   useOkfGovernance?: boolean;
+  useLexical?: boolean;
+  useVector?: boolean;
+  useGraphExpansion?: boolean;
+  scopeFilter?: string;
   asOfDate?: string;
 }
 
@@ -200,6 +204,8 @@ export interface HybridSearchResult {
   tokenBudget: number;
   tokensUsed: number;
   status: string;
+  embeddingModel: string;
+  latencyMs: number;
   filteredRetiredCount: number;
   followedRedirects: Array<{ from: string; to: string }>;
   exploredEdges: Array<{ fromPage: string; toPage: string; direction: string; hop: number }>;

@@ -3,15 +3,15 @@ mod agent_runtime;
 mod cloud_sync;
 mod extract;
 mod html_assets;
-mod knowledge_index;
 mod link_rewrite;
 mod local_engine;
 mod mcp;
 mod obsidian;
-mod okf;
 mod personal;
 mod terminal;
 mod web_source;
+
+pub use cowiki_knowledge::{embeddings, knowledge_index, okf};
 
 use local_engine::{
     AgentChange, BrokenLink, Checkpoint, CommentMember, FileDiff, HybridSearchOptions,

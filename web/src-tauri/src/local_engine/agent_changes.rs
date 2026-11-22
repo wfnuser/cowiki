@@ -581,7 +581,10 @@ fn apply_okf_trust_reset_on_agent_paths(
         {
             continue;
         }
-        let target = space_root.join(relative);
+        let rel_str = relative.to_string_lossy();
+        let Ok((_, target)) = crate::okf::safe_resolve_under_space(space_root, &rel_str) else {
+            continue;
+        };
         let is_regular = std::fs::symlink_metadata(&target)
             .map(|meta| meta.file_type().is_file())
             .unwrap_or(false);

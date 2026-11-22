@@ -3,6 +3,7 @@
 //! Markdown files remain the source of truth. Every row in these tables is
 //! derived data and may be dropped and rebuilt without losing user content.
 
+use crate::embeddings::{self, EmbeddingProvider};
 use crate::okf;
 use percent_encoding::percent_decode_str;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -12,8 +13,9 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
-const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 const CREATE_SCHEMA: &str = "CREATE TABLE knowledge_index_metadata (
         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -90,6 +92,9 @@ const CREATE_SCHEMA: &str = "CREATE TABLE knowledge_index_metadata (
         generated INTEGER NOT NULL DEFAULT 0,
         stale_after TEXT,
         redirect_to TEXT,
+        scope TEXT NOT NULL DEFAULT 'default',
+        embedding_model TEXT NOT NULL DEFAULT '',
+        embedding_blob BLOB NOT NULL DEFAULT X'',
         UNIQUE(space_id, unit_id)
     );
     CREATE INDEX knowledge_units_space_page ON knowledge_units(space_id, page_path);
@@ -115,7 +120,26 @@ const CREATE_SCHEMA: &str = "CREATE TABLE knowledge_index_metadata (
         VALUES ('delete', old.id, old.page_title, old.section_heading, old.aliases_text, old.body);
         INSERT INTO knowledge_units_fts(rowid, page_title, section_heading, aliases_text, body)
         VALUES (new.id, new.page_title, new.section_heading, new.aliases_text, new.body);
-    END;";
+    END;
+    CREATE TABLE unit_links (
+        space_id TEXT NOT NULL,
+        source_unit_id TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        target TEXT NOT NULL,
+        target_anchor TEXT,
+        kind INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(space_id, source_unit_id, target, kind)
+    );
+    CREATE INDEX unit_links_source_unit ON unit_links(space_id, source_unit_id);
+    CREATE INDEX unit_links_source_path ON unit_links(space_id, source_path);
+    CREATE INDEX unit_links_target ON unit_links(space_id, target);
+    CREATE TABLE embedding_cache (
+        model TEXT NOT NULL,
+        content_sha256 TEXT NOT NULL,
+        dim INTEGER NOT NULL,
+        vector_blob BLOB NOT NULL,
+        PRIMARY KEY (model, content_sha256)
+    );";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SearchHit {
@@ -133,6 +157,18 @@ pub struct BrokenLink {
     pub target: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexStats {
+    pub schema_version: i64,
+    pub indexed_pages: usize,
+    pub knowledge_units: usize,
+    pub page_links: usize,
+    pub unit_links: usize,
+    pub cached_embeddings: usize,
+    pub embedding_model: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HybridSearchOptions {
@@ -143,6 +179,10 @@ pub struct HybridSearchOptions {
     pub exclude_retired: Option<bool>,
     pub follow_redirects: Option<bool>,
     pub use_okf_governance: Option<bool>,
+    pub use_lexical: Option<bool>,
+    pub use_vector: Option<bool>,
+    pub use_graph_expansion: Option<bool>,
+    pub scope_filter: Option<String>,
     pub as_of_date: Option<String>,
 }
 
@@ -156,6 +196,10 @@ impl Default for HybridSearchOptions {
             exclude_retired: Some(true),
             follow_redirects: Some(true),
             use_okf_governance: Some(true),
+            use_lexical: Some(true),
+            use_vector: Some(true),
+            use_graph_expansion: Some(true),
+            scope_filter: None,
             as_of_date: None,
         }
     }
@@ -210,6 +254,8 @@ pub struct HybridSearchResult {
     pub token_budget: usize,
     pub tokens_used: usize,
     pub status: String,
+    pub latency_ms: f64,
+    pub embedding_model: String,
     pub filtered_retired_count: usize,
     pub followed_redirects: Vec<FollowedRedirect>,
     pub explored_edges: Vec<ExploredEdge>,
@@ -241,6 +287,8 @@ fn schema_is_structurally_healthy(connection: &Connection) -> bool {
         ("table", "page_links"),
         ("table", "knowledge_units"),
         ("table", "knowledge_units_fts"),
+        ("table", "unit_links"),
+        ("table", "embedding_cache"),
         ("trigger", "indexed_pages_insert"),
         ("trigger", "indexed_pages_delete"),
         ("trigger", "indexed_pages_update"),
@@ -250,6 +298,9 @@ fn schema_is_structurally_healthy(connection: &Connection) -> bool {
         ("index", "page_links_target"),
         ("index", "page_links_source"),
         ("index", "knowledge_units_space_page"),
+        ("index", "unit_links_source_unit"),
+        ("index", "unit_links_source_path"),
+        ("index", "unit_links_target"),
     ];
     if required_objects.iter().any(|(kind, name)| {
         !connection
@@ -280,9 +331,19 @@ fn schema_is_structurally_healthy(connection: &Connection) -> bool {
                 "SELECT id, space_id, unit_id, page_path, page_title, section_heading,
                         heading_path, line_start, line_end, body, token_count, content_sha256,
                         aliases_text, sources_json, doc_type, status, trust_tier,
-                        verified, generated, stale_after, redirect_to
+                        verified, generated, stale_after, redirect_to, scope,
+                        embedding_model, embedding_blob
                  FROM knowledge_units LIMIT 0",
             )
+            .is_err()
+        || connection
+            .prepare(
+                "SELECT space_id, source_unit_id, source_path, target, target_anchor, kind
+                 FROM unit_links LIMIT 0",
+            )
+            .is_err()
+        || connection
+            .prepare("SELECT model, content_sha256, dim, vector_blob FROM embedding_cache LIMIT 0")
             .is_err()
     {
         return false;
@@ -321,7 +382,9 @@ fn reset_schema(connection: &mut Connection) -> Result<(), String> {
         .map_err(|error| format!("cannot reset the disposable local search index: {error}"))?;
     transaction
         .execute_batch(
-            "DROP TRIGGER IF EXISTS knowledge_units_insert;
+            "DROP TABLE IF EXISTS embedding_cache;
+             DROP TABLE IF EXISTS unit_links;
+             DROP TRIGGER IF EXISTS knowledge_units_insert;
              DROP TRIGGER IF EXISTS knowledge_units_delete;
              DROP TRIGGER IF EXISTS knowledge_units_update;
              DROP TABLE IF EXISTS knowledge_units_fts;
@@ -352,10 +415,23 @@ pub fn rebuild_space(
     space_id: &str,
     root: &Path,
 ) -> Result<(), String> {
+    let embedder = embeddings::default_embedder();
+    rebuild_space_with_embedder(connection, space_id, root, embedder.as_ref())
+}
+
+pub fn rebuild_space_with_embedder(
+    connection: &mut Connection,
+    space_id: &str,
+    root: &Path,
+    embedder: &dyn EmbeddingProvider,
+) -> Result<(), String> {
     if !root.is_dir() {
         return Ok(());
     }
     let transaction = connection.transaction().map_err(|e| e.to_string())?;
+    transaction
+        .execute("DELETE FROM unit_links WHERE space_id = ?1", [space_id])
+        .map_err(|e| e.to_string())?;
     transaction
         .execute(
             "DELETE FROM knowledge_units WHERE space_id = ?1",
@@ -377,7 +453,7 @@ pub fn rebuild_space(
     {
         let path = entry.path();
         if entry.file_type().is_file() && is_markdown(path) {
-            index_file_in(&transaction, space_id, root, path)?;
+            index_file_in(&transaction, space_id, root, path, embedder)?;
         }
     }
     transaction.commit().map_err(|e| e.to_string())
@@ -391,6 +467,16 @@ pub fn refresh_space(
     connection: &mut Connection,
     space_id: &str,
     root: &Path,
+) -> Result<(), String> {
+    let embedder = embeddings::default_embedder();
+    refresh_space_with_embedder(connection, space_id, root, embedder.as_ref())
+}
+
+pub fn refresh_space_with_embedder(
+    connection: &mut Connection,
+    space_id: &str,
+    root: &Path,
+    embedder: &dyn EmbeddingProvider,
 ) -> Result<(), String> {
     if !root.is_dir() {
         return Ok(());
@@ -423,7 +509,7 @@ pub fn refresh_space(
         let modified_ns = file_modified_ns(path);
         seen.insert(relative.clone());
         if existing.get(&relative).copied() != Some(modified_ns) {
-            index_file_in(&transaction, space_id, root, path)?;
+            index_file_in(&transaction, space_id, root, path, embedder)?;
         }
     }
     for deleted in existing.keys().filter(|path| !seen.contains(*path)) {
@@ -442,6 +528,17 @@ pub fn index_paths(
     root: &Path,
     paths: &[PathBuf],
 ) -> Result<(), String> {
+    let embedder = embeddings::default_embedder();
+    index_paths_with_embedder(connection, space_id, root, paths, embedder.as_ref())
+}
+
+pub fn index_paths_with_embedder(
+    connection: &mut Connection,
+    space_id: &str,
+    root: &Path,
+    paths: &[PathBuf],
+    embedder: &dyn EmbeddingProvider,
+) -> Result<(), String> {
     if !root.is_dir() {
         return Ok(());
     }
@@ -455,7 +552,7 @@ pub fn index_paths(
             .map(|meta| meta.file_type().is_file())
             .unwrap_or(false);
         if is_regular_file {
-            index_file_in(&transaction, space_id, root, &path)?;
+            index_file_in(&transaction, space_id, root, &path, embedder)?;
         } else {
             let relative = normalize_path(relative);
             delete_page_rows(&transaction, space_id, &relative)?;
@@ -465,6 +562,12 @@ pub fn index_paths(
 }
 
 fn delete_page_rows(connection: &Connection, space_id: &str, relative: &str) -> Result<(), String> {
+    connection
+        .execute(
+            "DELETE FROM unit_links WHERE space_id = ?1 AND source_path = ?2",
+            params![space_id, relative],
+        )
+        .map_err(|e| e.to_string())?;
     connection
         .execute(
             "DELETE FROM knowledge_units WHERE space_id = ?1 AND page_path = ?2",
@@ -520,11 +623,50 @@ pub fn rebuild_links(connection: &mut Connection, space_id: &str) -> Result<(), 
     transaction.commit().map_err(|e| e.to_string())
 }
 
+pub fn index_stats(connection: &Connection, space_id: &str) -> Result<IndexStats, String> {
+    let count_for = |sql: &str, with_space: bool| -> Result<usize, String> {
+        let count: i64 = if with_space {
+            connection
+                .query_row(sql, [space_id], |row| row.get(0))
+                .map_err(|e| e.to_string())?
+        } else {
+            connection
+                .query_row(sql, [], |row| row.get(0))
+                .map_err(|e| e.to_string())?
+        };
+        Ok(count.max(0) as usize)
+    };
+    let model: String = connection
+        .query_row(
+            "SELECT embedding_model FROM knowledge_units
+             WHERE space_id = ?1 AND embedding_model != '' LIMIT 1",
+            [space_id],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|_| embeddings::default_embedder().model_name().to_string());
+    Ok(IndexStats {
+        schema_version: SCHEMA_VERSION,
+        indexed_pages: count_for(
+            "SELECT COUNT(*) FROM indexed_pages WHERE space_id = ?1",
+            true,
+        )?,
+        knowledge_units: count_for(
+            "SELECT COUNT(*) FROM knowledge_units WHERE space_id = ?1",
+            true,
+        )?,
+        page_links: count_for("SELECT COUNT(*) FROM page_links WHERE space_id = ?1", true)?,
+        unit_links: count_for("SELECT COUNT(*) FROM unit_links WHERE space_id = ?1", true)?,
+        cached_embeddings: count_for("SELECT COUNT(*) FROM embedding_cache", false)?,
+        embedding_model: model,
+    })
+}
+
 fn index_file_in(
     connection: &Connection,
     space_id: &str,
     root: &Path,
     path: &Path,
+    embedder: &dyn EmbeddingProvider,
 ) -> Result<(), String> {
     let relative = relative_path(root, path)?;
     let body = match std::fs::read_to_string(path) {
@@ -539,7 +681,7 @@ fn index_file_in(
     let title = meta
         .title
         .clone()
-        .or_else(|| crate::local_engine::markdown_title(&body))
+        .or_else(|| okf::display_metadata(&body).0)
         .unwrap_or_else(|| {
             path.file_stem()
                 .unwrap_or_default()
@@ -613,46 +755,110 @@ fn index_file_in(
     }
     connection
         .execute(
+            "DELETE FROM unit_links WHERE space_id = ?1 AND source_path = ?2",
+            params![space_id, relative],
+        )
+        .map_err(|e| e.to_string())?;
+    connection
+        .execute(
             "DELETE FROM knowledge_units WHERE space_id = ?1 AND page_path = ?2",
             params![space_id, relative],
         )
         .map_err(|e| e.to_string())?;
     if !is_reserved_nav_doc(&relative) {
         let chunks = chunk_markdown_page(&relative, &title, meta.description.as_deref(), &body);
-        for chunk in chunks {
-            connection
-                .execute(
-                    "INSERT INTO knowledge_units (
-                        space_id, unit_id, page_path, page_title, section_heading,
-                        heading_path, line_start, line_end, body, token_count,
-                        content_sha256, aliases_text, sources_json, doc_type, status,
-                        trust_tier, verified, generated, stale_after, redirect_to
-                     )
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
-                    params![
-                        space_id,
-                        chunk.unit_id,
-                        relative,
-                        title,
-                        chunk.section_heading,
-                        chunk.heading_path,
-                        chunk.line_start as i64,
-                        chunk.line_end as i64,
-                        chunk.body,
-                        chunk.token_count as i64,
-                        chunk.content_sha256,
-                        aliases_text,
-                        sources_json,
-                        meta.doc_type,
-                        meta.status,
-                        meta.trust_tier,
-                        i64::from(meta.verified),
-                        i64::from(meta.generated),
-                        meta.stale_after,
-                        resolved_redirect,
-                    ],
-                )
-                .map_err(|e| e.to_string())?;
+        if !chunks.is_empty() {
+            let model = embedder.model_name();
+            let mut blobs: Vec<Option<Vec<u8>>> = vec![None; chunks.len()];
+            let mut missing_indices: Vec<usize> = Vec::new();
+            let mut missing_texts: Vec<String> = Vec::new();
+            let mut cache_keys: Vec<String> = Vec::with_capacity(chunks.len());
+
+            for (idx, chunk) in chunks.iter().enumerate() {
+                let embed_text = format!(
+                    "{} | {} | {}\n{}",
+                    title, chunk.section_heading, aliases_text, chunk.body
+                );
+                let cache_key = format!("{:x}", Sha256::digest(embed_text.as_bytes()));
+                if let Ok(cached_blob) = connection.query_row(
+                    "SELECT vector_blob FROM embedding_cache WHERE model = ?1 AND content_sha256 = ?2",
+                    params![model, cache_key],
+                    |row| row.get::<_, Vec<u8>>(0),
+                ) {
+                    blobs[idx] = Some(cached_blob);
+                } else {
+                    missing_indices.push(idx);
+                    missing_texts.push(embed_text);
+                }
+                cache_keys.push(cache_key);
+            }
+
+            if !missing_texts.is_empty() {
+                let vectors = embedder.embed_batch(&missing_texts)?;
+                for (&idx, vec) in missing_indices.iter().zip(vectors) {
+                    let blob = embeddings::encode_vector(&vec);
+                    let dim = vec.len() as i64;
+                    connection
+                        .execute(
+                            "INSERT OR REPLACE INTO embedding_cache (model, content_sha256, dim, vector_blob)
+                             VALUES (?1, ?2, ?3, ?4)",
+                            params![model, cache_keys[idx], dim, blob],
+                        )
+                        .map_err(|e| e.to_string())?;
+                    blobs[idx] = Some(blob);
+                }
+            }
+
+            for (idx, chunk) in chunks.into_iter().enumerate() {
+                let blob = blobs[idx].take().unwrap_or_default();
+                connection
+                    .execute(
+                        "INSERT INTO knowledge_units (
+                            space_id, unit_id, page_path, page_title, section_heading,
+                            heading_path, line_start, line_end, body, token_count,
+                            content_sha256, aliases_text, sources_json, doc_type, status,
+                            trust_tier, verified, generated, stale_after, redirect_to,
+                            scope, embedding_model, embedding_blob
+                         )
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                        params![
+                            space_id,
+                            chunk.unit_id,
+                            relative,
+                            title,
+                            chunk.section_heading,
+                            chunk.heading_path,
+                            chunk.line_start as i64,
+                            chunk.line_end as i64,
+                            chunk.body,
+                            chunk.token_count as i64,
+                            chunk.content_sha256,
+                            aliases_text,
+                            sources_json,
+                            meta.doc_type,
+                            meta.status,
+                            meta.trust_tier,
+                            i64::from(meta.verified),
+                            i64::from(meta.generated),
+                            meta.stale_after,
+                            resolved_redirect,
+                            meta.scope,
+                            model,
+                            blob,
+                        ],
+                    )
+                    .map_err(|e| e.to_string())?;
+
+                for (target, anchor, kind) in extract_links_with_anchors(&chunk.body, &relative) {
+                    connection
+                        .execute(
+                            "INSERT OR IGNORE INTO unit_links (space_id, source_unit_id, source_path, target, target_anchor, kind)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                            params![space_id, chunk.unit_id, relative, target, anchor, kind as i64],
+                        )
+                        .map_err(|e| e.to_string())?;
+                }
+            }
         }
     }
     Ok(())
@@ -917,8 +1123,9 @@ fn okf_governance_multiplier(
     meta.governance_multiplier(Some(reference_date), exclude_retired)
 }
 
-/// Budgeted section-level BM25 + hub-dampened link-graph retrieval with
-/// OKF v0.3 governance filtering, redirect resolution, and line-range citations.
+/// Budgeted section-level hybrid retrieval (BM25 + dense semantic vectors via RRF +
+/// anchor-aware hub-dampened link-graph expansion) with OKF v0.3 governance filtering,
+/// redirect resolution, and line-range citations.
 pub fn hybrid_search(
     connection: &Connection,
     space_id: &str,
@@ -926,6 +1133,26 @@ pub fn hybrid_search(
     query: &str,
     options: &HybridSearchOptions,
 ) -> Result<HybridSearchResult, String> {
+    let embedder = embeddings::default_embedder();
+    hybrid_search_with_embedder(
+        connection,
+        space_id,
+        root,
+        query,
+        options,
+        embedder.as_ref(),
+    )
+}
+
+pub fn hybrid_search_with_embedder(
+    connection: &Connection,
+    space_id: &str,
+    root: &Path,
+    query: &str,
+    options: &HybridSearchOptions,
+    embedder: &dyn EmbeddingProvider,
+) -> Result<HybridSearchResult, String> {
+    let started = Instant::now();
     let token_budget = options.token_budget.unwrap_or(1200).clamp(64, 16_000);
     let max_hops = options.max_hops.unwrap_or(2).min(2);
     let seed_top_k = options.seed_top_k.unwrap_or(6).clamp(1, 20);
@@ -933,6 +1160,14 @@ pub fn hybrid_search(
     let exclude_retired = options.exclude_retired.unwrap_or(true);
     let follow_redirects = options.follow_redirects.unwrap_or(true);
     let use_governance = options.use_okf_governance.unwrap_or(true);
+    let use_lexical = options.use_lexical.unwrap_or(true);
+    let use_vector = options.use_vector.unwrap_or(true);
+    let use_graph_expansion = options.use_graph_expansion.unwrap_or(true);
+    let scope_filter = options
+        .scope_filter
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
     let reference_date = options
         .as_of_date
         .as_deref()
@@ -940,14 +1175,16 @@ pub fn hybrid_search(
         .filter(|value| okf::valid_iso_date(value))
         .map(str::to_string)
         .unwrap_or_else(okf::utc_today_iso);
+    let model_name = embedder.model_name().to_string();
 
-    let or_query = fts_or_query(query);
-    if or_query.is_empty() {
+    if query.trim().is_empty() || (!use_lexical && !use_vector) {
         return Ok(HybridSearchResult {
             query: query.to_string(),
             token_budget,
             tokens_used: 0,
             status: "empty".to_string(),
+            latency_ms: round_ms(started.elapsed().as_secs_f64() * 1000.0),
+            embedding_model: model_name,
             filtered_retired_count: 0,
             followed_redirects: Vec::new(),
             explored_edges: Vec::new(),
@@ -959,37 +1196,89 @@ pub fn hybrid_search(
     let query_terms = extract_query_terms(query);
     let query_lower = query.trim().to_lowercase();
 
-    // 1. Section-level BM25 seed retrieval.
-    let mut seed_stmt = connection
-        .prepare(
-            "SELECT u.unit_id, u.page_path, u.page_title, u.section_heading, u.body,
-                    u.status, u.trust_tier, u.verified, u.stale_after, u.redirect_to,
-                    bm25(knowledge_units_fts, 3.0, 2.2, 2.5, 1.0) AS rank_score
-             FROM knowledge_units_fts
-             JOIN knowledge_units AS u ON u.id = knowledge_units_fts.rowid
-             WHERE knowledge_units_fts MATCH ?1 AND u.space_id = ?2
-             ORDER BY rank_score ASC
-             LIMIT 64",
-        )
-        .map_err(|e| e.to_string())?;
-    let seed_rows = seed_stmt
-        .query_map(params![or_query, space_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, String>(6)?,
-                row.get::<_, i64>(7)? != 0,
-                row.get::<_, Option<String>>(8)?,
-                row.get::<_, Option<String>>(9)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+    // 1. Lexical BM25 candidate ranks over knowledge_units_fts.
+    let mut lexical_ranks: HashMap<String, usize> = HashMap::new();
+    if use_lexical {
+        let or_query = fts_or_query(query);
+        if !or_query.is_empty() {
+            let mut seed_stmt = connection
+                .prepare(
+                    "SELECT u.unit_id,
+                            bm25(knowledge_units_fts, 3.0, 2.2, 2.5, 1.0) AS rank_score
+                     FROM knowledge_units_fts
+                     JOIN knowledge_units AS u ON u.id = knowledge_units_fts.rowid
+                     WHERE knowledge_units_fts MATCH ?1 AND u.space_id = ?2
+                     ORDER BY rank_score ASC, u.unit_id ASC
+                     LIMIT 64",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = seed_stmt
+                .query_map(params![or_query, space_id], |row| row.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            for (idx, uid) in rows.into_iter().enumerate() {
+                lexical_ranks.insert(uid, idx + 1);
+            }
+        }
+    }
+
+    // 2. Dense semantic vector similarity over stored knowledge_units embeddings.
+    let mut vector_ranks: HashMap<String, usize> = HashMap::new();
+    let mut vector_sims: HashMap<String, f64> = HashMap::new();
+    if use_vector {
+        let query_vec = embedder.embed_one(query)?;
+        let mut vec_stmt = connection
+            .prepare(
+                "SELECT unit_id, embedding_model, embedding_blob
+                 FROM knowledge_units
+                 WHERE space_id = ?1",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = vec_stmt
+            .query_map([space_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Vec<u8>>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        let mut scored: Vec<(f64, String)> = Vec::with_capacity(rows.len());
+        for (uid, unit_model, blob) in rows {
+            if unit_model != model_name || blob.is_empty() {
+                continue;
+            }
+            let unit_vec = embeddings::decode_vector(&blob);
+            let sim = f64::from(embeddings::cosine_similarity(&query_vec, &unit_vec));
+            vector_sims.insert(uid.clone(), sim);
+            scored.push((sim, uid));
+        }
+        scored.sort_by(|left, right| {
+            right
+                .0
+                .total_cmp(&left.0)
+                .then_with(|| left.1.cmp(&right.1))
+        });
+        for (idx, (sim, uid)) in scored.into_iter().take(36).enumerate() {
+            if sim >= 0.14 || (idx < 3 && sim >= 0.10) {
+                vector_ranks.insert(uid, idx + 1);
+            }
+        }
+    }
+
+    // 3. Reciprocal Rank Fusion (RRF) + OKF v0.3 governance + redirect resolution.
+    let mut candidate_ids: Vec<String> = lexical_ranks
+        .keys()
+        .chain(vector_ranks.keys())
+        .cloned()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    candidate_ids.sort();
+    let candidate_units = load_units_by_ids(connection, space_id, &candidate_ids)?;
 
     let mut filtered_retired_count = 0usize;
     let mut followed_redirects: Vec<FollowedRedirect> = Vec::new();
@@ -997,44 +1286,57 @@ pub fn hybrid_search(
     // unit_id -> (score, channel, redirected_from)
     let mut raw_seed_scores: HashMap<String, (f64, String, Option<String>)> = HashMap::new();
 
-    for (
-        rank_idx,
-        (
-            uid,
-            page_path,
-            page_title,
-            sec_heading,
-            body,
-            status,
-            trust_tier,
-            verified,
-            stale_after,
-            redirect_to,
-        ),
-    ) in seed_rows.into_iter().enumerate()
-    {
-        if is_reserved_nav_doc(&page_path) {
+    for uid in &candidate_ids {
+        let Some(unit) = candidate_units.get(uid) else {
+            continue;
+        };
+        if is_reserved_nav_doc(&unit.page_path) {
             continue;
         }
-        if use_governance && exclude_retired && status.eq_ignore_ascii_case("retired") {
+        if let Some(scope) = scope_filter {
+            if unit.scope != scope && unit.scope != "default" {
+                continue;
+            }
+        }
+        if use_governance && exclude_retired && unit.status.eq_ignore_ascii_case("retired") {
             filtered_retired_count += 1;
             continue;
         }
 
-        let mut raw_score = 1.0 / (16.0 + (rank_idx + 1) as f64);
-        let haystack = format!("{page_title} {sec_heading} {body}").to_lowercase();
+        let lex_rank = lexical_ranks.get(uid).copied();
+        let vec_rank = vector_ranks.get(uid).copied();
+        let vec_sim = vector_sims.get(uid).copied().unwrap_or(0.0).max(0.0);
+        let mut raw_score = 0.0_f64;
+        if let Some(rank) = lex_rank {
+            raw_score += 1.0 / (16.0 + rank as f64);
+        }
+        if let Some(rank) = vec_rank {
+            raw_score += 1.05 / (16.0 + rank as f64) + 0.14 * vec_sim;
+        }
+        let channel = match (lex_rank.is_some(), vec_rank.is_some()) {
+            (true, true) => {
+                raw_score += 0.018;
+                "seed_hybrid"
+            }
+            (true, false) => "seed_lexical",
+            (false, true) => "seed_vector",
+            (false, false) => continue,
+        };
+
+        let haystack =
+            format!("{} {} {}", unit.page_title, unit.section_heading, unit.body).to_lowercase();
         let coverage = query_term_coverage(&query_terms, &haystack);
-        raw_score += 0.055 * coverage;
+        raw_score += 0.05 * coverage;
         if !query_terms.is_empty() && (coverage - 1.0).abs() < f64::EPSILON {
             raw_score += 0.025;
         }
-        let title_low = page_title.trim().to_lowercase();
+        let title_low = unit.page_title.trim().to_lowercase();
         if title_low.len() >= 4 && query_lower.contains(&title_low) {
             raw_score += 0.045;
         }
 
-        if use_governance && follow_redirects && redirect_to.is_some() {
-            if let Some(target_page) = resolve_redirect_chain(&page_path, &page_gov, 4) {
+        if use_governance && follow_redirects && unit.redirect_to.is_some() {
+            if let Some(target_page) = resolve_redirect_chain(&unit.page_path, &page_gov, 4) {
                 let target_retired = page_gov
                     .get(&target_page)
                     .is_some_and(|info| info.status.eq_ignore_ascii_case("retired"));
@@ -1044,14 +1346,19 @@ pub fn hybrid_search(
                 }
                 let target_units = load_units_for_page(connection, space_id, &target_page)?;
                 if !target_units.is_empty() {
-                    let pair = (page_path.clone(), target_page.clone());
+                    let pair = (unit.page_path.clone(), target_page.clone());
                     if seen_redirect_pairs.insert(pair) {
                         followed_redirects.push(FollowedRedirect {
-                            from: page_path.clone(),
+                            from: unit.page_path.clone(),
                             to: target_page.clone(),
                         });
                     }
                     for target_unit in target_units {
+                        if let Some(scope) = scope_filter {
+                            if target_unit.scope != scope && target_unit.scope != "default" {
+                                continue;
+                            }
+                        }
                         let (t_mult, _) = okf_governance_multiplier(
                             &target_unit.status,
                             &target_unit.trust_tier,
@@ -1073,7 +1380,7 @@ pub fn hybrid_search(
                                 (
                                     t_score,
                                     "redirect_target".to_string(),
-                                    Some(page_path.clone()),
+                                    Some(unit.page_path.clone()),
                                 ),
                             );
                         }
@@ -1086,10 +1393,10 @@ pub fn hybrid_search(
         let mut score = raw_score;
         if use_governance {
             let (mult, _) = okf_governance_multiplier(
-                &status,
-                &trust_tier,
-                verified,
-                stale_after.as_deref(),
+                &unit.status,
+                &unit.trust_tier,
+                unit.verified,
+                unit.stale_after.as_deref(),
                 &reference_date,
                 exclude_retired,
             );
@@ -1099,9 +1406,9 @@ pub fn hybrid_search(
             score *= mult;
         }
 
-        let update = raw_seed_scores.get(&uid).is_none_or(|prev| score > prev.0);
+        let update = raw_seed_scores.get(uid).is_none_or(|prev| score > prev.0);
         if update {
-            raw_seed_scores.insert(uid, (score, "seed_lexical".to_string(), None));
+            raw_seed_scores.insert(uid.clone(), (score, channel.to_string(), None));
         }
     }
 
@@ -1118,53 +1425,91 @@ pub fn hybrid_search(
     seed_list.truncate(seed_top_k);
     let seed_uid_set: HashSet<String> = seed_list.iter().map(|item| item.1.clone()).collect();
 
-    // 2. Hub-dampened 1-hop / 2-hop link-graph expansion over CoWiki page_links.
+    // 4. Anchor-aware, hub-dampened 1-hop / 2-hop link-graph expansion.
     let mut graph_candidates: HashMap<String, (f64, String, String, Option<String>)> =
         HashMap::new();
     let mut explored_edges: Vec<ExploredEdge> = Vec::new();
 
-    if max_hops > 0 && !seed_list.is_empty() {
+    if use_graph_expansion && max_hops > 0 && !seed_list.is_empty() {
         let link_graph = build_resolved_link_graph(connection, space_id, root)?;
-        let (outgoing_map, backlink_map) = (link_graph.outgoing, link_graph.backlinks);
         let (heading_df, total_pages) = load_heading_stats(connection, space_id)?;
         let seed_pages = load_unit_pages(connection, space_id, &seed_uid_set)?;
 
-        let mut frontier: Vec<(String, f64, usize)> = Vec::new();
+        struct FrontierEntry {
+            page_path: String,
+            source_unit_id: Option<String>,
+            parent_score: f64,
+            hop: usize,
+        }
+
+        let mut frontier: Vec<FrontierEntry> = Vec::new();
         let mut expanded_pages: HashSet<String> = HashSet::new();
         for (score, uid, _, _) in seed_list.iter().take(5) {
             if let Some(page) = seed_pages.get(uid) {
                 if expanded_pages.insert(page.clone()) {
-                    frontier.push((page.clone(), *score, 1));
+                    frontier.push(FrontierEntry {
+                        page_path: page.clone(),
+                        source_unit_id: Some(uid.clone()),
+                        parent_score: *score,
+                        hop: 1,
+                    });
                 }
             }
         }
 
         for hop in 1..=max_hops {
-            let current_batch: Vec<(String, f64)> = frontier
+            let current_batch: Vec<(String, Option<String>, f64)> = frontier
                 .iter()
-                .filter(|item| item.2 == hop)
-                .map(|item| (item.0.clone(), item.1))
+                .filter(|item| item.hop == hop)
+                .map(|item| {
+                    (
+                        item.page_path.clone(),
+                        item.source_unit_id.clone(),
+                        item.parent_score,
+                    )
+                })
                 .collect();
             if current_batch.is_empty() {
                 break;
             }
-            let mut next_frontier: Vec<(String, f64, usize)> = Vec::new();
-            for (src_page, parent_score) in current_batch {
-                let mut neighbors: Vec<(String, f64, &'static str)> = Vec::new();
-                if let Some(outs) = outgoing_map.get(&src_page) {
+            let mut next_frontier: Vec<(String, f64)> = Vec::new();
+            for (src_page, src_unit_opt, parent_score) in current_batch {
+                // Target page -> (edge_weight, direction, optional_anchor)
+                let mut neighbors: Vec<(String, f64, &'static str, Option<String>)> = Vec::new();
+                let mut seen_targets: HashSet<String> = HashSet::new();
+
+                // Prefer section-level outgoing links (carrying `#anchor` hints) when available.
+                if let Some(src_uid) = src_unit_opt.as_deref() {
+                    if let Some(unit_outs) = link_graph.unit_outgoing.get(src_uid) {
+                        for (target, anchor) in unit_outs {
+                            if seen_targets.insert(target.clone()) {
+                                neighbors.push((target.clone(), 1.05, "outgoing", anchor.clone()));
+                            }
+                        }
+                    }
+                }
+                if let Some(outs) = link_graph.outgoing.get(&src_page) {
                     for target in outs {
-                        neighbors.push((target.clone(), 1.0, "outgoing"));
+                        if seen_targets.insert(target.clone()) {
+                            let anchor = link_graph
+                                .page_anchors
+                                .get(&(src_page.clone(), target.clone()))
+                                .cloned();
+                            neighbors.push((target.clone(), 1.0, "outgoing", anchor));
+                        }
                     }
                 }
                 if include_backlinks && hop == 1 {
-                    if let Some(backs) = backlink_map.get(&src_page) {
+                    if let Some(backs) = link_graph.backlinks.get(&src_page) {
                         for source in backs.iter().take(18) {
-                            neighbors.push((source.clone(), 0.88, "backlink"));
+                            if seen_targets.insert(source.clone()) {
+                                neighbors.push((source.clone(), 0.88, "backlink", None));
+                            }
                         }
                     }
                 }
 
-                for (raw_target, edge_weight, direction) in neighbors {
+                for (raw_target, edge_weight, direction, target_anchor) in neighbors {
                     if is_reserved_nav_doc(&raw_target) || raw_target == src_page {
                         continue;
                     }
@@ -1206,7 +1551,8 @@ pub fn hybrid_search(
                         });
                     }
 
-                    let out_deg = outgoing_map
+                    let out_deg = link_graph
+                        .outgoing
                         .get(&target_page)
                         .map(|list| list.len())
                         .unwrap_or(0);
@@ -1217,6 +1563,11 @@ pub fn hybrid_search(
                     for unit in target_units {
                         if seed_uid_set.contains(&unit.unit_id) {
                             continue;
+                        }
+                        if let Some(scope) = scope_filter {
+                            if unit.scope != scope && unit.scope != "default" {
+                                continue;
+                            }
                         }
                         if use_governance
                             && exclude_retired
@@ -1229,6 +1580,18 @@ pub fn hybrid_search(
                             format!("{} {} {}", unit.page_title, unit.section_heading, unit.body)
                                 .to_lowercase();
                         let lex_overlap = query_term_coverage(&query_terms, &haystack);
+                        let dense_sim = vector_sims
+                            .get(&unit.unit_id)
+                            .copied()
+                            .unwrap_or(0.0)
+                            .max(0.0);
+                        let anchor_bonus = if target_anchor.as_deref().is_some_and(|anchor| {
+                            heading_matches_anchor(&unit.section_heading, anchor)
+                        }) {
+                            0.055
+                        } else {
+                            0.0
+                        };
                         let h_df = heading_df
                             .get(&unit.section_heading.to_lowercase())
                             .copied()
@@ -1241,7 +1604,9 @@ pub fn hybrid_search(
                             * hop_decay
                             * hub_damp
                             * (0.55 + 0.45 * heading_specificity.clamp(0.0, 1.0))
-                            + 0.10 * lex_overlap;
+                            + 0.14 * dense_sim
+                            + 0.08 * lex_overlap
+                            + anchor_bonus;
                         if use_governance {
                             let (mult, _) = okf_governance_multiplier(
                                 &unit.status,
@@ -1280,16 +1645,23 @@ pub fn hybrid_search(
                         && best_page_score > 0.0
                         && expanded_pages.insert(target_page.clone())
                     {
-                        next_frontier.push((target_page, best_page_score, hop + 1));
+                        next_frontier.push((target_page, best_page_score));
                     }
                 }
             }
             next_frontier.sort_by(|left, right| right.1.total_cmp(&left.1));
-            frontier.extend(next_frontier.into_iter().take(4));
+            for (page_path, parent_score) in next_frontier.into_iter().take(4) {
+                frontier.push(FrontierEntry {
+                    page_path,
+                    source_unit_id: None,
+                    parent_score,
+                    hop: hop + 1,
+                });
+            }
         }
     }
 
-    // 3. Budgeted diversity-aware context packing.
+    // 5. Budgeted diversity-aware context packing.
     struct PoolCandidate {
         score: f64,
         unit_id: String,
@@ -1346,6 +1718,11 @@ pub fn hybrid_search(
             let Some(unit) = units_by_id.get(&candidate.unit_id) else {
                 continue;
             };
+            if let Some(scope) = scope_filter {
+                if unit.scope != scope && unit.scope != "default" {
+                    continue;
+                }
+            }
             if use_governance && exclude_retired && unit.status.eq_ignore_ascii_case("retired") {
                 continue;
             }
@@ -1420,11 +1797,35 @@ pub fn hybrid_search(
         } else {
             "ok".to_string()
         },
+        latency_ms: round_ms(started.elapsed().as_secs_f64() * 1000.0),
+        embedding_model: model_name,
         filtered_retired_count,
         followed_redirects,
         explored_edges,
         evidence: packed,
     })
+}
+
+fn round_ms(ms: f64) -> f64 {
+    (ms * 1000.0).round() / 1000.0
+}
+
+fn heading_matches_anchor(heading: &str, anchor: &str) -> bool {
+    let normalize = |value: &str| -> String {
+        value
+            .chars()
+            .filter_map(|c| {
+                if c.is_alphanumeric() {
+                    Some(c.to_ascii_lowercase())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+    let h = normalize(heading);
+    let a = normalize(anchor);
+    !a.is_empty() && (h == a || h.contains(&a) || a.contains(&h))
 }
 
 #[derive(Debug, Clone)]
@@ -1446,6 +1847,7 @@ struct StoredUnit {
     verified: bool,
     stale_after: Option<String>,
     redirect_to: Option<String>,
+    scope: String,
 }
 
 fn load_units_for_page(
@@ -1458,7 +1860,7 @@ fn load_units_for_page(
             "SELECT unit_id, page_path, page_title, section_heading, heading_path,
                     line_start, line_end, body, token_count, content_sha256,
                     sources_json, doc_type, status, trust_tier, verified,
-                    stale_after, redirect_to
+                    stale_after, redirect_to, scope
              FROM knowledge_units
              WHERE space_id = ?1 AND page_path = ?2
              ORDER BY line_start ASC",
@@ -1485,7 +1887,7 @@ fn load_units_by_ids(
             "SELECT unit_id, page_path, page_title, section_heading, heading_path,
                     line_start, line_end, body, token_count, content_sha256,
                     sources_json, doc_type, status, trust_tier, verified,
-                    stale_after, redirect_to
+                    stale_after, redirect_to, scope
              FROM knowledge_units
              WHERE space_id = ?1 AND unit_id = ?2",
         )
@@ -1517,6 +1919,7 @@ fn map_stored_unit(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredUnit> {
         verified: row.get::<_, i64>(14)? != 0,
         stale_after: row.get(15)?,
         redirect_to: row.get(16)?,
+        scope: row.get(17)?,
     })
 }
 
@@ -1563,6 +1966,8 @@ fn load_heading_stats(
 struct ResolvedLinkGraph {
     outgoing: HashMap<String, Vec<String>>,
     backlinks: HashMap<String, Vec<String>>,
+    unit_outgoing: HashMap<String, Vec<(String, Option<String>)>>,
+    page_anchors: HashMap<(String, String), String>,
 }
 
 fn build_resolved_link_graph(
@@ -1573,6 +1978,9 @@ fn build_resolved_link_graph(
     let files = FileIndex::scan(root)?;
     let mut outgoing: HashMap<String, Vec<String>> = HashMap::new();
     let mut backlinks: HashMap<String, Vec<String>> = HashMap::new();
+    let mut unit_outgoing: HashMap<String, Vec<(String, Option<String>)>> = HashMap::new();
+    let mut page_anchors: HashMap<(String, String), String> = HashMap::new();
+
     let mut stmt = connection
         .prepare("SELECT source_path, target, kind FROM page_links WHERE space_id = ?1")
         .map_err(|e| e.to_string())?;
@@ -1608,9 +2016,57 @@ fn build_resolved_link_graph(
             }
         }
     }
+
+    let mut unit_stmt = connection
+        .prepare(
+            "SELECT source_unit_id, source_path, target, target_anchor, kind
+             FROM unit_links WHERE space_id = ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let unit_rows = unit_stmt
+        .query_map([space_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    for row in unit_rows {
+        let (unit_id, source, target, anchor, kind) = row.map_err(|e| e.to_string())?;
+        let resolved = if kind == LinkKind::Wiki as i64 {
+            files.resolve_wikilink(&target, &source)
+        } else if files.contains(&target) {
+            Some(target)
+        } else {
+            None
+        };
+        if let Some(resolved_target) = resolved {
+            if resolved_target != source {
+                if let Some(ref anchor_text) = anchor {
+                    page_anchors
+                        .entry((source.clone(), resolved_target.clone()))
+                        .or_insert_with(|| anchor_text.clone());
+                }
+                let entry = unit_outgoing.entry(unit_id).or_default();
+                if !entry
+                    .iter()
+                    .any(|(existing, _)| existing == &resolved_target)
+                {
+                    entry.push((resolved_target, anchor));
+                }
+            }
+        }
+    }
+
     Ok(ResolvedLinkGraph {
         outgoing,
         backlinks,
+        unit_outgoing,
+        page_anchors,
     })
 }
 
@@ -2145,14 +2601,31 @@ pub enum LinkKind {
     Wiki = 1,
 }
 
-pub(crate) fn extract_links(body: &str, source_path: &str) -> Vec<(String, LinkKind)> {
-    let mut links = Vec::new();
+pub fn extract_links(body: &str, source_path: &str) -> Vec<(String, LinkKind)> {
+    extract_links_with_anchors(body, source_path)
+        .into_iter()
+        .map(|(target, _, kind)| (target, kind))
+        .fold(Vec::new(), |mut acc, item| {
+            if !acc.contains(&item) {
+                acc.push(item);
+            }
+            acc
+        })
+}
+
+pub fn extract_links_with_anchors(
+    body: &str,
+    source_path: &str,
+) -> Vec<(String, Option<String>, LinkKind)> {
+    let mut links: Vec<(String, Option<String>, LinkKind)> = Vec::new();
     let excluded = code_ranges(body);
-    let wikilinks = extract_wikilinks(body, &excluded);
-    for (_, target) in &wikilinks {
-        let link = (target.clone(), LinkKind::Wiki);
-        if !links.contains(&link) {
-            links.push(link);
+    let wikilinks = extract_wikilinks_with_anchors(body, &excluded);
+    for (_, target, anchor) in &wikilinks {
+        if !links
+            .iter()
+            .any(|(existing, _, kind)| existing == target && *kind == LinkKind::Wiki)
+        {
+            links.push((target.clone(), anchor.clone(), LinkKind::Wiki));
         }
     }
 
@@ -2165,12 +2638,14 @@ pub(crate) fn extract_links(body: &str, source_path: &str) -> Vec<(String, LinkK
                 if code_block_depth == 0
                     && !wikilinks
                         .iter()
-                        .any(|(wikilink, _)| ranges_overlap(wikilink, &range)) =>
+                        .any(|(wikilink, _, _)| ranges_overlap(wikilink, &range)) =>
             {
                 if let Some(target) = resolve_markdown_target(source_path, dest_url.as_ref()) {
-                    let link = (target, LinkKind::Markdown);
-                    if !links.contains(&link) {
-                        links.push(link);
+                    let anchor = extract_link_anchor(dest_url.as_ref());
+                    if !links.iter().any(|(existing, _, kind)| {
+                        existing == &target && *kind == LinkKind::Markdown
+                    }) {
+                        links.push((target, anchor, LinkKind::Markdown));
                     }
                 }
             }
@@ -2180,7 +2655,7 @@ pub(crate) fn extract_links(body: &str, source_path: &str) -> Vec<(String, LinkK
     links
 }
 
-pub(crate) fn code_ranges(body: &str) -> Vec<Range<usize>> {
+pub fn code_ranges(body: &str) -> Vec<Range<usize>> {
     let mut ranges = Vec::new();
     let mut code_block_depth = 0;
     for (event, range) in Parser::new_ext(body, Options::all()).into_offset_iter() {
@@ -2205,7 +2680,28 @@ fn ranges_overlap(left: &Range<usize>, right: &Range<usize>) -> bool {
     left.start < right.end && right.start < left.end
 }
 
-fn extract_wikilinks(text: &str, excluded: &[Range<usize>]) -> Vec<(Range<usize>, String)> {
+fn extract_link_anchor(raw_target: &str) -> Option<String> {
+    let (_, after_hash) = raw_target.split_once('#')?;
+    let clean = after_hash.split('?').next().unwrap_or(after_hash).trim();
+    if clean.is_empty() {
+        return None;
+    }
+    let decoded = percent_decode_str(clean)
+        .decode_utf8()
+        .map(|s| s.into_owned())
+        .unwrap_or_else(|_| clean.to_string());
+    let trimmed = decoded.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn extract_wikilinks_with_anchors(
+    text: &str,
+    excluded: &[Range<usize>],
+) -> Vec<(Range<usize>, String, Option<String>)> {
     let mut links = Vec::new();
     let mut cursor = 0;
     while let Some(relative_start) = text[cursor..].find("[[") {
@@ -2225,7 +2721,8 @@ fn extract_wikilinks(text: &str, excluded: &[Range<usize>]) -> Vec<(Range<usize>
                 .unwrap_or_default()
                 .trim_end_matches('\\');
             if let Some(target) = resolve_wikilink_target(raw_target) {
-                links.push((span.clone(), target));
+                let anchor = extract_link_anchor(raw_target);
+                links.push((span.clone(), target, anchor));
             }
         }
         cursor = span.end;
@@ -2278,7 +2775,7 @@ fn is_diagnostic_target(target: &str) -> bool {
     parts.iter().all(|part| !part.starts_with('.'))
 }
 
-pub(crate) fn resolve_markdown_target(source_path: &str, target: &str) -> Option<String> {
+pub fn resolve_markdown_target(source_path: &str, target: &str) -> Option<String> {
     let target = local_link_target(target)?;
     let target = percent_decode_str(target).decode_utf8().ok()?;
     let target = target.as_ref();
@@ -2308,7 +2805,7 @@ pub(crate) fn resolve_markdown_target(source_path: &str, target: &str) -> Option
     Some(components.join("/"))
 }
 
-pub(crate) fn resolve_wikilink_target(target: &str) -> Option<String> {
+pub fn resolve_wikilink_target(target: &str) -> Option<String> {
     let target = local_link_target(target)?;
     let target = percent_decode_str(target).decode_utf8().ok()?;
     let mut components = Vec::new();
@@ -2700,5 +3197,79 @@ mod tests {
         let mut db = open_memory_db();
         index_paths(&mut db, "space-1", &root, &[PathBuf::from("linked.md")]).unwrap();
         assert!(search(&db, "space-1", "Classified", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn dense_vector_embedding_cache_and_anchor_unit_links_work_end_to_end() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("alpha.md"),
+            "---\ntype: Guide\ntitle: Gateway Guide\nscope: prod\n---\n\n# Gateway Guide\n\n## Intro\n\nSee [Rotation Policy](beta.md#rotation-cadence) for key updates.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("beta.md"),
+            "---\ntype: Policy\ntitle: Security Policy\nscope: prod\n---\n\n# Security Policy\n\n## General Notes\n\nMiscellaneous background text.\n\n## Rotation Cadence\n\nHardware signing keys rotate every 90 days.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("staging.md"),
+            "---\ntype: Guide\ntitle: Staging Gateway\nscope: staging\n---\n\n# Staging Gateway\n\nStaging-only gateway testing notes.\n",
+        )
+        .unwrap();
+
+        let mut db = open_memory_db();
+        rebuild_space(&mut db, "space-1", root).unwrap();
+
+        let stats = index_stats(&db, "space-1").unwrap();
+        assert_eq!(stats.schema_version, SCHEMA_VERSION);
+        assert_eq!(stats.indexed_pages, 3);
+        assert!(stats.knowledge_units >= 4);
+        assert!(stats.unit_links >= 1);
+        assert!(stats.cached_embeddings >= 4);
+        assert_eq!(stats.embedding_model, embeddings::LOCAL_EMBEDDING_MODEL);
+
+        // Vector-only mode should still retrieve morphologically related content.
+        let vec_only = hybrid_search(
+            &db,
+            "space-1",
+            root,
+            "rotating hardware keys cadence",
+            &HybridSearchOptions {
+                use_lexical: Some(false),
+                use_vector: Some(true),
+                use_graph_expansion: Some(false),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(vec_only.status, "ok");
+        assert!(vec_only
+            .evidence
+            .iter()
+            .any(|item| item.page_path == "beta.md" && item.retrieval_channel == "seed_vector"));
+
+        // Scope filter excludes staging-only documents while retaining prod docs.
+        let prod_only = hybrid_search(
+            &db,
+            "space-1",
+            root,
+            "Gateway",
+            &HybridSearchOptions {
+                scope_filter: Some("prod".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(prod_only
+            .evidence
+            .iter()
+            .all(|item| item.page_path != "staging.md"));
+        // Anchor-targeted section on beta.md should surface via unit_links.
+        assert!(prod_only
+            .evidence
+            .iter()
+            .any(|item| item.page_path == "beta.md" && item.section_heading == "Rotation Cadence"));
     }
 }
