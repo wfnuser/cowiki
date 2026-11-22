@@ -248,6 +248,8 @@ impl LocalEngine {
             &merged_tree,
             &mut before_write,
         )?;
+        let agent_touched = changed_paths(&repo, Some(&base_tree), &result_tree)?;
+        apply_okf_trust_reset_on_agent_paths(&space.local_path, &agent_touched)?;
         repo.reference(
             &merged_ref(change_id),
             result_id,
@@ -559,6 +561,51 @@ fn changed_paths(
         }
     }
     Ok(paths)
+}
+
+/// Enforce OKF v0.3 Agent-Edit Trust Reset on any concept page touched by an
+/// Agent Change that still carries human verification (`verified: true` or
+/// `trust_tier: human_verified`). Pages without verification metadata are left
+/// untouched byte-for-byte.
+fn apply_okf_trust_reset_on_agent_paths(
+    space_root: &Path,
+    agent_paths: &BTreeSet<PathBuf>,
+) -> Result<(), String> {
+    for relative in agent_paths {
+        if crate::okf::DocumentKind::from_path(relative) != crate::okf::DocumentKind::Concept {
+            continue;
+        }
+        if relative
+            .components()
+            .any(|component| component.as_os_str().to_string_lossy().starts_with('.'))
+        {
+            continue;
+        }
+        let target = space_root.join(relative);
+        let is_regular = std::fs::symlink_metadata(&target)
+            .map(|meta| meta.file_type().is_file())
+            .unwrap_or(false);
+        if !is_regular {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&target) else {
+            continue;
+        };
+        let metadata = crate::okf::parse_metadata(&content);
+        if !metadata.is_human_verified() {
+            continue;
+        }
+        let fallback_title = relative
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let reset = crate::okf::apply_agent_edit_trust_reset(&content, &fallback_title, &[], None)?;
+        if reset != content {
+            std::fs::write(&target, reset).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 fn warn_cleanup_failure(change_id: &str, error: &str) {

@@ -50,9 +50,11 @@ test('embedded MCP remains retrieval-only', () => {
   assert.deepEqual(tools, [
     'get_space_context',
     'search_pages',
+    'hybrid_search',
     'get_page',
     'list_backlinks',
     'list_broken_links',
+    'validate_okf',
   ]);
 });
 

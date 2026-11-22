@@ -21,7 +21,8 @@ use crate::web_source::{self, WebSourceSnapshot};
 
 mod agent_changes;
 mod comments;
-pub use crate::knowledge_index::BrokenLink;
+pub use crate::knowledge_index::{BrokenLink, HybridSearchOptions, HybridSearchResult};
+pub use crate::okf::OkfValidationReport;
 pub use agent_changes::AgentChange;
 pub use comments::{CommentMember, PageComment, PageCommentsResponse};
 
@@ -1316,6 +1317,32 @@ impl LocalEngine {
         knowledge_index::broken_links(&db, &space.id, &space.local_path)
     }
 
+    pub fn hybrid_search(
+        &self,
+        space_slug: &str,
+        query: &str,
+        options: &HybridSearchOptions,
+    ) -> Result<HybridSearchResult, String> {
+        let space = self.find_space(space_slug)?;
+        let mut db = self
+            .db
+            .lock()
+            .map_err(|_| "local database lock poisoned".to_string())?;
+        self.refresh_search_index(&mut db, &space)?;
+        self.prepare_backlinks(&mut db, &space.id)?;
+        knowledge_index::hybrid_search(&db, &space.id, &space.local_path, query, options)
+    }
+
+    pub fn validate_okf(
+        &self,
+        space_slug: &str,
+        as_of: Option<&str>,
+        check_links: bool,
+    ) -> Result<OkfValidationReport, String> {
+        let space = self.find_space(space_slug)?;
+        okf::validate_bundle(&space.local_path, as_of, check_links)
+    }
+
     pub fn indexed_page_count(&self, space_slug: &str) -> Result<usize, String> {
         let space = self.find_space(space_slug)?;
         let mut db = self
@@ -2384,11 +2411,12 @@ fn commit_okf_migration(repo: &Repository) -> Result<(), String> {
     let tree = repo.find_tree(tree_id).map_err(|error| error.to_string())?;
     let signature =
         Signature::now("CoWiki Migration", "migration@cowiki.app").map_err(|e| e.to_string())?;
+    let commit_message = format!("Migrate Space to OKF v{}", okf::OKF_VERSION);
     repo.commit(
         Some("HEAD"),
         &signature,
         &signature,
-        "Migrate Space to OKF v0.1",
+        &commit_message,
         &tree,
         &[&parent],
     )
@@ -5760,7 +5788,7 @@ mod tests {
         let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
         let folder = temp.path().join("future");
         std::fs::create_dir_all(&folder).unwrap();
-        let index = "---\nokf_version: \"0.2\"\n---\n\n# Future\n";
+        let index = "---\nokf_version: \"0.4\"\n---\n\n# Future\n";
         let page = "---\ntype: Future\n---\n\nUnchanged.\n";
         std::fs::write(folder.join("index.md"), index).unwrap();
         std::fs::write(folder.join("page.md"), page).unwrap();
@@ -6344,5 +6372,93 @@ mod tests {
             before,
             "the original vault must not change"
         );
+    }
+
+    #[test]
+    fn merging_agent_change_applies_okf_v03_trust_reset_on_human_verified_pages() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(
+            folder.join("policy.md"),
+            "---\ntype: Policy\ntitle: Security Policy\nverified: true\ntrust_tier: human_verified\ngenerated: false\nowner: security\n---\n\n# Security Policy\n\nOriginal human-verified guidance.\n",
+        )
+        .unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+
+        let change = engine
+            .create_agent_change_with_identity(&space.slug, "Update security policy", "Codex")
+            .unwrap();
+        std::fs::write(
+            change.worktree_path.join("policy.md"),
+            "---\ntype: Policy\ntitle: Security Policy\nverified: true\ntrust_tier: human_verified\ngenerated: false\nowner: security\n---\n\n# Security Policy\n\nAgent-revised guidance.\n",
+        )
+        .unwrap();
+
+        engine.merge_agent_change(&space.slug, &change.id).unwrap();
+
+        let merged_body = std::fs::read_to_string(folder.join("policy.md")).unwrap();
+        let meta = crate::okf::parse_metadata(&merged_body);
+        assert!(
+            !meta.verified,
+            "agent edit must demote verified: true -> false"
+        );
+        assert_eq!(meta.trust_tier, "agent_draft");
+        assert!(meta.generated);
+        assert!(merged_body.contains("owner: security"));
+        assert!(merged_body.contains("Agent-revised guidance."));
+    }
+
+    #[test]
+    fn engine_hybrid_search_and_validate_okf_work_across_multi_hop_space() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("kb");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(
+            folder.join("service.md"),
+            "---\ntype: Architecture\ntitle: Billing Service\nstatus: active\nverified: true\n---\n\n# Billing Service\n\nCharges run through [Ledger Pipeline](ledger.md).\n",
+        )
+        .unwrap();
+        std::fs::write(
+            folder.join("ledger.md"),
+            "---\ntype: Architecture\ntitle: Ledger Pipeline\nstatus: active\n---\n\n# Ledger Pipeline\n\nIdempotency keys expire after 24 hours per [[Retention Policy]].\n",
+        )
+        .unwrap();
+        std::fs::write(
+            folder.join("Retention Policy.md"),
+            "---\ntype: Policy\ntitle: Retention Policy\nstatus: active\nverified: true\nstale_after: \"2030-01-01\"\n---\n\n# Retention Policy\n\nAudit records remain immutable for seven years.\n",
+        )
+        .unwrap();
+        let space = engine.add_space("KB", "kb", &folder).unwrap();
+
+        let report = engine
+            .validate_okf(&space.slug, Some("2026-11-22"), true)
+            .unwrap();
+        assert!(report.valid, "expected valid bundle: {report:?}");
+        assert_eq!(report.okf_version.as_deref(), Some("0.3"));
+
+        let bundle = engine
+            .hybrid_search(
+                &space.slug,
+                "How long does Billing Service retain audit records?",
+                &super::HybridSearchOptions {
+                    token_budget: Some(500),
+                    max_hops: Some(2),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(bundle.status, "ok");
+        assert!(bundle.tokens_used <= 500);
+        let paths: Vec<&str> = bundle
+            .evidence
+            .iter()
+            .map(|item| item.page_path.as_str())
+            .collect();
+        assert!(paths.contains(&"service.md"));
+        assert!(paths.contains(&"ledger.md"));
+        assert!(paths.contains(&"Retention Policy.md"));
     }
 }

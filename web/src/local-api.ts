@@ -160,12 +160,92 @@ export function discardAgentChange(spaceSlug: string, changeId: string): Promise
   return invoke('local_discard_agent_change', { spaceSlug, changeId });
 }
 
+export interface HybridSearchOptions {
+  tokenBudget?: number;
+  maxHops?: number;
+  seedTopK?: number;
+  includeBacklinks?: boolean;
+  excludeRetired?: boolean;
+  followRedirects?: boolean;
+  useOkfGovernance?: boolean;
+  asOfDate?: string;
+}
+
+export interface HybridEvidenceItem {
+  unitId: string;
+  pagePath: string;
+  slug: string;
+  pageTitle: string;
+  sectionHeading: string;
+  headingPath: string;
+  citation: string;
+  text: string;
+  tokenCount: number;
+  score: number;
+  retrievalChannel: string;
+  viaLinkFrom: string | null;
+  docType: string;
+  status: string;
+  trustTier: string;
+  verified: boolean;
+  staleAfter: string | null;
+  isStale: boolean;
+  redirectTo: string | null;
+  redirectedFrom: string | null;
+  sources: string[];
+}
+
+export interface HybridSearchResult {
+  query: string;
+  tokenBudget: number;
+  tokensUsed: number;
+  status: string;
+  filteredRetiredCount: number;
+  followedRedirects: Array<{ from: string; to: string }>;
+  exploredEdges: Array<{ fromPage: string; toPage: string; direction: string; hop: number }>;
+  evidence: HybridEvidenceItem[];
+}
+
+export interface OkfValidationIssue {
+  code: string;
+  severity: 'error' | 'warning' | string;
+  rfcLevel: 'MUST' | 'SHOULD' | string;
+  path: string;
+  message: string;
+}
+
+export interface OkfValidationReport {
+  okfVersion: string | null;
+  valid: boolean;
+  checkedFiles: number;
+  errorCount: number;
+  warningCount: number;
+  summaryByCode: Record<string, number>;
+  issues: OkfValidationIssue[];
+}
+
 export function search(spaceSlug: string, query: string, limit: number): Promise<SearchResponse> {
   return invoke('local_search', { spaceSlug, query, limit });
 }
 
+export function hybridSearch(
+  spaceSlug: string,
+  query: string,
+  options?: HybridSearchOptions,
+): Promise<HybridSearchResult> {
+  return invoke('local_hybrid_search', { spaceSlug, query, options });
+}
+
 export function listBrokenLinks(spaceSlug: string): Promise<BrokenLink[]> {
   return invoke('local_list_broken_links', { spaceSlug });
+}
+
+export function validateOkf(
+  spaceSlug: string,
+  asOf?: string,
+  checkLinks = true,
+): Promise<OkfValidationReport> {
+  return invoke('local_validate_okf', { spaceSlug, asOf, checkLinks });
 }
 
 /** Resolves to the number of pages whose links were updated. */

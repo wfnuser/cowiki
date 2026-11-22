@@ -1,19 +1,329 @@
-//! Open Knowledge Format (OKF) v0.1 conventions for a local desktop Space.
+//! Open Knowledge Format (OKF) v0.3 conventions for a local desktop Space
+//! (backward-compatible with OKF v0.1 and v0.2 bundles).
 //!
-//! Markdown and Git remain authoritative. This module only normalizes files
-//! created through CoWiki and maintains the progressive-disclosure indexes.
+//! Markdown and Git remain authoritative. This module normalizes files created
+//! through CoWiki, parses OKF v0.3 governance/trust metadata, validates bundle
+//! conformance, and maintains progressive-disclosure indexes.
 
+use serde::Serialize;
 use serde_yaml::{Mapping, Value};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
-pub const OKF_VERSION: &str = "0.1";
+pub const OKF_VERSION: &str = "0.3";
+pub const SUPPORTED_OKF_VERSIONS: &[&str] = &["0.1", "0.2", "0.3"];
 pub const RAW_SOURCES_DIR: &str = ".cowiki/sources";
+pub const VALID_STATUSES: &[&str] = &["active", "draft", "deprecated", "retired"];
+pub const VALID_TRUST_TIERS: &[&str] = &[
+    "human_verified",
+    "human_authored",
+    "agent_draft",
+    "unverified",
+];
 const GENERATED_START: &str = "<!-- cowiki:generated-index:start -->";
 const GENERATED_END: &str = "<!-- cowiki:generated-index:end -->";
 const LEGACY_ROOT_METADATA_HEADING: &str = "## Legacy root index metadata";
+
+pub fn is_supported_version(version: &str) -> bool {
+    SUPPORTED_OKF_VERSIONS.contains(&version.trim())
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OkfMetadata {
+    pub doc_type: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub tags: Vec<String>,
+    pub aliases: Vec<String>,
+    pub sources: Vec<String>,
+    pub status: String,
+    pub stale_after: Option<String>,
+    pub trust_tier: String,
+    pub verified: bool,
+    pub generated: bool,
+    pub redirect_to: Option<String>,
+    pub updated_at: Option<String>,
+    pub scope: String,
+    pub version: String,
+}
+
+impl Default for OkfMetadata {
+    fn default() -> Self {
+        Self {
+            doc_type: "Note".to_string(),
+            title: None,
+            description: None,
+            tags: Vec::new(),
+            aliases: Vec::new(),
+            sources: Vec::new(),
+            status: "active".to_string(),
+            stale_after: None,
+            trust_tier: "unverified".to_string(),
+            verified: false,
+            generated: false,
+            redirect_to: None,
+            updated_at: None,
+            scope: "default".to_string(),
+            version: "v1".to_string(),
+        }
+    }
+}
+
+impl OkfMetadata {
+    pub fn is_human_verified(&self) -> bool {
+        self.verified || self.trust_tier.eq_ignore_ascii_case("human_verified")
+    }
+
+    pub fn is_retired(&self) -> bool {
+        self.status.eq_ignore_ascii_case("retired")
+    }
+
+    pub fn is_deprecated(&self) -> bool {
+        self.status.eq_ignore_ascii_case("deprecated")
+    }
+
+    pub fn is_stale_as_of(&self, as_of: Option<&str>) -> bool {
+        let Some(stale_after) = self.stale_after.as_deref() else {
+            return false;
+        };
+        is_iso_date_expired(stale_after, as_of)
+    }
+
+    pub fn governance_multiplier(&self, as_of: Option<&str>, exclude_retired: bool) -> (f64, bool) {
+        let is_stale = self.is_stale_as_of(as_of);
+        if self.is_retired() {
+            return (if exclude_retired { 0.0 } else { 0.25 }, is_stale);
+        }
+        let mut mult = 1.0_f64;
+        if self.is_deprecated() {
+            mult *= 0.42;
+        } else if self.status.eq_ignore_ascii_case("draft") {
+            mult *= 0.90;
+        }
+        if self.is_human_verified() {
+            mult *= 1.08;
+        } else if self.trust_tier.eq_ignore_ascii_case("agent_draft") {
+            mult *= 0.95;
+        }
+        if is_stale {
+            mult *= 0.65;
+        }
+        (mult, is_stale)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OkfValidationIssue {
+    pub code: String,
+    pub severity: String,
+    pub rfc_level: String,
+    pub path: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OkfValidationReport {
+    pub okf_version: Option<String>,
+    pub valid: bool,
+    pub checked_files: usize,
+    pub error_count: usize,
+    pub warning_count: usize,
+    pub summary_by_code: BTreeMap<String, usize>,
+    pub issues: Vec<OkfValidationIssue>,
+}
+
+pub fn utc_today_iso() -> String {
+    time::OffsetDateTime::now_utc().date().to_string()
+}
+
+pub(crate) fn is_iso_date_expired(stale_after: &str, as_of: Option<&str>) -> bool {
+    let stale_after = stale_after.trim();
+    if !valid_iso_date(stale_after) {
+        return false;
+    }
+    let reference = as_of
+        .map(str::trim)
+        .filter(|value| valid_iso_date(value))
+        .map(str::to_string)
+        .unwrap_or_else(utc_today_iso);
+    stale_after < reference.as_str()
+}
+
+pub fn parse_metadata(content: &str) -> OkfMetadata {
+    let (frontmatter, body) = split_frontmatter(content).unwrap_or((None, content));
+    let mapping = frontmatter.and_then(|raw| serde_yaml::from_str::<Mapping>(raw).ok());
+    let string_field = |key: &str| -> Option<String> {
+        mapping
+            .as_ref()
+            .and_then(|map| map.get(Value::String(key.into())))
+            .and_then(yaml_scalar_to_string)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    let list_field = |key: &str| -> Vec<String> {
+        mapping
+            .as_ref()
+            .and_then(|map| map.get(Value::String(key.into())))
+            .map(yaml_to_string_list)
+            .unwrap_or_default()
+    };
+    let bool_field = |key: &str| -> Option<bool> {
+        mapping
+            .as_ref()
+            .and_then(|map| map.get(Value::String(key.into())))
+            .and_then(yaml_to_bool)
+    };
+    let heading = body
+        .lines()
+        .find_map(|line| line.strip_prefix("# ").map(str::trim))
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    let verified = bool_field("verified").unwrap_or(false);
+    let trust_tier = string_field("trust_tier")
+        .map(|value| value.to_lowercase())
+        .unwrap_or_else(|| {
+            if verified {
+                "human_verified".to_string()
+            } else {
+                "unverified".to_string()
+            }
+        });
+    let generated = bool_field("generated").unwrap_or_else(|| trust_tier == "agent_draft");
+    let status = string_field("status")
+        .map(|value| value.to_lowercase())
+        .unwrap_or_else(|| "active".to_string());
+
+    OkfMetadata {
+        doc_type: string_field("type").unwrap_or_else(|| "Note".to_string()),
+        title: string_field("title").or(heading),
+        description: string_field("description").or_else(|| string_field("summary")),
+        tags: list_field("tags"),
+        aliases: list_field("aliases"),
+        sources: list_field("sources"),
+        status,
+        stale_after: string_field("stale_after"),
+        trust_tier,
+        verified,
+        generated,
+        redirect_to: string_field("redirect_to"),
+        updated_at: string_field("updated_at"),
+        scope: string_field("scope").unwrap_or_else(|| "default".to_string()),
+        version: string_field("version").unwrap_or_else(|| "v1".to_string()),
+    }
+}
+
+/// Apply OKF v0.3 Agent-Edit Trust Reset to a Markdown document while
+/// preserving all unknown user frontmatter keys and body content.
+///
+/// Any edit produced by an AI agent demotes `verified: true -> false`,
+/// sets `trust_tier: agent_draft` and `generated: true`, updates `updated_at`,
+/// and merges any newly cited provenance paths into `sources`.
+pub fn apply_agent_edit_trust_reset(
+    content: &str,
+    fallback_title: &str,
+    added_sources: &[String],
+    updated_at: Option<&str>,
+) -> Result<String, String> {
+    let (mut mapping, body) = match split_frontmatter(content) {
+        Ok((Some(raw), body)) => match serde_yaml::from_str::<Mapping>(raw) {
+            Ok(mapping) => (mapping, body),
+            Err(_) => (Mapping::new(), content),
+        },
+        Ok((None, body)) => (Mapping::new(), body),
+        Err(_) => (Mapping::new(), content),
+    };
+    remove_legacy_concept_kind(&mut mapping);
+    set_if_missing_or_blank(&mut mapping, "type", Value::String("Note".into()));
+    let heading_title = display_metadata(content)
+        .0
+        .unwrap_or_else(|| fallback_title.to_string());
+    set_if_missing_or_blank(&mut mapping, "title", Value::String(heading_title));
+
+    let mut merged_sources = mapping
+        .get(Value::String("sources".into()))
+        .map(yaml_to_string_list)
+        .unwrap_or_default();
+    for source in added_sources {
+        let trimmed = source.trim();
+        if !trimmed.is_empty() && !merged_sources.iter().any(|existing| existing == trimmed) {
+            merged_sources.push(trimmed.to_string());
+        }
+    }
+    if !merged_sources.is_empty() {
+        mapping.insert(
+            Value::String("sources".into()),
+            Value::Sequence(merged_sources.into_iter().map(Value::String).collect()),
+        );
+    }
+
+    mapping.insert(Value::String("verified".into()), Value::Bool(false));
+    mapping.insert(
+        Value::String("trust_tier".into()),
+        Value::String("agent_draft".into()),
+    );
+    mapping.insert(Value::String("generated".into()), Value::Bool(true));
+    let date_value = updated_at
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(utc_today_iso);
+    mapping.insert(
+        Value::String("updated_at".into()),
+        Value::String(date_value),
+    );
+
+    let yaml = serde_yaml::to_string(&mapping)
+        .map_err(|error| format!("cannot serialize concept frontmatter: {error}"))?;
+    Ok(format!(
+        "---\n{yaml}---\n\n{}",
+        body.trim_start_matches(['\r', '\n'])
+    ))
+}
+
+fn yaml_scalar_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
+fn yaml_to_bool(value: &Value) -> Option<bool> {
+    match value {
+        Value::Bool(b) => Some(*b),
+        Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
+            "true" | "yes" | "1" => Some(true),
+            "false" | "no" | "0" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn yaml_to_string_list(value: &Value) -> Vec<String> {
+    match value {
+        Value::Sequence(items) => items
+            .iter()
+            .filter_map(yaml_scalar_to_string)
+            .map(|item| item.trim().to_string())
+            .filter(|item| !item.is_empty())
+            .collect(),
+        Value::String(single) => single
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocumentKind {
@@ -158,10 +468,13 @@ pub fn ensure_supported_for_write(root: &Path) -> Result<(), String> {
         .and_then(|(frontmatter, _)| frontmatter)
         .and_then(|raw| serde_yaml::from_str::<Mapping>(raw).ok())
         .and_then(|mapping| mapping.get(Value::String("okf_version".into())).cloned())
-        .and_then(|value| value.as_str().map(str::to_string));
-    if version.as_deref().is_some_and(|value| value != OKF_VERSION) {
+        .and_then(|value| yaml_scalar_to_string(&value));
+    if version
+        .as_deref()
+        .is_some_and(|value| !is_supported_version(value))
+    {
         return Err(format!(
-            "This Space targets OKF {}; CoWiki can read it but will not rewrite it as {OKF_VERSION}.",
+            "This Space targets OKF {}; CoWiki supports OKF up to {OKF_VERSION} and will not rewrite it.",
             version.unwrap_or_default()
         ));
     }
@@ -184,9 +497,12 @@ pub fn needs_migration(root: &Path) -> Result<bool, String> {
     let declared_version = root_mapping
         .as_ref()
         .and_then(|mapping| mapping.get(Value::String("okf_version".into())))
-        .and_then(Value::as_str);
-    if declared_version.is_some_and(|version| version != OKF_VERSION) {
-        // §11: consume future versions best-effort; never rewrite them as 0.1.
+        .and_then(yaml_scalar_to_string);
+    if declared_version
+        .as_deref()
+        .is_some_and(|version| !is_supported_version(version))
+    {
+        // §11: consume future versions best-effort; never rewrite them.
         return Ok(false);
     }
     if legacy_sources_need_migration(root)? {
@@ -196,8 +512,8 @@ pub fn needs_migration(root: &Path) -> Result<bool, String> {
         mapping.len() == 1
             && mapping
                 .get(Value::String("okf_version".into()))
-                .and_then(Value::as_str)
-                .is_some_and(|version| version == OKF_VERSION)
+                .and_then(yaml_scalar_to_string)
+                .is_some_and(|version| is_supported_version(&version))
             && index_body_is_conforming(&root_index)
     });
     if !root_ok {
@@ -463,11 +779,16 @@ fn normalize_root_index(content: &str) -> Result<String, String> {
         Ok((None, body)) => (Mapping::new(), body),
         Err(_) => (Mapping::new(), content),
     };
-    legacy_mapping.remove(Value::String("okf_version".into()));
+    let preserved_version = legacy_mapping
+        .remove(Value::String("okf_version".into()))
+        .and_then(|value| yaml_scalar_to_string(&value))
+        .map(|value| value.trim().to_string())
+        .filter(|value| is_supported_version(value))
+        .unwrap_or_else(|| OKF_VERSION.to_string());
     let mut mapping = Mapping::new();
     mapping.insert(
         Value::String("okf_version".into()),
-        Value::String(OKF_VERSION.into()),
+        Value::String(preserved_version),
     );
     let mut body = body.trim_start_matches(['\r', '\n']).to_string();
     if !body.lines().any(|line| line.starts_with("# ")) {
@@ -572,7 +893,7 @@ fn log_is_conforming(content: &str) -> bool {
     saw_date && group_has_entry
 }
 
-fn valid_iso_date(value: &str) -> bool {
+pub(crate) fn valid_iso_date(value: &str) -> bool {
     if value.len() != 10
         || value.as_bytes()[4] != b'-'
         || value.as_bytes()[7] != b'-'
@@ -1058,6 +1379,10 @@ fn legacy_sources_need_migration(root: &Path) -> Result<bool, String> {
     Ok(false)
 }
 
+pub fn declared_version(root: &Path) -> Result<Option<String>, String> {
+    declared_root_version(root)
+}
+
 fn declared_root_version(root: &Path) -> Result<Option<String>, String> {
     let content = match std::fs::read_to_string(root.join("index.md")) {
         Ok(content) => content,
@@ -1070,7 +1395,525 @@ fn declared_root_version(root: &Path) -> Result<Option<String>, String> {
         .and_then(|(frontmatter, _)| frontmatter)
         .and_then(|raw| serde_yaml::from_str::<Mapping>(raw).ok())
         .and_then(|mapping| mapping.get(Value::String("okf_version".into())).cloned())
-        .and_then(|value| value.as_str().map(str::to_string)))
+        .and_then(|value| yaml_scalar_to_string(&value))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty()))
+}
+
+/// Validate a local CoWiki Space against OKF v0.3 RFC-2119 conformance rules
+/// (read-only; never mutates any file in the Space).
+pub fn validate_bundle(
+    root: &Path,
+    as_of: Option<&str>,
+    check_links: bool,
+) -> Result<OkfValidationReport, String> {
+    if !root.is_dir() {
+        return Err("Space directory does not exist".to_string());
+    }
+    let reference_date = as_of
+        .map(str::trim)
+        .filter(|value| valid_iso_date(value))
+        .map(str::to_string)
+        .unwrap_or_else(utc_today_iso);
+
+    let mut issues: Vec<OkfValidationIssue> = Vec::new();
+    let mut push_issue =
+        |code: &str, severity: &str, rfc_level: &str, path: &str, message: String| {
+            issues.push(OkfValidationIssue {
+                code: code.to_string(),
+                severity: severity.to_string(),
+                rfc_level: rfc_level.to_string(),
+                path: path.to_string(),
+                message,
+            });
+        };
+
+    let root_index_path = root.join("index.md");
+    let mut declared_ver: Option<String> = None;
+    match std::fs::symlink_metadata(&root_index_path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            push_issue(
+                "missing_root_index",
+                "error",
+                "MUST",
+                "index.md",
+                "Space root MUST contain an 'index.md' entry document.".to_string(),
+            );
+        }
+        Err(error) => {
+            push_issue(
+                "unreadable_root_index",
+                "error",
+                "MUST",
+                "index.md",
+                format!("Cannot inspect root 'index.md': {error}"),
+            );
+        }
+        Ok(meta) if meta.file_type().is_symlink() => {
+            push_issue(
+                "symlink_root_index",
+                "error",
+                "MUST",
+                "index.md",
+                "Root 'index.md' MUST be a regular file, not a symbolic link.".to_string(),
+            );
+        }
+        Ok(meta) if !meta.file_type().is_file() => {
+            push_issue(
+                "missing_root_index",
+                "error",
+                "MUST",
+                "index.md",
+                "Space root 'index.md' MUST be a regular Markdown file.".to_string(),
+            );
+        }
+        Ok(_) => match std::fs::read_to_string(&root_index_path) {
+            Err(_) => {
+                push_issue(
+                    "unreadable_utf8",
+                    "error",
+                    "MUST",
+                    "index.md",
+                    "Root 'index.md' MUST be valid UTF-8.".to_string(),
+                );
+            }
+            Ok(root_text) => {
+                match split_frontmatter(&root_text) {
+                    Err(error) => {
+                        push_issue(
+                            "invalid_frontmatter",
+                            "error",
+                            "MUST",
+                            "index.md",
+                            format!("Root 'index.md' has malformed frontmatter: {error}"),
+                        );
+                    }
+                    Ok((None, body)) => {
+                        push_issue(
+                            "missing_okf_version",
+                            "error",
+                            "MUST",
+                            "index.md",
+                            "Root 'index.md' MUST declare 'okf_version' in YAML frontmatter."
+                                .to_string(),
+                        );
+                        if !body.lines().any(|line| line.starts_with("# ")) {
+                            push_issue(
+                                "index_missing_heading",
+                                "error",
+                                "MUST",
+                                "index.md",
+                                "Index document MUST include an H1 heading.".to_string(),
+                            );
+                        }
+                    }
+                    Ok((Some(raw), body)) => {
+                        match serde_yaml::from_str::<Mapping>(raw) {
+                            Ok(map) => {
+                                declared_ver = map
+                                    .get(Value::String("okf_version".into()))
+                                    .and_then(yaml_scalar_to_string)
+                                    .map(|value| value.trim().to_string())
+                                    .filter(|value| !value.is_empty());
+                                match declared_ver.as_deref() {
+                                    None => push_issue(
+                                        "missing_okf_version",
+                                        "error",
+                                        "MUST",
+                                        "index.md",
+                                        "Root 'index.md' frontmatter MUST include non-empty 'okf_version'."
+                                            .to_string(),
+                                    ),
+                                    Some(ver) if !is_supported_version(ver) => push_issue(
+                                        "unsupported_okf_version",
+                                        "warning",
+                                        "SHOULD",
+                                        "index.md",
+                                        format!(
+                                            "Declared okf_version '{ver}' is newer than supported versions ({}).",
+                                            SUPPORTED_OKF_VERSIONS.join(", ")
+                                        ),
+                                    ),
+                                    Some(_) => {}
+                                }
+                            }
+                            Err(error) => push_issue(
+                                "invalid_frontmatter",
+                                "error",
+                                "MUST",
+                                "index.md",
+                                format!("Root 'index.md' has invalid YAML frontmatter: {error}"),
+                            ),
+                        }
+                        if !body.lines().any(|line| line.starts_with("# ")) {
+                            push_issue(
+                                "index_missing_heading",
+                                "error",
+                                "MUST",
+                                "index.md",
+                                "Index document MUST include an H1 heading.".to_string(),
+                            );
+                        }
+                    }
+                }
+                if root_text.contains(GENERATED_START) && !root_text.contains(GENERATED_END) {
+                    push_issue(
+                        "unclosed_generated_index_marker",
+                        "error",
+                        "MUST",
+                        "index.md",
+                        "Index document has opening generated-index marker without closing marker."
+                            .to_string(),
+                    );
+                }
+            }
+        },
+    }
+
+    let file_index = crate::knowledge_index::FileIndex::scan(root)?;
+    let live_files: HashSet<String> = file_index.files().iter().cloned().collect();
+    let mut live_dirs: HashSet<String> = HashSet::new();
+    let mut markdown_files: Vec<(String, PathBuf)> = Vec::new();
+    for entry in walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| {
+            entry.path() == root
+                || is_visible_document_path(root, entry.path())
+                || is_source_path(root, entry.path())
+        })
+        .filter_map(Result::ok)
+    {
+        if entry.file_type().is_symlink() {
+            continue;
+        }
+        let path = entry.path();
+        if path == root {
+            continue;
+        }
+        let Ok(relative) = path.strip_prefix(root) else {
+            continue;
+        };
+        let rel_str = relative
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        if entry.file_type().is_dir() {
+            live_dirs.insert(rel_str);
+        } else if entry.file_type().is_file()
+            && path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        {
+            markdown_files.push((rel_str, path.to_path_buf()));
+        }
+    }
+    markdown_files.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut redirects: HashMap<String, String> = HashMap::new();
+    for (rel, full_path) in &markdown_files {
+        let content = match std::fs::read_to_string(full_path) {
+            Ok(content) => content,
+            Err(_) => {
+                push_issue(
+                    "unreadable_utf8",
+                    "error",
+                    "MUST",
+                    rel,
+                    "Markdown document MUST be valid UTF-8.".to_string(),
+                );
+                continue;
+            }
+        };
+
+        let kind = DocumentKind::from_path(Path::new(rel));
+        match kind {
+            DocumentKind::Index => {
+                if rel != "index.md" {
+                    if !index_body_is_conforming(&content) {
+                        push_issue(
+                            "index_missing_heading",
+                            "error",
+                            "MUST",
+                            rel,
+                            "Nested index document MUST include an H1 heading.".to_string(),
+                        );
+                    }
+                    if content.contains(GENERATED_START) && !content.contains(GENERATED_END) {
+                        push_issue(
+                            "unclosed_generated_index_marker",
+                            "error",
+                            "MUST",
+                            rel,
+                            "Nested index has unclosed generated-index marker.".to_string(),
+                        );
+                    }
+                }
+                continue;
+            }
+            DocumentKind::Log => {
+                if !log_is_conforming(&content) {
+                    push_issue(
+                        "invalid_log_format",
+                        "warning",
+                        "SHOULD",
+                        rel,
+                        "Log document SHOULD follow descending ISO date heading format without frontmatter."
+                            .to_string(),
+                    );
+                }
+                continue;
+            }
+            DocumentKind::Other => continue,
+            DocumentKind::Concept => {}
+        }
+
+        let (raw_frontmatter, body) = match split_frontmatter(&content) {
+            Ok((Some(raw), body)) => (raw, body),
+            Ok((None, _)) => {
+                push_issue(
+                    "missing_frontmatter",
+                    "error",
+                    "MUST",
+                    rel,
+                    "Concept document MUST begin with YAML frontmatter.".to_string(),
+                );
+                continue;
+            }
+            Err(error) => {
+                push_issue(
+                    "invalid_frontmatter",
+                    "error",
+                    "MUST",
+                    rel,
+                    format!("Malformed YAML frontmatter: {error}"),
+                );
+                continue;
+            }
+        };
+
+        let mapping = match serde_yaml::from_str::<Mapping>(raw_frontmatter) {
+            Ok(mapping) => mapping,
+            Err(error) => {
+                push_issue(
+                    "invalid_frontmatter",
+                    "error",
+                    "MUST",
+                    rel,
+                    format!("Invalid YAML frontmatter: {error}"),
+                );
+                continue;
+            }
+        };
+
+        let doc_type = mapping
+            .get(Value::String("type".into()))
+            .and_then(yaml_scalar_to_string)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        if doc_type.is_none() {
+            push_issue(
+                "missing_required_field",
+                "error",
+                "MUST",
+                rel,
+                "Concept frontmatter MUST declare a non-empty 'type' field.".to_string(),
+            );
+        }
+
+        let has_title = mapping
+            .get(Value::String("title".into()))
+            .and_then(yaml_scalar_to_string)
+            .is_some_and(|value| !value.trim().is_empty());
+        let has_h1 = body.lines().any(|line| line.starts_with("# "));
+        if !has_title && !has_h1 {
+            push_issue(
+                "missing_required_field",
+                "error",
+                "MUST",
+                rel,
+                "Concept document MUST declare 'title' in frontmatter or an H1 heading."
+                    .to_string(),
+            );
+        }
+
+        if let Some(status_raw) = mapping
+            .get(Value::String("status".into()))
+            .and_then(yaml_scalar_to_string)
+        {
+            let lowered = status_raw.trim().to_ascii_lowercase();
+            if !VALID_STATUSES.contains(&lowered.as_str()) {
+                push_issue(
+                    "invalid_status",
+                    "error",
+                    "MUST",
+                    rel,
+                    format!(
+                        "Invalid status '{status_raw}'; MUST be one of: {}.",
+                        VALID_STATUSES.join(", ")
+                    ),
+                );
+            }
+        }
+
+        let trust_lower = mapping
+            .get(Value::String("trust_tier".into()))
+            .and_then(yaml_scalar_to_string)
+            .map(|value| value.trim().to_ascii_lowercase());
+        if let Some(ref trust) = trust_lower {
+            if !VALID_TRUST_TIERS.contains(&trust.as_str()) {
+                push_issue(
+                    "invalid_trust_tier",
+                    "error",
+                    "MUST",
+                    rel,
+                    format!(
+                        "Invalid trust_tier '{trust}'; MUST be one of: {}.",
+                        VALID_TRUST_TIERS.join(", ")
+                    ),
+                );
+            }
+        }
+
+        let verified = mapping
+            .get(Value::String("verified".into()))
+            .and_then(yaml_to_bool)
+            .unwrap_or(false);
+        let generated = mapping
+            .get(Value::String("generated".into()))
+            .and_then(yaml_to_bool)
+            .unwrap_or(false);
+        if verified && (trust_lower.as_deref() == Some("agent_draft") || generated) {
+            push_issue(
+                "trust_reset_violation",
+                "error",
+                "MUST",
+                rel,
+                "Agent-generated or agent_draft document MUST NOT carry 'verified: true'."
+                    .to_string(),
+            );
+        }
+
+        if let Some(stale_raw) = mapping
+            .get(Value::String("stale_after".into()))
+            .and_then(yaml_scalar_to_string)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+        {
+            if !valid_iso_date(&stale_raw) {
+                push_issue(
+                    "invalid_stale_after",
+                    "error",
+                    "MUST",
+                    rel,
+                    format!(
+                        "'stale_after' value '{stale_raw}' MUST be a valid ISO date YYYY-MM-DD."
+                    ),
+                );
+            } else if stale_raw.as_str() < reference_date.as_str() {
+                push_issue(
+                    "expired_stale_after",
+                    "warning",
+                    "SHOULD",
+                    rel,
+                    format!("Document expired on {stale_raw} (as of {reference_date})."),
+                );
+            }
+        }
+
+        if let Some(redirect_raw) = mapping
+            .get(Value::String("redirect_to".into()))
+            .and_then(yaml_scalar_to_string)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+        {
+            let resolved = crate::knowledge_index::resolve_markdown_target(rel, &redirect_raw);
+            match resolved {
+                Some(target) if live_files.contains(&target) => {
+                    redirects.insert(rel.clone(), target);
+                }
+                _ => {
+                    push_issue(
+                        "broken_redirect",
+                        "error",
+                        "MUST",
+                        rel,
+                        format!(
+                            "'redirect_to' target '{redirect_raw}' does not resolve to an existing document."
+                        ),
+                    );
+                }
+            }
+        }
+
+        if check_links && !rel.starts_with(".cowiki/") {
+            for (target, kind) in crate::knowledge_index::extract_links(body, rel) {
+                let target_trimmed = target.trim_end_matches('/');
+                let resolved = match kind {
+                    crate::knowledge_index::LinkKind::Markdown => {
+                        live_files.contains(&target) || live_dirs.contains(target_trimmed)
+                    }
+                    crate::knowledge_index::LinkKind::Wiki => {
+                        live_files.contains(&target)
+                            || file_index.resolve_wikilink(&target, rel).is_some()
+                    }
+                };
+                if !resolved && !target.split('/').any(|part| part.starts_with('.')) {
+                    push_issue(
+                        "broken_link",
+                        "warning",
+                        "SHOULD",
+                        rel,
+                        format!("Unresolved internal link target '{target}'."),
+                    );
+                }
+            }
+        }
+    }
+
+    let mut sorted_redirects: Vec<(&String, &String)> = redirects.iter().collect();
+    sorted_redirects.sort_by(|left, right| left.0.cmp(right.0));
+    for (src, first_next) in sorted_redirects {
+        let mut seen_chain: HashSet<&str> = HashSet::new();
+        seen_chain.insert(src.as_str());
+        let mut current = first_next.as_str();
+        while let Some(next) = redirects.get(current) {
+            if !seen_chain.insert(current) {
+                push_issue(
+                    "redirect_cycle",
+                    "error",
+                    "MUST",
+                    src,
+                    format!("Redirect chain from '{src}' forms a cycle involving '{current}'."),
+                );
+                break;
+            }
+            current = next.as_str();
+        }
+    }
+
+    let mut summary_by_code: BTreeMap<String, usize> = BTreeMap::new();
+    let mut error_count = 0usize;
+    let mut warning_count = 0usize;
+    for issue in &issues {
+        *summary_by_code.entry(issue.code.clone()).or_insert(0) += 1;
+        if issue.severity == "error" {
+            error_count += 1;
+        } else {
+            warning_count += 1;
+        }
+    }
+
+    Ok(OkfValidationReport {
+        okf_version: declared_ver,
+        valid: error_count == 0,
+        checked_files: markdown_files.len(),
+        error_count,
+        warning_count,
+        summary_by_code,
+        issues,
+    })
 }
 
 fn normalize_migrated_encoded_source(
@@ -1132,7 +1975,7 @@ fn normalize_relative_path(path: &str) -> Result<String, String> {
     Ok(segments.join("/"))
 }
 
-fn split_frontmatter(content: &str) -> Result<(Option<&str>, &str), String> {
+pub(crate) fn split_frontmatter(content: &str) -> Result<(Option<&str>, &str), String> {
     let Some(after_opening) = content
         .strip_prefix("---\n")
         .or_else(|| content.strip_prefix("---\r\n"))
@@ -1429,7 +2272,7 @@ mod tests {
         );
 
         let future = tempfile::tempdir().unwrap();
-        let future_index = "---\nokf_version: \"0.2\"\n---\n\n# Future bundle\n";
+        let future_index = "---\nokf_version: \"0.4\"\n---\n\n# Future bundle\n";
         std::fs::write(future.path().join("index.md"), future_index).unwrap();
         std::fs::write(
             future.path().join("concept.md"),
@@ -1510,7 +2353,7 @@ mod tests {
         let root = std::fs::read_to_string(bundle.path().join("index.md")).unwrap();
         let nested = std::fs::read_to_string(bundle.path().join("docs/index.md")).unwrap();
         let log = std::fs::read_to_string(bundle.path().join("docs/log.md")).unwrap();
-        assert!(root.contains("okf_version: '0.1'") || root.contains("okf_version: \"0.1\""));
+        assert!(root.contains("okf_version: '0.3'") || root.contains("okf_version: \"0.3\""));
         assert!(!nested.starts_with("---"));
         assert!(nested.starts_with("# docs"));
         assert!(!log.starts_with("---"));
@@ -1527,5 +2370,127 @@ mod tests {
             std::fs::read(bundle.path().join(".cowiki/legacy/docs/log.md.legacy")).unwrap(),
             [0xfd]
         );
+    }
+
+    #[test]
+    fn okf_v01_v02_and_v03_are_supported_while_future_versions_stay_read_only() {
+        for version in ["0.1", "0.2", "0.3"] {
+            let bundle = tempfile::tempdir().unwrap();
+            let index = format!("---\nokf_version: \"{version}\"\n---\n\n# Space\n");
+            std::fs::write(bundle.path().join("index.md"), &index).unwrap();
+            assert!(ensure_supported_for_write(bundle.path()).is_ok());
+            assert!(!needs_migration(bundle.path()).unwrap());
+            assert_eq!(
+                declared_version(bundle.path()).unwrap().as_deref(),
+                Some(version)
+            );
+        }
+
+        let future = tempfile::tempdir().unwrap();
+        std::fs::write(
+            future.path().join("index.md"),
+            "---\nokf_version: \"0.4\"\n---\n\n# Future\n",
+        )
+        .unwrap();
+        assert!(ensure_supported_for_write(future.path()).is_err());
+        assert!(!needs_migration(future.path()).unwrap());
+    }
+
+    #[test]
+    fn parse_metadata_extracts_okf_v03_governance_fields() {
+        let content = "---\ntype: Architecture\ntitle: Sync Engine\ndescription: Local replication design\ntags:\n  - sync\n  - crdt\naliases:\n  - Replication\nsources:\n  - .cowiki/sources/spec.md\nstatus: deprecated\nstale_after: \"2025-01-15\"\ntrust_tier: human_verified\nverified: true\ngenerated: false\nredirect_to: sync-v2.md\nupdated_at: \"2026-06-01\"\n---\n\n# Sync Engine\n\nDetails.\n";
+        let meta = parse_metadata(content);
+        assert_eq!(meta.doc_type, "Architecture");
+        assert_eq!(meta.title.as_deref(), Some("Sync Engine"));
+        assert_eq!(
+            meta.description.as_deref(),
+            Some("Local replication design")
+        );
+        assert_eq!(meta.tags, vec!["sync", "crdt"]);
+        assert_eq!(meta.aliases, vec!["Replication"]);
+        assert_eq!(meta.sources, vec![".cowiki/sources/spec.md"]);
+        assert_eq!(meta.status, "deprecated");
+        assert!(meta.is_deprecated());
+        assert!(!meta.is_retired());
+        assert!(meta.is_stale_as_of(Some("2026-01-01")));
+        assert!(!meta.is_stale_as_of(Some("2025-01-01")));
+        assert_eq!(meta.trust_tier, "human_verified");
+        assert!(meta.verified);
+        assert!(!meta.generated);
+        assert_eq!(meta.redirect_to.as_deref(), Some("sync-v2.md"));
+        assert_eq!(meta.updated_at.as_deref(), Some("2026-06-01"));
+    }
+
+    #[test]
+    fn agent_edit_trust_reset_demotes_verified_and_preserves_custom_keys() {
+        let original = "---\ntype: Guide\ntitle: Auth Policy\nverified: true\ntrust_tier: human_verified\ngenerated: false\nowner: security-team\ncustom_flag: 42\nsources:\n  - .cowiki/sources/rfc.md\n---\n\n# Auth Policy\n\nRotate tokens weekly.\n";
+        let updated = apply_agent_edit_trust_reset(
+            original,
+            "Auth Policy",
+            &[
+                ".cowiki/sources/rfc.md".to_string(),
+                ".cowiki/sources/audit-2026.md".to_string(),
+            ],
+            Some("2026-11-22"),
+        )
+        .unwrap();
+
+        let meta = parse_metadata(&updated);
+        assert!(!meta.verified);
+        assert_eq!(meta.trust_tier, "agent_draft");
+        assert!(meta.generated);
+        assert_eq!(meta.updated_at.as_deref(), Some("2026-11-22"));
+        assert_eq!(
+            meta.sources,
+            vec![".cowiki/sources/rfc.md", ".cowiki/sources/audit-2026.md"]
+        );
+        // Custom user frontmatter keys must be preserved verbatim.
+        assert!(updated.contains("owner: security-team"));
+        assert!(updated.contains("custom_flag: 42"));
+        assert!(updated.contains("Rotate tokens weekly."));
+    }
+
+    #[test]
+    fn validate_bundle_detects_trust_reset_staleness_and_redirect_issues() {
+        let bundle = tempfile::tempdir().unwrap();
+        let root = bundle.path();
+        std::fs::write(root.join("index.md"), root_index()).unwrap();
+        std::fs::write(
+            root.join("good.md"),
+            "---\ntype: Note\ntitle: Good\nstatus: active\ntrust_tier: human_verified\nverified: true\nstale_after: \"2030-01-01\"\n---\n\n# Good\n\nClean note.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("bad-trust.md"),
+            "---\ntype: Note\ntitle: Bad Trust\ntrust_tier: agent_draft\nverified: true\ngenerated: true\nstale_after: \"2024-01-01\"\n---\n\n# Bad Trust\n\nSee [ghost](ghost.md).\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("loop-a.md"),
+            "---\ntype: Note\ntitle: Loop A\nredirect_to: loop-b.md\n---\n\n# Loop A\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("loop-b.md"),
+            "---\ntype: Note\ntitle: Loop B\nredirect_to: loop-a.md\n---\n\n# Loop B\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("broken-redir.md"),
+            "---\ntype: Note\ntitle: Broken Redir\nredirect_to: missing-target.md\n---\n\n# Broken Redir\n",
+        )
+        .unwrap();
+
+        let report = validate_bundle(root, Some("2026-11-22"), true).unwrap();
+        assert_eq!(report.okf_version.as_deref(), Some("0.3"));
+        assert!(!report.valid);
+        assert_eq!(
+            report.summary_by_code.get("trust_reset_violation"),
+            Some(&1)
+        );
+        assert_eq!(report.summary_by_code.get("expired_stale_after"), Some(&1));
+        assert_eq!(report.summary_by_code.get("broken_redirect"), Some(&1));
+        assert_eq!(report.summary_by_code.get("redirect_cycle"), Some(&2));
+        assert_eq!(report.summary_by_code.get("broken_link"), Some(&1));
     }
 }

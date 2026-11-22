@@ -14,9 +14,10 @@ mod terminal;
 mod web_source;
 
 use local_engine::{
-    AgentChange, BrokenLink, Checkpoint, CommentMember, FileDiff, IngestFileOutcome, LocalEngine,
-    PageComment, PageCommentsResponse, PageFull, PageMeta, SearchResponse, SourceContent,
-    SourceItem, Space, SpaceHistory, SubmitResult,
+    AgentChange, BrokenLink, Checkpoint, CommentMember, FileDiff, HybridSearchOptions,
+    HybridSearchResult, IngestFileOutcome, LocalEngine, OkfValidationReport, PageComment,
+    PageCommentsResponse, PageFull, PageMeta, SearchResponse, SourceContent, SourceItem, Space,
+    SpaceHistory, SubmitResult,
 };
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -385,6 +386,26 @@ fn local_list_broken_links(
 }
 
 #[tauri::command]
+fn local_hybrid_search(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    query: String,
+    options: Option<HybridSearchOptions>,
+) -> Result<HybridSearchResult, String> {
+    engine.hybrid_search(&space_slug, &query, &options.unwrap_or_default())
+}
+
+#[tauri::command]
+fn local_validate_okf(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    as_of: Option<String>,
+    check_links: Option<bool>,
+) -> Result<OkfValidationReport, String> {
+    engine.validate_okf(&space_slug, as_of.as_deref(), check_links.unwrap_or(true))
+}
+
+#[tauri::command]
 fn local_submit(
     engine: State<'_, LocalEngine>,
     space_slug: String,
@@ -723,7 +744,9 @@ pub fn run() {
             local_rename_path,
             local_delete_path,
             local_search,
+            local_hybrid_search,
             local_list_broken_links,
+            local_validate_okf,
             local_submit,
             local_working_diff,
             local_keep_working_diff,
