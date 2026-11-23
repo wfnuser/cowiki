@@ -122,7 +122,7 @@ test('an empty Space gives its Owner a concise Agent quick setup', () => {
   assert.match(wiki, /space\.role === 'owner'/);
   assert.match(quickSetup, /Quick setup/);
   assert.match(quickSetup, /padding: '36px 56px 56px'/);
-  assert.match(quickSetup, /className="page-title mb-0"/);
+  assert.match(quickSetup, /className="view-title"/);
   assert.match(quickSetup, /Install the CoWiki skill/);
   assert.match(quickSetup, /Choose a local Space/);
   assert.match(quickSetup, /Publish with your Agent/);

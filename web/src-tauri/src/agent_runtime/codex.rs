@@ -40,6 +40,8 @@ struct CodexState {
     approvals: HashMap<String, PendingApproval>,
     file_paths: HashMap<String, Vec<String>>,
     next_approval: u64,
+    /// Sent with every turn once the person picked a model mid-conversation.
+    model: Option<String>,
 }
 
 pub struct CodexProvider {
@@ -151,6 +153,9 @@ fn handshake(
         "sandbox": CODEX_SANDBOX_MODE,
         "developerInstructions": config.instructions,
     });
+    if let Some(model) = config.model.as_deref() {
+        params["model"] = json!(model);
+    }
     let (method, resuming) = match resume.as_deref() {
         Some(thread_id) => {
             params["threadId"] = json!(thread_id);
@@ -773,15 +778,19 @@ impl Provider for CodexProvider {
                 return Ok(());
             }
             state.starting = true;
-            state.thread_id.clone()
+            (state.thread_id.clone(), state.model.clone())
         };
-        let params = json!({
+        let (thread_id, model) = thread_id;
+        let mut params = json!({
             "threadId": thread_id,
             "input": [{"type": "text", "text": text, "text_elements": []}],
             "cwd": self.cwd.to_string_lossy(),
             "approvalPolicy": CODEX_APPROVAL_POLICY,
             "sandboxPolicy": codex_sandbox_policy(&self.cwd),
         });
+        if let Some(model) = model {
+            params["model"] = json!(model);
+        }
         match rpc.request("turn/start", params, TURN_START_TIMEOUT) {
             Ok(response) => {
                 // Accepted is not started: Codex refuses turn/interrupt until
@@ -870,6 +879,15 @@ impl Provider for CodexProvider {
 
     fn is_alive(&self) -> bool {
         self.rpc.get().is_some_and(|rpc| rpc.is_alive())
+    }
+
+    fn set_model(&self, model: &str) -> Result<(), String> {
+        // Codex takes the model with each turn and keeps it for later ones.
+        self.state
+            .lock()
+            .map_err(|_| "Codex state is unavailable".to_string())?
+            .model = Some(model.to_string());
+        Ok(())
     }
 }
 

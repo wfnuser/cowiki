@@ -38,7 +38,7 @@ export function LoginPage() {
       <section className="login-shell" aria-label="CoWiki sign in">
         <div className="login-brand-panel">
           <div className="login-brand">
-            <img src="/cowiki-logo.svg" alt="" width={30} height={30} />
+            <img className="cowiki-logo" src="/cowiki-logo.svg" alt="" width={30} height={30} />
             <span>CoWiki</span>
           </div>
 

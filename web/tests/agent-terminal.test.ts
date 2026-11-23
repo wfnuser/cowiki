@@ -292,13 +292,13 @@ test('Review routes round-trip draft, Agent Change, and cloud detail targets', (
   ];
 
   for (const target of targets) {
-    const path = reviewRoute('qinghao', 'general', target);
+    const path = reviewRoute('wfnuser', 'general', target);
     assert.deepEqual(parseReviewRoute(path, workspaces), {
       workspaceSlug: 'general',
       target,
     });
   }
-  assert.deepEqual(parseReviewRoute('/qinghao/general/reviews', workspaces), {
+  assert.deepEqual(parseReviewRoute('/wfnuser/general/reviews', workspaces), {
     workspaceSlug: 'general',
     target: null,
   });
@@ -334,5 +334,5 @@ test('the local Review inbox stays a list and renders diffs only in detail', () 
 
   assert.equal(inbox.includes("from './DiffView'"), false);
   assert.match(detail, /<DiffView diffs=\{diffs\}/);
-  assert.match(detail, /Create Checkpoint/);
+  assert.match(detail, /Create checkpoint/);
 });

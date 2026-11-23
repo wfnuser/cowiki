@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   BookmarkPlus,
-  CircleAlert,
   FilePenLine,
   GitCommitHorizontal,
-  History,
   LoaderCircle,
 } from 'lucide-react';
 
@@ -15,7 +13,8 @@ import {
 } from '@/api';
 import { Button } from '@/components/ui/button';
 import { InlineFeedback } from '@/components/ui/inline-feedback';
-import { C } from '@/lib/design';
+import { ViewEmpty, ViewHeader, ViewSectionHeading } from '@/components/ui/view-header';
+import { fonts } from '@/lib/design';
 import {
   canCreateCheckpoint,
   defaultCheckpointName,
@@ -65,112 +64,72 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
     }
   };
 
+  const checkpointButton = local && (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      onClick={() => { void createCheckpoint(); }}
+      disabled={creating || loading || !checkpointReady}
+      title={checkpointReady ? 'Record the current Draft as a named snapshot' : 'Save a change first'}
+    >
+      {creating ? <LoaderCircle size={14} className="animate-spin" /> : <BookmarkPlus size={14} />}
+      {creating ? 'Creating…' : 'Create checkpoint'}
+    </Button>
+  );
+
   return (
     <section style={{ width: 'min(860px, 100%)' }}>
-      <header style={{ marginBottom: 30 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-          <History size={20} color={C.accent} strokeWidth={1.8} />
-          <h1 className="page-title page-title--compact" style={{ margin: 0 }}>History</h1>
-        </div>
-        <p style={{ margin: 0, maxWidth: 590, color: C.muted, fontSize: 13.5, lineHeight: 1.65 }}>
-          Your Space stays in one editable Draft. A checkpoint records a named local Git snapshot
-          without taking you out of that Draft.
-        </p>
-      </header>
+      <ViewHeader title="History" />
 
       {!local ? (
-        <div style={noticeStyle}>
-          <CircleAlert size={18} color={C.amber} />
-          <div>
-            <strong style={{ display: 'block', color: C.ink2, fontSize: 13.5, marginBottom: 3 }}>
-              Local history only
-            </strong>
-            <span style={{ color: C.muted, fontSize: 12.5, lineHeight: 1.55 }}>
-              Checkpoints are stored in the Space&apos;s local Git repository. Cloud history is not enabled.
-            </span>
-          </div>
-        </div>
+        <InlineFeedback tone="neutral" compact title="History is kept for local Spaces only." />
       ) : (
         <>
-          <article style={draftCardStyle}>
-            <div style={{ display: 'flex', gap: 14, minWidth: 0, alignItems: 'flex-start' }}>
-              <div style={draftIconStyle}><FilePenLine size={19} /></div>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <h2 style={{ margin: 0, color: C.ink, fontFamily: 'var(--font-serif)', fontSize: 19, fontWeight: 650 }}>
-                    Current Draft
-                  </h2>
-                  <span style={currentBadgeStyle}>Live</span>
-                </div>
-                <p style={{ margin: '5px 0 0', color: C.ink2, fontSize: 12.5 }}>
-                  {spaceHistory
-                    ? draftChangeLabel(spaceHistory.currentDraft.changedFiles, spaceHistory.checkpoints.length > 0)
-                    : 'Reading saved Draft…'}
-                </p>
-                <p style={{ margin: '8px 0 0', color: C.muted, fontSize: 12, lineHeight: 1.55 }}>
-                  Auto Save updates this Draft only. It never creates a checkpoint.
-                </p>
-              </div>
+          <div className="flex items-center gap-3 rounded-lg px-1 py-1">
+            <FilePenLine size={16} className="shrink-0 text-accent" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <p className="text-[14px] font-medium leading-5 text-text">Current Draft</p>
+              <p className="text-[12.5px] leading-5 text-text-tertiary">
+                {spaceHistory
+                  ? draftChangeLabel(spaceHistory.currentDraft.changedFiles, spaceHistory.checkpoints.length > 0)
+                  : 'Reading the Draft…'}
+              </p>
             </div>
-            <Button
-              type="button"
-              onClick={() => { void createCheckpoint(); }}
-              disabled={creating || loading || !checkpointReady}
-              title={checkpointReady ? 'Record the current Draft as a local Git snapshot' : 'Save a change before creating another checkpoint'}
-              style={{ flexShrink: 0 }}
-            >
-              {creating
-                ? <><LoaderCircle size={14} className="animate-spin" /> Creating…</>
-                : checkpointReady
-                  ? <><BookmarkPlus size={14} /> Create checkpoint</>
-                  : <><BookmarkPlus size={14} /> No new changes</>}
-            </Button>
-          </article>
+            {checkpointButton}
+          </div>
 
           {error && (
             <InlineFeedback
               className="mt-3.5"
               title="Could not update history"
               description={error}
-              action={<button type="button" onClick={() => { void refresh(); }} style={retryStyle}>Retry</button>}
+              action={<button type="button" onClick={() => { void refresh(); }} className="text-[12px] font-semibold text-red">Retry</button>}
             />
           )}
 
-          <div style={{ marginTop: 30 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
-              <h2 style={{ margin: 0, color: C.ink2, fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                Checkpoints
-              </h2>
-              {spaceHistory && (
-                <span style={{ color: C.faint, fontSize: 11.5 }}>{spaceHistory.checkpoints.length} total</span>
-              )}
-            </div>
-
+          <div className="mt-8">
+            <ViewSectionHeading meta={spaceHistory?.checkpoints.length || undefined}>Checkpoints</ViewSectionHeading>
             {loading ? (
-              <div style={emptyStyle}><LoaderCircle size={17} className="animate-spin" /> Loading history…</div>
+              <ViewEmpty><LoaderCircle size={15} className="animate-spin" /> Loading…</ViewEmpty>
             ) : spaceHistory?.checkpoints.length ? (
-              <ol style={{ display: 'grid', gap: 10, margin: 0, padding: 0, listStyle: 'none' }}>
-                {spaceHistory.checkpoints.map((checkpoint) => (
-                  <li key={checkpoint.id}>
-                    <div style={checkpointCardStyle}>
-                      <span style={commitIconStyle}><GitCommitHorizontal size={16} /></span>
-                      <div style={{ minWidth: 0 }}>
-                        <strong style={{ display: 'block', color: C.ink2, fontSize: 13.5, fontWeight: 620, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {checkpoint.name}
-                        </strong>
-                        <time dateTime={new Date(checkpoint.createdAt * 1000).toISOString()} style={{ display: 'block', marginTop: 4, color: C.muted, fontSize: 11.5 }}>
-                          {new Date(checkpoint.createdAt * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
-                        </time>
-                      </div>
-                      <code title={checkpoint.id} style={commitCodeStyle}>{checkpoint.id.slice(0, 8)}</code>
-                    </div>
-                  </li>
-                ))}
+              <ol className="m-0 list-none divide-y divide-border-soft border-y border-border-soft p-0">
+                {spaceHistory.checkpoints.map((checkpoint) => {
+                  const created = new Date(checkpoint.createdAt * 1000);
+                  return (
+                    <li key={checkpoint.id} className="flex min-w-0 items-center gap-3 px-1 py-2.5">
+                      <GitCommitHorizontal size={15} className="shrink-0 text-text-faint" aria-hidden />
+                      <span className="min-w-0 flex-1 truncate text-[13.5px] text-text">{checkpoint.name}</span>
+                      <time dateTime={created.toISOString()} className="shrink-0 text-[12px] text-text-tertiary">
+                        {created.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                      </time>
+                      <code title={checkpoint.id} className="shrink-0 text-[11px] text-text-faint" style={{ fontFamily: fonts.mono }}>{checkpoint.id.slice(0, 7)}</code>
+                    </li>
+                  );
+                })}
               </ol>
             ) : (
-              <div style={emptyStyle}>
-                No checkpoints yet. Your saved work is still in Current Draft.
-              </div>
+              <ViewEmpty>No checkpoints yet.</ViewEmpty>
             )}
           </div>
         </>
@@ -178,106 +137,3 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
     </section>
   );
 }
-
-const draftCardStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: 22,
-  padding: '20px 20px 20px 18px',
-  border: `1px solid ${C.accentTintBorder}`,
-  borderRadius: 12,
-  background: `linear-gradient(135deg, ${C.accentWash} 0%, ${C.accentSoft} 100%)`,
-};
-
-const draftIconStyle: React.CSSProperties = {
-  width: 38,
-  height: 38,
-  borderRadius: 11,
-  display: 'grid',
-  placeItems: 'center',
-  flexShrink: 0,
-  color: C.accent,
-  background: C.accentWashSoft,
-  border: `1px solid ${C.accentTintLine}`,
-};
-
-const currentBadgeStyle: React.CSSProperties = {
-  padding: '2px 7px',
-  borderRadius: 999,
-  background: C.accent,
-  color: C.onAccent,
-  fontSize: 9.5,
-  fontWeight: 750,
-  letterSpacing: '0.06em',
-  textTransform: 'uppercase',
-};
-
-const noticeStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'flex-start',
-  gap: 10,
-  padding: '14px 16px',
-  borderRadius: 9,
-  border: `1px solid ${C.line}`,
-  background: C.amberSoft,
-};
-
-const checkpointCardStyle: React.CSSProperties = {
-  minWidth: 0,
-  minHeight: 62,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: 16,
-  padding: '12px 14px',
-  border: `1px solid ${C.line}`,
-  borderRadius: 9,
-  background: C.panel,
-};
-
-const commitIconStyle: React.CSSProperties = {
-  width: 34,
-  height: 34,
-  display: 'grid',
-  placeItems: 'center',
-  borderRadius: 999,
-  color: C.green,
-  background: C.greenSoft,
-  border: `1px solid ${C.line}`,
-  flexShrink: 0,
-};
-
-const commitCodeStyle: React.CSSProperties = {
-  flexShrink: 0,
-  padding: '3px 7px',
-  borderRadius: 5,
-  color: C.muted,
-  background: C.rail,
-  fontSize: 10.5,
-  letterSpacing: '0.02em',
-};
-
-const emptyStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 8,
-  minHeight: 90,
-  padding: 20,
-  border: `1px dashed ${C.line}`,
-  borderRadius: 9,
-  color: C.muted,
-  fontSize: 12.5,
-  background: `color-mix(in srgb, ${C.panel} 55%, transparent)`,
-};
-
-const retryStyle: React.CSSProperties = {
-  border: 0,
-  padding: 0,
-  background: 'transparent',
-  color: C.red,
-  fontSize: 12,
-  fontWeight: 650,
-  cursor: 'pointer',
-};

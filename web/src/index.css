@@ -196,6 +196,18 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
   margin: 0 0 1rem;
 }
 
+/* Tool views (Tasks, History, Reviews, Members…) share one quiet sans title;
+   serif stays for content people write. Use components/ui/view-header. */
+.view-title {
+  margin: 0;
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 30px;
+  letter-spacing: -0.015em;
+}
+
 .page-title--tight {
   margin-bottom: 0.25rem;
 }
@@ -288,15 +300,104 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 }
 
 
-.dark {
-  --sidebar: hsl(240 5.9% 10%);
-  --sidebar-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-primary: hsl(224.3 76.3% 48%);
-  --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: hsl(240 3.7% 15.9%);
-  --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-border: hsl(240 3.7% 15.9%);
-  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+/* ── Dark theme ──
+   The same warm palette at night: paper becomes a soft charcoal, ink a warm
+   off-white, and the accent a little brighter so it reads on dark. Every
+   colour is a token, so components need no dark: variants. lib/theme.ts puts
+   `.dark` on <html> (System, Light or Dark in Settings). Unlayered, so it
+   wins over the @theme defaults. */
+html.dark {
+  color-scheme: dark;
+
+  --color-bg: #1c1b19;
+  --color-panel: #222120;
+  --color-bg-secondary: #252422;
+  --color-bg-hover: #2e2c29;
+  --color-bg-active: #383532;
+  --color-border: #34322e;
+  --color-border-hover: #4a4640;
+  --color-border-soft: #2b2a27;
+
+  --color-text: #ece9e3;
+  --color-text-secondary: #cdc8bf;
+  --color-text-tertiary: #959086;
+  --color-text-faint: #706b63;
+
+  --color-accent: #f07028;
+  --color-accent-hover: #f5853f;
+  --color-accent-fill: #c94b08;
+  --color-accent-soft: #3a2619;
+  --color-accent-soft-hover: #4a2f1c;
+  --color-accent-ink: #f7a26e;
+  --color-on-accent: #ffffff;
+
+  --color-green: #57b884;
+  --color-green-fill: #2f8a5b;
+  --color-green-soft: #1d3327;
+  --color-green-ink: #86d3a6;
+  --color-red: #f26a60;
+  --color-red-soft: #3b201e;
+  --color-amber: #dca540;
+  --color-amber-soft: #382d18;
+  --color-amber-ink: #ecc06e;
+  --color-blue: #6ea6e6;
+  --color-blue-soft: #1d2a3a;
+  --color-tag: #33302c;
+
+  --color-accent-tint-border: #5b3b27;
+  --color-accent-wash: #2a221c;
+  --color-accent-wash-soft: #2c231c;
+  --color-accent-tint-line: #4c3425;
+  --color-green-tint-border: #2d4a39;
+  --color-diff-mute: #26272a;
+  --color-code-bg: #151413;
+  --color-code-fg: #d6d1c8;
+  --color-scrim: rgb(0 0 0 / 60%);
+  --color-dialog-scrim: rgb(0 0 0 / 50%);
+  --color-sidebar-edge: rgb(255 255 255 / 6%);
+
+  --color-green-bg: #1e3a27;
+  --color-green-bg-soft: #1a2b20;
+  --color-red-bg: #40201e;
+  --color-red-bg-soft: #2d1b1a;
+  --color-purple: #a98bf2;
+
+  /* shadcn */
+  --background: 40 4% 10%;
+  --foreground: 40 18% 91%;
+  --card: 30 3% 13%;
+  --card-foreground: 40 18% 91%;
+  --popover: 30 3% 13%;
+  --popover-foreground: 40 18% 91%;
+  --primary: 40 18% 91%;
+  --primary-foreground: 40 4% 10%;
+  --secondary: 36 4% 14%;
+  --secondary-foreground: 40 18% 91%;
+  --muted: 36 4% 14%;
+  --muted-foreground: 39 5% 56%;
+  --accent: 22 87% 55%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 4 85% 66%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 40 5% 19%;
+  --input: 40 5% 19%;
+  --ring: 22 87% 55%;
+  --shadow-focus: 0 0 0 3px rgba(240, 112, 40, 0.28);
+  --shadow-login: 0 12px 36px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.3);
+  --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.3);
+  --shadow-chip: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-rest: 0 1px 2px rgba(0, 0, 0, 0.25);
+
+  --sidebar: hsl(36 4% 14%);
+  --sidebar-foreground: hsl(40 18% 91%);
+  --sidebar-primary: hsl(40 18% 91%);
+  --sidebar-primary-foreground: hsl(40 4% 10%);
+  --sidebar-accent: hsl(24 40% 16%);
+  --sidebar-accent-foreground: hsl(22 87% 55%);
+  --sidebar-border: hsl(40 5% 19%);
+  --sidebar-ring: hsl(22 87% 55%);
 }
 
 @theme inline {
@@ -336,3 +437,6 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 }
+
+/* The logo's ink dot turns light on dark. */
+html.dark img.cowiki-logo { content: url("/cowiki-logo-dark.svg"); }

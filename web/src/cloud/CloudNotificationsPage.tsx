@@ -88,7 +88,7 @@ export function CloudNotificationsPage({
           <div className="mx-auto max-w-3xl">
             <div className="mb-6 flex items-center justify-between gap-4">
               <div>
-                <h1 className="font-serif text-2xl font-semibold">Notifications</h1>
+                <h1 className="view-title">Notifications</h1>
                 <p className="mt-1 text-sm text-text-tertiary">Mentions shared through Cloud Spaces.</p>
               </div>
               <button

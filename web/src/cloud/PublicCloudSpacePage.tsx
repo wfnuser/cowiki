@@ -74,7 +74,7 @@ export function PublicCloudSpacePage() {
     return (
       <main className="grid min-h-screen place-items-center bg-bg px-6 text-text">
         <div className="max-w-md rounded-xl border bg-panel p-8 text-center">
-          <h1 className="font-serif text-2xl font-semibold">Space unavailable</h1>
+          <h1 className="view-title">Space unavailable</h1>
           <p className="mt-3 text-sm leading-6 text-text-tertiary">
             It may be private, missing, or temporarily unavailable.
           </p>
@@ -94,7 +94,7 @@ export function PublicCloudSpacePage() {
     <div className="flex min-h-screen bg-bg text-text">
       <aside className="hidden w-72 shrink-0 border-r bg-panel md:block">
         <div className="border-b p-5">
-          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-green">
+          <div className="mb-2 flex items-center gap-2 text-[12.5px] font-medium text-green">
             <Globe2 size={14} /> Public Space
           </div>
           <h1 className="font-serif text-xl font-semibold">{space.name}</h1>

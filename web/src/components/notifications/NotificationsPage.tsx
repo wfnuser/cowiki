@@ -11,6 +11,9 @@ import {
 import { C, spaceTileColors } from '@/lib/design';
 import { timeAgo } from '../../lib/time';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
+import { InlineFeedback } from '@/components/ui/inline-feedback';
+import { ViewEmpty, ViewHeader, ViewTabs } from '@/components/ui/view-header';
 
 type Tab = 'unread' | 'all';
 
@@ -142,199 +145,107 @@ export function NotificationsPage({ onUnreadChange }: { onUnreadChange?: (n: num
     }
   };
 
+  const header = (
+    <ViewHeader
+      title="Notifications"
+      className="mb-4"
+      actions={(
+        <Button size="sm" variant="ghost" onClick={markAll} disabled={unreadCount === 0}>
+          <CheckCheck /> Mark all as read
+        </Button>
+      )}
+    />
+  );
+
   if (error) {
-    return <p style={{ color: C.red, fontSize: 14 }}>Failed to load notifications: {error}</p>;
+    return (
+      <section style={{ width: 'min(860px, 100%)' }}>
+        {header}
+        <InlineFeedback title="Could not load notifications" description={error} />
+      </section>
+    );
   }
 
   return (
-    <div style={{ maxWidth: 860 }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
-        <h1 className="page-title" style={{ marginBottom: 0 }}>Notifications</h1>
-        <button
-          onClick={markAll}
-          disabled={unreadCount === 0}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '7px 12px', borderRadius: 8, border: `1px solid ${C.line}`,
-            background: C.panel, cursor: unreadCount === 0 ? 'default' : 'pointer',
-            color: unreadCount === 0 ? C.faint : C.ink2, fontSize: 13, fontWeight: 550,
-            opacity: unreadCount === 0 ? 0.6 : 1,
-          }}
-        >
-          <CheckCheck size={14} /> Mark all as read
-        </button>
-      </div>
+    <section style={{ width: 'min(860px, 100%)' }}>
+      {header}
 
-      {/* Filter bar */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap',
-      }}>
-        {/* Unread / All segmented */}
-        <div style={{ display: 'flex', gap: 6 }}>
-          {([
-            { key: 'unread' as Tab, label: 'Unread', count: unreadCount },
-            { key: 'all' as Tab, label: 'All', count: (notifs ?? []).length },
-          ]).map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              style={{
-                padding: '6px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
-                fontWeight: 550, fontSize: 13.5,
-                background: tab === t.key ? C.ink : 'transparent',
-                color: tab === t.key ? C.onAccent : C.muted,
-              }}
-            >
-              {t.label} · {t.count}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ flex: 1 }} />
-
-        {/* Type filter */}
-        <FilterSelect
-          value={kindFilter}
-          onChange={setKindFilter}
-          options={[{ value: 'all', label: 'All types' }, ...kinds.map((k) => ({ value: k, label: kindMeta(k).label }))]}
+      <div className="mb-4 flex flex-wrap items-end gap-2 border-b border-border-soft">
+        <ViewTabs
+          label="Notification filters"
+          className="mb-0 border-b-0"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { id: 'unread', label: 'Unread', count: unreadCount },
+            { id: 'all', label: 'All', count: (notifs ?? []).length },
+          ]}
         />
-        {/* Space filter */}
-        {spaces.length > 0 && (
+        <div className="flex-1" />
+        <div className="flex gap-2 pb-1.5">
           <FilterSelect
-            value={spaceFilter}
-            onChange={setSpaceFilter}
-            options={[
-              { value: 'all', label: 'All spaces' },
-              ...spaces.map(([slug, name]) => ({ value: slug, label: name })),
-              { value: '__none__', label: 'No space' },
-            ]}
+            value={kindFilter}
+            onChange={setKindFilter}
+            options={[{ value: 'all', label: 'All types' }, ...kinds.map((k) => ({ value: k, label: kindMeta(k).label }))]}
           />
-        )}
+          {spaces.length > 0 && (
+            <FilterSelect
+              value={spaceFilter}
+              onChange={setSpaceFilter}
+              options={[
+                { value: 'all', label: 'All spaces' },
+                ...spaces.map(([slug, name]) => ({ value: slug, label: name })),
+                { value: '__none__', label: 'No space' },
+              ]}
+            />
+          )}
+        </div>
       </div>
 
-      {/* List */}
       {notifs == null ? (
-        <p style={{ color: C.muted, fontSize: 14, padding: '16px 0' }}>Loading…</p>
+        <ViewEmpty>Loading…</ViewEmpty>
       ) : filtered.length === 0 ? (
-        <div style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
-          padding: '56px 24px', color: C.faint,
-          border: `1px solid ${C.line}`, borderRadius: 12, background: C.panel,
-        }}>
-          <Inbox size={32} strokeWidth={1.5} />
-          <span style={{ fontSize: 14 }}>
-            {tab === 'unread' ? "You're all caught up." : 'No notifications.'}
-          </span>
-        </div>
+        <ViewEmpty><Inbox size={15} aria-hidden /> {tab === 'unread' ? 'You’re all caught up.' : 'No notifications.'}</ViewEmpty>
       ) : (
-        <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'hidden', background: C.panel }}>
-          {filtered.map((n, i) => {
+        <div className="divide-y divide-border-soft">
+          {filtered.map((n) => {
             const meta = kindMeta(n.kind);
             const Icon = meta.icon;
             const actionable = (n.kind === 'invitation' || n.kind === 'ownership_transfer') && linkId(n);
             return (
-              <div
-                key={n.id}
-                style={{
-                  display: 'flex', alignItems: 'flex-start', gap: 13,
-                  padding: '14px 16px',
-                  borderTop: i ? `1px solid ${C.lineSoft}` : 'none',
-                  background: n.read
-                    ? C.panel
-                    : `color-mix(in srgb, ${C.accentSoft} 33%, transparent)`,
-                }}
-              >
-                {/* unread dot */}
-                <div style={{ width: 8, paddingTop: 7, flexShrink: 0 }}>
-                  {!n.read && (
-                    <span style={{ display: 'block', width: 8, height: 8, borderRadius: 4, background: C.accent }} />
-                  )}
-                </div>
-
-                {/* kind icon */}
-                <div style={{
-                  width: 32, height: 32, borderRadius: 9, flexShrink: 0,
-                  background: `color-mix(in srgb, ${meta.color} 10%, transparent)`, color: meta.color,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <Icon size={16} />
-                </div>
-
-                {/* body */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{
-                    fontSize: 14, color: C.ink, fontWeight: n.read ? 450 : 600, lineHeight: 1.4,
-                  }}>
-                    {n.title}
+              <div key={n.id} className="group flex items-start gap-3 px-1 py-3">
+                <span className="flex w-2 shrink-0 justify-center pt-2">
+                  {!n.read && <span aria-label="Unread" className="size-1.5 rounded-full bg-accent" />}
+                </span>
+                <Icon size={15} className="mt-0.5 shrink-0" style={{ color: meta.color }} aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <div className={n.read ? 'text-[13.5px] leading-5 text-text-secondary' : 'text-[13.5px] font-medium leading-5 text-text'}>{n.title}</div>
+                  {n.body && <div className="mt-0.5 text-[12.5px] leading-5 text-text-tertiary">{n.body}</div>}
+                  <div className="mt-1 text-[12px] text-text-faint">
+                    {[n.workspace_name, meta.label, timeAgo(n.created_at)].filter(Boolean).join(' · ')}
                   </div>
-                  {n.body && (
-                    <div style={{ fontSize: 13, color: C.muted, marginTop: 2, lineHeight: 1.45 }}>
-                      {n.body}
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 12, color: C.faint }}>
-                    {n.workspace_name && (
-                      <span style={{
-                        padding: '1px 7px', borderRadius: 999, background: C.rail, color: C.muted, fontWeight: 550,
-                      }}>
-                        {n.workspace_name}
-                      </span>
-                    )}
-                    <span>{meta.label}</span>
-                    <span>·</span>
-                    <span>{timeAgo(n.created_at)}</span>
-                  </div>
-
-                  {/* inline actions */}
                   {actionable && !n.read && (
-                    <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                      <button
-                        onClick={() => act(n, 'accept')}
-                        disabled={acting === n.id}
-                        style={{
-                          padding: '5px 14px', borderRadius: 7, border: 'none', cursor: 'pointer',
-                          background: C.accent, color: C.onAccent, fontSize: 13, fontWeight: 550,
-                          opacity: acting === n.id ? 0.6 : 1,
-                        }}
-                      >
-                        Accept
-                      </button>
-                      <button
-                        onClick={() => act(n, 'decline')}
-                        disabled={acting === n.id}
-                        style={{
-                          padding: '5px 14px', borderRadius: 7, border: `1px solid ${C.line}`, cursor: 'pointer',
-                          background: C.panel, color: C.ink2, fontSize: 13, fontWeight: 550,
-                          opacity: acting === n.id ? 0.6 : 1,
-                        }}
-                      >
-                        Decline
-                      </button>
+                    <div className="mt-2 flex gap-2">
+                      <Button size="xs" variant="outline" className="h-7 px-3" onClick={() => act(n, 'decline')} disabled={acting === n.id}>Decline</Button>
+                      <Button size="xs" className="h-7 px-3" onClick={() => act(n, 'accept')} disabled={acting === n.id}>Accept</Button>
                     </div>
                   )}
                 </div>
-
-                {/* read/unread toggle */}
                 <button
+                  type="button"
                   onClick={() => setRead(n, !n.read)}
+                  aria-label={n.read ? 'Mark as unread' : 'Mark as read'}
                   title={n.read ? 'Mark as unread' : 'Mark as read'}
-                  style={{
-                    flexShrink: 0, width: 28, height: 28, borderRadius: 7, border: 'none',
-                    background: 'transparent', cursor: 'pointer', color: C.faint,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = C.rail; e.currentTarget.style.color = C.muted; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.faint; }}
+                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-text-faint opacity-0 transition-opacity hover:bg-bg-hover hover:text-text group-hover:opacity-100 focus-visible:opacity-100"
                 >
-                  {n.read ? <Circle size={15} /> : <Check size={15} />}
+                  {n.read ? <Circle size={14} /> : <Check size={14} />}
                 </button>
               </div>
             );
           })}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -350,7 +261,7 @@ function FilterSelect({
   const EMPTY = '__all__';
   return (
     <Select value={value === '' ? EMPTY : value} onValueChange={(next) => onChange(next === EMPTY ? '' : next)}>
-      <SelectTrigger className="min-w-32 text-text-secondary">
+      <SelectTrigger className="h-7 min-w-28 border-transparent bg-transparent text-text-secondary shadow-none hover:bg-bg-hover">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

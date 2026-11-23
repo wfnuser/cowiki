@@ -7,13 +7,17 @@ import {
   canResume,
   canSend,
   mergeListed,
+  modelLabel,
   orderedSessions,
+  sessionGroups,
+  shortAgo,
   shortVersion,
   statusLabel,
   transcriptBlocks,
   workSummary,
   type AgentSnapshot,
   type AgentToolItem,
+  type ModelOption,
   type SessionMap,
 } from '../src/lib/agent-session.ts';
 
@@ -119,4 +123,34 @@ test('a run of steps reads as one short summary', () => {
   assert.equal(shortVersion('2.1.296 (Claude Code)'), '2.1.296');
   assert.equal(shortVersion('codex-cli 0.166.0'), '0.166.0');
   assert.equal(shortVersion(null), null);
+});
+
+test('a model reads by the name the Agent gave it, aliases by what they run', () => {
+  const claude: ModelOption[] = [
+    { id: 'default', name: 'Default', description: 'Opus · Best', isDefault: true, resolved: 'claude-opus' },
+    { id: 'opus', name: 'Opus', description: null, isDefault: false, resolved: 'claude-opus' },
+    { id: 'sonnet', name: 'Sonnet', description: null, isDefault: false, resolved: 'claude-sonnet' },
+  ];
+  assert.equal(modelLabel(claude, null), 'Opus', 'the default reads as the model it runs');
+  assert.equal(modelLabel(claude, 'sonnet'), 'Sonnet');
+  assert.equal(modelLabel(claude, null, 'claude-sonnet'), 'Sonnet', 'a reported concrete model maps back');
+  assert.equal(modelLabel(claude, 'unknown-model'), 'unknown-model');
+  assert.equal(modelLabel([], null, 'gpt-x'), 'gpt-x');
+  assert.equal(modelLabel([], null), null);
+});
+
+test('sessions group by day of last activity, newest first', () => {
+  const now = new Date(2026, 10, 23, 15, 0).getTime();
+  const at = (days: number, hour = 10) => new Date(2026, 10, 23 - days, hour, 0).getTime();
+  const session = (id: string, updatedAt: number) => ({ sessionId: id, updatedAt }) as AgentSnapshot;
+  const groups = sessionGroups([session('old', at(30)), session('a', at(0, 9)), session('b', at(0, 14)), session('y', at(1)), session('w', at(4))], now);
+  assert.deepEqual(groups.map((group) => [group.label, group.sessions.map((item) => item.sessionId)]), [
+    ['Today', ['b', 'a']],
+    ['Yesterday', ['y']],
+    ['Previous 7 days', ['w']],
+    ['Older', ['old']],
+  ]);
+  assert.equal(shortAgo(now - 30_000, now), 'now');
+  assert.equal(shortAgo(now - 5 * 60_000, now), '5m');
+  assert.equal(shortAgo(now - 3 * 3_600_000, now), '3h');
 });

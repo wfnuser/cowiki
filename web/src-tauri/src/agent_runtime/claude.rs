@@ -101,6 +101,10 @@ pub fn launch_args(config: &ProviderConfig, start: SessionStart<'_>) -> Vec<Stri
         args.push("--append-system-prompt".into());
         args.push(config.instructions.clone());
     }
+    if let Some(model) = config.model.as_deref() {
+        args.push("--model".into());
+        args.push(model.to_string());
+    }
     match start {
         SessionStart::New(id) => args.extend(["--session-id".to_string(), id.to_string()]),
         SessionStart::Resume(id) => args.extend(["--resume".to_string(), id.to_string()]),
@@ -1058,5 +1062,12 @@ impl Provider for ClaudeProvider {
 
     fn is_alive(&self) -> bool {
         self.rpc.get().is_some_and(|rpc| rpc.is_alive())
+    }
+
+    fn set_model(&self, model: &str) -> Result<(), String> {
+        self.rpc()?
+            .request("set_model", json!({"model": model}), INTERRUPT_TIMEOUT)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     }
 }

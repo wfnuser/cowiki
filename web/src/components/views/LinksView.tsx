@@ -1,15 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  CircleCheck,
-  FileText,
-  LoaderCircle,
-  RefreshCw,
-  Unlink,
-} from 'lucide-react';
+import { CircleCheck, FileText, LoaderCircle, RefreshCw } from 'lucide-react';
 
 import { listBrokenLinks, type BrokenLink } from '@/api';
 import { InlineFeedback } from '@/components/ui/inline-feedback';
-import { C } from '@/lib/design';
+import { ViewEmpty, ViewHeader, ViewIconButton, ViewSectionHeading } from '@/components/ui/view-header';
+import { fonts } from '@/lib/design';
 import {
   brokenLinkSummary,
   groupBrokenLinks,
@@ -68,75 +63,48 @@ export function LinksView({ workspaceSlug, onOpenPage }: LinksViewProps) {
   }, [refresh]);
 
   return (
-    <section style={{ width: 'min(760px, 100%)', margin: '0 auto' }}>
-      <header style={{ marginBottom: 28 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Unlink size={20} color={C.accent} strokeWidth={1.8} />
-            <h1 className="page-title page-title--compact" style={{ margin: 0 }}>Links</h1>
-          </div>
-          <button type="button" onClick={() => { void refresh(); }} disabled={refreshing} style={refreshButtonStyle}>
-            <RefreshCw size={13} className={refreshing ? 'animate-spin' : undefined} />
-            <span>Refresh</span>
-          </button>
-        </div>
-        <p style={{ margin: 0, maxWidth: 610, color: C.muted, fontSize: 13.5, lineHeight: 1.65 }}>
-          A read-only check of internal links. Paths are matched exactly, including letter
-          case. Results update when you open this view, choose Refresh, or return to this window.
-        </p>
-      </header>
+    <section style={{ width: 'min(860px, 100%)' }}>
+      <ViewHeader
+        title="Links"
+        description="Internal links whose target page doesn’t exist."
+        actions={(
+          <ViewIconButton label="Refresh" onClick={() => { void refresh(); }} disabled={refreshing}>
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : undefined} />
+          </ViewIconButton>
+        )}
+      />
 
       {mode === 'loading' ? (
-        <div style={emptyStyle}><LoaderCircle size={17} className="animate-spin" /> Checking links…</div>
+        <ViewEmpty><LoaderCircle size={15} className="animate-spin" /> Checking links…</ViewEmpty>
       ) : mode === 'error' ? (
         <InlineFeedback
           title="Could not inspect links"
           description={error}
           action={(
-            <button type="button" onClick={() => { void refresh(); }} disabled={refreshing} style={retryStyle}>
+            <button type="button" onClick={() => { void refresh(); }} disabled={refreshing} className="inline-flex items-center gap-1 text-[12px] font-semibold text-red">
               <RefreshCw size={12} /> Retry
             </button>
           )}
         />
       ) : mode === 'clean' ? (
-        <div style={cleanStyle} aria-live="polite">
-          <span style={cleanIconStyle}><CircleCheck size={21} /></span>
-          <div>
-            <strong style={{ display: 'block', color: C.ink2, fontSize: 14, marginBottom: 3 }}>
-              No broken links
-            </strong>
-            <span style={{ color: C.muted, fontSize: 12.5 }}>
-              All checked internal targets resolve in the current Space tree.
-            </span>
-          </div>
-        </div>
+        <ViewEmpty><CircleCheck size={15} className="text-green" aria-hidden /> No broken links.</ViewEmpty>
       ) : (
         <div aria-live="polite">
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
-            <h2 style={{ margin: 0, color: C.ink2, fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-              Needs attention
-            </h2>
-            <span style={{ color: C.red, fontSize: 11.5, fontWeight: 650 }}>
-              {brokenLinkSummary(links.length)}
-            </span>
-          </div>
-          <ol style={{ display: 'grid', gap: 10, margin: 0, padding: 0, listStyle: 'none' }}>
+          <ViewSectionHeading meta={brokenLinkSummary(links.length)}>Needs attention</ViewSectionHeading>
+          <ol className="m-0 list-none divide-y divide-border-soft border-y border-border-soft p-0">
             {groups.map((group) => (
-              <li key={group.sourcePath} style={sourceCardStyle}>
-                <button type="button" onClick={() => onOpenPage(group.sourcePath)} style={sourceButtonStyle}>
-                  <span style={fileIconStyle}><FileText size={16} /></span>
-                  <span style={{ minWidth: 0, textAlign: 'left' }}>
-                    <strong style={{ display: 'block', color: C.ink2, fontSize: 13.5, fontWeight: 630, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {group.sourceTitle || group.sourcePath}
-                    </strong>
-                    <code style={{ color: C.muted, fontSize: 11.5 }}>{group.sourcePath}</code>
-                  </span>
+              <li key={group.sourcePath} className="py-2.5">
+                <button type="button" onClick={() => onOpenPage(group.sourcePath)} className="flex w-full min-w-0 items-center gap-2.5 rounded-md px-1 py-0.5 text-left hover:bg-bg-hover">
+                  <FileText size={15} className="shrink-0 text-text-faint" aria-hidden />
+                  <span className="min-w-0 truncate text-[13.5px] font-medium text-text">{group.sourceTitle || group.sourcePath}</span>
+                  <span className="min-w-0 flex-1 truncate text-[12px] text-text-faint">{group.sourcePath}</span>
                 </button>
-                <ul style={{ margin: '12px 0 0 42px', padding: 0, listStyle: 'none', display: 'grid', gap: 7 }}>
+                <ul className="m-0 mt-1 grid list-none gap-1 p-0 pl-[30px]">
                   {group.targets.map((target) => (
-                    <li key={target} style={{ display: 'flex', alignItems: 'center', gap: 8, color: C.ink2, fontSize: 12.5 }}>
-                      <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: C.red, flexShrink: 0 }} />
-                      Missing target <code style={targetCodeStyle}>{target}</code>
+                    <li key={target} className="flex min-w-0 items-center gap-2 text-[12.5px] text-text-secondary">
+                      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-red" />
+                      <span className="shrink-0">Missing</span>
+                      <code className="min-w-0 break-all text-[12px] text-red" style={{ fontFamily: fonts.mono }}>{target}</code>
                     </li>
                   ))}
                 </ul>
@@ -148,50 +116,3 @@ export function LinksView({ workspaceSlug, onOpenPage }: LinksViewProps) {
     </section>
   );
 }
-
-const retryStyle: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none', background: 'transparent',
-  color: C.red, fontSize: 12, fontWeight: 650, cursor: 'pointer', padding: '3px 5px',
-};
-
-const refreshButtonStyle: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 9px',
-  border: `1px solid ${C.line}`, borderRadius: 7, background: C.panel,
-  color: C.ink2, fontSize: 12, fontWeight: 620, cursor: 'pointer',
-};
-
-const emptyStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 150,
-  border: `1px dashed ${C.line}`, borderRadius: 11, color: C.muted, fontSize: 12.5,
-};
-
-const cleanStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 14, padding: '20px 18px', borderRadius: 11,
-  border: `1px solid ${C.greenTintBorder}`, background: C.greenBgSoft,
-};
-
-const cleanIconStyle: React.CSSProperties = {
-  width: 38, height: 38, display: 'grid', placeItems: 'center', flexShrink: 0,
-  borderRadius: 11, color: C.green, background: C.panel,
-  border: `1px solid ${C.greenTintBorder}`,
-};
-
-const sourceCardStyle: React.CSSProperties = {
-  padding: '15px 16px 16px', border: `1px solid ${C.line}`, borderRadius: 11,
-  background: C.panel,
-};
-
-const sourceButtonStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: 0,
-  border: 'none', background: 'transparent', cursor: 'pointer',
-};
-
-const fileIconStyle: React.CSSProperties = {
-  width: 32, height: 32, display: 'grid', placeItems: 'center', flexShrink: 0,
-  borderRadius: 9, color: C.accent, background: C.accentSoft,
-};
-
-const targetCodeStyle: React.CSSProperties = {
-  padding: '2px 6px', borderRadius: 5, color: C.red, background: C.redSoft,
-  fontSize: 11.5, overflowWrap: 'anywhere',
-};

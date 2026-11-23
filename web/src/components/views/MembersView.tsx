@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Users, UserPlus, MoreHorizontal } from 'lucide-react';
+import { ArrowLeftRight, Users, UserPlus, MoreHorizontal } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -11,7 +11,9 @@ import {
   type MemberInfo,
 } from '../../api';
 import { AvatarBadge } from '@/components/ui/avatar-badge';
-import { C } from '@/lib/design';
+import { Button } from '@/components/ui/button';
+import { InlineFeedback } from '@/components/ui/inline-feedback';
+import { ViewEmpty, ViewHeader } from '@/components/ui/view-header';
 
 // ── Helpers ──
 
@@ -87,121 +89,60 @@ export function MembersView({ workspaceSlug, canManage, currentUserRole, current
 
   // ── State views ──
 
-  if (error) {
-    return <p style={{ color: C.red, fontSize: 14, padding: '16px 0' }}>Failed to load members: {error}</p>;
-  }
-
-  if (members == null) {
-    return <p style={{ color: C.muted, fontSize: 14, padding: '16px 0' }}>Loading members...</p>;
-  }
-
-  if (members.length === 0) {
+  if (error || members == null || members.length === 0) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 0', gap: 12 }}>
-        <Users size={32} color={C.faint} />
-        <p style={{ color: C.muted, fontSize: 13 }}>No members found.</p>
-      </div>
+      <section style={{ width: 'min(860px, 100%)' }}>
+        <ViewHeader title="Members" />
+        {error ? (
+          <InlineFeedback title="Could not load members" description={error} />
+        ) : (
+          <ViewEmpty>{members == null ? 'Loading…' : <><Users size={15} aria-hidden /> No members yet.</>}</ViewEmpty>
+        )}
+      </section>
     );
   }
 
   // ── Loaded ──
 
+  const columns = 'minmax(0,1fr) 120px 110px 32px';
   return (
-    <div>
-      {/* Header */}
-      {canManage && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-            <h1 className="page-title" style={{ marginBottom: 0 }}>
-              Members
-            </h1>
-            <span style={{ fontSize: 24, color: C.faint, fontWeight: 400 }}>{members.length}</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <section style={{ width: 'min(860px, 100%)' }}>
+      <ViewHeader
+        title={<>Members <span className="ml-1 font-normal text-text-faint">{members.length}</span></>}
+        actions={canManage ? (
+          <>
             {isOwner && (
-              <button
-                onClick={onTransfer}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 7,
-                  padding: '8px 14px', borderRadius: 6, border: `1px solid ${C.line}`,
-                  background: 'transparent', color: C.amber, fontSize: '13.5px', fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-                Transfer
-              </button>
+              <Button size="sm" variant="ghost" onClick={onTransfer}>
+                <ArrowLeftRight /> Transfer
+              </Button>
             )}
-            <button
-              onClick={onInvite}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 7,
-                padding: '8px 14px', borderRadius: 6, border: 'none',
-                background: C.accent, color: C.onAccent, fontSize: '13.5px', fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              <UserPlus size={15} /> Invite people
-            </button>
-          </div>
-        </div>
-      )}
+            <Button size="sm" onClick={onInvite}>
+              <UserPlus /> Invite
+            </Button>
+          </>
+        ) : undefined}
+      />
 
-      {/* Table */}
-      <div style={{ border: `1px solid ${C.line}`, borderRadius: 6, background: C.panel }}>
-        {/* Header row */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: '1fr 130px 130px 48px',
-          gap: 12, padding: '8px 16px', background: C.sidebar,
-          borderBottom: `1px solid ${C.line}`,
-          borderTopLeftRadius: 6, borderTopRightRadius: 6,
-          fontSize: 12, fontWeight: 600,
-          color: C.faint, textTransform: 'uppercase', letterSpacing: '0.05em',
-        }}>
-          <span>Member</span>
-          <span>Role</span>
-          <span>Active</span>
-          <span></span>
+      <div role="table" aria-label="Members">
+        <div role="row" className="grid items-center gap-3 border-b border-border-soft px-1 pb-1.5 text-[12px] text-text-tertiary" style={{ gridTemplateColumns: columns }}>
+          <span role="columnheader">Name</span>
+          <span role="columnheader">Role</span>
+          <span role="columnheader">Active</span>
+          <span role="columnheader" aria-label="Actions" />
         </div>
-
-        {/* Rows */}
-        {members.map((m, i) => {
+        {members.map((m) => {
           const manageable = canManageMember(m);
-          const isLast = i === members.length - 1;
-
           return (
-            <div
-              key={m.id}
-              style={{
-                display: 'grid', gridTemplateColumns: '1fr 130px 130px 48px',
-                gap: 12, padding: '10px 16px', alignItems: 'center',
-                borderBottom: isLast ? 'none' : `1px solid ${C.line}`,
-                borderBottomLeftRadius: isLast ? 6 : 0,
-                borderBottomRightRadius: isLast ? 6 : 0,
-                background: C.panel,
-              }}
-            >
-              {/* Avatar + name */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                <AvatarBadge name={m.name} size={36} kind="member" />
-                <div style={{ minWidth: 0 }}>
-                  <div style={{
-                    fontSize: '14.5px', fontWeight: 550, color: C.ink,
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>
-                    {m.name}
-                  </div>
-                  <div style={{
-                    fontSize: '12.5px', color: C.muted,
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>
-                    {m.email || 'No email'}
-                  </div>
+            <div key={m.id} role="row" className="grid min-h-12 items-center gap-3 border-b border-border-soft px-1 py-2" style={{ gridTemplateColumns: columns }}>
+              <div role="cell" className="flex min-w-0 items-center gap-2.5">
+                <AvatarBadge name={m.name} size={28} kind="member" />
+                <div className="min-w-0">
+                  <div className="truncate text-[13.5px] font-medium text-text">{m.name}</div>
+                  {m.email && <div className="truncate text-[12px] text-text-tertiary">{m.email}</div>}
                 </div>
               </div>
 
-              {/* Role — shadcn Select or read-only */}
-              <div>
+              <div role="cell">
                 {manageable ? (
                   <Select value={m.role} onValueChange={(v) => handleRoleChange(m.id, v)}>
                     <SelectTrigger className="h-7 w-28 text-xs">
@@ -215,72 +156,40 @@ export function MembersView({ workspaceSlug, canManage, currentUserRole, current
                     </SelectContent>
                   </Select>
                 ) : (
-                  <span style={{ fontSize: 12, color: C.muted, textTransform: 'capitalize' }}>
-                    {m.role}
-                  </span>
+                  <span className="text-[12.5px] capitalize text-text-secondary">{m.role}</span>
                 )}
               </div>
 
-              {/* Last active */}
-              <span style={{ fontSize: 12, color: C.faint }}>
-                {relativeTime(m.last_active_at)}
-              </span>
+              <span role="cell" className="text-[12px] text-text-tertiary">{relativeTime(m.last_active_at)}</span>
 
-              {/* Actions — shadcn DropdownMenu */}
-              <div>
-                {confirmRemove === m.id ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, whiteSpace: 'nowrap' }}>
-                    <span style={{ color: C.muted }}>Remove {m.name}?</span>
-                    <button
-                      onClick={() => handleRemove(m.id)}
-                      style={{
-                        padding: '2px 6px', borderRadius: 4, border: 'none',
-                        background: C.red, color: C.onAccent, fontSize: 11, fontWeight: 500, cursor: 'pointer',
-                      }}
-                    >
-                      Remove
-                    </button>
-                    <button
-                      onClick={() => setConfirmRemove(null)}
-                      style={{
-                        padding: '2px 6px', borderRadius: 4, border: `1px solid ${C.line}`,
-                        background: 'transparent', color: C.ink2, fontSize: 11, cursor: 'pointer',
-                      }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : manageable ? (
+              <div role="cell" className="flex justify-end">
+                {manageable && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <button
-                        style={{
-                          background: 'none', border: 'none', padding: 2,
-                          cursor: 'pointer', color: C.faint, borderRadius: 4,
-                        }}
-                        title="Actions"
-                        onMouseEnter={(e) => { e.currentTarget.style.background = C.rail; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
-                      >
+                      <button type="button" aria-label={`Actions for ${m.name}`} title="Actions" className="flex size-7 items-center justify-center rounded-md text-text-faint hover:bg-bg-hover hover:text-text">
                         <MoreHorizontal size={16} />
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        onClick={() => setConfirmRemove(m.id)}
-                        style={{ color: C.red }}
-                      >
+                      <DropdownMenuItem onClick={() => setConfirmRemove(m.id)} className="text-red focus:text-red">
                         Remove member
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                ) : null}
+                )}
               </div>
+              {confirmRemove === m.id && (
+                <div role="cell" className="col-span-full flex items-center justify-end gap-2 pb-1 text-[12.5px] text-text-secondary">
+                  Remove {m.name} from this Space?
+                  <Button size="xs" variant="outline" onClick={() => setConfirmRemove(null)}>Cancel</Button>
+                  <Button size="xs" variant="destructive" onClick={() => handleRemove(m.id)}>Remove</Button>
+                </div>
+              )}
             </div>
           );
         })}
       </div>
-    </div>
+    </section>
   );
 }
 

@@ -53,7 +53,10 @@ export type AgentSnapshot = {
   mode: AgentMode;
   changeId: string | null;
   threadId: string | null;
+  /** The model the Agent reports it is using. */
   model: string | null;
+  /** The model the person picked from the Agent's list; null = its default. */
+  requestedModel?: string | null;
   seq: number;
   status: AgentStatus;
   items: AgentItem[];
@@ -84,7 +87,76 @@ export type NativeReadiness = {
   message: string | null;
   detail: string | null;
   canSignIn: boolean;
+  /** Models the Agent listed itself; CoWiki never adds any. */
+  models?: ModelOption[];
 };
+
+export type ModelOption = {
+  id: string;
+  name: string;
+  description: string | null;
+  isDefault: boolean;
+  /** The concrete model an alias runs (Claude's `opus`). */
+  resolved: string | null;
+};
+
+/** The name to show for a session's model: the pick, else what the Agent
+ * reports, else its default. */
+export function modelLabel(models: readonly ModelOption[], chosen: string | null | undefined, reported?: string | null): string | null {
+  // An alias ("default", "opus") reads as the model it runs when one is listed.
+  const named = (option: ModelOption) => {
+    if (!option.resolved) return option.name;
+    const concrete = models.find((other) => other !== option && !other.isDefault
+      && (other.id === option.resolved || other.resolved === option.resolved));
+    return option.isDefault && concrete ? concrete.name : option.name;
+  };
+  const exact = (id: string) => models.find((model) => model.id === id);
+  const runs = (id: string) => models.find((model) => !model.isDefault && model.resolved === id)
+    ?? models.find((model) => model.resolved === id);
+  if (chosen) {
+    const option = exact(chosen);
+    return option ? named(option) : chosen;
+  }
+  if (reported) {
+    const option = exact(reported) ?? runs(reported);
+    return option ? named(option) : reported;
+  }
+  const fallback = models.find((model) => model.isDefault);
+  return fallback ? named(fallback) : null;
+}
+
+export type SessionGroup = { label: string; sessions: AgentSnapshot[] };
+
+/** Sessions by last activity: Today, Yesterday, Previous 7 days, Older. */
+export function sessionGroups(sessions: readonly AgentSnapshot[], now = Date.now()): SessionGroup[] {
+  const day = new Date(now);
+  day.setHours(0, 0, 0, 0);
+  const today = day.getTime();
+  const bounds: Array<[string, number]> = [
+    ['Today', today],
+    ['Yesterday', today - 86_400_000],
+    ['Previous 7 days', today - 7 * 86_400_000],
+    ['Older', Number.NEGATIVE_INFINITY],
+  ];
+  const groups = bounds.map(([label]) => ({ label, sessions: [] as AgentSnapshot[] }));
+  for (const session of [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)) {
+    const index = bounds.findIndex(([, start]) => session.updatedAt >= start);
+    groups[index]!.sessions.push(session);
+  }
+  return groups.filter((group) => group.sessions.length > 0);
+}
+
+/** "now", "5m", "3h", "Tue", "12 Nov": short, for a list column. */
+export function shortAgo(at: number, now = Date.now()): string {
+  const minutes = Math.floor((now - at) / 60_000);
+  if (minutes < 1) return 'now';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const date = new Date(at);
+  if (now - at < 7 * 86_400_000) return date.toLocaleDateString(undefined, { weekday: 'short' });
+  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
 
 export type LoginEvent = { agent: AgentKind; status: 'completed' | 'failed' | 'cancelled'; message: string | null };
 

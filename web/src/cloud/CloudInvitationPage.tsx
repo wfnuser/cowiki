@@ -67,7 +67,7 @@ export function CloudInvitationPage() {
     <main className="grid min-h-screen place-items-center bg-bg-secondary px-6 py-12 text-text">
       <section className="w-full max-w-lg rounded-2xl border bg-panel p-8 shadow-lg">
         <div className="mb-8 flex items-center gap-3">
-          <img src="/cowiki-logo.svg" alt="CoWiki" width={32} height={32} />
+          <img className="cowiki-logo" src="/cowiki-logo.svg" alt="CoWiki" width={32} height={32} />
           <span className="font-serif text-xl font-bold">CoWiki</span>
         </div>
         {loading && <p className="text-sm text-text-tertiary">Loading invitation…</p>}
@@ -77,7 +77,7 @@ export function CloudInvitationPage() {
             <div className="mb-6 flex items-center gap-4">
               <SpaceMonogram name={invitation.spaceName} />
               <div>
-                <div className="text-xs font-semibold uppercase tracking-[0.1em] text-accent">
+                <div className="text-[12.5px] font-medium text-accent">
                   Space invitation
                 </div>
                 <h1 className="mt-1 font-serif text-3xl font-bold">{invitation.spaceName}</h1>

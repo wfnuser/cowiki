@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertTriangle, Bot, Check, Clock, Cloud, Copy, Key, Loader2, Plus, Shield, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, Clock, Cloud, Copy, Key, Loader2, Plus, Shield, Trash2 } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -16,6 +16,7 @@ import {
   type DefaultAgent,
 } from '../lib/client-settings';
 import { agentDefinition, SUPPORTED_AGENTS } from '../lib/agents';
+import { loadTheme, setThemePreference, THEME_CHOICES, type ThemePreference } from '../lib/theme';
 
 interface SettingsDialogProps {
   open: boolean;
@@ -316,6 +317,7 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const availableTabs = settingsTabs({ clientMode, cloudConnected });
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
+  const [theme, setTheme] = useState<ThemePreference>(loadTheme);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -390,15 +392,31 @@ export function SettingsDialog({
 
             {availableTabs.includes('client') && (
               <TabsContent value="client" className="mt-4 data-[state=inactive]:hidden" forceMount style={{ minHeight: 320 }}>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Bot className="h-4 w-4 text-muted-foreground" />
-                    <h4 className="text-sm font-medium">Default agent</h4>
+                <section className="settings-section is-first">
+                  <h3 className="settings-heading">Appearance</h3>
+                  <div className="grid grid-cols-3 gap-0.5 rounded-lg bg-bg-secondary p-0.5 ring-1 ring-inset ring-border-soft" role="radiogroup" aria-label="Appearance">
+                    {THEME_CHOICES.map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        role="radio"
+                        aria-checked={theme === value}
+                        onClick={() => { setTheme(value); setThemePreference(value); }}
+                        className={`h-7 rounded-md px-2 text-[12.5px] transition-colors ${
+                          theme === value
+                            ? 'bg-panel font-medium text-text shadow-[var(--shadow-chip)] ring-1 ring-border'
+                            : 'text-text-tertiary hover:text-text-secondary'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Used as the primary action when you open the agent panel. Every installed CLI remains available in a new tab.
-                  </p>
-                  <div className="grid grid-cols-2 gap-2 pt-2">
+                </section>
+                <section className="settings-section">
+                  <h3 className="settings-heading">Default Agent</h3>
+                  <p className="-mt-1.5 mb-2.5 text-[12.5px] text-text-tertiary">New sessions start with it. The Agent you use last becomes the default.</p>
+                  <div className="grid grid-cols-2 gap-1.5">
                     {SUPPORTED_AGENTS.map((agent) => {
                       const selected = defaultAgent === agent;
                       const definition = agentDefinition(agent);
@@ -408,23 +426,19 @@ export function SettingsDialog({
                           type="button"
                           aria-pressed={selected}
                           onClick={() => onDefaultAgentChange(agent)}
-                          className={`rounded-lg border px-3 py-3 text-left transition-colors ${
+                          className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors ${
                             selected
-                              ? 'border-accent/30 bg-accent-soft text-accent-ink'
-                              : 'border-border bg-background hover:bg-muted/60'
+                              ? 'border-accent/40 bg-accent-soft/60 text-text'
+                              : 'border-border-soft text-text-secondary hover:bg-bg-hover'
                           }`}
                         >
-                          <span className="block text-sm font-medium">
-                            {definition.displayName}
-                          </span>
-                          <span className="mt-0.5 block text-xs text-muted-foreground">
-                            {definition.providerName} CLI
-                          </span>
+                          <span className="text-[13px] font-medium">{definition.displayName}</span>
+                          {selected && <Check className="size-3.5 text-accent" aria-hidden />}
                         </button>
                       );
                     })}
                   </div>
-                </div>
+                </section>
               </TabsContent>
             )}
 

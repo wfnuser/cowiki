@@ -3,7 +3,7 @@ import {
   ChevronRight, FileText, Folder,
   MoreHorizontal, Plus, FolderPlus, Settings, BookOpen, GitPullRequest, Users, History,
   FileCode, Pencil, Trash2, Search, Unlink,
-  PanelLeft, CalendarDays, CheckSquare, SlidersHorizontal, Layers,
+  PanelLeft, CalendarDays, CheckSquare, SlidersHorizontal, Layers, ChevronDown,
 } from 'lucide-react';
 import type { Workspace, PageMeta, SourceItem } from '../../api';
 import { SearchModal } from '../SearchModal';
@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { APP_HEADER_HEIGHT, C, colorForSpaceId, shadows } from '@/lib/design';
 import { conceptIdFromPath, visiblePageTree } from '@/lib/okf-pages';
+import { cn } from '@/lib/utils';
 import type { ModuleId } from '@/lib/space-features';
 import type { PluginAction } from '@/plugins/host';
 
@@ -126,97 +127,70 @@ export function SpacePanel({
   ];
 
   const wikiActive = activeTab === 'wiki';
+  const spaceMenu = Boolean((onModules && !readOnly) || (!isPersonal && isOwner && onSettings));
   const spaceColor = colorForSpaceId(workspace.id || workspace.slug);
 
   return (
     <aside style={panelStyle}>
       {/* Space name header */}
+      {/* Its menu holds the Space-wide settings. */}
       <div data-tauri-drag-region="deep" style={{
-        padding: '0 16px', display: 'flex', alignItems: 'center', gap: 9,
+        padding: '0 10px 0 10px', display: 'flex', alignItems: 'center', gap: 4,
         borderBottom: `1px solid ${C.line}`,
         height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT, userSelect: 'none',
       }}>
-        <div style={{
-          width: 26, height: 26, borderRadius: 8,
-          background: spaceColor, color: C.onAccent,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 12, fontWeight: 700,
-        }}>
-          {workspace.name[0]?.toUpperCase()}
-        </div>
-        <span style={{ fontSize: 15.5, fontWeight: 650, color: C.ink, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {workspace.name}
-        </span>
+        {spaceMenu ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" aria-label="Space menu" title={workspace.name} className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 text-left transition-colors hover:bg-bg-hover data-[state=open]:bg-bg-hover">
+                <SpaceTile name={workspace.name} color={spaceColor} />
+                <span className="min-w-0 truncate text-[14.5px] font-semibold text-text">{workspace.name}</span>
+                <ChevronDown size={13} className="shrink-0 text-text-faint" aria-hidden />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56">
+              {onModules && !readOnly && (
+                <DropdownMenuItem onClick={onModules}><SlidersHorizontal size={14} className="mr-2" /> Modules & settings…</DropdownMenuItem>
+              )}
+              {!isPersonal && isOwner && onSettings && (
+                <DropdownMenuItem onClick={onSettings}><Settings size={14} className="mr-2" /> Space settings…</DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <div className="flex h-8 min-w-0 flex-1 items-center gap-2 px-1.5">
+            <SpaceTile name={workspace.name} color={spaceColor} />
+            <span className="min-w-0 truncate text-[14.5px] font-semibold text-text">{workspace.name}</span>
+          </div>
+        )}
         <CollapseButton onClick={onCollapse} />
       </div>
 
       {/* Nav items */}
-      <div style={{ padding: '10px 0 6px' }}>
-        {navItems.filter((n) => !n.hide).map((n) => (
-          <button
-            key={n.tab}
-            onClick={() => n.action ? onPluginAction?.(n.action) : onTabChange(n.tab)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 9, width: 'calc(100% - 16px)',
-              padding: '8px 14px', margin: '1px 8px', borderRadius: 8, border: 'none', cursor: 'pointer',
-              background: activeTab === n.tab ? C.accentSoft : 'transparent',
-              color: activeTab === n.tab ? C.accent : C.ink2,
-              fontSize: 14, fontWeight: activeTab === n.tab ? 600 : 450,
-              transition: 'all 0.1s',
-              textAlign: 'left',
-            }}
-            onMouseEnter={(e) => { if (activeTab !== n.tab) e.currentTarget.style.background = C.rail; }}
-            onMouseLeave={(e) => { if (activeTab !== n.tab) e.currentTarget.style.background = 'transparent'; }}
-          >
-            {n.icon}
-            <span style={{ flex: 1 }}>{n.label}</span>
-            {n.badge != null && n.badge > 0 && (
-              <span style={{
-                fontSize: 11.5, fontWeight: 700, padding: '0 5px', borderRadius: 999,
-                background: C.accent, color: C.onAccent, minWidth: 18, height: 18,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                {n.badge}
-              </span>
-            )}
-          </button>
-        ))}
-        {onModules && !readOnly && (
-          <button
-            onClick={onModules}
-            title="Choose modules and journal settings"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 9, width: 'calc(100% - 16px)',
-              padding: '8px 14px', margin: '1px 8px', borderRadius: 8, border: 'none', cursor: 'pointer',
-              background: 'transparent', color: C.muted, fontSize: 14, fontWeight: 450, textAlign: 'left',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = C.rail; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-          >
-            <SlidersHorizontal size={16} />
-            <span style={{ flex: 1 }}>Modules & settings</span>
-          </button>
-        )}
-        {/* Space settings — same nav row style, only for non-personal owner */}
-        {!isPersonal && isOwner && onSettings && (
-          <button
-            onClick={onSettings}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 9, width: 'calc(100% - 16px)',
-              padding: '8px 14px', margin: '1px 8px', borderRadius: 8, border: 'none', cursor: 'pointer',
-              background: 'transparent',
-              color: C.ink2,
-              fontSize: 14, fontWeight: 450,
-              transition: 'all 0.1s',
-              textAlign: 'left',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = C.rail; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-          >
-            <Settings size={16} />
-            <span style={{ flex: 1 }}>Space settings</span>
-          </button>
-        )}
+      {/* The open one is a quiet grey row, like the page tree. */}
+      <div style={{ padding: '8px 0 4px' }}>
+        {navItems.filter((n) => !n.hide).map((n) => {
+          const active = activeTab === n.tab;
+          return (
+            <button
+              key={n.tab}
+              aria-current={active ? 'page' : undefined}
+              onClick={() => n.action ? onPluginAction?.(n.action) : onTabChange(n.tab)}
+              className={cn(
+                'mx-2 my-px flex w-[calc(100%-16px)] items-center gap-2.5 rounded-md px-2.5 py-[5px] text-left text-[14px] transition-colors',
+                active ? 'bg-bg-active/70 font-medium text-text' : 'text-text-secondary hover:bg-bg-hover',
+              )}
+            >
+              <span className={cn('flex shrink-0', active ? 'text-accent' : 'text-text-tertiary')}>{n.icon}</span>
+              <span style={{ flex: 1 }}>{n.label}</span>
+              {n.badge != null && n.badge > 0 && (
+                <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-bg-active px-1.5 text-[11px] font-semibold tabular-nums text-text-secondary">
+                  {n.badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Tree content — always visible regardless of active tab */}
@@ -320,7 +294,6 @@ export function SpacePanel({
         />
       )}
 
-      {/* Space settings moved into nav items above */}
     </aside>
   );
 }
@@ -591,6 +564,17 @@ const panelStyle: React.CSSProperties = {
   position: 'sticky', top: 0, zIndex: 15,
   overflowY: 'auto',
 };
+
+function SpaceTile({ name, color }: { name: string; color: string }) {
+  return (
+    <span aria-hidden style={{
+      width: 22, height: 22, borderRadius: 6, background: color, color: C.onAccent, flexShrink: 0,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700,
+    }}>
+      {name[0]?.toUpperCase()}
+    </span>
+  );
+}
 
 function CollapseButton({ onClick }: { onClick: () => void }) {
   return (

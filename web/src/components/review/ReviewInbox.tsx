@@ -1,7 +1,8 @@
 import { ChevronRight } from 'lucide-react';
 
 import { InlineFeedback } from '@/components/ui/inline-feedback';
-import { C } from '@/lib/design';
+import { ViewEmpty, ViewHeader } from '@/components/ui/view-header';
+import { cn } from '@/lib/utils';
 
 export function ReviewInbox({
   action,
@@ -13,53 +14,24 @@ export function ReviewInbox({
 }: {
   action?: React.ReactNode;
   children?: React.ReactNode;
-  description: string;
+  description?: string;
   empty?: string;
   error?: string | null;
   loading?: boolean;
 }) {
   return (
-    <div>
-      <div style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        justifyContent: 'space-between',
-        gap: 16,
-        marginBottom: 20,
-      }}>
-        <div>
-          <h1 className="page-title" style={{ marginBottom: 5 }}>Reviews</h1>
-          <p style={{ color: C.muted, fontSize: 13, margin: 0 }}>{description}</p>
-        </div>
-        {action}
-      </div>
+    <section style={{ width: 'min(860px, 100%)' }}>
+      <ViewHeader title="Reviews" description={description} actions={action} />
 
       {error && <InlineFeedback className="mb-4" title="Could not load Reviews" description={error} />}
       {loading ? (
-        <p style={{ color: C.muted, fontSize: 14 }}>Loading Reviews…</p>
+        <ViewEmpty>Loading…</ViewEmpty>
       ) : children ? (
-        <div style={{
-          border: `1px solid ${C.line}`,
-          borderRadius: 12,
-          overflow: 'hidden',
-          background: C.panel,
-        }}>
-          {children}
-        </div>
+        <div className="divide-y divide-border-soft border-y border-border-soft">{children}</div>
       ) : (
-        <div style={{
-          padding: 32,
-          textAlign: 'center',
-          color: C.muted,
-          fontSize: 14,
-          border: `1px solid ${C.line}`,
-          borderRadius: 10,
-          background: C.panel,
-        }}>
-          {empty ?? 'No reviews yet.'}
-        </div>
+        <ViewEmpty>{empty ?? 'No reviews yet.'}</ViewEmpty>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -67,7 +39,6 @@ export function ReviewInboxRow({
   additions,
   deletions,
   files,
-  first,
   icon,
   onOpen,
   status,
@@ -79,7 +50,8 @@ export function ReviewInboxRow({
   additions?: number;
   deletions?: number;
   files?: number;
-  first: boolean;
+  /** Kept for callers; rows are separated by the list's hairlines. */
+  first?: boolean;
   icon: React.ReactNode;
   onOpen: () => void;
   status: string;
@@ -92,62 +64,25 @@ export function ReviewInboxRow({
     <button
       type="button"
       onClick={onOpen}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        width: '100%',
-        minWidth: 0,
-        padding: '15px 17px',
-        border: 0,
-        borderTop: first ? 'none' : `1px solid ${C.line}`,
-        background: C.panel,
-        textAlign: 'left',
-        cursor: 'pointer',
-      }}
-      onMouseEnter={(event) => { event.currentTarget.style.background = C.sidebar; }}
-      onMouseLeave={(event) => { event.currentTarget.style.background = C.panel; }}
+      className="group flex w-full min-w-0 items-center gap-3 px-1 py-2.5 text-left transition-colors hover:bg-bg-hover/60"
     >
       {icon}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          fontSize: 14.5,
-          fontWeight: 650,
-          color: C.ink,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}>
-          {title}
-        </div>
-        <div style={{
-          marginTop: 3,
-          fontSize: 12.5,
-          color: C.muted,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}>
-          {subtitle}
-        </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13.5px] font-medium text-text">{title}</div>
+        <div className="mt-px truncate text-[12px] text-text-tertiary">{subtitle}</div>
       </div>
       {files != null && additions != null && deletions != null && (
-        <span style={{ color: C.muted, fontSize: 12, whiteSpace: 'nowrap' }}>
-          {files} file{files === 1 ? '' : 's'} ·{' '}
-          <span style={{ color: C.green }}>+{additions}</span> ·{' '}
-          <span style={{ color: C.red }}>−{deletions}</span>
+        <span className="whitespace-nowrap text-[12px] tabular-nums text-text-tertiary">
+          {files} file{files === 1 ? '' : 's'}{' '}
+          <span className="text-green">+{additions}</span>{' '}
+          <span className="text-red">−{deletions}</span>
         </span>
       )}
-      <span style={{
-        fontSize: 11.5,
-        fontWeight: 650,
-        color: statusTone === 'danger' ? C.red : C.muted,
-        whiteSpace: 'nowrap',
-      }}>
+      <span className={cn('whitespace-nowrap text-[12px]', statusTone === 'danger' ? 'font-medium text-red' : 'text-text-tertiary')}>
         {status}
       </span>
       {trailing}
-      <ChevronRight size={15} color={C.faint} />
+      <ChevronRight size={14} className="shrink-0 text-text-faint opacity-0 transition-opacity group-hover:opacity-100" />
     </button>
   );
 }

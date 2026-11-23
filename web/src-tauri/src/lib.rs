@@ -778,6 +778,7 @@ pub fn run() {
             agent_runtime::commands::agent_send,
             agent_runtime::commands::agent_stop,
             agent_runtime::commands::agent_resume,
+            agent_runtime::commands::agent_set_model,
             agent_runtime::commands::agent_answer_approval,
             agent_runtime::commands::agent_remove_session,
         ])

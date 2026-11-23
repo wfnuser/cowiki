@@ -7,6 +7,7 @@ import { Maximize2, PenTool, ZoomIn } from 'lucide-react';
 
 import { ObsidianReaderContext, withObsidianReader } from '@/components/ObsidianReader';
 import { C } from '@/lib/design';
+import { useAppTheme } from '@/lib/use-app-theme';
 import {
   DRAWING_COLORS,
   elementPoints,
@@ -260,6 +261,8 @@ function renderElement(element: ExcalidrawElement, scene: ExcalidrawScene): Reac
 
 /** A read-only SVG rendering of an Excalidraw scene, hand-drawn like the original. */
 export function ExcalidrawDrawing({ scene, fit = true }: { scene: ExcalidrawScene; fit?: boolean }) {
+  // Drawings follow the app theme the way Excalidraw's own dark mode does.
+  const appDark = useAppTheme() === 'dark';
   const bounds = useMemo(() => sceneBounds(scene.elements), [scene.elements]);
   const rendered = useMemo(() => scene.elements.map((element) => {
     const box = localBounds(element);
@@ -289,7 +292,7 @@ export function ExcalidrawDrawing({ scene, fit = true }: { scene: ExcalidrawScen
         maxHeight: fit ? '75vh' : undefined,
         margin: '0 auto',
         background: scene.background,
-        filter: scene.dark ? 'invert(93%) hue-rotate(180deg)' : undefined,
+        filter: scene.dark || appDark ? 'invert(93%) hue-rotate(180deg)' : undefined,
       }}
     >
       {rendered}

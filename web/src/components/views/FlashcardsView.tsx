@@ -6,6 +6,7 @@ import { Popover as PopoverPrimitive } from 'radix-ui';
 
 import { withObsidianReader } from '@/components/ObsidianReader';
 import { NumberField } from '@/components/ui/number-field';
+import { ViewHeader, ViewIconButton } from '@/components/ui/view-header';
 import { listCardSources, readCardReviews, writeCardReviews } from '@/local-api';
 import { C } from '@/lib/design';
 import { dateKey } from '@/lib/journal';
@@ -184,7 +185,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
     const fresh = isNew(store, current);
     const quiet = 'inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-3.5';
     return (
-      <section className="mx-auto" style={{ width: 'min(680px, 100%)' }}>
+      <section style={{ width: 'min(680px, 100%)' }}>
         <div className="mb-3 flex items-center justify-between gap-3">
           <span className="text-[12.5px] text-text-tertiary">
             <span className="tabular-nums">{session?.length ?? 0}</span> left · {fresh ? 'New' : `Review ${schedule.repeats + 1}`}
@@ -251,10 +252,12 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
   ] as Array<[number, string]>).filter(([value, label]) => value > 0 || label.startsWith('card'));
 
   return (
-    <section className="mx-auto" style={{ width: 'min(720px, 100%)' }}>
-      <header className="mb-5 flex items-center justify-between gap-4">
-        <h1 className="page-title page-title--compact" style={{ margin: 0 }}>Flashcards</h1>
-        <div className="flex items-center">
+    <section style={{ width: 'min(860px, 100%)' }}>
+      <ViewHeader
+        title="Flashcards"
+        className="mb-5"
+        actions={(
+          <>
           <PopoverPrimitive.Root>
             <PopoverPrimitive.Trigger asChild>
               <button type="button" aria-label="Daily limits" title="Daily limits" className="flex size-8 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text">
@@ -277,11 +280,12 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
               </PopoverPrimitive.Content>
             </PopoverPrimitive.Portal>
           </PopoverPrimitive.Root>
-          <button type="button" onClick={() => setReloadKey((key) => key + 1)} aria-label="Refresh" title="Refresh" className="flex size-8 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text">
-            <RefreshCw className="size-3.5" />
-          </button>
-        </div>
-      </header>
+            <ViewIconButton label="Refresh" onClick={() => setReloadKey((key) => key + 1)}>
+              <RefreshCw className="size-3.5" />
+            </ViewIconButton>
+          </>
+        )}
+      />
 
       {error && <div role="alert" className="mb-3 text-[12.5px] text-red">{error}</div>}
 

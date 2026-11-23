@@ -96,6 +96,15 @@ pub fn agent_send(
 }
 
 #[tauri::command]
+pub fn agent_set_model(
+    state: State<'_, AgentState>,
+    session_id: String,
+    model: Option<String>,
+) -> Result<AgentSnapshot, String> {
+    state.runtime.set_model(&session_id, model)
+}
+
+#[tauri::command]
 pub fn agent_stop(
     state: State<'_, AgentState>,
     session_id: String,

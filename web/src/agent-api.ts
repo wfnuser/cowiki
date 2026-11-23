@@ -31,6 +31,8 @@ export type CreateSessionRequest = {
   changeId: string | null;
   agent: AgentKind;
   title?: string;
+  /** One of the models the Agent listed; omitted = its default. */
+  model?: string | null;
 };
 
 export type SessionSubscription = {
@@ -47,8 +49,9 @@ export function createAgentApi(transport: AgentTransport = tauriTransport) {
     onLogin: (handler: (event: LoginEvent) => void) => transport.listen<LoginEvent>('agent:login', handler),
     list: (spaceSlug: string) => call<AgentSnapshot[]>('agent_list_sessions', { spaceSlug }),
     create: (request: CreateSessionRequest) => call<AgentSnapshot>('agent_create_session', {
-      request: { ...request, changeId: request.changeId ?? null, title: request.title ?? null },
+      request: { ...request, changeId: request.changeId ?? null, title: request.title ?? null, model: request.model ?? null },
     }),
+    setModel: (sessionId: string, model: string | null) => call<AgentSnapshot>('agent_set_model', { sessionId, model }),
     snapshot: (sessionId: string) => call<AgentSnapshot>('agent_snapshot', { sessionId }),
     send: (sessionId: string, text: string) => call<AgentSnapshot>('agent_send', { sessionId, text }),
     stop: (sessionId: string) => call<AgentSnapshot>('agent_stop', { sessionId }),

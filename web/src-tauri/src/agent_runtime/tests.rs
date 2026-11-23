@@ -141,6 +141,7 @@ impl Harness {
                 change_id: change_id.map(ToOwned::to_owned),
                 agent,
                 title: Some("Test task".into()),
+                model: None,
             })
             .unwrap()
             .session_id
@@ -307,6 +308,136 @@ fn codex_streams_two_turns_on_one_thread() {
             ))
             .count()
             == 2
+    );
+}
+
+impl Harness {
+    fn create_with_model(&self, agent: AgentKind, model: &str) -> String {
+        self.runtime
+            .create_session(CreateSession {
+                space_slug: self.space.clone(),
+                mode: AgentMode::Live,
+                change_id: None,
+                agent,
+                title: Some("Test task".into()),
+                model: Some(model.into()),
+            })
+            .unwrap()
+            .session_id
+    }
+}
+
+#[test]
+fn codex_starts_with_the_chosen_model_and_switches_between_turns() {
+    let harness = Harness::new("normal");
+    let id = harness.create_with_model(AgentKind::Codex, "gpt-chosen");
+    assert_eq!(
+        harness
+            .runtime
+            .snapshot(&id)
+            .unwrap()
+            .requested_model
+            .as_deref(),
+        Some("gpt-chosen")
+    );
+    harness.runtime.send(&id, "first").unwrap();
+    harness.wait(&id, "first answer", |snapshot| {
+        snapshot.status == AgentStatus::Idle && assistant_text(snapshot).contains("(first)")
+    });
+    assert_eq!(
+        harness.sent("thread/start")[0]["params"]["model"],
+        "gpt-chosen"
+    );
+    assert!(
+        harness.sent("turn/start")[0]["params"]
+            .get("model")
+            .is_none(),
+        "the thread already has the model"
+    );
+
+    harness
+        .runtime
+        .set_model(&id, Some("gpt-next".into()))
+        .unwrap();
+    harness.runtime.send(&id, "second").unwrap();
+    harness.wait(&id, "second answer", |snapshot| {
+        snapshot.status == AgentStatus::Idle && assistant_text(snapshot).contains("(second)")
+    });
+    assert_eq!(
+        harness.sent("thread/start").len(),
+        1,
+        "switching keeps the conversation"
+    );
+    assert_eq!(harness.sent("turn/start")[1]["params"]["model"], "gpt-next");
+}
+
+#[test]
+fn claude_starts_with_the_chosen_model_and_switches_between_turns() {
+    let harness = Harness::new("normal");
+    let id = harness.create_with_model(AgentKind::Claude, "sonnet");
+    harness.runtime.send(&id, "first").unwrap();
+    harness.wait(&id, "first answer", |snapshot| {
+        snapshot.status == AgentStatus::Idle && assistant_text(snapshot).contains("(first)")
+    });
+    let argv = harness.claude_argv().remove(0);
+    let flag = argv
+        .iter()
+        .position(|arg| arg == "--model")
+        .expect("--model is passed");
+    assert_eq!(argv[flag + 1], "sonnet");
+    assert!(harness.claude_requests("set_model").is_empty());
+
+    harness.runtime.set_model(&id, Some("opus".into())).unwrap();
+    harness.runtime.send(&id, "second").unwrap();
+    harness.wait(&id, "second answer", |snapshot| {
+        snapshot.status == AgentStatus::Idle && assistant_text(snapshot).contains("(second)")
+    });
+    let switched = harness.claude_requests("set_model");
+    assert_eq!(switched.len(), 1);
+    assert_eq!(switched[0]["request"]["model"], "opus");
+    assert_eq!(
+        harness.claude_argv().len(),
+        1,
+        "switching keeps the same process"
+    );
+}
+
+#[test]
+fn listed_models_come_only_from_the_agent() {
+    use super::auth::{claude_models, codex_models};
+    let codex = codex_models(&serde_json::json!({"data": [
+        {"id": "a", "model": "gpt-a", "displayName": "GPT A", "description": "Fast", "isDefault": true, "hidden": false},
+        {"id": "b", "model": "gpt-b", "displayName": "GPT B", "hidden": true},
+    ]}));
+    assert_eq!(codex.len(), 1, "hidden models stay hidden");
+    assert_eq!(
+        (
+            codex[0].id.as_str(),
+            codex[0].name.as_str(),
+            codex[0].is_default
+        ),
+        ("gpt-a", "GPT A", true)
+    );
+
+    let claude = claude_models(&serde_json::json!({"models": [
+        {"value": "default", "displayName": "Default (recommended)", "description": "Opus · Best", "resolvedModel": "claude-opus"},
+        {"value": "sonnet", "displayName": "Sonnet", "resolvedModel": "claude-sonnet"},
+    ]}));
+    assert_eq!(
+        (claude[0].name.as_str(), claude[0].is_default),
+        ("Default", true)
+    );
+    assert_eq!(claude[1].resolved.as_deref(), Some("claude-sonnet"));
+
+    let grok = super::acp::listed_models(&serde_json::json!({"_meta": {"modelState": {
+        "currentModelId": "grok-2",
+        "availableModels": [{"modelId": "grok-1", "name": "Grok 1"}, {"modelId": "grok-2", "name": "Grok 2", "description": "New"}],
+    }}}));
+    assert_eq!(grok.len(), 2);
+    assert!(grok[1].3 && !grok[0].3, "the current model is the default");
+    assert!(
+        codex_models(&serde_json::json!({})).is_empty()
+            && claude_models(&serde_json::json!({})).is_empty()
     );
 }
 
@@ -704,6 +835,7 @@ fn sessions_are_bound_to_their_space_and_change() {
             change_id: change_id.map(ToOwned::to_owned),
             agent: AgentKind::Codex,
             title: None,
+            model: None,
         })
     };
     assert!(
@@ -727,6 +859,7 @@ fn sessions_are_bound_to_their_space_and_change() {
                 change_id: None,
                 agent: AgentKind::Antigravity,
                 title: None,
+                model: None,
             })
             .is_err(),
         "no native protocol"
@@ -1319,6 +1452,7 @@ fn real_codex_round_trip() {
             change_id: Some(change.id.clone()),
             agent: AgentKind::Codex,
             title: Some("Real Codex check".into()),
+            model: None,
         })
         .unwrap()
         .session_id;
@@ -1474,6 +1608,7 @@ fn real_claude_round_trip() {
             change_id: Some(change.id.clone()),
             agent: AgentKind::Claude,
             title: Some("Real Claude check".into()),
+            model: None,
         })
         .unwrap()
         .session_id;
@@ -1588,4 +1723,24 @@ fn real_claude_round_trip() {
     );
     assert!(runtime.snapshot(&id).unwrap().closed);
     runtime.shutdown_all();
+}
+
+/// Opt-in: the readiness check of the CLIs installed here lists models.
+/// Handshakes only; no model is called.
+#[test]
+#[ignore]
+fn real_probes_list_their_models() {
+    for agent in [AgentKind::Codex, AgentKind::Claude, AgentKind::Grok] {
+        let readiness = super::auth::probe(agent);
+        println!(
+            "{agent:?}: {:?} {:?}",
+            readiness.status,
+            readiness
+                .models
+                .iter()
+                .map(|model| (&model.id, &model.name, model.is_default))
+                .collect::<Vec<_>>()
+        );
+        assert!(!readiness.models.is_empty(), "{agent:?} listed no models");
+    }
 }

@@ -187,6 +187,7 @@ mod tests {
                 change_id: None,
                 thread_id: Some("thread-1".into()),
                 model: None,
+                requested_model: None,
                 seq: 4,
                 status,
                 items: vec![],

@@ -157,18 +157,13 @@ export function ReviewDetail({
       <div style={{ flexShrink: 0 }}>
         <ReviewBackButton onClick={onBack}>
           Reviews
-          <span style={{ color: C.faint }}> / #{submissionId.slice(0, 6)}</span>
+          <span style={{ color: C.faint }}> · #{submissionId.slice(0, 6)}</span>
         </ReviewBackButton>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-          <h1 style={{ fontFamily: fonts.serif, fontSize: 26, fontWeight: 700, color: C.ink, margin: 0 }}>
-            {submission.summary || 'Submission'}
-          </h1>
-          <span style={{ fontSize: 16, color: C.faint, fontWeight: 400 }}>#{submissionId.slice(0, 6)}</span>
-          <span style={{
-            fontSize: 12.5, fontWeight: 600, padding: '6px 12px', borderRadius: 999,
-            background: status.bg, color: status.fg,
-          }}>
+          <h1 className="view-title min-w-0 truncate">{submission.summary || 'Submission'}</h1>
+          <span className="flex shrink-0 items-center gap-1.5 text-[12.5px]" style={{ color: status.fg }}>
+            <span aria-hidden className="size-1.5 rounded-full" style={{ background: status.fg }} />
             {status.label}
           </span>
         </div>
@@ -217,9 +212,9 @@ export function ReviewDetail({
 
           {/* Finish your review box */}
           <div style={{
-            marginTop: 24, padding: 16, border: `1px solid ${C.line}`, borderRadius: 12, background: C.bg,
+            marginTop: 28, paddingTop: 18, borderTop: `1px solid ${C.lineSoft}`,
           }}>
-            <div style={{ fontSize: 14.5, fontWeight: 650, color: C.ink, marginBottom: 10 }}>Finish your review</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.ink, marginBottom: 8 }}>Finish your review</div>
             <textarea
               value={reviewBody}
               onChange={(e) => setReviewBody(e.target.value)}
@@ -384,8 +379,7 @@ const actionBtnStyle: React.CSSProperties = {
 };
 
 const sidebarSectionTitle: React.CSSProperties = {
-  fontSize: 11.5, fontWeight: 600, color: C.faint, textTransform: 'uppercase',
-  letterSpacing: '0.06em', marginBottom: 8,
+  fontSize: 12.5, fontWeight: 600, color: C.ink2, marginBottom: 8,
 };
 
 export default ReviewDetail;

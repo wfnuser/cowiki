@@ -45,6 +45,46 @@ leads and the chrome stays quiet. Check every new screen against these.
   "Tomorrow", never raw identifiers such as `oauth_token` or
   `2.1.296 (Claude Code)`.
 
+## View layout
+
+Every tool view (Tasks, Flashcards, History, Links, Reviews, Members,
+Notifications, Review details, Cloud pages) is built the same way, with
+`components/ui/view-header`:
+
+- **Title:** `ViewHeader` renders `.view-title`: 22px, weight 650, **sans**.
+  Serif (`.page-title`) is for content people write: page, source and
+  drawing titles, and the welcome screen. A view title has no icon tile next
+  to it and no subtitle unless it says something the title does not.
+- **Actions** sit at the right end of the title row: icon-only
+  (`ViewIconButton`, e.g. Refresh) or one small button.
+- **Tabs** under the title are line tabs (`ViewTabs`): the open tab is
+  underlined in ink, counts are faint numbers, never pills.
+- **Groups** use `ViewSectionHeading` (13px, weight 600, sentence case, a
+  faint count on the right). **Lists** are hairline-separated rows
+  (`divide-y divide-border-soft`), never a box of cards. **Empty and
+  loading** states are one centered sentence (`ViewEmpty`).
+- Views are left-aligned in the content area (`36px 56px` padding) with a
+  `min(860px, 100%)` column; a wide board may use `min(1040px, 100%)`.
+
+## Navigation
+
+- The open item in the left navigation is a quiet grey row
+  (`bg-bg-active/70`, ink text) with only its icon in the accent, the same
+  treatment as the open page in the tree. No orange fills.
+- Space-wide settings (Modules & settings, Space settings) live in the
+  **Space menu**: click the Space name at the top of the sidebar. The
+  navigation list holds only places.
+- The Agent panel is organised by **session**. Its header shows the
+  session's title, its status only when it needs attention, and three quiet
+  icons: Session history, New session, More. History lists every session of
+  the Space by day (Today, Yesterday, Previous 7 days, Older); a new session
+  shows the five most recent above the composer.
+- The composer footer names the Agent, its model and where it works. The
+  model is a quiet menu of **only the models the Agent itself listed** in
+  its handshake (Codex `model/list`, Claude Code `initialize`, ACP
+  `modelState`); CoWiki never adds its own list. A change applies from the
+  next message, and new sessions start with the Agent and model used last.
+
 ## Form controls
 
 A control never shows the platform's look: no system-blue checkbox or focus
@@ -147,7 +187,7 @@ those surfaces so this cleanup does not restyle the product.
 | Family | Variable | Usage |
 |--------|----------|-------|
 | Inter Variable | `--font-sans` | Body text, UI elements |
-| Source Serif 4 Variable | `--font-serif` | Headlines, brand mark, page titles |
+| Source Serif 4 Variable | `--font-serif` | Content titles (pages, sources, drawings), prose headings, brand mark, welcome screens. Never tool-view titles |
 | System mono | `--font-mono` | Code, commit SHAs, xterm (`fonts.mono` in JS) |
 
 Monospace is `--font-mono` (`ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`).
@@ -167,7 +207,20 @@ keeps the concrete family list because xterm paints on a canvas and cannot resol
 The `:root` block in `index.css` maps the same palette onto shadcn's HSL
 tokens (`--background`, `--foreground`, `--primary`, `--muted`,
 `--accent`, `--destructive`, `--border`, `--ring`, …) and sidebar tokens.
-A `.dark` variant currently overrides the sidebar tokens only.
+`html.dark` overrides every one of them (see Dark theme).
+
+## Dark theme
+
+Settings → Appearance offers System, Light and Dark (stored per device,
+`lib/theme.ts`). The choice puts `.dark` on `<html>`; `index.css` then
+redefines **every** `--color-*` token, the shadcn tokens and the
+`--shadow-*` tokens under `html.dark`. Components therefore need no `dark:`
+variants: if a screen looks wrong in dark, a token is missing or a colour
+was hardcoded. The dark palette keeps the warm character: charcoal paper
+(`#1c1b19`), warm off-white ink, and a slightly brighter accent
+(`#f07028`) so it reads on dark. Excalidraw drawings follow the app theme
+the way Excalidraw's own dark mode does (an inverted, hue-rotated render).
+The logo swaps to `cowiki-logo-dark.svg` (light centre dot).
 
 ## Component Conventions
 
@@ -213,3 +266,8 @@ It also fails when a component uses a platform control that has a CoWiki
 replacement (`<select>`, `type="number"`, `type="date"` outside
 `components/ui`), when a new shadow is written as a raw `rgba()` instead of a
 `--shadow-*` token, or when the base border colour rule is missing.
+
+It also fails when a colour token has no dark value, when a component sets
+text in ALL CAPS (`uppercase`, `textTransform: 'uppercase'`), or when a tool
+view titles itself with `.page-title` or a serif font instead of
+`ViewHeader` / `.view-title`.

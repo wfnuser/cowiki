@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { GitBranch, MessageSquare } from 'lucide-react';
+import { GitBranch } from 'lucide-react';
 import { listReviews, type Submission } from '../../api';
-import { C } from '@/lib/design';
+import { InlineFeedback } from '@/components/ui/inline-feedback';
+import { ViewEmpty, ViewHeader, ViewTabs } from '@/components/ui/view-header';
 import { timeAgo } from '../../lib/time';
 import { AvatarBadge } from '@/components/ui/avatar-badge';
 import { statusBadge } from '@/lib/review';
@@ -56,111 +57,64 @@ function CloudReviewList({
     return true;
   });
 
-  if (error) {
-    return <p style={{ color: C.red, fontSize: 14 }}>Failed to load reviews: {error}</p>;
-  }
-
-  if (subs == null) {
-    return <p style={{ color: C.muted, fontSize: 14, padding: '16px 0' }}>Loading reviews...</p>;
+  if (error || subs == null) {
+    return (
+      <section style={{ width: 'min(860px, 100%)' }}>
+        <ViewHeader title="Reviews" />
+        {error ? <InlineFeedback title="Could not load Reviews" description={error} /> : <ViewEmpty>Loading…</ViewEmpty>}
+      </section>
+    );
   }
 
   const openCount = subs.filter((s) => s.status !== 'merged').length;
   const mergedCount = subs.filter((s) => s.status === 'merged').length;
 
   return (
-    <div>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <h1 className="page-title" style={{ marginBottom: 0 }}>
-          Reviews
-        </h1>
-      </div>
+    <section style={{ width: 'min(860px, 100%)' }}>
+      <ViewHeader title="Reviews" className="mb-4" />
+      <ViewTabs
+        label="Review filters"
+        value={filter}
+        onChange={setFilter}
+        tabs={[
+          { id: 'open', label: 'Open', count: openCount },
+          { id: 'merged', label: 'Merged', count: mergedCount },
+          { id: 'all', label: 'All', count: subs.length },
+        ]}
+      />
 
-      {/* Filter pills (design: active pill = ink, others plain) */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 18, fontSize: 13.5 }}>
-        {([
-          { key: 'open' as Filter, label: 'Open', count: openCount },
-          { key: 'merged' as Filter, label: 'Merged', count: mergedCount },
-          { key: 'all' as Filter, label: 'All', count: subs.length },
-        ]).map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setFilter(tab.key)}
-            style={{
-              padding: '6px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
-              fontWeight: 550,
-              background: filter === tab.key ? C.ink : 'transparent',
-              color: filter === tab.key ? C.onAccent : C.muted,
-              transition: 'all 0.15s',
-            }}
-          >
-            {tab.label} · {tab.count}
-          </button>
-        ))}
-      </div>
-
-      {/* List */}
       {filtered && filtered.length === 0 ? (
-        <div style={{
-          padding: 32, textAlign: 'center', color: C.muted, fontSize: 14,
-          border: `1px solid ${C.line}`, borderRadius: 8, background: C.panel,
-        }}>
-          No {filter === 'all' ? '' : filter} reviews.
-        </div>
+        <ViewEmpty>No {filter === 'all' ? '' : `${filter} `}reviews.</ViewEmpty>
       ) : (
-        <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'hidden', background: C.panel }}>
-          {filtered?.map((s, i) => {
+        <div className="divide-y divide-border-soft border-y border-border-soft">
+          {filtered?.map((s) => {
             const sb = statusBadge[s.status] ?? statusBadge.pending;
             const author = s.author_name || s.user_id.slice(0, 8);
             return (
               <button
                 key={s.id}
+                type="button"
                 onClick={() => onOpen({ kind: 'cloud', submissionId: s.id })}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 14,
-                  padding: '15px 18px', background: C.panel, border: 'none',
-                  borderTop: i ? `1px solid ${C.line}` : 'none',
-                  textAlign: 'left', cursor: 'pointer', width: '100%',
-                  transition: 'background 0.1s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = C.sidebar; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = C.panel; }}
+                className="flex w-full min-w-0 items-center gap-3 px-1 py-2.5 text-left transition-colors hover:bg-bg-hover/60"
               >
-                <GitBranch size={17} color={C.faint} />
-
-                {/* Main content */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 550, color: C.ink, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {s.summary || s.paths.join(', ') || 'Submission'}
-                  </div>
-                  <div style={{ fontSize: 12.5, color: C.muted, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span>{author}</span>
-                    <span>·</span>
-                    <span>{s.paths.length} file{s.paths.length === 1 ? '' : 's'}</span>
-                    <span>·</span>
-                    <span>{timeAgo(s.created_at)}</span>
+                <GitBranch size={16} className="shrink-0 text-text-faint" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13.5px] font-medium text-text">{s.summary || s.paths.join(', ') || 'Submission'}</div>
+                  <div className="mt-px truncate text-[12px] text-text-tertiary">
+                    {author} · {s.paths.length} file{s.paths.length === 1 ? '' : 's'} · {timeAgo(s.created_at)}
                   </div>
                 </div>
-
-                {/* Right side */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12.5, color: C.faint }}>
-                    <MessageSquare size={14} /> 0
-                  </span>
-                  <span style={{
-                    fontSize: 12, fontWeight: 600, padding: '5px 10px', borderRadius: 999,
-                    background: sb.bg, color: sb.fg, whiteSpace: 'nowrap',
-                  }}>
-                    {sb.label}
-                  </span>
-                  <AvatarBadge name={author} size={26} />
-                </div>
+                <span className="flex shrink-0 items-center gap-1.5 text-[12px]" style={{ color: sb.fg }}>
+                  <span aria-hidden className="size-1.5 rounded-full" style={{ background: sb.fg }} />
+                  {sb.label}
+                </span>
+                <AvatarBadge name={author} size={22} />
               </button>
             );
           })}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 

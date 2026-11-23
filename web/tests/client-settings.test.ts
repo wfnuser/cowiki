@@ -68,3 +68,11 @@ test('the hosted app keeps account and API-key settings', () => {
     'keys',
   ]);
 });
+
+test('the model last used with each Agent is remembered, junk is dropped', () => {
+  const storage = new MemoryStorage();
+  saveClientSettings(storage, { defaultAgent: 'claude', agentModels: { claude: 'sonnet', codex: 'gpt-a' } });
+  assert.deepEqual(loadClientSettings(storage), { defaultAgent: 'claude', agentModels: { claude: 'sonnet', codex: 'gpt-a' } });
+  storage.setItem('cowiki.client.settings', JSON.stringify({ defaultAgent: 'codex', agentModels: { codex: 7, nobody: 'x', grok: '' } }));
+  assert.deepEqual(loadClientSettings(storage), { defaultAgent: 'codex' });
+});

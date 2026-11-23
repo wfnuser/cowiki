@@ -1,27 +1,12 @@
 import { ArrowLeft } from 'lucide-react';
-import { C } from '@/lib/design';
 
-/**
- * Shared "back to the review list" control. This is a text-style chrome
- * control, not a shadcn Button — wrapping Button forced padding/icon overrides
- * that still drifted from the original 12.5px / 14px-icon row.
- */
+/** "Back to the review list": a quiet text control above the view title. */
 export function ReviewBackButton({ onClick, children }: { onClick: () => void; children?: React.ReactNode }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: 0,
-        border: 0,
-        background: 'transparent',
-        color: C.muted,
-        fontSize: 12.5,
-        cursor: 'pointer',
-      }}
+      className="-ml-1.5 inline-flex h-7 items-center gap-1.5 rounded-md px-1.5 text-[12.5px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text"
     >
       <ArrowLeft size={14} /> {children ?? 'Reviews'}
     </button>

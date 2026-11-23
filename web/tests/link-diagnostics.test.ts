@@ -50,7 +50,7 @@ test('the local-only Links view refreshes on demand and window focus without pol
   assert.match(mainLayout, /showLinkDiagnostics=\{desktop/);
   assert.doesNotMatch(linksView, /setInterval/);
   assert.match(linksView, /addEventListener\('focus'/);
-  assert.match(linksView, />\s*Refresh\s*</);
+  assert.match(linksView, /label="Refresh"/);
   assert.doesNotMatch(linksView, /A live|live, read-only/i);
   assert.match(linksView, /listBrokenLinks/);
   assert.doesNotMatch(linksView, /writePage|onSave|Auto Save/);

@@ -340,7 +340,7 @@ function FileDiffCard({
   };
 
   return (
-    <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'hidden', background: C.panel }}>
+    <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, overflow: 'hidden', background: C.panel }}>
       {/* File header */}
       <div
         onClick={() => setCollapsed(!collapsed)}
@@ -355,10 +355,10 @@ function FileDiffCard({
         <FileText size={14} color={C.muted} />
         <span style={{ fontFamily: mono, fontSize: 13, fontWeight: 550, color: C.ink }}>{file.path}</span>
         <span style={{
-          fontSize: 11, padding: '1px 6px', borderRadius: 4, fontWeight: 600, letterSpacing: '0.03em',
-          textTransform: 'uppercase', background: sc.bg, color: sc.fg,
+          fontSize: 11.5, padding: '0 6px', borderRadius: 4, fontWeight: 500,
+          background: sc.bg, color: sc.fg,
         }}>
-          {status}
+          {status[0]!.toUpperCase() + status.slice(1)}
         </span>
         <span style={{ marginLeft: 'auto', fontSize: 12, color: C.muted }}>
           <span style={{ color: C.green }}>+{file.additions}</span>
@@ -498,10 +498,8 @@ function RenderedPreview({ panes }: { panes: ReviewPreviewPane[] }) {
             padding: '7px 14px',
             borderBottom: `1px solid ${C.line}`,
             color: pane.key === 'before' ? C.red : C.green,
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase',
+            fontSize: 12,
+            fontWeight: 600,
           }}>
             {pane.label}
           </div>

@@ -16,6 +16,11 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await server.close(); });
 
+async function openModulesSettings(page: Page) {
+  await page.getByRole('button', { name: 'Space menu' }).click();
+  await page.getByRole('menuitem', { name: /Modules & settings/i }).click();
+}
+
 const today = 'Daily/2026-11-01'; // local day at 02:30 UTC on November 2
 const unknownSettings = { version: 7, data: ['preserve'] };
 interface FixtureOptions {
@@ -81,7 +86,7 @@ test('Today creates one local-date Markdown note; disabling preserves it and unr
   await action.click();
   expect(state.creates).toEqual([today]);
   const savedBody = state.files.get(today);
-  await page.getByRole('button', { name: /Modules & settings/i }).click();
+  await openModulesSettings(page);
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('checkbox', { name: /Daily journal|Daily Notes/i }).uncheck();
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
@@ -118,7 +123,7 @@ test('a disabled Space never offers Today while its settings are still loading',
     await expect(page.getByRole('button', { name: 'Wiki', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Today', exact: true })).toHaveCount(0);
   } finally { gate.resolve(); }
-  await page.getByRole('button', { name: /Modules & settings/i }).click();
+  await openModulesSettings(page);
   await expect(page.getByRole('checkbox', { name: /Daily journal|Daily Notes/i })).not.toBeChecked();
   expect(state.creates).toEqual([]);
 });
@@ -156,7 +161,7 @@ test('saving a journal folder does not revert an external update to another plug
   const state = await desktop(page);
   await page.goto(origin);
   await expect(page.getByRole('button', { name: 'Today', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: /Modules & settings/i }).click();
+  await openModulesSettings(page);
   const dialog = page.getByRole('dialog');
   await dialog.locator('section').filter({ has: page.getByRole('heading', { name: 'Journal', exact: true }) }).getByLabel('Folder', { exact: true }).fill('Diary');
   state.config().features.modules.later = true; // another client after opening
@@ -174,7 +179,7 @@ for (const entry of ['/', '/personal/Welcome']) test(`unreadable settings recove
   await page.goto(origin + entry);
   await expect(page.locator('article')).toContainText(/Welcome|From my template/);
   const originalSelection = page.url();
-  await page.getByRole('button', { name: /Modules & settings/i }).click();
+  await openModulesSettings(page);
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('Unreadable settings document');
   await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
@@ -182,7 +187,7 @@ for (const entry of ['/', '/personal/Welcome']) test(`unreadable settings recove
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Today', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: /Modules & settings/i }).click();
+  await openModulesSettings(page);
   damaged = false;
   await dialog.getByRole('button', { name: 'Reload settings', exact: true }).click();
   await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
@@ -218,7 +223,7 @@ test('the settings dialog stays inside a short window with its actions visible',
   await page.setViewportSize({ width: 1100, height: 600 });
   await desktop(page);
   await page.goto(origin);
-  await page.getByRole('button', { name: /Modules & settings/i }).click();
+  await openModulesSettings(page);
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeInViewport({ ratio: 1 });

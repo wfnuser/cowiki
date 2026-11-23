@@ -149,6 +149,9 @@ lines.on('line', (line) => {
         models: [{ value: 'default' }],
       } } });
     }
+    if (request.subtype === 'set_model') {
+      return send({ type: 'control_response', response: { subtype: 'success', request_id: id, response: {} } });
+    }
     if (request.subtype === 'interrupt') {
       interrupted = true;
       return send({ type: 'control_response', response: { subtype: 'success', request_id: id, response: {} } });

@@ -95,9 +95,6 @@ test('CSS-variable colors are not composed as hex strings', () => {
       `${rel} must use color-mix() rather than append a hex alpha channel`,
     );
   }
-  const notifications = sourceOf('components/notifications/NotificationsPage.tsx');
-  assert.match(notifications, /color-mix\(in srgb, \$\{C\.accentSoft\} 33%, transparent\)/);
-  assert.match(notifications, /color-mix\(in srgb, \$\{meta\.color\} 10%, transparent\)/);
 });
 
 test('semantic foreground tokens remain readable on their intended surfaces', () => {
@@ -117,7 +114,6 @@ test('semantic foreground tokens remain readable on their intended surfaces', ()
 });
 
 test('existing filled controls keep original accent/green rather than fill/ink roles', () => {
-  assert.match(sourceOf('components/notifications/NotificationsPage.tsx'), /background: C\.accent, color: C\.onAccent/);
   assert.match(sourceOf('components/review/DiffView.tsx'), /background: C\.accent, color: C\.onAccent/);
   assert.match(sourceOf('pages/MainLayout.tsx'), /background: C\.accent, color: C\.onAccent/);
   assert.match(sourceOf('components/review/ReviewDetail.tsx'), /background: C\.green, color: C\.onAccent/);
@@ -255,4 +251,36 @@ test('checkboxes, switches, focus and bare borders are drawn by the design syste
   for (const token of ['popover', 'card', 'chip', 'rest']) {
     assert.match(css, new RegExp(`--shadow-${token}:`), `missing --shadow-${token}`);
   }
+});
+
+test('every colour token has a dark value', () => {
+  const block = (start: RegExp) => {
+    const at = css.search(start);
+    assert.ok(at >= 0, `missing ${start}`);
+    return css.slice(at, css.indexOf('\n}', at));
+  };
+  const names = (source: string, prefix: string) => [...source.matchAll(new RegExp(`(--${prefix}[\\w-]*):`, 'g'))].map((match) => match[1]);
+  const light = block(/@theme \{/);
+  const dark = block(/html\.dark \{/);
+  const missing = names(light, 'color-').filter((name) => !names(dark, 'color-').includes(name));
+  assert.deepEqual(missing, [], 'see DESIGN_SYSTEM.md, "Dark theme"');
+  const shadcn = block(/:root \{\n {2}\/\* ── CoWiki shadcn theme/);
+  for (const prefix of ['background', 'foreground', 'card', 'popover', 'primary', 'secondary', 'muted', 'accent', 'destructive', 'border', 'input', 'ring', 'shadow-', 'sidebar']) {
+    const absent = names(shadcn, prefix).filter((name) => !names(dark, prefix).includes(name));
+    assert.deepEqual(absent, [], `dark theme misses ${absent.join(', ')}`);
+  }
+});
+
+test('labels are sentence case and tool views share the sans view title', () => {
+  const caps: string[] = [];
+  for (const { rel, source } of sourceFiles()) {
+    if (/\buppercase\b|textTransform: ['"]uppercase['"]/.test(source)) caps.push(rel);
+  }
+  assert.deepEqual(caps, [], 'no ALL CAPS labels (DESIGN_SYSTEM.md, "Interface principles")');
+  const views = sourceFiles().filter(({ rel }) => /^components\/(views|review|notifications)\/|^cloud\/Cloud(Members|Reviews|Notifications)/.test(rel));
+  assert.ok(views.length >= 10);
+  for (const { rel, source } of views) {
+    assert.doesNotMatch(source, /page-title|font-serif|fonts\.serif/, `${rel}: use ViewHeader / .view-title`);
+  }
+  assert.match(css, /\.view-title \{[^}]*font-family: var\(--font-sans\)/);
 });

@@ -215,7 +215,7 @@ fn handshake(
                 })
             })?;
             enforce_asking_mode(rpc, label, &session_id, &result)?;
-            session_id
+            (session_id, current_model(&result))
         }
         None => {
             let result = rpc
@@ -233,19 +233,78 @@ fn handshake(
                 .ok_or_else(|| OpenError::Failed(format!("{label} did not return a session id")))?
                 .to_string();
             enforce_asking_mode(rpc, label, &session_id, &result)?;
-            session_id
+            (session_id, current_model(&result))
         }
     };
+    let (session_id, session_model) = session_id;
     provider
         .state
         .lock()
         .map_err(|_| OpenError::Failed("state unavailable".into()))?
         .session_id = session_id.clone();
-    let model = initialized
-        .pointer("/_meta/modelState/currentModelId")
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned);
+    let mut model =
+        session_model.or_else(|| current_model(initialized.get("_meta").unwrap_or(&Value::Null)));
+    if let Some(chosen) = config.model.as_deref() {
+        if model.as_deref() != Some(chosen) {
+            set_session_model(rpc, &session_id, chosen).map_err(|error| {
+                OpenError::Failed(format!("{label} could not switch to {chosen}: {error}"))
+            })?;
+            model = Some(chosen.to_string());
+        }
+    }
     Ok((session_id, model))
+}
+
+/// ACP reports the session's model under `models` (Grok also under
+/// `_meta.modelState` in `initialize`).
+fn current_model(result: &Value) -> Option<String> {
+    result
+        .pointer("/models/currentModelId")
+        .or_else(|| result.pointer("/modelState/currentModelId"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn set_session_model(rpc: &RpcProcess, session_id: &str, model: &str) -> Result<(), String> {
+    rpc.request(
+        "session/set_model",
+        json!({"sessionId": session_id, "modelId": model}),
+        SESSION_TIMEOUT,
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
+}
+
+/// The models an ACP agent offers before a session exists (Grok's
+/// `initialize`), as (id, name, description, is current).
+pub fn listed_models(initialized: &Value) -> Vec<(String, String, Option<String>, bool)> {
+    let state = initialized.pointer("/_meta/modelState");
+    let current = state
+        .and_then(|state| state.get("currentModelId"))
+        .and_then(Value::as_str);
+    state
+        .and_then(|state| state.get("availableModels"))
+        .and_then(Value::as_array)
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|model| {
+                    let id = model.get("modelId").and_then(Value::as_str)?;
+                    let name = model.get("name").and_then(Value::as_str).unwrap_or(id);
+                    let description = model
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned);
+                    Some((
+                        id.to_string(),
+                        name.to_string(),
+                        description,
+                        Some(id) == current,
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Session modes that run tools without asking.
@@ -635,6 +694,16 @@ impl AcpProvider {
 }
 
 impl Provider for AcpProvider {
+    fn set_model(&self, model: &str) -> Result<(), String> {
+        let session_id = self
+            .state
+            .lock()
+            .map_err(|_| "state unavailable".to_string())?
+            .session_id
+            .clone();
+        set_session_model(self.rpc()?, &session_id, model)
+    }
+
     fn start_turn(&self, turn_id: &str, text: &str) -> Result<(), String> {
         let rpc = self.rpc()?.clone();
         let session_id = {

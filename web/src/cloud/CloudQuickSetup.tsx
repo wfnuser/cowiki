@@ -17,10 +17,10 @@ export function CloudQuickSetup({
     return (
       <div className="h-full overflow-auto">
         <section className="w-full max-w-2xl" style={{ padding: '36px 56px 56px' }}>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">
+          <p className="text-[12.5px] font-medium text-accent">
             Shared Space
           </p>
-          <h1 className="mt-4 font-serif text-[28px] font-semibold tracking-[-0.025em] text-text">
+          <h1 className="view-title mt-2">
             Waiting for the first published version
           </h1>
           <p className="mt-3 max-w-lg text-sm leading-6 text-text-tertiary">
@@ -44,7 +44,7 @@ export function CloudQuickSetup({
   return (
     <div className="h-full overflow-auto">
       <section className="w-full max-w-3xl" style={{ padding: '36px 56px 56px' }}>
-        <h1 className="page-title mb-0">
+        <h1 className="view-title">
           Quick setup
         </h1>
 

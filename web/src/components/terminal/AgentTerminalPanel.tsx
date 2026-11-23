@@ -410,7 +410,7 @@ function AgentPicker({
         >
           <Bot className="mr-2 size-4 text-accent" />
           <span>
-            <span className="block text-[10px] font-medium uppercase tracking-wide text-text-tertiary">Agent</span>
+            <span className="block text-[11px] font-medium text-text-tertiary">Agent</span>
             <span className="block text-xs font-semibold text-text">{agentDisplayName(selectedAgent)}</span>
           </span>
           <ChevronDown className="ml-auto size-3.5 text-text-tertiary" />

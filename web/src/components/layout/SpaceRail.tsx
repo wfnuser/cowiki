@@ -74,7 +74,7 @@ export function SpaceRail<T extends SpaceRailItem>({
         width: 68, height: 46, display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: 'default', flexShrink: 0,
       }}>
-        <img src="/cowiki-logo.svg" alt="CoWiki" width={30} height={30} />
+        <img className="cowiki-logo" src="/cowiki-logo.svg" alt="CoWiki" width={30} height={30} />
       </div>
 
       {/* Separator */}

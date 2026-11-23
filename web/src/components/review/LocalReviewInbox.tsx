@@ -7,7 +7,6 @@ import {
   type AgentChange,
   type FileDiff,
 } from '@/api';
-import { C } from '@/lib/design';
 import { ReviewInbox, ReviewInboxRow } from './ReviewInbox';
 import {
   localReviewSelectionForRow,
@@ -49,7 +48,6 @@ export function LocalReviewInbox({
 
   return (
     <ReviewInbox
-      description="Checkpoint the Current Draft or review isolated Agent Changes."
       error={error}
       loading={draftDiffs == null || changes == null}
     >
@@ -60,13 +58,13 @@ export function LocalReviewInbox({
               <ReviewInboxRow
                 key={row.id}
                 title="Current Draft"
-                subtitle="Working tree · compared with the latest checkpoint"
-                status={draftDiffs.length ? 'Uncheckpointed' : 'Clean'}
+                subtitle="Compared with the latest checkpoint"
+                status={draftDiffs.length ? 'Not checkpointed' : 'Clean'}
                 files={draftDiffs.length}
                 additions={sum(draftDiffs, 'additions')}
                 deletions={sum(draftDiffs, 'deletions')}
                 first={index === 0}
-                icon={<GitCommitHorizontal size={17} color={C.faint} />}
+                icon={<GitCommitHorizontal size={16} className="shrink-0 text-text-faint" />}
                 onOpen={() => onOpen(localReviewSelectionForRow(row))}
               />
             );
@@ -76,14 +74,14 @@ export function LocalReviewInbox({
             <ReviewInboxRow
               key={row.id}
               title={change.title}
-              subtitle={`agent/${change.id.slice(0, 8)} → Current Draft`}
+              subtitle={`Agent change · ${change.id.slice(0, 8)}`}
               status={statusLabel(change.status)}
               statusTone={change.status === 'needsResolution' ? 'danger' : 'muted'}
               files={change.diffs.length}
               additions={sum(change.diffs, 'additions')}
               deletions={sum(change.diffs, 'deletions')}
               first={index === 0}
-              icon={<GitBranch size={17} color={C.faint} />}
+              icon={<GitBranch size={16} className="shrink-0 text-text-faint" />}
               onOpen={() => onOpen(localReviewSelectionForRow(row))}
             />
           );

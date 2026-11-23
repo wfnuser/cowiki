@@ -52,6 +52,8 @@ pub struct CreateSession {
     pub change_id: Option<String>,
     pub agent: AgentKind,
     pub title: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 struct SessionState {
@@ -69,6 +71,8 @@ struct SessionState {
     stop_requested: bool,
     closing: bool,
     current_turn: Option<String>,
+    /// The model the running provider was told to use.
+    applied_model: Option<String>,
 }
 
 impl SessionState {
@@ -353,6 +357,7 @@ impl AgentRuntime {
                     stop_requested: false,
                     closing: false,
                     current_turn: None,
+                    applied_model: None,
                 }),
                 flush_scheduled: AtomicBool::new(false),
                 last_saved: Mutex::new(0),
@@ -500,6 +505,12 @@ impl AgentRuntime {
             change_id: request.change_id,
             thread_id: None,
             model: None,
+            requested_model: request
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+                .map(ToOwned::to_owned),
             seq: 1,
             status: AgentStatus::Idle,
             items: Vec::new(),
@@ -523,6 +534,7 @@ impl AgentRuntime {
                 stop_requested: false,
                 closing: false,
                 current_turn: None,
+                applied_model: None,
             }),
             flush_scheduled: AtomicBool::new(false),
             last_saved: Mutex::new(0),
@@ -550,6 +562,36 @@ impl AgentRuntime {
             .collect::<Vec<_>>();
         snapshots.sort_by_key(|snapshot| std::cmp::Reverse(snapshot.updated_at));
         Ok(snapshots)
+    }
+
+    /// Records the model to use from the next turn on (`None`: the agent's
+    /// default for sessions that have not started yet).
+    pub fn set_model(
+        &self,
+        session_id: &str,
+        model: Option<String>,
+    ) -> Result<AgentSnapshot, String> {
+        let model = model
+            .map(|model| model.trim().to_string())
+            .filter(|model| !model.is_empty());
+        if model.as_ref().is_some_and(|model| model.len() > 200) {
+            return Err("That model name is too long".into());
+        }
+        let session = self.session(session_id)?;
+        let snapshot = {
+            let mut state = lock(&session.state)?;
+            if state.snapshot.closed {
+                return Err("This Agent Change is closed".into());
+            }
+            if state.snapshot.requested_model == model {
+                return Ok(state.snapshot.clone());
+            }
+            state.snapshot.requested_model = model;
+            state.bump();
+            state.snapshot.clone()
+        };
+        self.publish(&session, snapshot.clone());
+        Ok(snapshot)
     }
 
     pub fn snapshot(&self, session_id: &str) -> Result<AgentSnapshot, String> {
@@ -673,6 +715,24 @@ impl AgentRuntime {
             self.publish(&session, snapshot);
             return;
         }
+        // A model picked since the provider started applies from this turn.
+        let switch = session.state.lock().ok().and_then(|state| {
+            (state.generation == generation)
+                .then(|| state.snapshot.requested_model.clone())
+                .flatten()
+                .filter(|model| state.applied_model.as_deref() != Some(model.as_str()))
+        });
+        if let Some(model) = switch {
+            if let Err(error) = provider.set_model(&model) {
+                self.fail(&session, Some(generation), error);
+                return;
+            }
+            if let Ok(mut state) = session.state.lock() {
+                if state.generation == generation {
+                    state.applied_model = Some(model);
+                }
+            }
+        }
         let turn_id = format!("turn-{}", uuid::Uuid::new_v4().simple());
         if let Err(error) = provider.start_turn(&turn_id, &text) {
             // Also replace a generic "exited" error with the specific reason.
@@ -692,7 +752,18 @@ impl AgentRuntime {
         &self,
         session: &Arc<Session>,
     ) -> Result<(Arc<dyn Provider>, u64), OpenError> {
-        let (lease, (previous, generation), resume, mode, agent, slug, change_id, space_id, cwd) = {
+        let (
+            lease,
+            (previous, generation),
+            resume,
+            mode,
+            agent,
+            slug,
+            change_id,
+            space_id,
+            cwd,
+            model,
+        ) = {
             let mut state = lock(&session.state).map_err(OpenError::Failed)?;
             if let Some(provider) = state
                 .provider
@@ -724,6 +795,7 @@ impl AgentRuntime {
                 state.snapshot.change_id.clone(),
                 state.space_id.clone(),
                 state.cwd.clone(),
+                state.snapshot.requested_model.clone(),
             )
         };
         // Re-check the binding: the Space may have moved or the Change closed.
@@ -753,6 +825,7 @@ impl AgentRuntime {
                 mcp.args.extend(["--space".to_string(), slug.clone()]);
                 mcp
             }),
+            model: model.clone(),
         };
         let sink = self.sink(session, generation);
         let opened = self.inner.launcher.open(config, resume, sink)?;
@@ -770,6 +843,7 @@ impl AgentRuntime {
             state.provider = Some(opened.provider.clone());
             state.lease = Some(lease);
             state.snapshot.thread_id = Some(opened.thread_id);
+            state.applied_model = model;
             if opened.model.is_some() {
                 state.snapshot.model = opened.model;
             }

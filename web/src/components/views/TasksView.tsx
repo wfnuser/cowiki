@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowUpRight, FileText, LoaderCircle, Play, Plus, RefreshCw } from 'lucide-react';
 
+import { ViewHeader, ViewIconButton, ViewTabs } from '@/components/ui/view-header';
 import { DatePicker, dayLabel } from '@/components/ui/date-picker';
 import { WeekNav } from '@/components/WeekNav';
 import { listTaskSources } from '@/local-api';
@@ -186,38 +187,18 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
   ];
 
   return (
-    <section className="mx-auto" style={{ width: filter === 'week' ? 'min(1040px, 100%)' : 'min(720px, 100%)' }}>
-      <header className="mb-5 flex items-center justify-between gap-4">
-        <h1 className="page-title page-title--compact" style={{ margin: 0 }}>Tasks</h1>
-        <button
-          type="button"
-          onClick={refresh}
-          disabled={refreshing}
-          aria-label="Refresh"
-          title="Refresh"
-          className="flex size-8 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text disabled:opacity-60"
-        >
-          <RefreshCw className={cn('size-3.5', refreshing && 'animate-spin')} />
-        </button>
-      </header>
+    <section style={{ width: filter === 'week' ? 'min(1040px, 100%)' : 'min(860px, 100%)' }}>
+      <ViewHeader
+        title="Tasks"
+        actions={(
+          <ViewIconButton label="Refresh" onClick={refresh} disabled={refreshing}>
+            <RefreshCw className={cn('size-3.5', refreshing && 'animate-spin')} />
+          </ViewIconButton>
+        )}
+        className="mb-4"
+      />
 
-      <nav role="tablist" aria-label="Task lists" className="mb-4 flex gap-5 border-b border-border-soft">
-        {tabs.map(([id, label]) => (
-          <button
-            key={id}
-            role="tab"
-            aria-selected={filter === id}
-            onClick={() => setFilter(id)}
-            className={cn(
-              '-mb-px flex items-center gap-1.5 border-b-2 pb-2 pt-1 text-[13px] transition-colors',
-              filter === id ? 'border-text font-medium text-text' : 'border-transparent text-text-tertiary hover:text-text-secondary',
-            )}
-          >
-            {label}
-            {counts[id] > 0 && <span className="text-[11.5px] font-normal tabular-nums text-text-faint">{counts[id]}</span>}
-          </button>
-        ))}
-      </nav>
+      <ViewTabs label="Task lists" tabs={tabs.map(([id, label]) => ({ id, label, count: counts[id] }))} value={filter} onChange={setFilter} />
 
       {error && <div role="alert" className="mb-3 text-[12.5px] text-red">{error}</div>}
 

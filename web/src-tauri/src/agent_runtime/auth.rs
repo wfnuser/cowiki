@@ -50,6 +50,92 @@ pub struct NativeReadiness {
     pub message: Option<String>,
     pub detail: Option<String>,
     pub can_sign_in: bool,
+    /// The models the agent itself offers; empty when it lists none.
+    pub models: Vec<ModelOption>,
+}
+
+/// One model an agent listed in its handshake. CoWiki never invents these.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelOption {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub is_default: bool,
+    /// The concrete model an alias runs (Claude's `opus` → `claude-opus-…`).
+    pub resolved: Option<String>,
+}
+
+/// Codex `model/list`: visible models with their display names.
+pub fn codex_models(response: &Value) -> Vec<ModelOption> {
+    response
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|models| {
+            models
+                .iter()
+                .filter(|model| model.get("hidden").and_then(Value::as_bool) != Some(true))
+                .filter_map(|model| {
+                    let id = model
+                        .get("model")
+                        .or_else(|| model.get("id"))
+                        .and_then(Value::as_str)?;
+                    Some(ModelOption {
+                        id: id.to_string(),
+                        name: model
+                            .get("displayName")
+                            .and_then(Value::as_str)
+                            .unwrap_or(id)
+                            .to_string(),
+                        description: model
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned),
+                        is_default: model.get("isDefault").and_then(Value::as_bool) == Some(true),
+                        resolved: None,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Claude Code `initialize` response: `models` (`default` is its pick).
+pub fn claude_models(response: &Value) -> Vec<ModelOption> {
+    response
+        .get("models")
+        .and_then(Value::as_array)
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|model| {
+                    let id = model.get("value").and_then(Value::as_str)?;
+                    let is_default = id == "default";
+                    Some(ModelOption {
+                        id: id.to_string(),
+                        name: if is_default {
+                            "Default".to_string()
+                        } else {
+                            model
+                                .get("displayName")
+                                .and_then(Value::as_str)
+                                .unwrap_or(id)
+                                .to_string()
+                        },
+                        description: model
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned),
+                        is_default,
+                        resolved: model
+                            .get("resolvedModel")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -83,6 +169,7 @@ fn readiness(agent: AgentKind, status: NativeStatus) -> NativeReadiness {
         message: None,
         detail: None,
         can_sign_in: false,
+        models: Vec::new(),
     }
 }
 
@@ -341,6 +428,13 @@ pub fn probe(agent: AgentKind) -> NativeReadiness {
             };
             let result = codex_initialize(&rpc)
                 .and_then(|_| rpc.request("account/read", json!({}), PROBE_TIMEOUT));
+            let models = match &result {
+                Ok(_) => rpc
+                    .request("model/list", json!({}), PROBE_TIMEOUT)
+                    .map(|listed| codex_models(&listed))
+                    .unwrap_or_default(),
+                Err(_) => Vec::new(),
+            };
             let _ = rpc.shutdown(Duration::from_millis(800));
             match result {
                 Ok(account) => {
@@ -356,6 +450,7 @@ pub fn probe(agent: AgentKind) -> NativeReadiness {
                         message: signed_out
                             .then(|| "Codex is installed but not signed in".to_string()),
                         can_sign_in: true,
+                        models,
                         ..base
                     }
                 }
@@ -405,6 +500,16 @@ pub fn probe(agent: AgentKind) -> NativeReadiness {
                         message: signed_out
                             .then(|| format!("{name} is installed but not signed in")),
                         can_sign_in,
+                        models: acp::listed_models(&initialized)
+                            .into_iter()
+                            .map(|(id, name, description, is_default)| ModelOption {
+                                id,
+                                name,
+                                description,
+                                is_default,
+                                resolved: None,
+                            })
+                            .collect(),
                         ..base
                     }
                 }
@@ -439,9 +544,10 @@ pub fn probe(agent: AgentKind) -> NativeReadiness {
                 };
             }
             match claude_handshake(&executable) {
-                Ok(()) => NativeReadiness {
+                Ok(models) => NativeReadiness {
                     account,
                     can_sign_in: true,
+                    models,
                     ..base
                 },
                 Err(error) => NativeReadiness {
@@ -465,7 +571,7 @@ pub fn probe(agent: AgentKind) -> NativeReadiness {
 
 /// Starts Claude Code the way a session does (without a conversation and
 /// without saving one), sends `initialize`, and stops it. No model call.
-fn claude_handshake(executable: &Path) -> Result<(), String> {
+fn claude_handshake(executable: &Path) -> Result<Vec<ModelOption>, String> {
     let args = claude::probe_args();
     let args = args.iter().map(String::as_str).collect::<Vec<_>>();
     let rpc = spawn_quiet(
@@ -478,7 +584,8 @@ fn claude_handshake(executable: &Path) -> Result<(), String> {
     let result = rpc.request("initialize", claude::initialize_params(), PROBE_TIMEOUT);
     let _ = rpc.shutdown(Duration::from_millis(1500));
     let response = result.map_err(|error| error.to_string())?;
-    claude::check_initialize(&response).map_err(|error| error.message().to_string())
+    claude::check_initialize(&response).map_err(|error| error.message().to_string())?;
+    Ok(claude_models(&response))
 }
 
 /// Only HTTPS URLs on the provider's own sign-in hosts are opened.

@@ -46,12 +46,15 @@ async function desktop(page: Page, options: { approval?: boolean; panelWidth?: n
       case 'local_working_diff': case 'local_list_agent_changes': case 'local_list_sources': case 'local_list_backlinks': return [];
       case 'cloud_get_status': return { state: 'unlinked', conflicts: [], message: '', pullRequest: null, committed: false, cloudSpaceId: null, cloudBaseUrl: null };
       case 'local_set_auto_checkpoint': case 'local_auto_checkpoint': return null;
-      case 'agent_probe_native': return { agent: args.agent, status: 'available', protocol: 'codex-app-server', version: 'codex-cli 0.166.0', account: 'ChatGPT', message: null, detail: null, canSignIn: true };
+      case 'agent_probe_native': return { agent: args.agent, status: 'available', protocol: 'codex-app-server', version: 'codex-cli 0.166.0', account: 'ChatGPT', message: null, detail: null, canSignIn: true, models: [
+        { id: 'gpt-a', name: 'GPT A', description: 'Fast', isDefault: true, resolved: null },
+        { id: 'gpt-b', name: 'GPT B', description: 'Careful', isDefault: false, resolved: null },
+      ] };
       case 'agent_list_sessions': return [...sessions.values()].filter((session) => session.spaceSlug === args.spaceSlug);
       case 'agent_create_session': {
-        const request = args.request as { spaceSlug: string; mode: string; changeId: string | null; agent: string; title: string | null };
+        const request = args.request as { spaceSlug: string; mode: string; changeId: string | null; agent: string; title: string | null; model: string | null };
         counter += 1;
-        const snapshot: Snapshot = { sessionId: `agent-${counter}`, provider: request.agent, title: request.title ?? 'Task', spaceSlug: request.spaceSlug, mode: request.mode, changeId: request.changeId, threadId: null, model: null, seq: 1, status: 'idle', items: [], approvals: [], error: null, notice: null, closed: false, createdAt: Date.now(), updatedAt: Date.now() };
+        const snapshot: Snapshot = { sessionId: `agent-${counter}`, provider: request.agent, title: request.title ?? 'Task', spaceSlug: request.spaceSlug, mode: request.mode, changeId: request.changeId, threadId: null, model: null, requestedModel: request.model, seq: 1, status: 'idle', items: [], approvals: [], error: null, notice: null, closed: false, createdAt: Date.now(), updatedAt: Date.now() };
         sessions.set(snapshot.sessionId, snapshot);
         return snapshot;
       }
@@ -75,6 +78,7 @@ async function desktop(page: Page, options: { approval?: boolean; panelWidth?: n
         return update(id, { status: 'idle', approvals: [], notice: null });
       }
       case 'agent_stop': return update(String(args.sessionId), { status: 'stopped' });
+      case 'agent_set_model': return update(String(args.sessionId), { requestedModel: args.model });
       default: throw new Error('Unsupported fixture IPC: ' + cmd);
     }
   });
@@ -206,9 +210,53 @@ test('switching Spaces shows only that Space’s sessions and keeps the other ru
   await expect(page.getByText('Personal task')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Stop the Agent' })).toHaveCount(0);
   await page.getByRole('button', { name: 'P', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Choose Agent session' })).toContainText('Personal task');
+  await expect(page.locator('aside[aria-label="Agent"]').getByRole('heading', { name: 'Personal task' })).toBeVisible();
   await expect(page.locator('aside[aria-label="Agent"]').getByText('Reading')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Stop the Agent' })).toBeVisible();
   expect(state.count('agent_send')).toBe(1);
   expect(state.count('agent_stop')).toBe(0);
+});
+
+test('the model menu lists only the Agent’s models and the pick is remembered', async ({ page }) => {
+  const state = await desktop(page);
+  await openAgent(page);
+  const panel = page.locator('aside[aria-label="Agent"]');
+  await panel.getByRole('button', { name: 'Model: GPT A' }).click();
+  await expect(page.getByRole('menuitem')).toHaveText([/GPT A/, /GPT B/]);
+  await page.getByRole('menuitem', { name: /GPT B/ }).click();
+  await panel.getByRole('textbox', { name: 'Message agent' }).fill('Use the careful one');
+  await panel.getByRole('button', { name: 'Send message' }).click();
+  await expect(panel.getByText('Reading')).toBeVisible();
+  const created = state.calls.find((call) => call.cmd === 'agent_create_session')!;
+  expect((created.args.request as { model: string }).model).toBe('gpt-b');
+  // Switching applies to the open session from its next message.
+  await panel.getByRole('button', { name: 'Model: GPT B' }).click();
+  await page.getByRole('menuitem', { name: /GPT A/ }).click();
+  await expect(panel.getByRole('button', { name: 'Model: GPT A' })).toBeVisible();
+  expect(state.calls.filter((call) => call.cmd === 'agent_set_model').map((call) => call.args)).toEqual([{ sessionId: 'agent-1', model: 'gpt-a' }]);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('cowiki.client.settings') ?? '{}'));
+  expect(saved).toMatchObject({ defaultAgent: 'codex', agentModels: { codex: 'gpt-a' } });
+  await shot(page, 'model-menu');
+});
+
+test('sessions are listed in history and the newest ones on a new session', async ({ page }) => {
+  await desktop(page);
+  await openAgent(page);
+  const panel = page.locator('aside[aria-label="Agent"]');
+  for (const text of ['First question', 'Second question']) {
+    await panel.getByRole('button', { name: 'New session' }).click();
+    await panel.getByRole('textbox', { name: 'Message agent' }).fill(text);
+    await panel.getByRole('button', { name: 'Send message' }).click();
+    await expect(panel.getByRole('heading', { name: text })).toBeVisible();
+  }
+  await panel.getByRole('button', { name: 'New session' }).click();
+  const recent = panel.getByRole('region', { name: 'Recent sessions' });
+  await expect(recent.getByRole('button')).toHaveText([/Second question/, /First question/]);
+  await shot(page, 'new-session-recent');
+  await panel.getByRole('button', { name: 'Session history' }).click();
+  await expect(panel.getByRole('heading', { name: 'Sessions' })).toBeVisible();
+  await expect(panel.getByRole('region', { name: 'Today' }).getByRole('button')).toHaveCount(2);
+  await shot(page, 'history');
+  await panel.getByRole('region', { name: 'Today' }).getByRole('button', { name: /First question/ }).click();
+  await expect(panel.getByRole('heading', { name: 'First question' })).toBeVisible();
 });

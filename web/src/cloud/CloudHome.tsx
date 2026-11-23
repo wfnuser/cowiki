@@ -167,7 +167,7 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
                 <section aria-labelledby="create-space-title" className="rounded-xl border bg-panel p-6">
                   <div className="mb-6 flex items-start justify-between gap-4">
                     <div>
-                      <h1 id="create-space-title" className="font-serif text-2xl font-semibold tracking-[-0.02em]">
+                      <h1 id="create-space-title" className="view-title">
                         New shared Space
                       </h1>
                       <p className="mt-1.5 text-sm text-text-tertiary">
@@ -260,14 +260,14 @@ export function CloudHome({ client, session, onSignOut }: CloudHomeProps) {
                   <div className="mx-auto mb-5 grid size-11 place-items-center rounded-xl bg-accent-soft text-accent">
                     <Link2 size={19} />
                   </div>
-                  <h1 className="font-serif text-2xl font-semibold tracking-[-0.02em]">Join a Space</h1>
+                  <h1 className="view-title">Join a Space</h1>
                   <p className="mx-auto mt-2 max-w-xs text-sm leading-6 text-text-tertiary">
                     Open an invitation link from a Space owner or manager.
                   </p>
                 </section>
               ) : (
                 <section className="text-center">
-                  <h1 className="font-serif text-2xl font-semibold tracking-[-0.02em]">Select a Space</h1>
+                  <h1 className="view-title">Select a Space</h1>
                   <p className="mt-2 text-sm text-text-tertiary">Choose one from the rail.</p>
                 </section>
               )}

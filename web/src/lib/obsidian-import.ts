@@ -234,7 +234,7 @@ export function importReportMarkdown(scan: VaultScan, plan: ImportPlan, imported
     '',
     `- Location ${journalWhere}, format \`${plan.journal.format}\` (${journalHow}); ${plan.journalEntries} existing entries recognised.`,
     plan.journal.template ? `- New entries use the template \`${plan.journal.template}\`.` : '- New entries use CoWiki\'s Plan / Notes / Review layout.',
-    '- Change this under Modules & settings in the sidebar.',
+    '- Change this under Modules & settings in the Space menu (click the Space name).',
     '',
   ];
   if (scan.communityPlugins.length > 0) {

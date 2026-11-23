@@ -1,8 +1,8 @@
 import {
   Bot,
-  ChevronDown,
   GitBranch,
   GitCompare,
+  History,
   LoaderCircle,
   LogIn,
   MoreHorizontal,
@@ -20,7 +20,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -35,6 +34,7 @@ import {
   statusLabel,
   type AgentMode,
   type AgentSnapshot,
+  type ModelOption,
   type NativeReadiness,
 } from '@/lib/agent-session';
 import { APP_HEADER_HEIGHT } from '@/lib/design';
@@ -42,6 +42,8 @@ import { cn } from '@/lib/utils';
 
 import { AgentApprovalCard } from './AgentApprovalCard';
 import { AgentComposer } from './AgentComposer';
+import { AgentSessionList, AgentSessionRow } from './AgentSessionList';
+import { ModelPicker } from './ModelPicker';
 import { AgentTranscript } from './AgentTranscript';
 import { useAgentSessions, useNativeReadiness, type ProbeState } from './useAgentSessions';
 
@@ -168,9 +170,18 @@ function ReadinessLine({ agent, state, onCheck, onSignIn, onCancelSignIn }: {
   );
 }
 
+const RECENT_ON_NEW = 5;
+
+/** A remembered model only counts while the Agent still lists it. */
+function listedModel(models: readonly ModelOption[] | undefined, model: string | null | undefined): string | null {
+  return model && models?.some((option) => option.id === model) ? model : null;
+}
+
 export function AgentPanel({
   spaceSlug,
   defaultAgent,
+  agentModels,
+  onAgentUsed,
   openRequest,
   onOpenRequestHandled,
   onClose,
@@ -178,7 +189,12 @@ export function AgentPanel({
   className,
 }: {
   spaceSlug: string;
+  /** The Agent new sessions start with (the one used last). */
   defaultAgent: AgentKind;
+  /** The model last picked for each Agent. */
+  agentModels?: Partial<Record<AgentKind, string>>;
+  /** A session started or switched model: remember the choice. */
+  onAgentUsed?: (agent: AgentKind, model: string | null) => void;
   openRequest?: AgentPanelOpenRequest | null;
   onOpenRequestHandled?: (requestId: string) => void;
   onClose?: () => void;
@@ -191,6 +207,8 @@ export function AgentPanel({
   const [composingNew, setComposingNew] = useState(false);
   const [draftAgent, setDraftAgent] = useState<AgentKind>(defaultAgent);
   const [draftMode, setDraftMode] = useState<AgentMode>('live');
+  const [draftModel, setDraftModel] = useState<string | null>(() => agentModels?.[defaultAgent] ?? null);
+  const [showHistory, setShowHistory] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [busyAction, setBusyAction] = useState(false);
   const busyRef = useRef(false);
@@ -202,10 +220,19 @@ export function AgentPanel({
       : ordered[0]?.sessionId ?? null;
   const active = shownId ? sessions.get(shownId) ?? null : null;
   const draftState = readiness.stateFor(draftAgent);
+  const draftModels = draftState.readiness?.models ?? [];
+  const chosenDraftModel = listedModel(draftModels, draftModel);
+  const activeState = active ? readiness.stateFor(active.provider) : null;
+  const activeModels = activeState?.readiness?.models ?? [];
 
   useEffect(() => {
     if (!active && draftState.phase === 'idle') void readiness.check(draftAgent);
   }, [active, draftAgent, draftState.phase, readiness]);
+
+  // The model list of the open session's Agent comes from its own check.
+  useEffect(() => {
+    if (active && activeState?.phase === 'idle') void readiness.check(active.provider);
+  }, [active, activeState?.phase, readiness]);
 
   const guard = useCallback(async <T,>(work: () => Promise<T>): Promise<T | undefined> => {
     if (busyRef.current) return undefined;
@@ -229,6 +256,7 @@ export function AgentPanel({
     mode: AgentMode,
     title: string,
     changeId?: string,
+    pick?: string | null,
   ): Promise<AgentSnapshot | null> => {
     const state = await readiness.check(agent);
     const problem = readinessFeedback(agent, state);
@@ -236,26 +264,29 @@ export function AgentPanel({
       setFeedback(problem);
       return null;
     }
+    const model = listedModel(state.models, pick === undefined ? agentModels?.[agent] : pick);
     let boundChange = changeId ?? null;
     if (mode === 'background' && !boundChange) {
       const change = await createLocalAgentChange(spaceSlug, title, agentName(agent));
       boundChange = change.id;
     }
-    const snapshot = await agentApi.create({ spaceSlug, mode, changeId: boundChange, agent, title });
+    const snapshot = await agentApi.create({ spaceSlug, mode, changeId: boundChange, agent, title, model });
     setSelectedId(snapshot.sessionId);
     setComposingNew(false);
+    setShowHistory(false);
     return snapshot;
-  }, [readiness, spaceSlug]);
+  }, [agentModels, readiness, spaceSlug]);
 
   const startTask = useCallback(async (text: string) => {
     const done = await guard(async () => {
-      const snapshot = await createSession(draftAgent, draftMode, titleFor(text));
+      const snapshot = await createSession(draftAgent, draftMode, titleFor(text), undefined, chosenDraftModel);
       if (!snapshot) return false;
+      onAgentUsed?.(draftAgent, chosenDraftModel);
       await agentApi.send(snapshot.sessionId, text);
       return true;
     });
     return done === true;
-  }, [createSession, draftAgent, draftMode, guard]);
+  }, [chosenDraftModel, createSession, draftAgent, draftMode, guard, onAgentUsed]);
 
   const sendToActive = useCallback(async (text: string) => {
     if (!active) return false;
@@ -285,6 +316,7 @@ export function AgentPanel({
             if (existing) {
               setSelectedId(existing.sessionId);
               setComposingNew(false);
+              setShowHistory(false);
               return;
             }
             await guard(async () => {
@@ -318,6 +350,21 @@ export function AgentPanel({
     void agentApi.stop(active.sessionId).catch((cause) => setFeedback({ title: 'Stop failed', description: errorText(cause) }));
   };
 
+  const changeModel = (model: string) => {
+    if (!active) return;
+    const { sessionId, provider } = active;
+    void agentApi.setModel(sessionId, model)
+      .then(() => onAgentUsed?.(provider, model))
+      .catch((cause) => setFeedback({ title: 'The model was not changed', description: errorText(cause) }));
+  };
+
+  const openSession = (sessionId: string) => {
+    setSelectedId(sessionId);
+    setComposingNew(false);
+    setShowHistory(false);
+    setFeedback(null);
+  };
+
   const resume = () => {
     if (!active) return;
     void agentApi.resume(active.sessionId).catch((cause) => setFeedback({ title: 'Could not continue', description: errorText(cause) }));
@@ -338,11 +385,12 @@ export function AgentPanel({
     setDraftMode(mode);
     setSelectedId(null);
     setComposingNew(true);
+    setShowHistory(false);
     setFeedback(null);
   };
 
   const activeBusy = active ? isBusy(active.status) : false;
-  const visibleSessions = ordered;
+  const recent = ordered.slice(0, RECENT_ON_NEW);
 
   return (
     <aside className={cn('flex h-full min-w-0 flex-col border-l border-border bg-bg', className)} aria-label="Agent">
@@ -350,43 +398,25 @@ export function AgentPanel({
         className="flex shrink-0 items-center gap-1 border-b border-border bg-bg-secondary pl-2 pr-1"
         style={{ height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT }}
       >
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-bg-hover data-[state=open]:bg-bg-hover"
-              aria-label="Choose Agent session"
-            >
-              <span className="min-w-0 truncate text-[13px] font-semibold text-text">
-                {active ? active.title : 'New session'}
-              </span>
-              <ChevronDown className="size-3.5 shrink-0 text-text-tertiary" aria-hidden />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-72">
-            <DropdownMenuItem onSelect={() => newSession('live')}><Plus /> New session</DropdownMenuItem>
-            {visibleSessions.length > 0 && <DropdownMenuSeparator />}
-            {visibleSessions.length > 0 && <DropdownMenuLabel className="text-[11px] font-medium text-text-tertiary">Recent in this Space</DropdownMenuLabel>}
-            {visibleSessions.slice(0, 30).map((session) => (
-              <DropdownMenuItem
-                key={session.sessionId}
-                className={cn(session.sessionId === active?.sessionId && 'bg-bg-hover')}
-                onSelect={() => {
-                  setSelectedId(session.sessionId);
-                  setComposingNew(false);
-                }}
-              >
-                {session.mode === 'background' ? <GitBranch className="text-text-tertiary" /> : <Bot className="text-text-tertiary" />}
-                <span className="min-w-0 flex-1 truncate">{session.title}</span>
-                {!(session.status === 'idle' && !session.closed) && (
-                  <span className="shrink-0 text-[10.5px] text-text-tertiary">{statusLabel(session)}</span>
-                )}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <div className="flex-1" />
-        {active && <StatusPill snapshot={active} />}
+        <h2 className="min-w-0 flex-1 truncate px-1.5 text-[13px] font-semibold text-text" title={showHistory ? undefined : active?.title}>
+          {showHistory ? 'Sessions' : active ? active.title : 'New session'}
+        </h2>
+        {active && !showHistory && <StatusPill snapshot={active} />}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className={cn('text-text-tertiary', showHistory && 'bg-bg-hover text-text')}
+          aria-label="Session history"
+          aria-pressed={showHistory}
+          title="Session history"
+          onClick={() => setShowHistory((open) => !open)}
+        >
+          <History />
+        </Button>
+        <Button type="button" variant="ghost" size="icon-xs" className="text-text-tertiary" aria-label="New session" title="New session" onClick={() => newSession('live')}>
+          <Plus />
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="ghost" size="icon-xs" className="text-text-tertiary" aria-label="Agent options">
@@ -417,7 +447,11 @@ export function AgentPanel({
         <InlineFeedback compact className="m-2" title="Agent sessions could not be loaded" description={listError} />
       )}
 
-      {active ? (
+      {showHistory ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
+          <AgentSessionList sessions={ordered} activeId={active?.sessionId ?? null} onOpen={openSession} />
+        </div>
+      ) : active ? (
         <>
           <AgentTranscript snapshot={active} />
           <div className="shrink-0 space-y-2 px-3 empty:hidden">
@@ -443,7 +477,11 @@ export function AgentPanel({
             meta={(
               <span className="flex min-w-0 items-center gap-1.5">
                 <span className="shrink-0 text-text-secondary">{agentName(active.provider)}</span>
-                {active.model && <span className="min-w-0 truncate" title={active.model}>{active.model}</span>}
+                {active.closed ? (
+                  active.model && <span className="min-w-0 truncate">{active.model}</span>
+                ) : (
+                  <ModelPicker models={activeModels} value={active.requestedModel ?? null} reported={active.model} onChange={changeModel} />
+                )}
                 <span aria-hidden>·</span>
                 <span className="shrink-0">{active.mode === 'background' ? 'Agent Change' : 'Current Draft'}</span>
                 {active.changeId && onOpenChanges && (
@@ -468,6 +506,7 @@ export function AgentPanel({
                   value={draftAgent}
                   onValueChange={(value) => {
                     setDraftAgent(value as AgentKind);
+                    setDraftModel(agentModels?.[value as AgentKind] ?? null);
                     setFeedback(null);
                   }}
                 >
@@ -518,6 +557,21 @@ export function AgentPanel({
               {feedback && (
                 <InlineFeedback compact tone={feedback.tone ?? 'error'} title={feedback.title} description={feedback.description} details={feedback.details} />
               )}
+              {recent.length > 0 && (
+                <section aria-label="Recent sessions" className="-mx-2 mt-2">
+                  <div className="mb-0.5 flex items-baseline justify-between px-2">
+                    <h3 className="text-[11.5px] font-medium text-text-tertiary">Recent</h3>
+                    {ordered.length > recent.length && (
+                      <button type="button" className="text-[11.5px] text-text-tertiary hover:text-text" onClick={() => setShowHistory(true)}>
+                        All {ordered.length}
+                      </button>
+                    )}
+                  </div>
+                  {recent.map((session) => (
+                    <AgentSessionRow key={session.sessionId} session={session} onOpen={() => openSession(session.sessionId)} />
+                  ))}
+                </section>
+              )}
             </div>
           </div>
           <AgentComposer
@@ -528,9 +582,11 @@ export function AgentPanel({
             busy={busyAction}
             stopping={false}
             meta={(
-              <span>
-                <span className="text-text-secondary">{agentName(draftAgent)}</span>
-                {' · '}{draftMode === 'background' ? 'New Agent Change' : 'Current Draft'}
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="shrink-0 text-text-secondary">{agentName(draftAgent)}</span>
+                <ModelPicker models={draftModels} value={chosenDraftModel} onChange={setDraftModel} />
+                <span aria-hidden>·</span>
+                <span className="shrink-0">{draftMode === 'background' ? 'New Agent Change' : 'Current Draft'}</span>
               </span>
             )}
             onSend={startTask}

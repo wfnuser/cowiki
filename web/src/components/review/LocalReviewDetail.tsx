@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { GitBranch, GitCommitHorizontal } from 'lucide-react';
 
 import {
   discardLocalAgentChange,
@@ -10,8 +9,9 @@ import {
   type AgentChange,
   type FileDiff,
 } from '@/api';
-import { C, fonts } from '@/lib/design';
+import { Button } from '@/components/ui/button';
 import { InlineFeedback } from '@/components/ui/inline-feedback';
+import { ViewEmpty, ViewHeader } from '@/components/ui/view-header';
 import { DiffView } from './DiffView';
 import { ReviewBackButton } from './ReviewBackButton';
 import { agentMergeResult, type LocalReviewSelection } from './local-review-model';
@@ -94,133 +94,65 @@ export function LocalReviewDetail({
   const title = target.kind === 'local-draft' ? 'Current Draft' : (change?.title || 'Agent Change');
   const activeChange = change?.status === 'open' || change?.status === 'needsResolution';
 
-  return (
-    <div>
-      <ReviewBackButton onClick={onBack} />
-
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginTop: 10 }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            {target.kind === 'local-draft'
-              ? <GitCommitHorizontal size={19} color={C.faint} />
-              : <GitBranch size={19} color={C.faint} />}
-            <h1 style={{ margin: 0, color: C.ink, fontFamily: fonts.serif, fontSize: 28 }}>
-              {title}
-            </h1>
-          </div>
-          <p style={{ margin: '6px 0 0 28px', color: C.muted, fontSize: 13 }}>
-            {target.kind === 'local-draft'
-              ? 'Working tree · compared with the latest checkpoint'
-              : `agent/${target.changeId.slice(0, 8)} → Current Draft`}
-          </p>
-          {target.kind === 'local-agent' && change && (
-            <span style={{
-              display: 'inline-block',
-              margin: '8px 0 0 28px',
-              padding: '3px 7px',
-              borderRadius: 999,
-              background: change.status === 'needsResolution' ? C.redBg : C.panel,
-              color: change.status === 'needsResolution' ? C.red : C.muted,
-              fontSize: 11.5,
-              fontWeight: 650,
-            }}>
-              {statusLabel(change.status)}
-            </span>
-          )}
-        </div>
-
-        {!loading && !error && target.kind === 'local-draft' && draftDiffs && (
-          <ActionButton
-            disabled={!draftDiffs.length || pending != null}
-            onClick={() => run(
-              'checkpoint',
-              () => keepLocalWorkingDiff(workspaceSlug, draftDiffs),
-            )}
-          >
-            {pending === 'checkpoint' ? 'Creating…' : 'Create Checkpoint'}
-          </ActionButton>
-        )}
-
-        {!loading && target.kind === 'local-agent' && change && activeChange && (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            {onContinueAgent && (
-              <ActionButton subtle disabled={pending != null} onClick={() => onContinueAgent(change)}>
-                Continue with Agent
-              </ActionButton>
-            )}
-            <ActionButton
-              disabled={pending != null}
-              onClick={() => run(
-                'merge',
-                () => mergeLocalAgentChange(workspaceSlug, change.id),
-                true,
-              )}
-            >
-              {pending === 'merge' ? 'Merging…' : 'Merge into Draft'}
-            </ActionButton>
-            <ActionButton
-              subtle
-              disabled={pending != null}
-              onClick={() => run(
-                'discard',
-                () => discardLocalAgentChange(workspaceSlug, change.id),
-              )}
-            >
-              {pending === 'discard' ? 'Discarding…' : 'Discard'}
-            </ActionButton>
-          </div>
-        )}
-      </div>
-
-      {error && <InlineFeedback className="mt-[18px]" title="Could not update this Review" description={error} />}
-      {loading || diffs == null ? (
-        <p style={{ color: C.muted, fontSize: 14, marginTop: 24 }}>Loading changes…</p>
-      ) : (
-        <div style={{ marginTop: 24 }}>
-          {diffs.length ? (
-            <DiffView diffs={diffs} />
-          ) : (
-            <div style={{ padding: 28, border: `1px solid ${C.line}`, borderRadius: 10, color: C.muted, textAlign: 'center' }}>
-              No file changes.
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ActionButton({
-  children,
-  disabled,
-  onClick,
-  subtle = false,
-}: {
-  children: React.ReactNode;
-  disabled?: boolean;
-  onClick: () => void;
-  subtle?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      style={{
-        border: subtle ? `1px solid ${C.line}` : 'none',
-        borderRadius: 7,
-        padding: '8px 11px',
-        background: subtle ? C.panel : C.ink,
-        color: subtle ? C.muted : C.onAccent,
-        cursor: disabled ? 'default' : 'pointer',
-        fontSize: 12.5,
-        fontWeight: 650,
-        opacity: disabled ? 0.55 : 1,
-        whiteSpace: 'nowrap',
-      }}
+  const actions = !loading && !error && target.kind === 'local-draft' && draftDiffs ? (
+    <Button
+      size="sm"
+      disabled={!draftDiffs.length || pending != null}
+      onClick={() => run('checkpoint', () => keepLocalWorkingDiff(workspaceSlug, draftDiffs))}
     >
-      {children}
-    </button>
+      {pending === 'checkpoint' ? 'Creating…' : 'Create checkpoint'}
+    </Button>
+  ) : !loading && target.kind === 'local-agent' && change && activeChange ? (
+    <>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={pending != null}
+        onClick={() => run('discard', () => discardLocalAgentChange(workspaceSlug, change.id))}
+      >
+        {pending === 'discard' ? 'Discarding…' : 'Discard'}
+      </Button>
+      {onContinueAgent && (
+        <Button size="sm" variant="outline" disabled={pending != null} onClick={() => onContinueAgent(change)}>
+          Continue with Agent
+        </Button>
+      )}
+      <Button
+        size="sm"
+        disabled={pending != null}
+        onClick={() => run('merge', () => mergeLocalAgentChange(workspaceSlug, change.id), true)}
+      >
+        {pending === 'merge' ? 'Merging…' : 'Merge into Draft'}
+      </Button>
+    </>
+  ) : undefined;
+
+  return (
+    <section style={{ width: 'min(1040px, 100%)' }}>
+      <ReviewBackButton onClick={onBack} />
+      <ViewHeader
+        className="mb-5 mt-2"
+        title={title}
+        actions={actions}
+        description={(
+          <span className="flex items-center gap-2">
+            {target.kind === 'local-draft' ? 'Compared with the latest checkpoint' : `Agent change · ${target.changeId.slice(0, 8)}`}
+            {target.kind === 'local-agent' && change && (
+              <span className={change.status === 'needsResolution' ? 'font-medium text-red' : 'text-text-tertiary'}>· {statusLabel(change.status)}</span>
+            )}
+          </span>
+        )}
+      />
+
+      {error && <InlineFeedback className="mb-4" title="Could not update this Review" description={error} />}
+      {loading || diffs == null ? (
+        <ViewEmpty>Loading changes…</ViewEmpty>
+      ) : diffs.length ? (
+        <DiffView diffs={diffs} />
+      ) : (
+        <ViewEmpty>No file changes.</ViewEmpty>
+      )}
+    </section>
   );
 }
 

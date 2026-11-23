@@ -69,6 +69,9 @@ pub struct ProviderConfig {
     pub launch: LaunchSpec,
     pub instructions: String,
     pub mcp: Option<McpLaunch>,
+    /// A model the person chose from the ones the agent listed; `None`
+    /// keeps the agent's own default.
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,6 +114,11 @@ pub trait Provider: Send + Sync {
     /// Ends the provider process group and confirms nothing is left running.
     fn shutdown(&self) -> Result<(), String>;
     fn is_alive(&self) -> bool;
+    /// Uses `model` from the next turn on. Called between turns only.
+    fn set_model(&self, model: &str) -> Result<(), String> {
+        let _ = model;
+        Err("This Agent cannot change models during a conversation. Start a new session.".into())
+    }
 }
 
 /// Opens a provider for a session: spawns it, completes the handshake and

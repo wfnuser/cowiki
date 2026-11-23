@@ -135,7 +135,12 @@ pub struct AgentSnapshot {
     pub mode: AgentMode,
     pub change_id: Option<String>,
     pub thread_id: Option<String>,
+    /// The model the agent reports it is using.
     pub model: Option<String>,
+    /// The model the person picked from the agent's list (`None`: the
+    /// agent's default). Applied from the next turn on.
+    #[serde(default)]
+    pub requested_model: Option<String>,
     pub seq: u64,
     pub status: AgentStatus,
     pub items: Vec<AgentItem>,
@@ -207,6 +212,7 @@ mod tests {
             change_id: Some("c1".into()),
             thread_id: None,
             model: None,
+            requested_model: None,
             seq: 3,
             status: AgentStatus::Waiting,
             items: vec![AgentItem::Tool {

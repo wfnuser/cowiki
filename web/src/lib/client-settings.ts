@@ -3,7 +3,10 @@ import { isAgentKind, type AgentKind } from './agents.ts';
 export type DefaultAgent = AgentKind;
 
 export interface ClientSettings {
+  /** The Agent new sessions start with: the one used last, or picked in Settings. */
   defaultAgent: DefaultAgent;
+  /** The model last picked for each Agent (ids the Agent listed). */
+  agentModels?: Partial<Record<AgentKind, string>>;
 }
 
 export interface ClientSettingsStorage {
@@ -25,11 +28,12 @@ export function loadClientSettings(storage: ClientSettingsStorage): ClientSettin
       && typeof value === 'object'
     ) {
       const defaultAgent = (value as Record<string, unknown>).defaultAgent;
+      const agentModels = modelsFrom((value as Record<string, unknown>).agentModels);
       if (defaultAgent === 'gemini') {
-        return { defaultAgent: 'antigravity' };
+        return { defaultAgent: 'antigravity', ...agentModels };
       }
       if (isAgentKind(defaultAgent)) {
-        return { defaultAgent };
+        return { defaultAgent, ...agentModels };
       }
     }
   } catch {
@@ -37,6 +41,15 @@ export function loadClientSettings(storage: ClientSettingsStorage): ClientSettin
   }
 
   return { ...DEFAULT_CLIENT_SETTINGS };
+}
+
+function modelsFrom(value: unknown): { agentModels?: Partial<Record<AgentKind, string>> } {
+  if (!value || typeof value !== 'object') return {};
+  const models = Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([agent, model]) => isAgentKind(agent) && typeof model === 'string' && model.length > 0 && model.length <= 200),
+  ) as Partial<Record<AgentKind, string>>;
+  return Object.keys(models).length > 0 ? { agentModels: models } : {};
 }
 
 export function saveClientSettings(

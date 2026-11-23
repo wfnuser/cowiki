@@ -6,7 +6,7 @@ import { DiffView } from '../components/review/DiffView';
 import { ReviewBackButton } from '../components/review/ReviewBackButton';
 import { ReviewInbox, ReviewInboxRow } from '../components/review/ReviewInbox';
 import { AvatarBadge } from '../components/ui/avatar-badge';
-import { C, fonts } from '../lib/design';
+import { C } from '../lib/design';
 import type {
   CloudClient,
   CloudPullRequest,
@@ -153,7 +153,7 @@ export function CloudReviewsView({
           />
         ) : (
           <ReviewInbox
-            description="Review submitted changes before they become Cloud main."
+            description="Changes waiting to reach Cloud main."
             empty="No pull requests yet."
             loading={loading}
           >
@@ -162,12 +162,12 @@ export function CloudReviewsView({
                 <ReviewInboxRow
                   key={pullRequest.id}
                   first={index === 0}
-                  icon={<GitBranch size={17} color={C.faint} />}
+                  icon={<GitBranch size={16} className="shrink-0 text-text-faint" />}
                   title={`#${pullRequest.number} ${pullRequest.title}`}
                   subtitle={`${pullRequest.authorName} · ${pullRequest.headRef} → ${pullRequest.baseRef}`}
                   status={statusLabel(pullRequest.status)}
                   onOpen={() => navigate(cloudSpaceRoute(space.id, 'reviews', pullRequest.id))}
-                  trailing={<AvatarBadge name={pullRequest.authorName} size={26} />}
+                  trailing={<AvatarBadge name={pullRequest.authorName} size={22} />}
                 />
               ))
               : undefined}
@@ -223,9 +223,7 @@ function CloudReviewDetail({
         <div style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
             <GitBranch size={19} color={C.faint} />
-            <h1 style={{ margin: 0, color: C.ink, fontFamily: fonts.serif, fontSize: 28 }}>
-              {pullRequest.title}
-            </h1>
+            <h1 className="view-title">{pullRequest.title}</h1>
           </div>
           <p style={{ margin: '6px 0 0 28px', color: C.muted, fontSize: 13 }}>
             {pullRequest.authorName} · {pullRequest.headRef} → {pullRequest.baseRef}

@@ -125,9 +125,8 @@ export function CloudMembersView({
   return (
     <div className="h-full overflow-y-auto">
       <div style={{ padding: '36px 56px 56px' }}>
-        <div className="mb-5 flex items-baseline gap-3">
-          <h1 className="page-title mb-0">Members</h1>
-          {members && <span className="text-2xl font-normal text-text-tertiary">{members.length}</span>}
+        <div className="mb-6 flex min-h-8 items-center">
+          <h1 className="view-title">Members{members && <span className="ml-2 font-normal text-text-faint">{members.length}</span>}</h1>
         </div>
 
         {notice && <CloudNotice tone={notice.tone}>{notice.message}</CloudNotice>}
@@ -222,7 +221,7 @@ export function CloudMembersView({
         ) : (
           <div className="overflow-hidden rounded-xl border bg-panel">
             <div
-              className="grid gap-3 border-b bg-bg-secondary px-4 py-2 text-xs font-semibold uppercase tracking-[0.05em] text-text-tertiary"
+              className="grid gap-3 border-b px-4 py-2 text-[12px] text-text-tertiary"
               style={{ gridTemplateColumns: 'minmax(0, 1fr) 150px' }}
             >
               <span>Member</span>

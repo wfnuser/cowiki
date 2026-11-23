@@ -109,10 +109,12 @@ test('commands carry ids and text only, never directories', async () => {
   await api.create({ spaceSlug: 'demo', mode: 'background', changeId: 'c1', agent: 'grok', title: 'T' });
   await api.send('agent-1', 'hello');
   await api.answer('agent-1', 'approval-1', 'deny');
+  await api.setModel('agent-1', 'grok-4.6');
   assert.deepEqual(fake.calls[0], {
     command: 'agent_create_session',
-    args: { request: { spaceSlug: 'demo', mode: 'background', changeId: 'c1', agent: 'grok', title: 'T' } },
+    args: { request: { spaceSlug: 'demo', mode: 'background', changeId: 'c1', agent: 'grok', title: 'T', model: null } },
   });
+  assert.deepEqual(fake.calls[3], { command: 'agent_set_model', args: { sessionId: 'agent-1', model: 'grok-4.6' } });
   assert.deepEqual(fake.calls[1], { command: 'agent_send', args: { sessionId: 'agent-1', text: 'hello' } });
   assert.deepEqual(fake.calls[2], { command: 'agent_answer_approval', args: { sessionId: 'agent-1', approvalId: 'approval-1', decision: 'deny' } });
   assert.equal(JSON.stringify(fake.calls).includes('cwd'), false);

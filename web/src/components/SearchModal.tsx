@@ -171,7 +171,7 @@ export function SearchModal({
   const sectionLabel = (icon: React.ReactNode, label: string) => (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 6, padding: '10px 18px 4px',
-      fontSize: 11, fontWeight: 600, color: C.faint, textTransform: 'uppercase', letterSpacing: '0.07em',
+      fontSize: 12, fontWeight: 500, color: C.muted,
     }}>
       {icon} {label}
     </div>

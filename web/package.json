@@ -15,7 +15,7 @@
     "test:versioned-document": "node --experimental-strip-types --test tests/versioned-document.test.ts",
     "test:local-space": "node --experimental-strip-types --test tests/local-space.test.ts",
     "test:sidebar-layout": "node --experimental-strip-types --test tests/sidebar-layout.test.ts",
-    "test:client-settings": "node --experimental-strip-types --test tests/client-settings.test.ts",
+    "test:client-settings": "node --experimental-strip-types --test tests/client-settings.test.ts tests/theme.test.ts",
     "test:design-system": "node --experimental-strip-types --test tests/design-system.test.ts",
     "test:page-frontmatter": "node --experimental-strip-types --test tests/page-frontmatter.test.ts",
     "test:page-lineage": "node --experimental-strip-types --test tests/page-lineage.test.ts && npm run test:page-lineage-ui",

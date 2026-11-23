@@ -297,9 +297,23 @@ export function MainLayout() {
   }, [agentPanelWidth]);
 
   const handleDefaultAgentChange = useCallback((defaultAgent: DefaultAgent) => {
-    const next = { defaultAgent };
-    setClientSettings(next);
-    saveClientSettings(window.localStorage, next);
+    setClientSettings((previous) => {
+      const next = { ...previous, defaultAgent };
+      try { saveClientSettings(window.localStorage, next); } catch { /* keep it for this run */ }
+      return next;
+    });
+  }, []);
+
+  /** New sessions start with the Agent and model used last. */
+  const handleAgentUsed = useCallback((agent: DefaultAgent, model: string | null) => {
+    setClientSettings((previous) => {
+      const agentModels = { ...previous.agentModels };
+      if (model) agentModels[agent] = model;
+      else delete agentModels[agent];
+      const next = { ...previous, defaultAgent: agent, agentModels };
+      try { saveClientSettings(window.localStorage, next); } catch { /* keep it for this run */ }
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -1804,7 +1818,7 @@ export function MainLayout() {
 
               /* Link diagnostics */
               ) : activeView?.kind === 'tasks' && activeWorkspace ? (
-                <div style={{ position: 'absolute', inset: 0, overflow: 'auto', padding: '36px 32px 56px' }}>
+                <div style={{ position: 'absolute', inset: 0, overflow: 'auto', padding: '36px 56px 56px' }}>
                   <TasksView
                     workspaceSlug={activeWorkspace.slug}
                     journal={activeFeatures.journal}
@@ -1815,7 +1829,7 @@ export function MainLayout() {
                   />
                 </div>
               ) : activeView?.kind === 'flashcards' && activeWorkspace ? (
-                <div style={{ position: 'absolute', inset: 0, overflow: 'auto', padding: '36px 32px 56px' }}>
+                <div style={{ position: 'absolute', inset: 0, overflow: 'auto', padding: '36px 56px 56px' }}>
                   <ObsidianReaderContext.Provider value={readerCallbacks}>
                     <FlashcardsView
                       key={activeWorkspace.slug}
@@ -1944,7 +1958,7 @@ export function MainLayout() {
               /* Home */
               ) : (
                 <div>
-                  <h1 className="page-title">Home</h1>
+                  <h1 className="view-title mb-1">Home</h1>
                   <p style={{ color: C.muted, fontSize: 13 }}>
                     Select a page from the sidebar to get started.
                   </p>
@@ -1991,6 +2005,8 @@ export function MainLayout() {
                 key={activeWorkspace.id}
                 spaceSlug={activeWorkspace.slug}
                 defaultAgent={clientSettings.defaultAgent}
+                agentModels={clientSettings.agentModels}
+                onAgentUsed={handleAgentUsed}
                 openRequest={agentOpenRequest}
                 onOpenRequestHandled={(requestId) => {
                   setAgentOpenRequest((current) => (
@@ -2434,7 +2450,7 @@ function DiscoverView() {
 
   return (
     <>
-      <h1 className="page-title page-title--tight">Discover</h1>
+      <h1 className="view-title mb-1">Discover</h1>
       <p style={{ color: C.muted, fontSize: 13, marginBottom: 32 }}>Public knowledge spaces you can browse and join.</p>
       {loading ? (
         <div style={{ padding: '32px 0', textAlign: 'center', color: C.muted, fontSize: 13 }}>Loading...</div>
