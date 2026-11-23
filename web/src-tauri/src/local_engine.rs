@@ -153,6 +153,15 @@ fn ignore_portable_cloud_link(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// A page with the time its file last changed on this device.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentPage {
+    pub path: String,
+    pub title: String,
+    pub modified_at: i64,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Checkpoint {
@@ -1097,6 +1106,24 @@ impl LocalEngine {
     pub fn list_pages(&self, space_slug: &str) -> Result<Vec<PageMeta>, String> {
         let space = self.find_space(space_slug)?;
         read_page_tree(&space.local_path, &space.local_path)
+    }
+
+    /// Pages whose files changed most recently, newest first.
+    pub fn recent_pages(&self, space_slug: &str, limit: usize) -> Result<Vec<RecentPage>, String> {
+        let space = self.find_space(space_slug)?;
+        let mut pages = Vec::new();
+        collect_recent_pages(
+            &space.local_path,
+            &read_page_tree(&space.local_path, &space.local_path)?,
+            &mut pages,
+        );
+        pages.sort_by(|a, b| {
+            b.modified_at
+                .cmp(&a.modified_at)
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        pages.truncate(limit.clamp(1, 50));
+        Ok(pages)
     }
 
     pub fn read_html_asset(
@@ -2785,6 +2812,26 @@ fn source_display_title(path: &Path, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
+fn collect_recent_pages(root: &Path, tree: &[PageMeta], out: &mut Vec<RecentPage>) {
+    for page in tree {
+        if page.kind == "folder" {
+            collect_recent_pages(root, &page.children, out);
+            continue;
+        }
+        let modified = std::fs::metadata(root.join(&page.path))
+            .and_then(|metadata| metadata.modified())
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok());
+        if let Some(modified) = modified {
+            out.push(RecentPage {
+                path: page.path.clone(),
+                title: page.title.clone(),
+                modified_at: modified.as_secs() as i64,
+            });
+        }
+    }
+}
+
 fn read_page_tree(root: &Path, current: &Path) -> Result<Vec<PageMeta>, String> {
     if !current.is_dir() {
         return Ok(vec![]);
@@ -3125,6 +3172,30 @@ mod tests {
             original
         );
         assert!(engine.get_page("demo", "../index.html").is_err());
+    }
+
+    #[test]
+    fn recent_pages_list_the_newest_files_first_inside_folders() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = super::LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let folder = temp.path().join("space");
+        std::fs::create_dir_all(folder.join("notes")).unwrap();
+        std::fs::write(folder.join("Old.md"), "# Old\n").unwrap();
+        std::fs::write(folder.join("notes/New.md"), "# New\n").unwrap();
+        engine.add_space("Demo", "demo", &folder).unwrap();
+        let old = std::fs::File::options()
+            .write(true)
+            .open(folder.join("Old.md"))
+            .unwrap();
+        old.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000))
+            .unwrap();
+
+        let recent = engine.recent_pages("demo", 10).unwrap();
+        let paths: Vec<_> = recent.iter().map(|page| page.path.as_str()).collect();
+        assert_eq!(paths.first(), Some(&"notes/New.md"));
+        assert!(paths.contains(&"Old.md"));
+        assert!(recent.iter().all(|page| page.modified_at > 0));
+        assert_eq!(engine.recent_pages("demo", 1).unwrap().len(), 1);
     }
     use super::{sha256_file, CloudLink, LocalEngine};
     use git2::Repository;

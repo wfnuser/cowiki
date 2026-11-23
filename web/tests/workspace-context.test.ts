@@ -37,5 +37,5 @@ test('sync problems are visible and never described as uploaded', () => {
 test('active-Space context is keyed so a previous Space cannot leak into the header', () => {
   assert.match(mainLayout, /desktopCloudStatus\.spaceSlug === activeWorkspace\?\.slug/);
   assert.match(mainLayout, /workingDiffsSpaceSlug === activeWorkspace\?\.slug/);
-  assert.match(mainLayout, /WorkspaceContextBadge/);
+  assert.match(mainLayout, /<SpaceStatusMenu[\s\S]*?context=\{workspaceContext\}/);
 });

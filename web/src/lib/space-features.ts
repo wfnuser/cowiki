@@ -142,7 +142,6 @@ export async function saveSpaceFeatures(config: {
 
 /** Personal usage preferences, stored on this device only. */
 export interface PersonalPreferences {
-  openJournalOnStartup: boolean;
   /** Save a checkpoint after a quiet spell and when the app quits (desktop). */
   autoCheckpoint: boolean;
 }
@@ -155,7 +154,6 @@ export interface PreferenceStorage {
 export const PERSONAL_PREFERENCES_KEY = 'cowiki.personal.preferences';
 
 export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
-  openJournalOnStartup: false,
   autoCheckpoint: true,
 };
 
@@ -164,7 +162,6 @@ export function loadPersonalPreferences(storage: PreferenceStorage): PersonalPre
     const value = record(JSON.parse(storage.getItem(PERSONAL_PREFERENCES_KEY) ?? 'null'));
     if (!value) return { ...DEFAULT_PERSONAL_PREFERENCES };
     return {
-      openJournalOnStartup: value.openJournalOnStartup === true,
       autoCheckpoint: value.autoCheckpoint !== false,
     };
   } catch {

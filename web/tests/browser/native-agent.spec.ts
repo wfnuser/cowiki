@@ -118,7 +118,7 @@ async function desktop(page: Page, options: { approval?: boolean; panelWidth?: n
         for (const listener of listeners.get(event) ?? []) callbacks.get(listener.handler)?.({ event, id: listener.id, payload });
       },
     });
-    localStorage.setItem('cowiki.personal.preferences', JSON.stringify({ openJournalOnStartup: false, autoCheckpoint: false }));
+    localStorage.setItem('cowiki.personal.preferences', JSON.stringify({ autoCheckpoint: false }));
     if (width) localStorage.setItem('cowiki.agentPanelWidth', String(width));
   }, options.panelWidth ?? null);
   const count = (cmd: string) => calls.filter((call) => call.cmd === cmd).length;
@@ -163,6 +163,28 @@ test('collapsing the panel does not stop a running task', async ({ page }) => {
   expect(state.count('agent_stop')).toBe(1);
 });
 
+test('Enter that picks an input-method candidate does not send', async ({ page }) => {
+  const state = await desktop(page);
+  await openAgent(page);
+  const box = page.getByRole('textbox', { name: 'Message agent' });
+  await box.fill('你好');
+  // WebKit sends the confirming Enter after the composition ends, with key code 229.
+  for (const composing of [{ isComposing: true, keyCode: 13 }, { isComposing: false, keyCode: 229 }]) {
+    await box.evaluate((element, init) => {
+      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, isComposing: init.isComposing });
+      Object.defineProperty(event, 'keyCode', { value: init.keyCode });
+      element.dispatchEvent(event);
+    }, composing);
+  }
+  await expect(box).toHaveValue('你好');
+  expect(state.count('agent_send')).toBe(0);
+  await box.press('Enter');
+  await expect.poll(() => state.count('agent_send')).toBe(1);
+  // Let the fake run settle so it does not outlive this page.
+  await page.getByRole('button', { name: 'Stop the Agent' }).click();
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible();
+});
+
 test('an approval is answered once from the keyboard', async ({ page }) => {
   const state = await desktop(page, { approval: true });
   await openAgent(page);
@@ -181,7 +203,7 @@ test('an approval is answered once from the keyboard', async ({ page }) => {
   expect(answers).toEqual([{ cmd: 'agent_answer_approval', args: { sessionId: 'agent-1', approvalId: 'approval-1', decision: 'allow' } }]);
 });
 
-test('a narrow panel fits and the top bar gains no controls', async ({ page }) => {
+test('a narrow panel fits and its toggle moves into the panel, taking no top bar space', async ({ page }) => {
   await desktop(page, { panelWidth: 320 });
   await page.goto(origin + '/personal/Welcome');
   await expect(page.locator('article')).toContainText('Welcome');
@@ -192,7 +214,12 @@ test('a narrow panel fits and the top bar gains no controls', async ({ page }) =
   await expect(panel.getByRole('textbox', { name: 'Message agent' })).toBeVisible();
   await expect(panel.getByText(/Codex 0\.166\.0 is ready/)).toBeVisible();
   await shot(page, 'new-task-320');
-  expect(await topBarButtons()).toBe(before);
+  // Opened and closed from the same corner: the top bar loses its toggle.
+  expect(await topBarButtons()).toBe(before - 1);
+  await expect(page.getByRole('button', { name: 'Agent', exact: true })).toHaveCount(0);
+  await panel.getByRole('button', { name: 'Close agent panel' }).click();
+  await expect(page.getByRole('button', { name: 'Agent', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Agent', exact: true }).click();
   const overflow = await panel.evaluate((element) => element.scrollWidth - element.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
   await page.getByRole('textbox', { name: 'Message agent' }).fill('x'.repeat(400));
@@ -206,7 +233,7 @@ test('switching Spaces shows only that Space’s sessions and keeps the other ru
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect(page.getByText('Reading')).toBeVisible();
   await page.getByRole('button', { name: 'W', exact: true }).click();
-  await expect(page.locator('article')).toContainText('Welcome');
+  await expect(page.getByRole('button', { name: 'Space menu' })).toHaveAttribute('title', 'Work');
   await expect(page.getByText('Personal task')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Stop the Agent' })).toHaveCount(0);
   await page.getByRole('button', { name: 'P', exact: true }).click();

@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { isSubmitEnter } from '@/lib/ime';
 import { MessageSquare, Check, ChevronDown, ChevronRight, Send, X, FileText, Pencil } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -81,7 +82,7 @@ function CommentThread({
                 value={replyBody}
                 onChange={(e) => setReplyBody(e.target.value)}
                 placeholder="Reply..."
-                onKeyDown={(e) => e.key === 'Enter' && handleReply(c.id)}
+                onKeyDown={(e) => isSubmitEnter(e) && handleReply(c.id)}
                 style={{ flex: 1, fontSize: 12, padding: '4px 8px', border: `1px solid ${C.line}`, borderRadius: 4, outline: 'none', background: C.panel }}
               />
               <button onClick={() => handleReply(c.id)} style={{ ...smallBtn, color: C.accent }}>

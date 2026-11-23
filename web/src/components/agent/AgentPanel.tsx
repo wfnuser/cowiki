@@ -6,7 +6,7 @@ import {
   LoaderCircle,
   LogIn,
   MoreHorizontal,
-  PanelRightClose,
+  PanelRight,
   Plus,
   RefreshCw,
   Trash2,
@@ -437,8 +437,8 @@ export function AgentPanel({
           </DropdownMenuContent>
         </DropdownMenu>
         {onClose && (
-          <Button type="button" variant="ghost" size="icon-xs" className="text-text-tertiary" aria-label="Close agent panel" onClick={onClose}>
-            <PanelRightClose />
+          <Button type="button" variant="ghost" size="icon-xs" className="text-text-tertiary" aria-label="Close agent panel" title="Close the Agent sidebar" onClick={onClose}>
+            <PanelRight />
           </Button>
         )}
       </header>

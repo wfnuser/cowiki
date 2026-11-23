@@ -29,6 +29,18 @@ export function listPages(spaceSlug: string): Promise<PageMeta[]> {
   return invoke('local_list_pages', { spaceSlug });
 }
 
+/** A page and when its file last changed on this device (Unix seconds). */
+export interface RecentPage {
+  path: string;
+  title: string;
+  modifiedAt: number;
+}
+
+/** Pages whose files changed most recently, newest first. */
+export function recentPages(spaceSlug: string, limit: number): Promise<RecentPage[]> {
+  return invoke('local_recent_pages', { spaceSlug, limit });
+}
+
 export function getPage(spaceSlug: string, conceptId: string): Promise<PageFull> {
   return invoke('local_get_page', { spaceSlug, pageSlug: conceptId });
 }

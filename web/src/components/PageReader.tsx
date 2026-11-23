@@ -8,6 +8,7 @@ import { useReaderLineagePanel } from './PageCommentsLayer';
 import type { PageLineage as PageLineageModel } from '@/lib/page-lineage';
 import { withHtmlMarkdownComponents } from './HtmlView';
 import { useMemo } from 'react';
+import { renderedClick, type RenderedClick } from '@/lib/click-to-edit';
 
 interface PageReaderProps {
   body: string;
@@ -26,6 +27,11 @@ interface PageReaderProps {
   onOpenSource?: (path: string) => void;
   onOpenReview?: (id: string) => void;
   loadSource?: LoadLineageSource;
+  /**
+   * Click to edit: called with the clicked text (null for blank space) and the
+   * click's distance from the top of the page. Links and controls never edit.
+   */
+  onEditAt?: (click: RenderedClick | null, top: number) => void;
 }
 
 export function PageReader({
@@ -42,6 +48,7 @@ export function PageReader({
   onOpenSource,
   onOpenReview,
   loadSource,
+  onEditAt,
 }: PageReaderProps) {
   const [lineageOpen, setLineageOpen] = useReaderLineagePanel();
   const lineageId = useId();
@@ -54,8 +61,13 @@ export function PageReader({
       <div style={{ position: 'relative', display: 'flex', alignItems: 'stretch', flex: 1, minHeight: 0 }}>
       <article
         ref={articleRef}
-        className="prose"
+        className={onEditAt ? 'prose page-reader-editable' : 'prose'}
         style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '36px 48px 56px 56px' }}
+        onClick={onEditAt ? (event) => {
+          const click = renderedClick(event.nativeEvent, event.currentTarget);
+          if (click === undefined) return;
+          onEditAt(click, event.clientY - event.currentTarget.getBoundingClientRect().top);
+        } : undefined}
       >
         {readOnlyLabel && (
           <div style={readOnlyBannerStyle}>

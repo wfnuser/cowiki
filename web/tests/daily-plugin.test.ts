@@ -11,8 +11,7 @@ import { ensureDatePage } from '../src/lib/date-page.ts';
 
 const now = () => new Date(2026, 10, 2, 9, 15);
 function snapshot(features: SpaceFeatures | null = structuredClone(DEFAULT_SPACE_FEATURES)): PluginSnapshot {
-  return { space: { id: 'local-a', local: true }, activation: 1, readiness: features ? 'ready' : 'pending', features,
-    preferences: { openJournalOnStartup: false, autoCheckpoint: true } };
+  return { space: { id: 'local-a', local: true }, activation: 1, readiness: features ? 'ready' : 'pending', features };
 }
 
 async function fixture(t: TestContext) {
@@ -66,15 +65,14 @@ test('host lists and dispatches a second built-in contribution without a shell b
   assert.throws(() => createPluginHost({ definitions: [{ ...example, actions: [example.actions[0], example.actions[0]] }], getSnapshot: () => current, pages: () => { throw Error('must not run'); }, now }), /duplicate/i);
 });
 
-test('disabled, pending and nonlocal dispatch/startup do no page I/O', async (t) => {
+test('disabled, pending and nonlocal dispatch do no page I/O', async (t) => {
   const disabled = structuredClone(DEFAULT_SPACE_FEATURES);
   disabled.modules.journal = false;
   for (const state of [snapshot(disabled), snapshot(null), { ...snapshot(), space: { id: 'remote', local: false } }]) {
     const f = await fixture(t);
-    f.current = { ...state, preferences: { openJournalOnStartup: true, autoCheckpoint: true } };
+    f.current = state;
     assert.deepEqual(f.host.actions(), []);
     assert.equal(await f.host.dispatch('journal:today'), false);
-    await f.host.launch({ workspacesLoaded: true, initialPathname: '/' });
     assert.equal(f.calls, 0);
   }
 });
@@ -233,64 +231,6 @@ test('the inner ordinary page open receives the same activation lifetime guard',
   assert.deepEqual(f.opened, [], 'a stale read inside ordinary open must not commit page content');
 });
 
-test('a terminal first configuration failure consumes root startup even before boot navigation is ready', async (t) => {
-  for (const initiallyReady of [false, true]) {
-    const f = await fixture(t);
-    const first = { ...snapshot(null), readiness: 'failed' as const, preferences: { openJournalOnStartup: true, autoCheckpoint: true } };
-    f.current = first;
-    await f.host.launch({ workspacesLoaded: initiallyReady, initialPathname: '/' });
-    f.current = { ...first, readiness: 'ready', features: structuredClone(DEFAULT_SPACE_FEATURES) };
-    await f.host.launch({ workspacesLoaded: true, initialPathname: '/' });
-    assert.equal(f.calls, 0, 'repair/reload is not another application launch');
-    assert.equal(await f.host.dispatch('journal:today'), true);
-    assert.deepEqual(f.opened, ['journal/2026-11-02.md']);
-  }
-});
-
-test('startup is bound to the first visible activation while its configuration or boot navigation is pending', async (t) => {
-  for (const readiness of ['pending', 'failed'] as const) {
-    for (const initiallyReady of [false, true]) {
-      const f = await fixture(t);
-      const first = { ...snapshot(null), readiness, preferences: { openJournalOnStartup: true, autoCheckpoint: true } };
-      f.current = first;
-      await f.host.launch({ workspacesLoaded: initiallyReady, initialPathname: '/' });
-      f.current = { ...snapshot(), activation: 2, space: { id: 'local-b', local: true }, preferences: first.preferences };
-      await f.host.launch({ workspacesLoaded: true, initialPathname: '/' });
-      assert.equal(f.calls, 0, 'choosing ready B must not transfer startup from A');
-      assert.equal(await f.host.dispatch('journal:today'), true, 'B still permits explicit Today');
-    }
-  }
-});
-
-test('an intentional departure consumes launch before the first launch effect has observed a Space', async (t) => {
-  const f = await fixture(t);
-  f.host.cancelLaunch();
-  f.current.preferences.openJournalOnStartup = true;
-  await f.host.launch({ workspacesLoaded: true, initialPathname: '/' });
-  assert.equal(f.calls, 0);
-});
-
-test('launch waits for configuration and only honors explicit root-start preference once', async (t) => {
-  for (const pathname of ['/', '/local-a/Existing', '/local-a/reviews']) {
-    const f = await fixture(t);
-    f.current = snapshot(null);
-    await f.host.launch({ workspacesLoaded: true, initialPathname: pathname });
-    assert.equal(f.calls, 0);
-    f.current = snapshot();
-    f.current.preferences.openJournalOnStartup = true;
-    await f.host.launch({ workspacesLoaded: true, initialPathname: pathname });
-    await f.host.launch({ workspacesLoaded: true, initialPathname: '/' });
-    assert.deepEqual(f.opened, pathname === '/' ? ['journal/2026-11-02.md'] : []);
-  }
-  const f = await fixture(t);
-  await f.host.launch({ workspacesLoaded: false, initialPathname: '/' });
-  assert.equal(f.calls, 0);
-  await f.host.launch({ workspacesLoaded: true, initialPathname: '/' });
-  f.current.preferences.openJournalOnStartup = true;
-  await f.host.launch({ workspacesLoaded: true, initialPathname: '/' });
-  assert.equal(f.calls, 0, 'changing a preference after launch is not a new launch');
-});
-
 test('page adapter bounds paths and distinguishes native missing-file and create-only errors', async () => {
   let reads = 0;
   const ports: SpacePagePorts = { read: async () => { reads++; throw 'No such file or directory (os error 2)'; },
@@ -375,7 +315,7 @@ test('saving only a local preference does not materialize Space defaults or rewr
     write: async () => { assert.fail('unchanged Space settings must not be rewritten'); } }, structuredClone(base), base);
 });
 
-test('the real sidebar renders contributed commands rather than a hardwired Today entry', async () => {
+test('the real sidebar renders contributed commands and Journals instead of a Wiki or Today entry', async () => {
   const { createServer } = await import('vite');
   const { fileURLToPath } = await import('node:url');
   const React = await import('react');
@@ -386,7 +326,15 @@ test('the real sidebar renders contributed commands rather than a hardwired Toda
     const props = { workspace: { id: 'a', slug: 'a', name: 'A' }, activeTab: 'wiki', pages: [], sources: [],
       isPersonal: true, modules: ['journal'], onCollapse: () => {} };
     const withoutContribution = renderToStaticMarkup(React.createElement(SpacePanel, props));
-    assert.doesNotMatch(withoutContribution, />Today</);
+    assert.doesNotMatch(withoutContribution, />Today<|>Wiki</);
+    assert.match(withoutContribution, />Home</);
+    const personal = renderToStaticMarkup(React.createElement(SpacePanel, { ...props, home: 'journals' }));
+    assert.match(personal, />Journals</);
+    assert.doesNotMatch(personal, />Home</);
+    const shared = renderToStaticMarkup(React.createElement(SpacePanel, { ...props, home: 'overview', journals: true }));
+    assert.match(shared, />Home<[\s\S]*>Journals</);
+    const deciding = renderToStaticMarkup(React.createElement(SpacePanel, { ...props, home: null }));
+    assert.doesNotMatch(deciding, />Home<|>Journals</);
     const contributed = renderToStaticMarkup(React.createElement(SpacePanel, { ...props,
       pluginActions: [{ id: 'example:open', label: 'Example action', icon: 'file' }], onPluginAction: () => {} }));
     assert.match(contributed, />Example action</);
@@ -406,7 +354,7 @@ test('plugin-owned settings render another definition with no Journal-specific f
         { id: 'example-value', label: 'Example field', value: () => 'Kept value', update: (features) => features },
       ], preferences: [{ id: 'example-personal', label: 'Example personal preference', value: () => true, update: (preferences) => preferences }] } };
     const html = renderToStaticMarkup(React.createElement(PluginSettings, { plugins: [example], features: snapshot().features,
-      preferences: snapshot().preferences, onFeatures: () => {}, onPreferences: () => {} }));
+      preferences: { autoCheckpoint: true }, onFeatures: () => {}, onPreferences: () => {} }));
     assert.match(html, /Example plugin/);
     assert.match(html, /Example field/);
     assert.match(html, /Kept value/);

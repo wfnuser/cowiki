@@ -16,8 +16,8 @@ const spacePanel = readFileSync(
   new URL('../src/components/layout/SpacePanel.tsx', import.meta.url),
   'utf8',
 );
-const versionSwitcher = readFileSync(
-  new URL('../src/components/layout/VersionSwitcher.tsx', import.meta.url),
+const statusMenu = readFileSync(
+  new URL('../src/components/layout/SpaceStatusMenu.tsx', import.meta.url),
   'utf8',
 );
 
@@ -74,23 +74,30 @@ test('Source titles use a dedicated overflow-safe presentation class', () => {
   assert.match(mainLayout, /className="page-title page-title--compact source-title"/);
 });
 
-test('the desktop header exposes the focused local version switcher', () => {
+test('the desktop header merges version and Cloud state into one quiet menu', () => {
   assert.match(mainLayout, /desktop && activeWorkspace\?\.localPath/);
   assert.match(mainLayout, /change\.status === 'open'/);
-  assert.match(versionSwitcher, />\s*WORKING\s*</);
-  assert.match(versionSwitcher, />\s*UPSTREAM\s*</);
-  assert.match(versionSwitcher, />\s*AGENT CHANGES\s*</);
-  assert.match(versionSwitcher, /See All in Reviews/);
-  assert.doesNotMatch(versionSwitcher, /CHECKPOINTS|Discarded|Merged/);
+  assert.match(mainLayout, /<SpaceStatusMenu/);
+  assert.doesNotMatch(mainLayout, /WorkspaceContextBadge|VersionSwitcher/);
+  // Sentence case inside the menu; the words live there, not in the bar.
+  assert.match(statusMenu, />\s*Version\s*</);
+  assert.match(statusMenu, /See all in Reviews/);
+  assert.doesNotMatch(statusMenu, /WORKING|UPSTREAM|AGENT CHANGES|CHECKPOINTS|Discarded|Merged/);
+  assert.match(statusMenu, /<ChevronDown[^>]*aria-hidden[^>]*\/>/);
 });
 
-test('the version switcher centers a real chevron icon instead of a text glyph', () => {
-  assert.match(versionSwitcher, /import \{[^}]*ChevronDown[^}]*\} from 'lucide-react'/);
-  assert.match(versionSwitcher, /<ChevronDown[^>]*aria-hidden[^>]*\/>/);
-  assert.doesNotMatch(versionSwitcher, />⌄</);
+test('the status trigger shows a dot only when changes need attention', () => {
+  // User decision 2026-11-23: no status words in the bar, a dot for unsent changes.
+  assert.match(statusMenu, /\{context\.attention && \(\s*<span data-testid="space-status-dot"/);
 });
 
-test('the persistent version trigger does not use a high-attention status dot', () => {
-  assert.doesNotMatch(versionSwitcher, /const dot =/);
-  assert.doesNotMatch(versionSwitcher, /background: dot/);
+test('the header has no Edit button and opens the Agent from the corner its sidebar closes from', () => {
+  const headerActions = mainLayout
+    .split('{/* Right: actions */}')[1]
+    .split('{/* User menu moved to Rail bottom avatar */}')[0];
+  assert.doesNotMatch(headerActions, />\s*Edit\s*</);
+  assert.doesNotMatch(headerActions, /Pencil/);
+  assert.match(headerActions, /!agentPanelOpen && \(/);
+  assert.match(headerActions, /<PanelRight size=\{16\} \/>/);
+  assert.match(agentPanel, /aria-label="Close agent panel"[^>]*>\s*<PanelRight \/>/);
 });

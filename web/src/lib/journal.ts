@@ -223,6 +223,30 @@ export function journalEntryKeys(config: JournalConfig, paths: Iterable<string>)
   return [...keys].sort();
 }
 
+export interface JournalEntry {
+  key: string;
+  date: Date;
+  path: string;
+  /** Today before its file exists: it is created on the first click. */
+  missing: boolean;
+}
+
+/** Today and every earlier journal entry, newest first. Future dates are left out. */
+export function journalTimeline(config: JournalConfig, paths: Iterable<string>, today: Date): JournalEntry[] {
+  const todayKey = dateKey(today);
+  const entries = new Map<string, JournalEntry>();
+  for (const path of paths) {
+    const date = journalDateFromPath(config, path);
+    if (!date) continue;
+    const key = dateKey(date);
+    if (key <= todayKey && !entries.has(key)) entries.set(key, { key, date, path, missing: false });
+  }
+  if (!entries.has(todayKey)) {
+    entries.set(todayKey, { key: todayKey, date: startOfDay(today), path: journalPagePath(config, today), missing: true });
+  }
+  return [...entries.values()].sort((a, b) => b.key.localeCompare(a.key));
+}
+
 /**
  * A template's own `title:` (for example "Daily" on an imported template page)
  * must not become every new page's title: replace it with the page's title.

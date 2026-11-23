@@ -98,6 +98,15 @@ fn local_list_pages(
 }
 
 #[tauri::command]
+fn local_recent_pages(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    limit: usize,
+) -> Result<Vec<local_engine::RecentPage>, String> {
+    engine.recent_pages(&space_slug, limit)
+}
+
+#[tauri::command]
 fn local_get_page(
     engine: State<'_, LocalEngine>,
     space_slug: String,
@@ -719,6 +728,7 @@ pub fn run() {
             local_list_spaces,
             local_add_space,
             local_list_pages,
+            local_recent_pages,
             local_get_page,
             local_read_html_asset,
             local_read_space_config,

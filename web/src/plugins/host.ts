@@ -9,7 +9,6 @@ export interface PluginSnapshot {
   readiness: 'pending' | 'ready' | 'failed';
   /** null is never default-enabled; readiness distinguishes waiting from failure. */
   features: SpaceFeatures | null;
-  preferences: PersonalPreferences;
 }
 
 export interface PluginTextSetting {
@@ -48,7 +47,6 @@ export interface BuiltinPlugin {
     preview?: { label: string; value: (features: SpaceFeatures, now: Date) => string };
     preferences?: readonly PluginPreferenceSetting[];
   };
-  launch?: { action: string; when: (preferences: PersonalPreferences) => boolean };
 }
 
 export interface PluginAction {
@@ -86,8 +84,6 @@ export function createPluginHost({ definitions, getSnapshot, pages, now = () => 
       commands.set(id, { plugin, action });
     }
   }
-  let launched = false;
-  let launchActivation: number | null = null;
   type Availability = Pick<PluginSnapshot, 'space' | 'readiness' | 'features'>;
   const permitted = (plugin: BuiltinPlugin, snapshot: Availability) =>
     !!snapshot.space?.local && snapshot.readiness === 'ready' && !!snapshot.features && plugin.enabled(snapshot.features);
@@ -116,21 +112,5 @@ export function createPluginHost({ definitions, getSnapshot, pages, now = () => 
         .map(([id, { action }]) => ({ id, label: action.label, icon: action.icon }));
     },
     dispatch,
-    cancelLaunch() { launched = true; },
-    async launch({ workspacesLoaded, initialPathname }: { workspacesLoaded: boolean; initialPathname: string }): Promise<void> {
-      if (launched) return;
-      if (initialPathname !== '/' && initialPathname !== '') { launched = true; return; }
-      const snapshot = getSnapshot();
-      if (!snapshot.space) return;
-      // Observe the initial visible activation even while boot navigation or
-      // configuration is pending. Failure/departure permanently consumes launch.
-      launchActivation ??= snapshot.activation;
-      if (snapshot.activation !== launchActivation || snapshot.readiness === 'failed' || !snapshot.space.local) { launched = true; return; }
-      if (!workspacesLoaded || snapshot.readiness !== 'ready' || !snapshot.features) return;
-      launched = true;
-      for (const plugin of definitions) {
-        if (plugin.launch?.when(snapshot.preferences)) await dispatch(`${plugin.id}:${plugin.launch.action}`);
-      }
-    },
   };
 }

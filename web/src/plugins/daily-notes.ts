@@ -3,7 +3,7 @@ import { ensureDatePage } from '../lib/date-page.ts';
 import { journalPagePath } from '../lib/journal.ts';
 
 export const dailyNotesPlugin: BuiltinPlugin = {
-  id: 'journal', label: 'Daily journal', description: 'Open or create today’s note.',
+  id: 'journal', label: 'Daily journal', description: 'Journals: today first, earlier days as you scroll.',
   enabled: (features) => features.modules.journal,
   setEnabled: (features, enabled) => ({ ...features, modules: { ...features.modules, journal: enabled } }),
   actions: [{ id: 'today', label: 'Today', icon: 'calendar', run: async ({ pages, features, now }) => {
@@ -11,7 +11,6 @@ export const dailyNotesPlugin: BuiltinPlugin = {
     const path = await ensureDatePage(pages, features.journal, date, date);
     await pages.open(path);
   } }],
-  launch: { action: 'today', when: (preferences) => preferences.openJournalOnStartup },
   settings: {
     title: 'Journal',
     fields: [
@@ -24,8 +23,5 @@ export const dailyNotesPlugin: BuiltinPlugin = {
     ],
     help: 'Dates use Obsidian (moment) tokens such as YYYY-MM-DD. Templates support {{date}}, {{title}} and {{time}}.',
     preview: { label: 'Today’s note:', value: (features, date) => journalPagePath(features.journal, date) },
-    preferences: [{ id: 'journal-startup', label: 'Open today’s journal when CoWiki starts',
-      value: (preferences) => preferences.openJournalOnStartup,
-      update: (preferences, openJournalOnStartup) => ({ ...preferences, openJournalOnStartup }) }],
   },
 };

@@ -66,6 +66,48 @@ Notifications, Review details, Cloud pages) is built the same way, with
 - Views are left-aligned in the content area (`36px 56px` padding) with a
   `min(860px, 100%)` column; a wide board may use `min(1040px, 100%)`.
 
+## Start page, editing and the top bar
+
+- **No Wiki entry.** The page tree already reaches every page. A Space opens
+  on its **start page**, never on its first file:
+  - a personal Space opens on **Journals**, as in Logseq: today first, earlier
+    days as you scroll (seven at a time). Each day reads like a page under
+    its date (serif, 24px); headings inside a day are 15px sans section
+    labels. Opening Journals writes nothing; today's file is created from
+    the journal template on the first click.
+  - a shared Space (a team Space, or a local Space published to Cloud) opens
+    on **Home**: *Waiting for review* (your unsent draft, open Agent
+    changes, member submissions) and *Recently edited* pages, as hairline
+    rows. Journals stays in the navigation when the module is on.
+  - While a local Space's settings or Cloud link load, the start page and
+    its navigation row wait instead of guessing.
+- **Click to edit**, as in Logseq; there is no Edit button. A single click
+  in a page or journal day opens the editor with the caret where you
+  clicked (matched through the text, `lib/click-to-edit.ts`). Links,
+  controls and comment highlights never start editing, and a drag selection
+  stays a selection, so selecting text to comment still works. Esc (after
+  any open completion menu and any selection) returns to reading; a journal
+  day also returns when focus leaves it. While editing, the comments
+  button saves, returns to reading and opens the comments.
+- **Top bar, right to left:** the Agent toggle in the corner, comments, the
+  Space status. The Agent sidebar opens from the top bar's right corner and
+  closes from the same corner of its own header (`PanelRight` both ways), so
+  the toggle never takes space next to an open sidebar. Comments show a
+  count only when there are open comments. The **Space status** is one quiet
+  menu: a place icon (drive for local, cloud when linked) and the version
+  you are reading (Draft, main, or an Agent change). Words about sync live
+  in the menu; the bar shows only a **small dot when changes are not
+  uploaded or need attention**.
+- Enter that confirms an input-method candidate never sends or submits
+  (`lib/ime.ts`): WebKit reports it with key code 229 after the
+  composition ends.
+
+## Sign in
+
+One centered column on the page background: the mark, the slogan in serif,
+one muted line, then *Continue with GitHub* (ink) and *Continue locally*
+(hairline). No card, no split panels, no caps eyebrow, no "Welcome back".
+
 ## Navigation
 
 - The open item in the left navigation is a quiet grey row

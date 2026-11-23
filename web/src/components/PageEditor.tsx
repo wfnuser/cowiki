@@ -54,6 +54,10 @@ export const PageEditor = forwardRef<PageEditorHandle, {
   onWikilink?: (target: string) => void;
   loadImage?: (src: string) => Promise<string>;
   getPageSlugs?: () => string[];
+  /** Caret position in the body (without CoWiki frontmatter) when editing starts. */
+  initialCursor?: number;
+  /** Pixel distance from the top of the page to the caret's line when editing starts. */
+  initialCursorTop?: number;
 }>(function PageEditor({
   initialBody,
   onSave,
@@ -63,6 +67,8 @@ export const PageEditor = forwardRef<PageEditorHandle, {
   onWikilink,
   loadImage,
   getPageSlugs,
+  initialCursor,
+  initialCursorTop,
 }, ref) {
   const [feedback, setFeedback] = useState<SaveFeedback>(null);
   const [externalConflict, setExternalConflict] = useState<ExternalConflict | null>(null);
@@ -217,15 +223,6 @@ export const PageEditor = forwardRef<PageEditorHandle, {
     }
   }, [externalConflict, onSave]);
 
-  // Esc exits (unless CodeMirror already consumed it, e.g. closing autocomplete).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.defaultPrevented) void handleDone();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [handleDone]);
-
   // Warn before closing the tab with unsaved edits.
   useEffect(() => {
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -251,6 +248,9 @@ export const PageEditor = forwardRef<PageEditorHandle, {
         onWikilink={handleWikilink}
         loadImage={loadImage}
         getPageSlugs={getPageSlugs}
+        initialCursor={initialCursor}
+        initialCursorTop={initialCursorTop}
+        onEscape={() => { void handleDone(); }}
       />
 
       {feedback && <div style={{

@@ -1,11 +1,11 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { EditorView, keymap, drawSelection } from '@codemirror/view';
 import { EditorState, Prec } from '@codemirror/state';
-import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { history, defaultKeymap, historyKeymap, indentWithTab, simplifySelection } from '@codemirror/commands';
 import { indentUnit } from '@codemirror/language';
 import { markdown, markdownLanguage, markdownKeymap } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
-import { autocompletion } from '@codemirror/autocomplete';
+import { autocompletion, completionStatus } from '@codemirror/autocomplete';
 import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete';
 import { livePreview, livePreviewConfig } from './livePreview';
 import { WikiLink, Frontmatter } from './markdownExtensions';
@@ -22,6 +22,14 @@ export interface LivePreviewEditorProps {
   loadImage?: (src: string) => Promise<string>;
   /** Candidate slugs for `[[` autocompletion. */
   getPageSlugs?: () => string[];
+  /** Caret position when the editor opens; it starts at the top otherwise. */
+  initialCursor?: number;
+  /** Keep the caret's line this far below the top of the editor, as it was when clicked. */
+  initialCursorTop?: number;
+  /** Focus left the editor for another part of the page (not another window). */
+  onBlur?: () => void;
+  /** Esc with nothing to close or deselect: stop editing. */
+  onEscape?: () => void;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -43,6 +51,10 @@ export const LivePreviewEditor = forwardRef<LivePreviewEditorHandle, LivePreview
   onWikilink,
   loadImage,
   getPageSlugs,
+  initialCursor,
+  initialCursorTop,
+  onBlur,
+  onEscape,
   className,
   style,
 }, ref) {
@@ -51,9 +63,9 @@ export const LivePreviewEditor = forwardRef<LivePreviewEditorHandle, LivePreview
   const applyingExternalDoc = useRef(false);
 
   // Keep callbacks fresh without recreating the editor.
-  const callbacks = useRef({ onDocChanged, onRequestSave, onWikilink, loadImage, getPageSlugs });
+  const callbacks = useRef({ onDocChanged, onRequestSave, onWikilink, loadImage, getPageSlugs, onBlur, onEscape });
   useEffect(() => {
-    callbacks.current = { onDocChanged, onRequestSave, onWikilink, loadImage, getPageSlugs };
+    callbacks.current = { onDocChanged, onRequestSave, onWikilink, loadImage, getPageSlugs, onBlur, onEscape };
   });
 
   useEffect(() => {
@@ -82,10 +94,14 @@ export const LivePreviewEditor = forwardRef<LivePreviewEditorHandle, LivePreview
       };
     };
 
+    const anchor = initialCursor === undefined
+      ? undefined
+      : Math.max(0, Math.min(initialCursor, initialDoc.length));
     const view = new EditorView({
       parent: hostRef.current,
       state: EditorState.create({
         doc: initialDoc,
+        selection: anchor === undefined ? undefined : { anchor },
         extensions: [
           history(),
           drawSelection(),
@@ -105,6 +121,19 @@ export const LivePreviewEditor = forwardRef<LivePreviewEditorHandle, LivePreview
               ? callbacks.current.loadImage(src)
               : Promise.reject(new Error('Attachments are not available here'))),
           }),
+          // Esc: an open completion menu closes first, then a selection
+          // collapses, then editing stops. A completion that is only pending
+          // (nothing shown yet) must not swallow the key.
+          Prec.highest(keymap.of([{
+            key: 'Escape',
+            run: (target) => {
+              if (completionStatus(target.state) === 'active') return false;
+              if (simplifySelection(target)) return true;
+              if (!callbacks.current.onEscape) return false;
+              callbacks.current.onEscape();
+              return true;
+            },
+          }])),
           autocompletion({ override: [wikilinkCompletion], icons: false }),
           Prec.high(keymap.of([
             {
@@ -113,6 +142,15 @@ export const LivePreviewEditor = forwardRef<LivePreviewEditorHandle, LivePreview
             },
           ])),
           keymap.of([...markdownKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
+          EditorView.domEventHandlers({
+            blur: () => {
+              // Switching to another window is not leaving the editor.
+              // A destroyed editor (an unmount) also blurs; only the live one counts.
+              window.setTimeout(() => {
+                if (viewRef.current === view && !view.hasFocus && document.hasFocus()) callbacks.current.onBlur?.();
+              }, 0);
+            },
+          }),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
               callbacks.current.onDocChanged(
@@ -126,6 +164,13 @@ export const LivePreviewEditor = forwardRef<LivePreviewEditorHandle, LivePreview
     });
     viewRef.current = view;
     view.focus();
+    if (anchor !== undefined) {
+      view.dispatch({
+        effects: EditorView.scrollIntoView(anchor, initialCursorTop === undefined
+          ? { y: 'center' }
+          : { y: 'start', yMargin: Math.max(0, initialCursorTop) }),
+      });
+    }
 
     return () => {
       view.destroy();

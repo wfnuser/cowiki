@@ -1,8 +1,9 @@
 import { useState, useEffect, useLayoutEffect, useEffectEvent, useCallback, useMemo, useRef } from 'react';
+import { isSubmitEnter } from '@/lib/ime';
 import { useNavigate, useLocation, useNavigationType } from 'react-router-dom';
 import {
   Compass,
-  Pencil, FolderOpen, PanelLeft, Bot, HardDrive, FolderInput, Cloud, UserPlus, ChevronLeft,
+  FolderOpen, PanelLeft, PanelRight, MessageSquare, HardDrive, FolderInput, Cloud, UserPlus, ChevronLeft,
   ExternalLink, BookMarked,
 } from 'lucide-react';
 import {
@@ -34,7 +35,7 @@ import {
   ContentHeader,
   ContentHeaderActions,
 } from '../components/layout/ContentHeader';
-import { VersionSwitcher, type VersionSelection } from '../components/layout/VersionSwitcher';
+import { SpaceStatusMenu, type VersionSelection } from '../components/layout/SpaceStatusMenu';
 type CreateSpaceMode = 'choose' | 'local' | 'import';
 import { ReviewList } from '../components/review/ReviewList';
 import { ReviewDetail } from '../components/review/ReviewDetail';
@@ -59,7 +60,6 @@ import { C } from '@/lib/design';
 import { apiOrigin, isDesktopClient } from '@/runtime';
 import { normalizeCloudSession } from '@/cloud/session';
 import { CloudSpaceDialog } from '@/components/cloud/CloudSpaceDialog';
-import { WorkspaceContextBadge } from '@/components/layout/WorkspaceContextBadge';
 import { getCloudStatus, readHtmlAsset, type CloudSyncState } from '@/local-api';
 import { HtmlFileReader } from '../components/HtmlFileReader';
 import { ExcalidrawReader } from '../components/ExcalidrawDrawing';
@@ -74,7 +74,6 @@ import {
 import {
   conceptIdFromPath,
   conceptPath,
-  firstConcept,
   isReservedDocument,
   pageRoute,
   visiblePageTree,
@@ -92,17 +91,19 @@ import {
 import { sourceUrlFromDocument, splitSystemFrontmatter } from '@/lib/page-frontmatter';
 import { pageLineage, sourceFilename } from '@/lib/page-lineage';
 import { sourceOrganizationTask } from '@/lib/source-ingest';
-import { resolveWorkspaceSwitchTarget } from '@/lib/workspace-navigation';
 import { workspaceContextStatus } from '@/lib/workspace-context';
 import { createCloudClient } from '@/cloud/client';
 import { cloudPageCommentStore, desktopPageCommentStore } from '@/lib/page-comment-store';
 import { openExternalUrl } from '@/external-links';
 import { TasksView } from '../components/views/TasksView';
 import { FlashcardsView } from '../components/views/FlashcardsView';
+import { JournalsView } from '../components/views/JournalsView';
+import { SpaceHome, type HomeReview } from '../components/views/SpaceHome';
 import { SpaceFeaturesDialog } from '../components/SpaceFeaturesDialog';
 import { ObsidianImportDialog } from '../components/ObsidianImportDialog';
 import { ObsidianReaderContext, withObsidianReader, type ReaderCallbacks } from '../components/ObsidianReader';
-import { autoCheckpoint, readAsset, readSpaceConfig, setAutoCheckpoint, writeSpaceConfig } from '@/local-api';
+import { autoCheckpoint, readAsset, readSpaceConfig, recentPages, setAutoCheckpoint, writeSpaceConfig, type RecentPage } from '@/local-api';
+import { sourceOffsetForClick } from '@/lib/click-to-edit';
 import {
   DEFAULT_SPACE_FEATURES,
   loadPersonalPreferences,
@@ -146,6 +147,9 @@ function safePreferences(): PersonalPreferences {
 }
 
 type ActiveView =
+  /** The Space's start page: Journals or the Home overview. */
+  | { kind: 'home'; workspaceSlug: string }
+  | { kind: 'journals'; workspaceSlug: string }
   | { kind: 'page'; slug: string; path?: string; content: PageFull | null }
   | { kind: 'source'; filename: string; content: SourceContent | null }
   | { kind: 'review-list'; workspaceSlug: string }
@@ -191,7 +195,6 @@ export function MainLayout() {
   // Data
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
-  const [launchNavigationReady, setLaunchNavigationReady] = useState(false);
   const [spacePages, setSpacePages] = useState<Record<string, PageMeta[]>>({});
   const [spaceSources, setSpaceSources] = useState<Record<string, SourceItem[]>>({});
   const [activeView, setActiveView] = useState<ActiveView>(null);
@@ -216,9 +219,8 @@ export function MainLayout() {
   const [modulesDialogOpen, setModulesDialogOpen] = useState(false);
   const [obsidianImportOpen, setObsidianImportOpen] = useState(false);
   const assetUrls = useRef(new Map<string, string>());
-  const initialPathname = useRef(location.pathname);
   const [spaceActivation] = useState(createSpaceActivationTracker);
-  const pluginSnapshot = useRef<PluginSnapshot>({ space: null, activation: 0, readiness: 'pending', features: null, preferences });
+  const pluginSnapshot = useRef<PluginSnapshot>({ space: null, activation: 0, readiness: 'pending', features: null });
   const pluginPages = useRef<PluginHostOptions['pages'] | null>(null);
   const [pluginHost] = useState(() => createPluginHost({
     definitions: BUILTIN_PLUGINS,
@@ -364,6 +366,10 @@ export function MainLayout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [cloudDialogOpen, setCloudDialogOpen] = useState(false);
   const [editingPage, setEditingPage] = useState(false);
+  // Where a click in the reader asked the editor to put the caret.
+  const [editStart, setEditStart] = useState<{ path: string; cursor: number; top: number } | null>(null);
+  // The comments button pressed while editing: back to reading with the panel open.
+  const [commentsAfterEdit, setCommentsAfterEdit] = useState(false);
   // Tree path ops (rename/delete of pages & folders on the draft branch)
   const [pathOp, setPathOp] = useState<
     | { kind: 'rename'; path: string; isFolder: boolean; title: string; value: string }
@@ -525,26 +531,16 @@ export function MainLayout() {
         }
       }
     } else if (personal && firstLoad) {
-      const personalPages = visiblePageTree(await listPages(userBranch, personal.slug, 'all'));
-      const firstPage = firstConcept(personalPages);
-      if (firstPage) {
-        const conceptId = conceptIdFromPath(firstPage.path);
-        setActiveView({ kind: 'page', slug: conceptId, path: firstPage.path, content: null });
-        navigate(pageRoute(personal.slug, conceptId), { replace: true });
-        try {
-          const page = await getPage(conceptId, userBranch, personal.slug, 'wiki');
-          setActiveView(prev => prev?.kind === 'page' ? { ...prev, content: page } : prev);
-        } catch {
-          // Page not found
-        }
-      }
+      // Like Logseq, a Space opens on its start page, not on its first file.
+      setActiveTab('home');
+      setActiveView({ kind: 'home', workspaceSlug: personal.slug });
     }
-  }, [auth, desktop, loadSpacePages, loadSpaceSources, navigate, userBranch]);
+  }, [auth, desktop, loadSpacePages, loadSpaceSources, userBranch]);
 
   // Load once per sign-in. `navigate` changes identity on every route change,
   // so depending on loadWorkspaces re-ran the whole startup load per click.
   const loadWorkspacesOnce = useEffectEvent(() => {
-    void loadWorkspaces().finally(() => setLaunchNavigationReady(true));
+    void loadWorkspaces();
   });
   useEffect(() => {
     if (!auth) return;
@@ -662,26 +658,18 @@ export function MainLayout() {
   // Switch workspace via rail
   const handleSelectWorkspace = async (ws: Workspace) => {
     if (activeWorkspace?.id === ws.id) return;
-    pluginHost.cancelLaunch();
     // Invalidate a pending plugin operation immediately, not after React paints.
     pluginSnapshot.current = { ...pluginSnapshot.current,
       space: { id: ws.id, local: desktop && !!ws.localPath }, activation: spaceActivation(ws.id),
       readiness: featureLoadErrors[ws.id] ? 'failed' : spaceFeatures[ws.id] ? 'ready' : 'pending',
       features: spaceFeatures[ws.id] ?? null };
     setActiveWorkspace(ws);
-    setActiveTab('wiki');
-    // Resolve navigation from the loaded tree, not the pre-request state snapshot.
-    const targetPromise = resolveWorkspaceSwitchTarget(
-      spacePages[ws.id],
-      () => loadSpacePages(ws),
-    );
-    if (!spaceSources[ws.id]) loadSpaceSources(ws);
-    const target = await targetPromise;
-    if (target) {
-      selectPage(ws, target.conceptId, target.path);
-    } else {
-      setActiveView(null);
-    }
+    setEditingPage(false);
+    setActiveTab('home');
+    setActiveView({ kind: 'home', workspaceSlug: ws.slug });
+    navigate('/', { replace: true });
+    if (!spacePages[ws.id]) void loadSpacePages(ws);
+    if (!spaceSources[ws.id]) void loadSpaceSources(ws);
   };
 
   // Select a page
@@ -693,6 +681,7 @@ export function MainLayout() {
     setActiveWorkspace(ws);
     setActiveTab('wiki');
     setEditingPage(false);
+    setCommentsAfterEdit(false);
     persistedPageBody.current = null;
     externalConflictNotified.current = false;
     setActiveView({ kind: 'page', slug: conceptId, path: repoPath, content: null });
@@ -831,14 +820,13 @@ export function MainLayout() {
       return await readSpaceConfig(ws.slug);
     } catch (error) {
       if (pluginSnapshot.current.space?.id === ws.id) {
-        pluginHost.cancelLaunch();
         pluginSnapshot.current = { ...pluginSnapshot.current, readiness: 'failed', features: null };
       }
       setSpaceFeatures((previous) => { const next = { ...previous }; delete next[ws.id]; return next; });
       setFeatureLoadErrors((previous) => ({ ...previous, [ws.id]: error instanceof Error ? error.message : String(error) }));
       throw error;
     }
-  }, [pluginHost]);
+  }, []);
 
   const loadSpaceFeatures = useCallback(async (ws: Workspace): Promise<SpaceFeatures> => {
     if (!desktop || !ws.localPath) return DEFAULT_SPACE_FEATURES;
@@ -893,7 +881,6 @@ export function MainLayout() {
       activation: spaceActivation(activeWorkspace?.id ?? null),
       readiness: activeWorkspace && featureLoadErrors[activeWorkspace.id] ? 'failed' : activeFeaturesReady ? 'ready' : 'pending',
       features: activeWorkspace ? spaceFeatures[activeWorkspace.id] ?? null : null,
-      preferences,
     };
     pluginPages.current = (space, action, isCurrent) => {
       const ws = workspaces.find((workspace) => workspace.id === space.id);
@@ -914,11 +901,6 @@ export function MainLayout() {
     try { await pluginHost.dispatch(id); }
     catch (error) { setMessage({ text: error instanceof Error ? error.message : String(error), type: 'error' }); }
   };
-
-  useEffect(() => {
-    void pluginHost.launch({ workspacesLoaded: workspacesLoaded && launchNavigationReady, initialPathname: initialPathname.current })
-      .catch((error) => setMessage({ text: error instanceof Error ? error.message : String(error), type: 'error' }));
-  }, [pluginHost, workspacesLoaded, launchNavigationReady, activeWorkspace, spaceFeatures, featureLoadErrors, preferences]);
 
   /** Navigate like Obsidian: resolve by name anywhere, create the note if missing. */
   const openWikilink = async (raw: string) => {
@@ -954,16 +936,18 @@ export function MainLayout() {
   const viewedPagePath = activeView?.kind === 'page' ? (activeView.path ?? conceptPath(activeView.slug)) : '';
   const viewedSpaceSlug = activeWorkspace?.slug ?? '';
   const canReadAssets = isLocalSpace(activeWorkspace);
-  const loadAssetUrl = useCallback(async (src: string): Promise<string> => {
+  /** An attachment referenced from `fromPath`, as a displayable URL. */
+  const loadAssetFrom = useCallback(async (fromPath: string, src: string): Promise<string> => {
     if (!canReadAssets || !viewedSpaceSlug) throw new Error('Attachments are only available for local Spaces');
-    const key = `${viewedSpaceSlug}\u0000${viewedPagePath}\u0000${src}`;
+    const key = `${viewedSpaceSlug}\u0000${fromPath}\u0000${src}`;
     const cached = assetUrls.current.get(key);
     if (cached) return cached;
-    const asset = await readAsset(viewedSpaceSlug, viewedPagePath, src);
+    const asset = await readAsset(viewedSpaceSlug, fromPath, src);
     const url = URL.createObjectURL(new Blob([new Uint8Array(asset.bytes)], { type: asset.mime }));
     assetUrls.current.set(key, url);
     return url;
-  }, [canReadAssets, viewedSpaceSlug, viewedPagePath]);
+  }, [canReadAssets, viewedSpaceSlug]);
+  const loadAssetUrl = useCallback((src: string) => loadAssetFrom(viewedPagePath, src), [loadAssetFrom, viewedPagePath]);
 
   /** Toggle a task from the reader; `renderedLine` is 1-based in the rendered body. */
   const toggleReaderTask = async (renderedLine: number) => {
@@ -1002,13 +986,20 @@ export function MainLayout() {
     await writePage(conceptId, updated, userBranch, ws.slug, 'wiki', page.body);
   };
 
+  /** Today's journal entry in the active Space, created from its template when missing. */
+  const ensureTodayEntry = async (ws: Workspace) => {
+    // Leaving the Space, even to come straight back, drops a write still in flight.
+    const activation = pluginSnapshot.current.activation;
+    const isCurrent = () => pluginSnapshot.current.space?.id === ws.id && pluginSnapshot.current.activation === activation;
+    const features = spaceFeatures[ws.id] ?? await loadSpaceFeatures(ws);
+    const pages = createSpacePageAdapter(pagePorts(ws, isCurrent), isCurrent);
+    return { pages, path: await ensureDatePage(pages, features.journal, new Date()) };
+  };
+
   const addTaskToToday = async (line: string) => {
     const ws = activeWorkspace;
     if (!ws) return;
-    const features = spaceFeatures[ws.id] ?? await loadSpaceFeatures(ws);
-    const isCurrent = () => pluginSnapshot.current.space?.id === ws.id;
-    const pages = createSpacePageAdapter(pagePorts(ws, isCurrent), isCurrent);
-    const path = await ensureDatePage(pages, features.journal, new Date());
+    const { pages, path } = await ensureTodayEntry(ws);
     const page = await pages.read(path);
     if (page === null) throw new Error('Today’s page was removed before adding the task');
     await writePage(conceptIdFromPath(path), insertTaskLine(page, line), userBranch, ws.slug, 'wiki', page);
@@ -1110,16 +1101,12 @@ export function MainLayout() {
     setActiveTab(tab);
     const owner = auth?.name || 'user';
     switch (tab) {
-      case 'wiki': {
-        const pages = spacePages[activeWorkspace.id] || [];
-        const first = firstConcept(pages);
-        if (first) {
-          selectPage(activeWorkspace, conceptIdFromPath(first.path), first.path);
-        } else {
-          setActiveView(null);
-        }
+      case 'home':
+      case 'journals':
+        setEditingPage(false);
+        setActiveView({ kind: tab, workspaceSlug: activeWorkspace.slug });
+        navigate('/', { replace: true });
         break;
-      }
       case 'reviews':
         setActiveView({ kind: 'review-list', workspaceSlug: activeWorkspace.slug });
         navigate(reviewRoute(owner, activeWorkspace.slug));
@@ -1229,6 +1216,8 @@ export function MainLayout() {
     return readHtmlAsset(htmlSpaceSlug, htmlDocumentPath, assetPath);
   }, [htmlSpaceSlug, htmlDocumentPath]);
   const commentsActive = !!pageView?.content && !editingPage && !isHtmlPage && !isDrawingPage;
+  // Click to edit, as in Logseq: the working version of a Markdown page.
+  const canEditInline = !!pageView?.content && !isHtmlPage && !isDrawingPage && versionSelection.kind === 'working';
   const commentPageSlug = commentsActive && pageView
     ? (pageView.path ?? pageView.content?.path ?? '')
     : '';
@@ -1379,6 +1368,62 @@ export function MainLayout() {
     statusKnown: !desktop || !!activeCloudState,
   });
 
+  // The start page. A personal Space opens on Journals, like Logseq; a shared
+  // one (a team Space, or a local Space published to Cloud) opens on Home,
+  // which shows what waits for review and what changed. Undecided (null)
+  // while a local Space's settings or Cloud link are still loading.
+  const activeLocal = isLocalSpace(activeWorkspace);
+  const journalsAvailable = pluginActions.some((action) => action.id === 'journal:today');
+  const sharedSpace = !personal
+    || (!!activeCloudState && activeCloudState !== 'unlinked' && activeCloudState !== 'unavailable');
+  const startDecided = !activeLocal
+    || ((activeFeaturesReady || !!featureLoadErrors[activeWorkspace?.id ?? '']) && !!activeCloudState);
+  const homeKind: 'journals' | 'overview' | null = !activeWorkspace || !startDecided
+    ? null
+    : journalsAvailable && !sharedSpace ? 'journals' : 'overview';
+  const onStartPage = activeView === null || activeView.kind === 'home';
+  const showJournals = !!activeWorkspace && (
+    (activeView?.kind === 'journals' && journalsAvailable) || (onStartPage && homeKind === 'journals'));
+  const showOverview = !!activeWorkspace && onStartPage && homeKind === 'overview';
+  const journalPaths = useMemo(() => activeFlatPages.map((page) => page.path), [activeFlatPages]);
+  const journalSpaceSlug = activeWorkspace?.slug ?? '';
+  const readJournal = useCallback(
+    async (path: string) => (await getPage(conceptIdFromPath(path), userBranch, journalSpaceSlug, 'wiki')).body,
+    [journalSpaceSlug, userBranch],
+  );
+  const writeJournal = useCallback(
+    (path: string, body: string, expected: string) => (
+      writePage(conceptIdFromPath(path), body, userBranch, journalSpaceSlug, 'wiki', expected)
+    ),
+    [journalSpaceSlug, userBranch],
+  );
+  const [recent, setRecent] = useState<{ spaceSlug: string; pages: RecentPage[] } | null>(null);
+  const pagesVersion = activeWorkspace ? spacePages[activeWorkspace.id] : undefined;
+  useEffect(() => {
+    if (!showOverview || !activeLocal || !journalSpaceSlug) return;
+    let live = true;
+    recentPages(journalSpaceSlug, 8)
+      .then((pages) => { if (live) setRecent({ spaceSlug: journalSpaceSlug, pages }); })
+      .catch(() => { if (live) setRecent({ spaceSlug: journalSpaceSlug, pages: [] }); });
+    return () => { live = false; };
+  }, [showOverview, activeLocal, journalSpaceSlug, pagesVersion, reviewRefreshKey]);
+  const homeReviews: HomeReview[] = desktop && activeWorkspace?.localPath ? [
+    ...(sharedSpace && activeWorkingDiffs.length > 0 ? [{
+      id: 'draft',
+      title: 'Your draft',
+      meta: `${activeWorkingDiffs.length} changed ${activeWorkingDiffs.length === 1 ? 'file' : 'files'} · not uploaded`,
+      agent: false,
+      onOpen: () => openReviewDetail({ kind: 'local-draft' }),
+    }] : []),
+    ...openAgentChanges.map((change) => ({
+      id: change.id,
+      title: change.title,
+      meta: `Agent · ${change.diffs.length} ${change.diffs.length === 1 ? 'file' : 'files'}`,
+      agent: true,
+      onOpen: () => openReviewDetail({ kind: 'local-agent', changeId: change.id }),
+    })),
+  ] : [];
+
   // Determine active page/source for panel highlight
   const currentActivePage = activeView?.kind === 'page' ? activeView.slug : null;
   const currentActiveSource = activeView?.kind === 'source' ? activeView.filename : null;
@@ -1484,7 +1529,7 @@ export function MainLayout() {
             }}>
               <SpacePanel
                 workspace={activeWorkspace}
-                activeTab={activeTab}
+                activeTab={showJournals && homeKind === 'journals' ? 'home' : showJournals ? 'journals' : showOverview ? 'home' : activeTab}
                 onTabChange={handleTabChange}
                 pages={activeWorkspace ? (spacePages[activeWorkspace.id] || []) : []}
                 sources={activeWorkspace ? (spaceSources[activeWorkspace.id] || []) : []}
@@ -1506,8 +1551,11 @@ export function MainLayout() {
                 onShowIngest={() => setShowIngest(true)}
                 onSettings={() => setSettingsOpen(true)}
                 modules={activeModules}
-                pluginActions={pluginActions}
+                // The journal's own entry is Journals (the start page), not a command.
+                pluginActions={pluginActions.filter((action) => action.id !== 'journal:today')}
                 onPluginAction={(id) => { void dispatchPluginAction(id); }}
+                home={homeKind}
+                journals={journalsAvailable}
                 onModules={isLocalSpace(activeWorkspace) ? () => setModulesDialogOpen(true) : undefined}
                 onCollapse={() => setSidebarLayout((current) => ({ ...current, collapsed: true }))}
               />
@@ -1547,6 +1595,7 @@ export function MainLayout() {
             <CommentsProvider
               store={commentStore}
               pageSlug={commentPageSlug}
+              openPanel={commentsAfterEdit}
               source={commentSource}
               articleRef={articleRef}
             >
@@ -1574,6 +1623,12 @@ export function MainLayout() {
                 )}
                 {activeWorkspace && (
                   <span style={{ color: C.ink2 }}>{activeWorkspace.name}</span>
+                )}
+                {showJournals && (
+                  <>
+                    <span style={{ color: C.faint }}>/</span>
+                    <span style={{ color: C.ink }}>Journals</span>
+                  </>
                 )}
                 {activeView?.kind === 'page' && activeView.content && (
                   <>
@@ -1647,60 +1702,68 @@ export function MainLayout() {
               </ContentBreadcrumb>
 
               {/* Right: actions */}
+              {/* Version and Cloud state, comments, then the Agent toggle facing its sidebar. */}
               <ContentHeaderActions>
                 {desktop && activeWorkspace?.localPath && (
-                  <WorkspaceContextBadge
+                  <SpaceStatusMenu
                     context={workspaceContext}
-                    connected={workspaceContext.kind === 'linked'}
-                    onClick={() => {
-                      if (!cloudSession) {
-                        navigate('/login');
-                        return;
-                      }
-                      setCloudDialogOpen(true);
-                    }}
-                    style={headerBtnStyle}
-                  />
-                )}
-
-                {desktop && activeWorkspace?.localPath && !editingPage && !isHtmlPage && (
-                  <VersionSwitcher
-                    selection={versionSelection}
                     agentChanges={openAgentChanges}
-                    onSelect={setVersionSelection}
+                    selection={versionSelection}
+                    onSelect={(selection) => {
+                      if (editingPage) void handleDoneEditing();
+                      setVersionSelection(selection);
+                    }}
                     onSeeReviews={() => handleTabChange('reviews')}
+                    versions={!isHtmlPage}
+                    cloudAction={{
+                      label: !cloudSession
+                        ? 'Sign in to share…'
+                        : workspaceContext.kind === 'linked' ? 'Cloud sync…' : 'Publish to Cloud…',
+                      onSelect: () => {
+                        if (!cloudSession) {
+                          navigate('/login');
+                          return;
+                        }
+                        setCloudDialogOpen(true);
+                      },
+                    }}
                   />
                 )}
 
-                {desktop && activeWorkspace?.localPath && (
+                {/* Comments on the open page */}
+                {!isHtmlPage && versionSelection.kind === 'working' && activeTab === 'wiki' && (activeView?.kind === 'page' || activeView?.kind === 'source') && (
+                  <CommentsHeaderToggle style={headerBtnStyle} />
+                )}
+                {/* While editing, comments wait: the same button saves, returns to reading and opens them. */}
+                {editingPage && canEditInline && commentStore && (
                   <button
                     type="button"
-                    onClick={() => setAgentPanelOpen((open) => !open)}
-                    style={{
-                      ...headerBtnStyle,
-                      color: agentPanelOpen ? C.accent : C.muted,
-                      background: agentPanelOpen ? C.accentSoft : 'transparent',
-                    }}
-                    title="Open the Agent sidebar for this Space"
+                    aria-label="Comments"
+                    title="Back to reading and show comments"
+                    onClick={() => { setCommentsAfterEdit(true); void handleDoneEditing(); }}
+                    className="hover:bg-bg-hover"
+                    style={{ ...headerBtnStyle, width: 30, height: 28, justifyContent: 'center', padding: 0, color: C.ink2, background: undefined }}
                   >
-                    <Bot size={14} /> Agent
+                    <MessageSquare size={15} />
                   </button>
                 )}
 
-                {/* Wiki-specific actions */}
-                {!isHtmlPage && versionSelection.kind === 'working' && activeTab === 'wiki' && (activeView?.kind === 'page' || activeView?.kind === 'source') && (
-                  <>
-                    {activeView?.kind === 'page' && activeView.content && !editingPage && (
-                      <button
-                        onClick={() => setEditingPage(true)}
-                        style={headerBtnStyle}
-                        title={desktop ? 'Edit this local file' : 'Edit this page in your draft'}
-                      >
-                        <Pencil size={13} /> Edit
-                      </button>
-                    )}
-                    <CommentsHeaderToggle style={{ ...headerBtnStyle, marginLeft: 2 }} />
-                  </>
+                {/* Opens the Agent sidebar; once open, the sidebar's own header closes it from the same corner. */}
+                {desktop && activeWorkspace?.localPath && !agentPanelOpen && (
+                  <button
+                    type="button"
+                    aria-label="Agent"
+                    onClick={() => setAgentPanelOpen(true)}
+                    className="hover:bg-bg-hover"
+                    style={{
+                      ...headerBtnStyle,
+                      width: 28, height: 28, justifyContent: 'center', padding: 0, marginRight: -18,
+                      color: C.muted, background: undefined,
+                    }}
+                    title="Open the Agent sidebar"
+                  >
+                    <PanelRight size={16} />
+                  </button>
                 )}
 
                 {/* User menu moved to Rail bottom avatar */}
@@ -1896,6 +1959,8 @@ export function MainLayout() {
                     ref={pageEditorRef}
                     key={activeView.path ?? activeView.slug}
                     initialBody={activeView.content.body}
+                    initialCursor={editStart && editStart.path === activeView.path ? editStart.cursor : undefined}
+                    initialCursorTop={editStart && editStart.path === activeView.path ? editStart.top : undefined}
                     onSave={handleSavePage}
                     onExternalReload={(fullBody) => {
                       persistedPageBody.current = fullBody;
@@ -1947,6 +2012,13 @@ export function MainLayout() {
                       ? 'This page does not exist in the selected version.'
                       : undefined}
                     aside={<CommentsPanel />}
+                    onEditAt={canEditInline ? (click, top) => {
+                      const body = splitSystemFrontmatter(activeView.content!.body).body;
+                      const cursor = click ? sourceOffsetForClick(body, click) ?? body.length : body.length;
+                      setEditStart({ path: activeView.path ?? '', cursor, top: Math.max(0, top - 12) });
+                      setCommentsAfterEdit(false);
+                      setEditingPage(true);
+                    } : undefined}
                   />
                   </ObsidianReaderContext.Provider>
                 )
@@ -1955,15 +2027,34 @@ export function MainLayout() {
               ) : location.pathname === '/discover' ? (
                 <DiscoverView />
 
-              /* Home */
-              ) : (
-                <div>
-                  <h1 className="view-title mb-1">Home</h1>
-                  <p style={{ color: C.muted, fontSize: 13 }}>
-                    Select a page from the sidebar to get started.
-                  </p>
+              /* Start page: Journals */
+              ) : showJournals && activeWorkspace ? (
+                <div style={{ position: 'absolute', inset: 0, overflow: 'auto', padding: '36px 56px 56px' }}>
+                  <JournalsView
+                    key={activeWorkspace.slug}
+                    config={activeFeatures.journal}
+                    paths={journalPaths}
+                    read={readJournal}
+                    write={writeJournal}
+                    createToday={async () => (await ensureTodayEntry(activeWorkspace)).path}
+                    onOpenPage={(path) => { void selectPage(activeWorkspace, conceptIdFromPath(path), path); }}
+                    onWikilink={(target) => { void openWikilink(target); }}
+                    loadAsset={canReadAssets ? loadAssetFrom : undefined}
+                    getPageSlugs={() => collectSlugs(spacePages[activeWorkspace.id] || [])}
+                  />
                 </div>
-              )}
+
+              /* Start page: Home overview */
+              ) : showOverview && activeWorkspace ? (
+                <SpaceHome
+                  name={activeWorkspace.name}
+                  reviews={homeReviews}
+                  moreReviews={desktop ? 0 : reviewCount}
+                  onSeeReviews={() => handleTabChange('reviews')}
+                  recent={activeLocal ? (recent?.spaceSlug === activeWorkspace.slug ? recent.pages : []) : null}
+                  onOpenPage={(path) => { void selectPage(activeWorkspace, conceptIdFromPath(path), path); }}
+                />
+              ) : null}
             </div>
             </CommentsProvider>
           </main>
@@ -2155,7 +2246,7 @@ export function MainLayout() {
             <Input
               value={pathOp?.kind === 'rename' ? pathOp.value : ''}
               onChange={(e) => setPathOp((p) => (p?.kind === 'rename' ? { ...p, value: e.target.value } : p))}
-              onKeyDown={(e) => e.key === 'Enter' && handlePathOp()}
+              onKeyDown={(e) => isSubmitEnter(e) && handlePathOp()}
               autoFocus
             />
             <p className="text-xs text-text-secondary">

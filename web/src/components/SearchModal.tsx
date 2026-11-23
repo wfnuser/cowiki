@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isComposingKey } from '@/lib/ime';
 import { FileText, Search, Sparkles, CornerDownLeft, X } from 'lucide-react';
 import { searchWorkspace, type SearchResponse } from '../api';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -158,7 +159,7 @@ export function SearchModal({
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setSel((s) => Math.min(s + 1, rows.length - 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setSel((s) => Math.max(s - 1, 0)); }
-    else if (e.key === 'Enter') { e.preventDefault(); pick(rows[sel]); }
+    else if (e.key === 'Enter' && !isComposingKey(e)) { e.preventDefault(); pick(rows[sel]); }
   };
 
   // Keep the selected row in view.

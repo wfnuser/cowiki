@@ -129,7 +129,9 @@ test('comments reject stale page responses and show a failed load instead of sil
     await act(async () => finishOld({ comments: [{ id: 'old-comment', user_id: 'user-1', parent_id: null,
       body: 'Private old page comment', resolved: false, content_hash: null, start_line: null, end_line: null,
       created_at: '2026-09-01T00:00:00Z' }], snapshots: [] }));
-    assert.equal(container.querySelector('button')?.textContent?.trim(), '0');
+    // No count is shown for zero: the stale page's comment must not be counted.
+    assert.equal(container.querySelector('button')?.getAttribute('aria-label'), 'Comments');
+    assert.equal(container.querySelector('button')?.textContent?.trim(), '');
     await act(async () => container.querySelector('button')!.click());
     assert.ok(container.querySelector('#page-comments-panel'), 'the empty panel should open');
     assert.doesNotMatch(container.textContent ?? '', /Private old page comment/);

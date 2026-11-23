@@ -1,4 +1,5 @@
 import { ArrowUp, LoaderCircle, Play, Square } from 'lucide-react';
+import { isSubmitEnter } from '@/lib/ime';
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -55,7 +56,7 @@ export function AgentComposer({
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+    if (isSubmitEnter(event)) {
       event.preventDefault();
       void submit();
     }

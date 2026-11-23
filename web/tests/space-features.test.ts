@@ -53,18 +53,19 @@ test('writing features keeps other Space config keys', () => {
 test('personal preferences and the modules a Space turns on', () => {
   const storage = new MemoryStorage();
   let preferences = loadPersonalPreferences(storage);
-  assert.deepEqual(preferences, { openJournalOnStartup: false, autoCheckpoint: true });
-  preferences = { openJournalOnStartup: true, autoCheckpoint: false };
+  assert.deepEqual(preferences, { autoCheckpoint: true });
+  preferences = { autoCheckpoint: false };
   savePersonalPreferences(storage, preferences);
   assert.deepEqual(loadPersonalPreferences(storage), preferences);
-  // Older saved preferences may still carry the removed per-person module hiding.
+  // Older saved preferences may still carry removed settings: module hiding and
+  // the journal start preference (Journals became the start page).
   storage.setItem('cowiki.personal.preferences', JSON.stringify({ openJournalOnStartup: true, hiddenModules: { a: ['tasks'] } }));
-  assert.deepEqual(loadPersonalPreferences(storage), { openJournalOnStartup: true, autoCheckpoint: true });
+  assert.deepEqual(loadPersonalPreferences(storage), { autoCheckpoint: true });
 
   assert.deepEqual(visibleModules(DEFAULT_SPACE_FEATURES), ['journal', 'tasks', 'flashcards']);
   const disabled = { ...DEFAULT_SPACE_FEATURES, modules: { journal: false, tasks: true, flashcards: false } };
   assert.deepEqual(visibleModules(disabled), ['tasks']);
 
   storage.setItem('cowiki.personal.preferences', '{broken');
-  assert.deepEqual(loadPersonalPreferences(storage), { openJournalOnStartup: false, autoCheckpoint: true });
+  assert.deepEqual(loadPersonalPreferences(storage), { autoCheckpoint: true });
 });

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { isComposingKey } from '@/lib/ime';
 import { Search, X, Check } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -89,7 +90,7 @@ export function InviteDialog({
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setFocusedIdx((prev) => Math.max(prev - 1, -1));
-    } else if (e.key === 'Enter' && focusedIdx >= 0 && focusedIdx < results.length) {
+    } else if (e.key === 'Enter' && !isComposingKey(e) && focusedIdx >= 0 && focusedIdx < results.length) {
       e.preventDefault();
       selectUser(results[focusedIdx]);
     } else if (e.key === 'Escape') {

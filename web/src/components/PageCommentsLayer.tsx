@@ -131,6 +131,8 @@ interface CommentsProviderProps {
   pageSlug: string;
   source: string;
   articleRef: React.RefObject<HTMLElement | null>;
+  /** Open the comments panel as soon as the page is read again (after editing). */
+  openPanel?: boolean;
   children: React.ReactNode;
 }
 
@@ -138,12 +140,12 @@ export function CommentsProvider(props: CommentsProviderProps) {
   return <CommentsSession key={`${props.store?.key ?? 'none'}:${props.pageSlug}`} {...props} />;
 }
 
-function CommentsSession({ store, pageSlug, source, articleRef, children }: CommentsProviderProps) {
+function CommentsSession({ store, pageSlug, source, articleRef, openPanel = false, children }: CommentsProviderProps) {
   const [comments, setComments] = useState<PageComment[]>([]);
   const [snapshots, setSnapshots] = useState<{ content_hash: string; source: string }[]>([]);
   const [members, setMembers] = useState<CommentMember[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [panelOpen, setPanelOpenState] = useState(false);
+  const [panelOpen, setPanelOpenState] = useState(openPanel && !!store && !!pageSlug);
   const [lineageOpen, setLineageOpenState] = useState(false);
   const setPanelOpen = (open: boolean) => { setPanelOpenState(open); if (open) setLineageOpenState(false); };
   const setLineageOpen = (open: boolean) => { setLineageOpenState(open); if (open) setPanelOpenState(false); };
@@ -329,15 +331,21 @@ export function CommentsHeaderToggle({ style }: { style?: React.CSSProperties })
     <button
       onClick={() => ctx.setPanelOpen(!ctx.panelOpen)}
       title={ctx.panelOpen ? 'Hide comments' : 'Show comments'}
+      aria-label={ctx.openCount ? `Comments, ${ctx.openCount} open` : 'Comments'}
       aria-controls="page-comments-panel"
       aria-expanded={ctx.panelOpen}
+      className="hover:bg-bg-hover"
       style={{
-        ...style, fontWeight: 600,
-        background: ctx.panelOpen ? C.accentSoft : (style?.background ?? 'transparent'),
+        ...style, fontWeight: 600, height: 28,
+        padding: ctx.openCount ? '0 9px' : 0,
+        width: ctx.openCount ? undefined : 30,
+        justifyContent: 'center',
+        background: ctx.panelOpen ? C.accentSoft : undefined,
         color: ctx.panelOpen ? C.accent : (style?.color ?? C.ink2),
       }}
     >
-      <MessageSquare size={14} /> {ctx.openCount}
+      {/* No count when there is nothing to read. */}
+      <MessageSquare size={15} />{ctx.openCount > 0 && <span className="tabular-nums">{ctx.openCount}</span>}
     </button>
   );
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { isSubmitEnter } from '@/lib/ime';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, Check, Clock, Cloud, Copy, Key, Loader2, Plus, Shield, Trash2 } from 'lucide-react';
 import {
@@ -185,7 +186,7 @@ function CreateKeyDialog({
                 placeholder="e.g. CLI, CI/CD, Web"
                 value={name}
                 onChange={(e) => { setName(e.target.value); setError(null); }}
-                onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+                onKeyDown={(e) => isSubmitEnter(e) && handleCreate()}
                 autoFocus
               />
               {error && (

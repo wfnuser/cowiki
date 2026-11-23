@@ -131,9 +131,11 @@ test('CLI OAuth uses the same exact loopback boundary as desktop', () => {
 });
 
 test('desktop sign in follows the local-first shell design', () => {
-  assert.match(loginPage, /COLLABORATIVE LLM WIKI/);
+  // One centered column: the slogan and two ways in. No card, no caps eyebrow,
+  // no "Welcome back" on a first launch (user decision 2026-11-23).
   assert.match(loginPage, /Connect what people and AI agents know/);
-  assert.match(loginPage, /Welcome back/);
+  assert.match(loginPage, /className="login-column"/);
+  assert.doesNotMatch(loginPage, /COLLABORATIVE LLM WIKI|Welcome back|login-shell|login-brand-panel/);
   assert.doesNotMatch(loginPage, /login-topbar/);
   assert.match(loginPage, /Continue locally/);
   assert.doesNotMatch(loginPage, /Connect what people and AI know/);
