@@ -11,7 +11,7 @@ test.after(async () => { await vite.close(); });
 const lineage = {
   sources: ['.cowiki/sources/interview.md'],
   agents: [{ name: 'Codex', changeId: 'change-1', task: 'Organize interview' }],
-  commit: { oid: '0123456789abcdef', summary: 'Compile interview', author: 'Qinghao', committedAt: 1725000000 },
+  commit: { oid: '0123456789abcdef', summary: 'Compile interview', author: 'wfnuser', committedAt: 1725000000 },
   review: { id: 'review-id', number: 12, title: 'Compile interview' },
 };
 async function mount(props: Record<string, unknown> = {}) {
@@ -74,6 +74,6 @@ test('empty provenance never fabricates history', async () => {
     assert.match(ui.host.textContent!, /No sources linked/);
     await ui.click('Records');
     assert.match(ui.host.textContent!, /No recorded changes/);
-    assert.doesNotMatch(ui.host.textContent!, /Created|Approved|Qinghao|Codex/);
+    assert.doesNotMatch(ui.host.textContent!, /Created|Approved|wfnuser|Codex/);
   } finally { await ui.cleanup(); }
 });

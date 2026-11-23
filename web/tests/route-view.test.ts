@@ -7,8 +7,8 @@ import { showsRoute, viewForRoute } from '../src/lib/route-view.ts';
 const spaces = ['general', 'thevault'];
 
 test('review list -> detail -> back -> forward follows the URL', () => {
-  const list = reviewRoute('qinghao', 'general');
-  const detail = reviewRoute('qinghao', 'general', { kind: 'local-agent', changeId: 'c1' });
+  const list = reviewRoute('wfnuser', 'general');
+  const detail = reviewRoute('wfnuser', 'general', { kind: 'local-agent', changeId: 'c1' });
   const history = [list, detail, list, detail];
   let shown: Parameters<typeof showsRoute>[0] = null;
   const seen: string[] = [];

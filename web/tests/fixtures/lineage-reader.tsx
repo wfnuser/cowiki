@@ -11,7 +11,7 @@ const store: PageCommentStore = {
   create: async () => { throw new Error('Read-only fixture'); },
   setResolved: async () => undefined, delete: async () => undefined,
 };
-const evidence = { sources: ['.cowiki/sources/interview.md'], agents: [{ name: 'Codex', changeId: 'change-1', task: 'Organize the team discussion into portable knowledge.' }], commit: { oid: '0123456789abcdef', author: 'Qinghao', summary: 'Document local-first collaboration', committedAt: 1789182846 }, review: { id: 'review-1', number: 12, title: 'Knowledge ownership and collaboration' } };
+const evidence = { sources: ['.cowiki/sources/interview.md'], agents: [{ name: 'Codex', changeId: 'change-1', task: 'Organize the team discussion into portable knowledge.' }], commit: { oid: '0123456789abcdef', author: 'wfnuser', summary: 'Document local-first collaboration', committedAt: 1789182846 }, review: { id: 'review-1', number: 12, title: 'Knowledge ownership and collaboration' } };
 function Fixture() {
   const articleRef = useRef<HTMLElement>(null);
   const [other, setOther] = useState(false);

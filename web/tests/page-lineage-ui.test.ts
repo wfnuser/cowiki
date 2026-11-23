@@ -23,7 +23,7 @@ test('page lineage stays collapsed after the document until requested', async ()
     lineage: {
       sources: ['.cowiki/sources/interview.md'],
       agents: [{ name: 'Codex', changeId: 'change-1', task: 'Organize interview' }],
-      commit: { oid: '0123456789abcdef', summary: 'Compile interview', author: 'Qinghao', committedAt: 1_725_000_000 },
+      commit: { oid: '0123456789abcdef', summary: 'Compile interview', author: 'wfnuser', committedAt: 1_725_000_000 },
       review: { id: 'review-id', number: 12, title: 'Compile interview' },
     },
   }));

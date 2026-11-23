@@ -34,7 +34,7 @@ sources: source.md
       commit: {
         oid: '0123456789abcdef',
         summary: 'Compile the interview',
-        author: 'Qinghao',
+        author: 'wfnuser',
         committedAt: 1_725_000_000,
       },
       agents: [{ name: 'Codex', changeId: 'change-1', task: 'Organize interview' }],
