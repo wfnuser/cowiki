@@ -57,6 +57,46 @@ pub struct Dataset {
     pub gold: BTreeMap<String, Gold>,
 }
 
+/// Internal family-level development partition, fixed before this tuning round.
+/// Pilot selection uses case IDs only and is shared by all model arms.
+pub fn select_dev_slice(dataset: &mut Dataset, split: &str, slice: &str) -> Result<(), String> {
+    use cowiki_knowledge::governance::digest;
+    if split != "dev" {
+        return Err("--dev-slice requires --split dev".into());
+    }
+    let mut families: Vec<_> = dataset.families.keys().collect();
+    families.sort_by_cached_key(|id| digest(&format!("issue169-dev-validation-v1/{id}")));
+    match slice {
+        "tune" | "validation" => {
+            if families.len() != 8 {
+                return Err("development partition expects eight families".into());
+            }
+            let validation = &families[..2];
+            dataset
+                .cases
+                .retain(|case| validation.contains(&&case.family) == (slice == "validation"));
+        }
+        "pilot" => {
+            let mut selected = BTreeSet::new();
+            for family in families {
+                let mut cases: Vec<_> = dataset
+                    .cases
+                    .iter()
+                    .filter(|c| &c.family == family)
+                    .collect();
+                cases.sort_by_cached_key(|c| digest(&format!("issue169-model-pilot-v1/{}", c.id)));
+                selected.extend(cases.into_iter().take(2).map(|c| c.id.clone()));
+            }
+            if selected.len() > 16 {
+                return Err("pilot exceeds 16 cases".into());
+            }
+            dataset.cases.retain(|c| selected.contains(&c.id));
+        }
+        _ => return Err(format!("unknown development slice {slice}")),
+    }
+    Ok(())
+}
+
 fn records<T: DeserializeOwned>(path: &Path) -> Result<Vec<T>, String> {
     let contents = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     contents

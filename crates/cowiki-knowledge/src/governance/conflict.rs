@@ -179,6 +179,9 @@ fn sentence_relation(candidate: &str, evidence: &str) -> Relation {
     if a.qualifiers != b.qualifiers && !a.qualifiers.is_empty() {
         return Relation::ScopeDifference;
     }
+    if let Some(r) = super::alignment::facet_relation(candidate, evidence) {
+        return r;
+    }
     let intersection = a.subject.intersection(&b.subject).count();
     let union = a.subject.union(&b.subject).count();
     if intersection < 1 || 4 * intersection < 3 * union {
@@ -228,23 +231,20 @@ pub fn rule_relation(candidate: &str, evidence: &str) -> Relation {
     if historical_context(candidate) {
         return Relation::ScopeDifference;
     }
-    let direct = sentence_relation(candidate, evidence);
-    if matches!(
-        direct,
-        Relation::Entailment | Relation::Contradiction | Relation::ScopeDifference
-    ) {
-        return direct;
-    }
     let source = sentences(evidence);
     let parts = sentences(candidate);
     if parts.len() == 1 && source.len() == 1 {
-        return direct;
+        return sentence_relation(candidate, evidence);
     }
     let mut all_entailed = !parts.is_empty();
     for claim in parts {
         let relations = source
             .iter()
-            .map(|s| sentence_relation(claim, s))
+            .enumerate()
+            .map(|(i, s)| {
+                super::alignment::scope_relation(claim, s, i.checked_sub(1).map(|n| source[n]))
+                    .unwrap_or_else(|| sentence_relation(claim, s))
+            })
             .collect::<Vec<_>>();
         if relations.contains(&Relation::Contradiction)
             && !relations.contains(&Relation::Entailment)
@@ -256,20 +256,62 @@ pub fn rule_relation(candidate: &str, evidence: &str) -> Relation {
     if all_entailed {
         Relation::Entailment
     } else {
-        direct
+        Relation::Neutral
     }
 }
 
 pub struct RuleConflictDetector;
 impl ConflictDetector for RuleConflictDetector {
     fn classify(&self, bundle: &EvidenceBundle) -> Result<Vec<Verdict>, String> {
+        let base_meta = okf::parse_metadata(&bundle.input.base);
+        let new_meta = okf::parse_metadata(&bundle.input.candidate);
+        let base = claims(&bundle.input.path, &bundle.input.base)?;
+        let current = claims(&bundle.input.path, &bundle.input.candidate)?;
+        let surviving: BTreeSet<_> = current
+            .iter()
+            .flat_map(|c| sentences(&c.text).into_iter().map(|s| (&c.heading, s)))
+            .collect();
+        let removed: Vec<_> = base
+            .iter()
+            .flat_map(|c| sentences(&c.text).into_iter().map(|s| (&c.heading, s)))
+            .filter(|pair| !surviving.contains(pair))
+            .collect();
         let mut results = Vec::new();
         for (candidate, claim) in bundle.changed.iter().enumerate() {
+            let mut aligned = Vec::new();
+            if base_meta.version == new_meta.version && base_meta.scope == new_meta.scope {
+                for new in sentences(&claim.text) {
+                    if let Some(old) = super::alignment::align_removed(
+                        new,
+                        removed
+                            .iter()
+                            .filter(|(h, _)| *h == &claim.heading)
+                            .map(|(_, s)| *s),
+                    ) {
+                        aligned.push((new, old));
+                    }
+                }
+            }
             for (evidence, item) in bundle.evidence.iter().enumerate() {
+                let mut relation = rule_relation(&claim.text, &item.claim.text);
+                if matches!(relation, Relation::Neutral | Relation::Insufficient)
+                    && item.status == "active"
+                    && item.human_verified
+                {
+                    let source = sentences(&item.claim.text);
+                    if aligned.iter().any(|(new, old)| {
+                        source.iter().any(|s| {
+                            super::alignment::changed_facet(new, old, s)
+                                == Some(Relation::Contradiction)
+                        })
+                    }) {
+                        relation = Relation::Contradiction;
+                    }
+                }
                 results.push(Verdict {
                     candidate,
                     evidence,
-                    relation: rule_relation(&claim.text, &item.claim.text),
+                    relation,
                 });
             }
         }

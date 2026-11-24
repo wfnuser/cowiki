@@ -16,11 +16,12 @@ fn run() -> Result<(), String> {
     let mut split = String::from("dev");
     let mut out = None;
     let mut verifier = String::from("rules");
+    let mut dev_slice = None;
     let mut cache = String::from("record");
     let mut args = env::args().skip(1);
     while let Some(flag) = args.next() {
         if flag == "--help" {
-            println!("cowiki-governance-bench --split dev|held-out --verifier none|rules|single-pass|remote|both [--cache record|replay] [--out FILE]");
+            println!("cowiki-governance-bench --split dev|held-out --verifier none|rules|single-pass|remote|both [--dev-slice tune|validation|pilot] [--cache record|replay] [--out FILE]");
             return Ok(());
         }
         let val = args
@@ -29,6 +30,7 @@ fn run() -> Result<(), String> {
         match flag.as_str() {
             "--cache" if matches!(val.as_str(), "record" | "replay") => cache = val,
             "--verifier" => verifier = val,
+            "--dev-slice" => dev_slice = Some(val),
             "--split" => split = val,
             "--out" => out = Some(val),
             _ => return Err(format!("invalid option {flag} {val}")),
@@ -55,7 +57,13 @@ fn run() -> Result<(), String> {
         }
         Runner::default()
     };
-    let dataset = load_dataset(&Path::new(env!("CARGO_MANIFEST_DIR")).join("data"), &split)?;
+    if dev_slice.is_some() && split != "dev" {
+        return Err("--dev-slice requires --split dev".into());
+    }
+    let mut dataset = load_dataset(&Path::new(env!("CARGO_MANIFEST_DIR")).join("data"), &split)?;
+    if let Some(slice) = &dev_slice {
+        cowiki_governance_bench::select_dev_slice(&mut dataset, &split, slice)?;
+    }
     let mut total = Counts::default();
     let mut cost = Cost::default();
     let mut by_type = BTreeMap::<String, (Counts, Cost)>::new();
@@ -174,7 +182,7 @@ fn run() -> Result<(), String> {
         let m=c.metrics();
         (code,json!({"tp":c.tp,"fp":c.fp,"fn":c.fn_,"precision":m["precision"],"recall":m["recall"],"f1":m["f1"]}))
     }).collect();
-    let report = json!({"schema_version":2,"split":split,"verifier":verifier,"total":total.metrics(),"cost":cost,
+    let report = json!({"schema_version":2,"split":split,"verifier":verifier,"dev_slice":dev_slice,"total":total.metrics(),"cost":cost,
         "by_type":groups,"detection_by_code":codes,"cases":rows});
     let text = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
     if let Some(path) = out {

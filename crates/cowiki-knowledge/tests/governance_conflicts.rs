@@ -124,3 +124,52 @@ fn a_later_cited_verified_decision_can_reinstate_a_rule() {
         .iter()
         .any(|i| i.code == "reintroduces_retired"));
 }
+
+#[test]
+fn aligned_facets_separate_conflicting_values_from_applicability() {
+    for (edit, evidence, expected) in [
+        (
+            "The packet format defaults to compact.",
+            "The packet format defaults to verbose.",
+            Relation::Contradiction,
+        ),
+        (
+            "The sender must retain completed receipts.",
+            "The sender need not retain completed receipts.",
+            Relation::Contradiction,
+        ),
+        (
+            "The durable queue accepts 8 messages per batch.",
+            "The durable queue accepts 4 messages per batch.",
+            Relation::Contradiction,
+        ),
+        (
+            "The console exporter was deprecated in 2.3.",
+            "The console exporter was deprecated in 2.1.",
+            Relation::Contradiction,
+        ),
+        (
+            "Since 3.0 the console exporter defaults to compact.",
+            "Since 2.0 the console exporter defaults to verbose.",
+            Relation::ScopeDifference,
+        ),
+        (
+            "On mobile the console exporter defaults to compact.",
+            "On desktop the console exporter defaults to verbose.",
+            Relation::ScopeDifference,
+        ),
+    ] {
+        assert_eq!(
+            rule_relation(edit, evidence),
+            expected,
+            "{edit} / {evidence}"
+        );
+    }
+    assert_ne!(
+        rule_relation(
+            "An encrypted volume can be mounted.",
+            "The volume cannot be mounted except on an encrypted device."
+        ),
+        Relation::Contradiction
+    );
+}

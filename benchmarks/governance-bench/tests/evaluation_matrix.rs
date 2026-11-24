@@ -37,3 +37,26 @@ fn development_reports_pair_every_case_and_reconcile_metrics() {
     assert!(load_dataset(Path::new("."), "test").is_err());
     assert!("unknown".parse::<Mode>().is_err());
 }
+
+#[test]
+fn development_slices_are_disjoint_families_and_pilot_is_bounded() {
+    use cowiki_governance_bench::select_dev_slice;
+    use std::collections::BTreeSet;
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+    let ids = |slice: &str| {
+        let mut d = load_dataset(&root, "dev").unwrap();
+        select_dev_slice(&mut d, "dev", slice).unwrap();
+        (
+            d.cases.len(),
+            d.cases
+                .into_iter()
+                .map(|c| c.family)
+                .collect::<BTreeSet<_>>(),
+        )
+    };
+    let (train, tf) = ids("tune");
+    let (valid, vf) = ids("validation");
+    assert_eq!((train, valid, tf.len(), vf.len()), (48, 16, 6, 2));
+    assert!(tf.is_disjoint(&vf));
+    assert_eq!(ids("pilot").0, 16);
+}
