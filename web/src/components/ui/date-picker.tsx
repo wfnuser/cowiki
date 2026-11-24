@@ -63,7 +63,7 @@ function DatePicker({
           type="button"
           aria-label={value ? `${label}: ${dayLabel(value, today)}` : label}
           className={cn(
-            "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] transition-colors hover:bg-bg-hover",
+            "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-meta transition-colors hover:bg-bg-hover",
             value ? "text-text-secondary" : "text-text-tertiary",
             className
           )}
@@ -80,20 +80,20 @@ function DatePicker({
         >
           <div className="flex flex-col">
             {quick.map(([name, key]) => (
-              <button key={name} type="button" onClick={() => choose(key)} className="flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] hover:bg-bg-hover">
+              <button key={name} type="button" onClick={() => choose(key)} className="flex items-center justify-between rounded-md px-2 py-1.5 text-small hover:bg-bg-hover">
                 {name}
-                <span className="text-[11.5px] text-text-tertiary">{dayLabel(key, "0000-01-01").replace(/,? \d{4}$/, "")}</span>
+                <span className="text-meta text-text-tertiary">{dayLabel(key, "0000-01-01").replace(/,? \d{4}$/, "")}</span>
               </button>
             ))}
             {value && (
-              <button type="button" onClick={() => choose("")} className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-text-secondary hover:bg-bg-hover">
+              <button type="button" onClick={() => choose("")} className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-small text-text-secondary hover:bg-bg-hover">
                 <X className="size-3.5" aria-hidden /> No date
               </button>
             )}
           </div>
           <div className="my-2 h-px bg-border-soft" />
           <div className="flex items-center justify-between px-1 pb-1">
-            <span className="text-[12.5px] font-medium">{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
+            <span className="text-small font-medium">{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
             <span className="flex">
               <button type="button" aria-label="Previous month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="flex size-6 items-center justify-center rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text">
                 <ChevronLeft className="size-3.5" />
@@ -103,7 +103,7 @@ function DatePicker({
               </button>
             </span>
           </div>
-          <div className="grid grid-cols-7 text-center text-[10.5px] text-text-faint">
+          <div className="grid grid-cols-7 text-center text-caption text-text-faint">
             {["M", "T", "W", "T", "F", "S", "S"].map((day, index) => <span key={index} className="py-1">{day}</span>)}
           </div>
           <div className="grid grid-cols-7 gap-y-0.5">
@@ -119,7 +119,7 @@ function DatePicker({
                   aria-pressed={selected}
                   onClick={() => choose(key)}
                   className={cn(
-                    "mx-auto flex size-7 items-center justify-center rounded-md text-[12px] tabular-nums transition-colors",
+                    "mx-auto flex size-7 items-center justify-center rounded-md text-meta tabular-nums transition-colors",
                     selected ? "bg-accent font-medium text-on-accent" : "hover:bg-bg-hover",
                     !selected && outside && "text-text-faint",
                     !selected && key === today && "font-semibold text-accent"

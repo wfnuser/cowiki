@@ -219,9 +219,9 @@ export function NotificationsPage({ onUnreadChange }: { onUnreadChange?: (n: num
                 </span>
                 <Icon size={15} className="mt-0.5 shrink-0" style={{ color: meta.color }} aria-hidden />
                 <div className="min-w-0 flex-1">
-                  <div className={n.read ? 'text-[13.5px] leading-5 text-text-secondary' : 'text-[13.5px] font-medium leading-5 text-text'}>{n.title}</div>
-                  {n.body && <div className="mt-0.5 text-[12.5px] leading-5 text-text-tertiary">{n.body}</div>}
-                  <div className="mt-1 text-[12px] text-text-faint">
+                  <div className={n.read ? 'text-small leading-5 text-text-secondary' : 'text-small font-medium leading-5 text-text'}>{n.title}</div>
+                  {n.body && <div className="mt-0.5 text-small leading-5 text-text-tertiary">{n.body}</div>}
+                  <div className="mt-1 text-meta text-text-faint">
                     {[n.workspace_name, meta.label, timeAgo(n.created_at)].filter(Boolean).join(' · ')}
                   </div>
                   {actionable && !n.read && (

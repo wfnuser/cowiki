@@ -221,7 +221,7 @@ export function CloudMembersView({
         ) : (
           <div className="overflow-hidden rounded-xl border bg-panel">
             <div
-              className="grid gap-3 border-b px-4 py-2 text-[12px] text-text-tertiary"
+              className="grid gap-3 border-b px-4 py-2 text-meta text-text-tertiary"
               style={{ gridTemplateColumns: 'minmax(0, 1fr) 150px' }}
             >
               <span>Member</span>

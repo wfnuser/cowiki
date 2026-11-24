@@ -27,7 +27,7 @@ function ViewHeader({
         <h1 className="view-title min-w-0 flex-1 truncate">{title}</h1>
         {actions && <div className="flex shrink-0 items-center gap-1">{actions}</div>}
       </div>
-      {description && <p className="mt-1 text-[13px] leading-5 text-text-tertiary">{description}</p>}
+      {description && <p className="mt-1 text-small leading-5 text-text-tertiary">{description}</p>}
     </header>
   )
 }
@@ -36,15 +36,15 @@ function ViewHeader({
 function ViewSectionHeading({ children, meta, className }: { children: ReactNode; meta?: ReactNode; className?: string }) {
   return (
     <div className={cn("mb-1.5 flex items-baseline justify-between gap-3", className)}>
-      <h2 className="text-[13px] font-semibold leading-5 text-text">{children}</h2>
-      {meta != null && <span className="text-[12px] tabular-nums text-text-tertiary">{meta}</span>}
+      <h2 className="text-small font-semibold leading-5 text-text">{children}</h2>
+      {meta != null && <span className="text-meta tabular-nums text-text-tertiary">{meta}</span>}
     </div>
   )
 }
 
 /** Nothing to show: one short sentence, no box. */
 function ViewEmpty({ children, className }: { children: ReactNode; className?: string }) {
-  return <p className={cn("flex items-center justify-center gap-2 py-10 text-center text-[13px] text-text-tertiary", className)}>{children}</p>
+  return <p className={cn("flex items-center justify-center gap-2 py-10 text-center text-small text-text-tertiary", className)}>{children}</p>
 }
 
 /** A small icon-only action for a view header. */
@@ -87,12 +87,12 @@ function ViewTabs<T extends string>({
           aria-selected={value === tab.id}
           onClick={() => onChange(tab.id)}
           className={cn(
-            "-mb-px flex items-center gap-1.5 border-b-2 pb-2 pt-1 text-[13px] transition-colors",
+            "-mb-px flex items-center gap-1.5 border-b-2 pb-2 pt-1 text-small transition-colors",
             value === tab.id ? "border-text font-medium text-text" : "border-transparent text-text-tertiary hover:text-text-secondary"
           )}
         >
           {tab.label}
-          {tab.count != null && tab.count > 0 && <span className="text-[11.5px] font-normal tabular-nums text-text-faint">{tab.count}</span>}
+          {tab.count != null && tab.count > 0 && <span className="text-meta font-normal tabular-nums text-text-faint">{tab.count}</span>}
         </button>
       ))}
     </nav>

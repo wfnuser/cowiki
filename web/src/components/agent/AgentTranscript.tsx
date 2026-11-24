@@ -54,7 +54,7 @@ const markdownComponents: Components = {
   img: ({ alt }) => <span className="text-text-tertiary">[{alt || 'image'}]</span>,
   pre: ({ children }) => (
     <pre
-      className="my-2 overflow-x-auto rounded-lg bg-bg-secondary px-3 py-2 text-[12px] leading-relaxed [&_code]:bg-transparent [&_code]:p-0"
+      className="my-2 overflow-x-auto rounded-lg bg-bg-secondary px-3 py-2 text-meta leading-relaxed [&_code]:bg-transparent [&_code]:p-0"
       style={{ fontFamily: fonts.mono }}
     >
       {children}
@@ -69,7 +69,7 @@ const markdownComponents: Components = {
 
 export function AgentMarkdown({ text }: { text: string }) {
   return (
-    <div className="agent-markdown min-w-0 break-words text-[13px] leading-[1.6] text-text [&_li]:my-0.5 [&_ol]:my-1.5 [&_ol]:ml-5 [&_ol]:list-decimal [&_p]:my-1.5 [&_p:first-child]:mt-0 [&_ul]:my-1.5 [&_ul]:ml-5 [&_ul]:list-disc [&_li::marker]:text-text-faint [&_strong]:font-semibold [&_h1]:mb-1 [&_h1]:mt-3 [&_h1]:text-[15px] [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:mt-3 [&_h2]:text-[14px] [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:font-semibold [&_table]:my-2 [&_table]:text-[12px] [&_td]:border [&_td]:border-border [&_td]:px-1.5 [&_th]:border [&_th]:border-border [&_th]:px-1.5 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-2 [&_blockquote]:text-text-secondary">
+    <div className="agent-markdown min-w-0 break-words text-small leading-[1.6] text-text [&_li]:my-0.5 [&_ol]:my-1.5 [&_ol]:ml-5 [&_ol]:list-decimal [&_p]:my-1.5 [&_p:first-child]:mt-0 [&_ul]:my-1.5 [&_ul]:ml-5 [&_ul]:list-disc [&_li::marker]:text-text-faint [&_strong]:font-semibold [&_h1]:mb-1 [&_h1]:mt-3 [&_h1]:text-lead [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:mt-3 [&_h2]:text-body [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:font-semibold [&_table]:my-2 [&_table]:text-meta [&_td]:border [&_td]:border-border [&_td]:px-1.5 [&_th]:border [&_th]:border-border [&_th]:px-1.5 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-2 [&_blockquote]:text-text-secondary">
       <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={markdownComponents}>
         {text}
       </ReactMarkdown>
@@ -101,7 +101,7 @@ const statusText: Record<AgentToolItem['status'], string> = {
   stopped: 'stopped',
 };
 
-const rowClass = 'flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left text-[12px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary disabled:cursor-default disabled:hover:bg-transparent';
+const rowClass = 'flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left text-meta text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary disabled:cursor-default disabled:hover:bg-transparent';
 
 function ToolStep({ item }: { item: AgentToolItem }) {
   const [open, setOpen] = useState(false);
@@ -118,7 +118,7 @@ function ToolStep({ item }: { item: AgentToolItem }) {
         onClick={() => setOpen((value) => !value)}
       >
         <Icon className="size-3.5 shrink-0 text-text-faint" />
-        <span className={cn('min-w-0 flex-1 truncate', mono && 'text-[11.5px]')} style={mono ? { fontFamily: fonts.mono } : undefined}>
+        <span className={cn('min-w-0 flex-1 truncate', mono && 'text-meta')} style={mono ? { fontFamily: fonts.mono } : undefined}>
           {item.name}
         </span>
         <ToolStatusIcon status={item.status} />
@@ -128,11 +128,11 @@ function ToolStep({ item }: { item: AgentToolItem }) {
       {open && hasOutput && (
         <div className="mb-1 ml-[26px] mt-0.5 overflow-hidden rounded-md bg-bg-secondary">
           {item.truncated && (
-            <p className="px-2.5 pt-1.5 text-[10.5px] text-text-tertiary">Earlier output was truncated.</p>
+            <p className="px-2.5 pt-1.5 text-caption text-text-tertiary">Earlier output was truncated.</p>
           )}
           <pre
             className={cn(
-              'max-h-64 overflow-auto whitespace-pre-wrap break-words px-2.5 py-2 text-[11px] leading-relaxed text-text-secondary',
+              'max-h-64 overflow-auto whitespace-pre-wrap break-words px-2.5 py-2 text-caption leading-relaxed text-text-secondary',
               item.toolKind === 'think' && 'whitespace-pre-line italic',
             )}
             style={item.toolKind === 'think' ? undefined : { fontFamily: fonts.mono }}
@@ -161,7 +161,7 @@ function WorkBlock({ steps }: { steps: AgentToolItem[] }) {
           : LeadIcon && <LeadIcon className="size-3.5 shrink-0 text-text-faint" />}
         <span className="min-w-0 flex-1 truncate">
           {running ? (
-            <span style={running.toolKind === 'command' ? { fontFamily: fonts.mono, fontSize: 11.5 } : undefined}>{running.name}</span>
+            <span style={running.toolKind === 'command' ? { fontFamily: fonts.mono, fontSize: 12 } : undefined}>{running.name}</span>
           ) : summary.text}
           {summary.failed > 0 && <span className="text-red"> · {summary.failed} failed</span>}
           {summary.declined > 0 && <span className="text-amber"> · {summary.declined} declined</span>}
@@ -180,7 +180,7 @@ function WorkBlock({ steps }: { steps: AgentToolItem[] }) {
 function Message({ item, pending }: { item: AgentMessageItem; pending: boolean }) {
   if (item.role === 'user') {
     return (
-      <div className="ml-8 max-w-[88%] self-end whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-accent-soft px-3 py-1.5 text-[13px] leading-[1.55] text-text">
+      <div className="ml-8 max-w-[88%] self-end whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-accent-soft px-3 py-1.5 text-small leading-[1.55] text-text">
         {item.text}
       </div>
     );
@@ -191,7 +191,7 @@ function Message({ item, pending }: { item: AgentMessageItem; pending: boolean }
 
 function Working({ label }: { label: string }) {
   return (
-    <p className="flex items-center gap-1.5 px-1.5 text-[12px] text-text-tertiary">
+    <p className="flex items-center gap-1.5 px-1.5 text-meta text-text-tertiary">
       <LoaderCircle className="size-3 animate-spin text-accent" aria-hidden /> {label}
     </p>
   );
@@ -224,7 +224,7 @@ export function AgentTranscript({ snapshot }: { snapshot: AgentSnapshot }) {
     >
       <div className="flex flex-col gap-3">
         {blocks.length === 0 && snapshot.status !== 'starting' && (
-          <p className="py-6 text-center text-[12px] text-text-tertiary">Send a message to start.</p>
+          <p className="py-6 text-center text-meta text-text-tertiary">Send a message to start.</p>
         )}
         {blocks.map((block, index) => block.type === 'work'
           ? <WorkBlock key={block.id} steps={block.steps} />

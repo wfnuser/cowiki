@@ -99,12 +99,12 @@ function CloudReviewList({
               >
                 <GitBranch size={16} className="shrink-0 text-text-faint" />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13.5px] font-medium text-text">{s.summary || s.paths.join(', ') || 'Submission'}</div>
-                  <div className="mt-px truncate text-[12px] text-text-tertiary">
+                  <div className="truncate text-small font-medium text-text">{s.summary || s.paths.join(', ') || 'Submission'}</div>
+                  <div className="mt-px truncate text-meta text-text-tertiary">
                     {author} · {s.paths.length} file{s.paths.length === 1 ? '' : 's'} · {timeAgo(s.created_at)}
                   </div>
                 </div>
-                <span className="flex shrink-0 items-center gap-1.5 text-[12px]" style={{ color: sb.fg }}>
+                <span className="flex shrink-0 items-center gap-1.5 text-meta" style={{ color: sb.fg }}>
                   <span aria-hidden className="size-1.5 rounded-full" style={{ background: sb.fg }} />
                   {sb.label}
                 </span>

@@ -6,6 +6,7 @@
  * that refer to source lines still line up with the file.
  */
 import { isImagePath, parseWikilink } from './wikilinks.ts';
+import { CALLOUT_LINE, CALLOUT_SEP, calloutOf } from './callouts.ts';
 
 /** Fragment prefix react-markdown keeps; the reader turns it into navigation. */
 export const WIKILINK_HREF_PREFIX = '#cowiki-wiki:';
@@ -30,13 +31,6 @@ function escapeLabel(value: string): string {
 function angleTarget(value: string): string {
   return `<${value.replace(/[<>]/g, (char) => encodeURIComponent(char))}>`;
 }
-
-const CALLOUT_ICONS: Record<string, string> = {
-  note: '📝', info: 'ℹ️', tip: '💡', hint: '💡', important: '❗', success: '✅', check: '✅', done: '✅',
-  question: '❓', help: '❓', faq: '❓', warning: '⚠️', caution: '⚠️', attention: '⚠️',
-  failure: '❌', fail: '❌', missing: '❌', danger: '⛔', error: '⛔', bug: '🐞',
-  example: '📋', quote: '❝', cite: '❝', abstract: '📄', summary: '📄', tldr: '📄', todo: '☑️',
-};
 
 function convertInline(segment: string): string {
   let text = segment.replace(/%%.*?%%/g, '').replace(/\{\{cloze:?\s+(.*?)\}\}/g, '==$1==');
@@ -87,12 +81,10 @@ function convertLine(raw: string): string {
   // Blank instead of removed, so rendered lines still match the file's lines.
   if (HIDDEN_PROPERTY.test(raw)) return '';
   const line = convertTaskMarker(raw);
-  const callout = /^(\s*(?:>\s*)+)\[!([A-Za-z-]+)\]([+-]?)\s*(.*)$/.exec(line);
+  const callout = CALLOUT_LINE.exec(line);
   if (callout) {
-    const type = callout[2].toLowerCase();
-    const icon = CALLOUT_ICONS[type] ?? '📌';
-    const title = callout[4].trim() || `${callout[2][0].toUpperCase()}${callout[2].slice(1).toLowerCase()}`;
-    return `${callout[1]}**${icon} ${convertInline(title)}**`;
+    const { type, title } = calloutOf(callout[3], callout[4]);
+    return `${callout[1]}**${CALLOUT_SEP}${type}${CALLOUT_SEP} ${convertInline(title)}**`;
   }
   const parts = line.split(/(`+[^`]*`+)/);
   return parts.map((part, index) => (index % 2 === 1 ? part : convertInline(part))).join('');

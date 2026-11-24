@@ -39,7 +39,7 @@ function NumberField({
         type="number"
         inputMode="numeric"
         aria-label={label}
-        className="w-10 min-w-0 bg-transparent text-center text-[12.5px] tabular-nums text-text outline-none focus-visible:outline-none"
+        className="w-10 min-w-0 bg-transparent text-center text-small tabular-nums text-text outline-none focus-visible:outline-none"
         min={min}
         max={max}
         step={step}

@@ -37,5 +37,5 @@ export function WeekNav({ week, onOpenWeek }: WeekNavProps) {
 
 const iconButton: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 5,
-  border: 'none', borderRadius: 7, background: 'transparent', color: C.muted, cursor: 'pointer', fontSize: 12.5,
+  border: 'none', borderRadius: 7, background: 'transparent', color: C.muted, cursor: 'pointer', fontSize: 13,
 };

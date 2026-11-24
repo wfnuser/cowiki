@@ -53,7 +53,7 @@ export function InlineFeedback({
           <div className="font-medium leading-5">{title}</div>
           {description && <p className="mt-0.5 text-current/80">{description}</p>}
           {details && (
-            <details className="mt-1.5 text-[11px] text-current/70">
+            <details className="mt-1.5 text-caption text-current/70">
               <summary className="cursor-pointer select-none">Technical details</summary>
               <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words font-mono">{details}</pre>
             </details>

@@ -40,6 +40,9 @@ Foxtrot para right under a heading.
 >
 > Papa quote
 
+> [!tip] Whiskey callout
+> Xray inside
+
 \`\`\`js
 Quebec code
 \`\`\`
@@ -53,7 +56,7 @@ Sierra after rule.
 ### Tango h3
 Uniform \`inline code\` here.
 `;
-const MARKERS = ['Parity', 'Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel', 'wrapwordhere', 'India', 'Juliet', 'Kilo', 'Lima', 'Mike', 'November', 'Oscar', 'Papa', 'Quebec', 'Romeo', 'Sierra', 'Tango', 'Uniform'];
+const MARKERS = ['Parity', 'Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel', 'wrapwordhere', 'India', 'Juliet', 'Kilo', 'Lima', 'Mike', 'November', 'Oscar', 'Papa', 'Whiskey', 'Xray', 'Quebec', 'Romeo', 'Sierra', 'Tango', 'Uniform'];
 
 async function setup(page: Page, body: string, more: Array<[string, string]> = []) {
   const space = { name: 'Personal', slug: 'personal', id: 'personal', visibility: 'private', role: 'owner', localPath: '/fixture/personal' };
@@ -132,6 +135,7 @@ test('clicking to edit leaves every line where it was', async ({ page }) => {
 });
 
 test('list and heading markup never shifts the text', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
   await setup(page, BODY);
   await page.goto(origin + '/personal/Doc');
   await page.getByText('Charlie heading').click();

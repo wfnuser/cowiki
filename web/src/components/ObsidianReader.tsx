@@ -4,10 +4,13 @@ import {
   useEffect,
   useState,
   type AnchorHTMLAttributes,
+  type HTMLAttributes,
   type ImgHTMLAttributes,
   type InputHTMLAttributes,
+  type ReactNode,
 } from 'react';
 import type { Components } from 'react-markdown';
+import { CALLOUT_SEP, calloutOf } from '@/lib/callouts';
 import { C } from '@/lib/design';
 import { wikilinkFromHref } from '@/lib/obsidian-markdown';
 import { openExternalUrl } from '@/external-links';
@@ -52,7 +55,7 @@ function AssetImage({ src, alt, loadAsset, ...rest }: ImgHTMLAttributes<HTMLImag
       title={current?.error ?? raw}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 6,
-        border: `1px dashed ${C.line}`, color: current?.error ? C.red : C.muted, fontSize: 12.5,
+        border: `1px dashed ${C.line}`, color: current?.error ? C.red : C.muted, fontSize: 13,
       }}
     >
       {current?.error ? `Attachment not found: ${decodeURIComponent(raw)}` : 'Loading attachment…'}
@@ -136,6 +139,25 @@ function ReaderInput({ node, ...props }: WithNode<InputHTMLAttributes<HTMLInputE
   return <TaskCheckbox {...props} onToggleTask={onToggleTask} />;
 }
 
+/** A callout's title (`**<SEP>tip<SEP> Title**`, see lib/callouts.ts): its icon, then the title. */
+function ReaderStrong({ node, children, ...props }: WithNode<HTMLAttributes<HTMLElement>>) {
+  void node;
+  const parts = Array.isArray(children) ? children : [children];
+  const first = parts[0];
+  if (typeof first === 'string' && first.startsWith(CALLOUT_SEP)) {
+    const end = first.indexOf(CALLOUT_SEP, 1);
+    const { icon, family } = calloutOf(first.slice(1, end));
+    const rest: ReactNode[] = [first.slice(end + 1).trimStart(), ...parts.slice(1)];
+    return (
+      <strong className="callout-title" data-callout-family={family}>
+        <span aria-hidden className="callout-icon" data-icon={icon} />
+        {rest}
+      </strong>
+    );
+  }
+  return <strong {...props}>{children}</strong>;
+}
+
 /**
  * Markdown components that make Obsidian-style pages usable in the reader.
  * Wrap the reader in `ObsidianReaderContext.Provider` to enable navigation,
@@ -147,5 +169,6 @@ export function withObsidianReader(base: Components | undefined): Components {
     a: ReaderAnchor,
     img: ReaderImage,
     input: ReaderInput,
+    strong: ReaderStrong,
   };
 }

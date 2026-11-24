@@ -4,7 +4,6 @@ import { CircleCheck, FileText, LoaderCircle, RefreshCw } from 'lucide-react';
 import { listBrokenLinks, type BrokenLink } from '@/api';
 import { InlineFeedback } from '@/components/ui/inline-feedback';
 import { ViewEmpty, ViewHeader, ViewIconButton, ViewSectionHeading } from '@/components/ui/view-header';
-import { fonts } from '@/lib/design';
 import {
   brokenLinkSummary,
   groupBrokenLinks,
@@ -81,7 +80,7 @@ export function LinksView({ workspaceSlug, onOpenPage }: LinksViewProps) {
           title="Could not inspect links"
           description={error}
           action={(
-            <button type="button" onClick={() => { void refresh(); }} disabled={refreshing} className="inline-flex items-center gap-1 text-[12px] font-semibold text-red">
+            <button type="button" onClick={() => { void refresh(); }} disabled={refreshing} className="inline-flex items-center gap-1 text-meta font-semibold text-red">
               <RefreshCw size={12} /> Retry
             </button>
           )}
@@ -91,20 +90,21 @@ export function LinksView({ workspaceSlug, onOpenPage }: LinksViewProps) {
       ) : (
         <div aria-live="polite">
           <ViewSectionHeading meta={brokenLinkSummary(links.length)}>Needs attention</ViewSectionHeading>
-          <ol className="m-0 list-none divide-y divide-border-soft border-y border-border-soft p-0">
+          <ol className="view-list">
             {groups.map((group) => (
-              <li key={group.sourcePath} className="py-2.5">
-                <button type="button" onClick={() => onOpenPage(group.sourcePath)} className="-mx-2 flex w-[calc(100%+16px)] min-w-0 items-center gap-2.5 rounded-md px-2 py-0.5 text-left hover:bg-bg-hover">
-                  <FileText size={15} className="shrink-0 text-text-faint" aria-hidden />
-                  <span className="min-w-0 truncate text-[13.5px] font-medium text-text">{group.sourceTitle || group.sourcePath}</span>
-                  <span className="min-w-0 flex-1 truncate text-[12px] text-text-faint">{group.sourcePath}</span>
+              <li key={group.sourcePath} className="pb-1.5">
+                <button type="button" onClick={() => onOpenPage(group.sourcePath)} className="view-row">
+                  <span className="view-row-icon"><FileText size={16} aria-hidden /></span>
+                  <span className="view-row-title">
+                    {group.sourceTitle || group.sourcePath}
+                    <span className="view-row-detail">{group.sourcePath}</span>
+                  </span>
                 </button>
-                <ul className="m-0 mt-1 grid list-none gap-1 p-0 pl-[25px]">
+                <ul aria-label={`Missing pages linked from ${group.sourceTitle || group.sourcePath}`} className="m-0 grid list-none gap-0.5 p-0 pl-[34px]">
                   {group.targets.map((target) => (
-                    <li key={target} className="flex min-w-0 items-center gap-2 text-[12.5px] text-text-secondary">
+                    <li key={target} className="flex min-w-0 items-center gap-2 text-small text-text-secondary">
                       <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-red" />
-                      <span className="shrink-0">Missing</span>
-                      <code className="min-w-0 break-all text-[12px] text-red" style={{ fontFamily: fonts.mono }}>{target}</code>
+                      <span className="min-w-0 break-words">{target}</span>
                     </li>
                   ))}
                 </ul>

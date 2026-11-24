@@ -43,7 +43,7 @@ function Avatar({ id, name, size = 24 }: { id: string; name: string; size?: numb
 
 const ghostBtn: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 8px', borderRadius: 7,
-  border: 'none', background: 'transparent', color: C.muted, fontSize: 12.5, fontWeight: 550, cursor: 'pointer',
+  border: 'none', background: 'transparent', color: C.muted, fontSize: 13, fontWeight: 550, cursor: 'pointer',
 };
 
 // Render a quoted snippet as *inline* markdown (bold/italic/links/code), so it
@@ -408,9 +408,9 @@ export function CommentsPanel() {
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px 12px 20px', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span style={{ fontSize: 13.5, fontWeight: 600, color: C.ink }}>Comments</span>
-          <span style={{ fontSize: 12.5, color: C.faint }}>({openCount})</span>
-          <span title={scopeLabel === 'Local only' ? 'These comments stay on this device.' : 'These comments are shared with Space members.'} style={{ fontSize: 10.5, color: C.faint, fontWeight: 500 }}>{scopeLabel}</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>Comments</span>
+          <span style={{ fontSize: 13, color: C.faint }}>({openCount})</span>
+          <span title={scopeLabel === 'Local only' ? 'These comments stay on this device.' : 'These comments are shared with Space members.'} style={{ fontSize: 11, color: C.faint, fontWeight: 500 }}>{scopeLabel}</span>
         </div>
         <button onClick={() => setPanelOpen(false)} title="Collapse" style={{ ...ghostBtn, padding: 5 }}>
           <ChevronsRight size={16} />
@@ -459,7 +459,7 @@ export function CommentsPanel() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                   <Avatar id={t.root.user_id} name={nameOf(t.root.user_id)} size={22} />
                   <span style={{ fontSize: 13, fontWeight: 600, color: C.ink, flex: 1 }}>{nameOf(t.root.user_id)}</span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11.5, fontWeight: 600, color: C.green }}><Check size={13} />Resolved</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: C.green }}><Check size={13} />Resolved</span>
                 </div>
                 <div style={{ fontSize: 13, color: C.muted, marginBottom: 8, lineHeight: 1.5 }}>{t.root.body}</div>
                 <button onClick={() => onResolve(t.root.id, false)} style={{ ...ghostBtn, padding: '3px 6px', fontSize: 12 }}><RotateCcw size={12} /> Reopen</button>
@@ -496,9 +496,9 @@ function CommentCard({
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <Avatar id={t.root.user_id} name={authorName} size={22} />
           <span style={{ fontSize: 13, fontWeight: 600, color: C.ink, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{authorName}</span>
-          <span style={{ fontSize: 11.5, color: C.faint }}>{relTime(t.root.created_at)}</span>
+          <span style={{ fontSize: 12, color: C.faint }}>{relTime(t.root.created_at)}</span>
         </div>
-        <div style={{ fontSize: 13.5, lineHeight: 1.5, color: C.ink2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{t.root.body}</div>
+        <div style={{ fontSize: 13, lineHeight: 1.5, color: C.ink2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{t.root.body}</div>
         {t.replies.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 7, fontSize: 12, color: C.faint }}>
             <MessageSquare size={13} />{t.replies.length} {t.replies.length === 1 ? 'reply' : 'replies'}
@@ -511,15 +511,15 @@ function CommentCard({
   return (
     <div onClick={onActivate} style={{ background: C.sidebar, borderLeft: `2px solid ${isOutdated ? C.amber : C.accent}`, borderRadius: 6, padding: '12px 12px 11px', cursor: 'pointer', position: 'relative' }}>
       <div style={{ display: 'flex', gap: 8, marginBottom: 11, paddingLeft: 9, borderLeft: `2.5px solid ${isOutdated ? C.amber : C.accent}` }}>
-        <span style={{ fontSize: 12.5, lineHeight: 1.45, color: C.muted, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+        <span style={{ fontSize: 13, lineHeight: 1.45, color: C.muted, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
           {isOutdated && <span style={{ color: C.amber, fontStyle: 'normal', fontWeight: 600 }}>outdated · </span>}<Quote text={t.quote} />
         </span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 7 }}>
         <Avatar id={t.root.user_id} name={authorName} size={26} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: C.ink, lineHeight: 1.2 }}>{authorName}</div>
-          <div style={{ fontSize: 11.5, color: C.faint }}>{relTimeAgo(t.root.created_at)}</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.ink, lineHeight: 1.2 }}>{authorName}</div>
+          <div style={{ fontSize: 12, color: C.faint }}>{relTimeAgo(t.root.created_at)}</div>
         </div>
         {t.root.user_id === currentUserId ? (
           <button onClick={(e) => { e.stopPropagation(); onDelete(t.root.id); }} title="Delete" style={{ ...ghostBtn, padding: 4 }}><Trash2 size={14} /></button>
@@ -536,10 +536,10 @@ function CommentCard({
               <Avatar id={r.user_id} name={nameOf(r.user_id)} size={22} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginBottom: 1 }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 600, color: C.ink }}>{nameOf(r.user_id)}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>{nameOf(r.user_id)}</span>
                   <span style={{ fontSize: 11, color: C.faint }}>{relTime(r.created_at)}</span>
                 </div>
-                <div style={{ fontSize: 13.5, lineHeight: 1.5, color: C.ink2 }}>{r.body}</div>
+                <div style={{ fontSize: 13, lineHeight: 1.5, color: C.ink2 }}>{r.body}</div>
               </div>
             </div>
           ))}
@@ -610,7 +610,7 @@ function Composer({
     <div style={{ marginBottom: compact ? 0 : 14, marginTop: compact ? 4 : 0 }}>
       {quote && (
         <div style={{ marginBottom: 9, paddingLeft: 9, borderLeft: `2.5px solid ${C.accent}` }}>
-          <span style={{ fontSize: 12.5, lineHeight: 1.45, color: C.muted, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}><Quote text={quote} /></span>
+          <span style={{ fontSize: 13, lineHeight: 1.45, color: C.muted, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}><Quote text={quote} /></span>
         </div>
       )}
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -618,13 +618,13 @@ function Composer({
         <div style={{ flex: 1, position: 'relative', border: `1.5px solid ${C.accent}`, borderRadius: 9, background: C.panel }}>
           <textarea ref={ref} value={value} placeholder={placeholder} rows={2} autoFocus={autoFocus} disabled={sending}
             onChange={(e) => sync(e.target.value, e.target.selectionStart)}
-            style={{ width: '100%', border: 'none', outline: 'none', resize: 'none', padding: '8px 10px', fontSize: 13.5, lineHeight: 1.5, color: C.ink, fontFamily: fonts.sans, boxSizing: 'border-box', background: 'transparent' }} />
+            style={{ width: '100%', border: 'none', outline: 'none', resize: 'none', padding: '8px 10px', fontSize: 13, lineHeight: 1.5, color: C.ink, fontFamily: fonts.sans, boxSizing: 'border-box', background: 'transparent' }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderTop: `1px solid ${C.lineSoft}` }}>
             <AtSign size={15} color={C.faint} />
             <div style={{ flex: 1 }} />
             <button onClick={onCancel} disabled={sending} style={{ ...ghostBtn, padding: '5px 9px' }}>Cancel</button>
             <button onClick={() => void submit()} disabled={!value.trim() || sending}
-              style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 7, border: 'none', background: value.trim() ? C.accent : C.line, color: value.trim() ? C.onAccent : C.faint, fontSize: 12.5, fontWeight: 600, cursor: value.trim() ? 'pointer' : 'default' }}>
+              style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 7, border: 'none', background: value.trim() ? C.accent : C.line, color: value.trim() ? C.onAccent : C.faint, fontSize: 13, fontWeight: 600, cursor: value.trim() ? 'pointer' : 'default' }}>
               {sending ? 'Sending…' : primaryLabel}
             </button>
           </div>
@@ -633,7 +633,7 @@ function Composer({
             <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 70, marginTop: 2, minWidth: 170, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: shadows.popover, overflow: 'hidden' }}>
               {matches.map((m) => (
                 <button key={m.id} onMouseDown={(e) => { e.preventDefault(); pick(m.mention); }}
-                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '7px 10px', border: 'none', background: 'transparent', fontSize: 12.5, color: C.ink, cursor: 'pointer' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '7px 10px', border: 'none', background: 'transparent', fontSize: 13, color: C.ink, cursor: 'pointer' }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = C.tag; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
                   <Avatar id={m.id} name={m.name} size={18} /> {m.name} <span style={{ color: C.faint }}>@{m.mention}</span>

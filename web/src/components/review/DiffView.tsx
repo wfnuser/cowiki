@@ -7,6 +7,7 @@ import type { FileDiff, DiffHunk, DiffLine, ReviewComment } from '../../api';
 import { C, fonts } from '@/lib/design';
 import { reviewPreviewPanes, type ReviewPreviewPane } from '@/lib/review-preview';
 import { timeAgo } from '../../lib/time';
+import { hunkLabel } from '@/lib/diff-label';
 
 const mono = fonts.mono;
 
@@ -18,11 +19,13 @@ function fileStatus(f: FileDiff): 'added' | 'deleted' | 'modified' {
   return 'modified';
 }
 
-const statusColors: Record<string, { bg: string; fg: string }> = {
-  added: { bg: C.greenBg, fg: C.green },
-  deleted: { bg: C.redBg, fg: C.red },
-  modified: { bg: C.amberSoft, fg: C.amber },
+/** A new or removed file says so in its colour; an edited one says nothing. */
+const statusColors: Record<string, string | null> = {
+  added: C.green,
+  deleted: C.red,
+  modified: null,
 };
+
 
 /* ── Inline comment thread ── */
 function CommentThread({
@@ -54,13 +57,13 @@ function CommentThread({
             <div style={{
               width: 20, height: 20, borderRadius: '50%', background: C.rail,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 10, fontWeight: 600, color: C.ink2,
+              fontSize: 11, fontWeight: 600, color: C.ink2,
             }}>
               {c.user_id.slice(0, 1).toUpperCase()}
             </div>
             <span style={{ fontSize: 12, fontWeight: 600, color: C.ink }}>{c.user_id.slice(0, 8)}</span>
             <span style={{ fontSize: 11, color: C.muted }}>{timeAgo(c.created_at)}</span>
-            {c.resolved && <span style={{ fontSize: 10, color: C.green, fontWeight: 500 }}>Resolved</span>}
+            {c.resolved && <span style={{ fontSize: 11, color: C.green, fontWeight: 500 }}>Resolved</span>}
           </div>
           <div style={{ fontSize: 13, color: C.ink2, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{c.body}</div>
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
@@ -184,11 +187,11 @@ function HunkView({
     <>
       {/* Hunk header */}
       <tr>
-        <td colSpan={4} style={{
-          background: C.blueSoft, color: C.muted, fontSize: 12, fontFamily: mono,
-          padding: '4px 12px', borderBottom: `1px solid ${C.line}`,
+        <td colSpan={4} title={hunk.header} style={{
+          background: C.bg, color: C.faint, fontSize: 12,
+          padding: '4px 12px', borderBottom: `1px solid ${C.lineSoft}`,
         }}>
-          {hunk.header}
+          {hunkLabel(hunk.header)}
         </td>
       </tr>
       {hunk.lines.map((line, i) => {
@@ -341,7 +344,7 @@ function FileDiffCard({
   };
 
   return (
-    <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, overflow: 'hidden', background: C.panel }}>
+    <div style={{ border: `1px solid ${C.line}`, borderRadius: 8, overflow: 'hidden', background: C.panel }}>
       {/* File header */}
       <div
         onClick={() => setCollapsed(!collapsed)}
@@ -354,17 +357,12 @@ function FileDiffCard({
       >
         {collapsed ? <ChevronRight size={14} color={C.muted} /> : <ChevronDown size={14} color={C.muted} />}
         <FileText size={14} color={C.muted} />
-        <span style={{ fontFamily: mono, fontSize: 13, fontWeight: 550, color: C.ink }}>{file.path}</span>
-        <span style={{
-          fontSize: 11.5, padding: '0 6px', borderRadius: 4, fontWeight: 500,
-          background: sc.bg, color: sc.fg,
-        }}>
-          {status[0]!.toUpperCase() + status.slice(1)}
-        </span>
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: C.muted }}>
-          <span style={{ color: C.green }}>+{file.additions}</span>
+        <span style={{ fontSize: 13, fontWeight: 500, color: C.ink }}>{file.path}</span>
+        {sc && <span style={{ fontSize: 12, color: sc }}>{status[0]!.toUpperCase() + status.slice(1)}</span>}
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: C.muted, fontVariantNumeric: 'tabular-nums' }}>
+          <span style={{ color: file.additions ? C.green : C.faint }}>+{file.additions}</span>
           {' '}
-          <span style={{ color: C.red }}>-{file.deletions}</span>
+          <span style={{ color: file.deletions ? C.red : C.faint }}>−{file.deletions}</span>
         </span>
         {onEditSave && file.new_content != null && !editing && (
           <button
@@ -407,7 +405,7 @@ function FileDiffCard({
               onClick={() => setEditing(false)}
               disabled={saving}
               style={{
-                marginLeft: 'auto', padding: '5px 12px', borderRadius: 6, fontSize: 12.5, fontWeight: 550,
+                marginLeft: 'auto', padding: '5px 12px', borderRadius: 6, fontSize: 13, fontWeight: 550,
                 border: `1px solid ${C.line}`, background: C.panel, color: C.ink2, cursor: 'pointer',
               }}
             >
@@ -417,7 +415,7 @@ function FileDiffCard({
               onClick={saveEdit}
               disabled={saving || draft === (file.new_content ?? '')}
               style={{
-                padding: '5px 14px', borderRadius: 6, fontSize: 12.5, fontWeight: 600,
+                padding: '5px 14px', borderRadius: 6, fontSize: 13, fontWeight: 600,
                 border: 'none', background: draft !== (file.new_content ?? '') ? C.accent : C.faint,
                 color: C.onAccent, cursor: 'pointer', opacity: saving ? 0.6 : 1,
               }}

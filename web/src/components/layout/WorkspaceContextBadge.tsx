@@ -22,7 +22,7 @@ export function WorkspaceContextBadge({
     border: 'none',
     borderRadius: 8,
     background: 'transparent',
-    fontSize: 12.5,
+    fontSize: 13,
     fontWeight: 500,
     whiteSpace: 'nowrap',
     cursor: onClick ? 'pointer' : 'default',

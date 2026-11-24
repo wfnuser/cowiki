@@ -6,6 +6,7 @@ export const colors = {
   rail: 'var(--color-bg-hover)',
   ink: 'var(--color-text)',
   ink2: 'var(--color-text-secondary)',
+  nav: 'var(--color-text-nav)',
   muted: 'var(--color-text-tertiary)',
   faint: 'var(--color-text-faint)',
   line: 'var(--color-border)',
@@ -112,16 +113,20 @@ function hashTimes31(value: string): number {
   return hash;
 }
 
-/** Space-rail / space-header tiles. Hash is the original sum-of-charCodes. */
+/**
+ * Space-rail / space-header tiles. Hash is the original sum-of-charCodes, so a
+ * Space keeps its slot; the four saturated defaults (indigo, teal, amber,
+ * violet) were muted on 2026-11-24 to sit with the warm paper palette.
+ */
 export const spaceTileColors = [
   '#3f6c8c',
   '#5d8a6c',
   '#9a6f93',
   '#c2410c',
-  '#6366f1',
-  '#14b8a6',
-  '#f59e0b',
-  '#8b5cf6',
+  '#5b679e',
+  '#3d8a83',
+  '#b07d2c',
+  '#7a65a6',
 ] as const;
 
 /** Invitation-page monogram; historically this fixed tile green. */
@@ -143,7 +148,7 @@ export function colorForName(name: string): string {
 export const avatarColors = [
   '#2f6bb0',
   '#2f8a5b',
-  '#8b5cf6',
+  '#7a65a6',
   '#c2410c',
   '#3f6c8c',
   '#5d8a6c',
@@ -159,7 +164,7 @@ export function colorForAvatarName(name: string): string {
 export const commentAvatarColors = [
   '#2f6bb0',
   '#2f8a5b',
-  '#8b5cf6',
+  '#7a65a6',
   '#c2410c',
   '#3f6c8c',
   '#9a6f93',

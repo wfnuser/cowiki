@@ -23,15 +23,15 @@ export function SettingSwitch({ id, label, description, checked, disabled, onCha
   return (
     <label className="flex cursor-pointer items-center gap-4 py-2.5 has-[:disabled]:cursor-default">
       <span className="min-w-0 flex-1">
-        <span className="block text-[13px] font-medium leading-5 text-text">{label}</span>
-        {description && <span className="block text-[12px] leading-[1.45] text-text-tertiary">{description}</span>}
+        <span className="block text-small font-medium leading-5 text-text">{label}</span>
+        {description && <span className="block text-meta leading-[1.45] text-text-tertiary">{description}</span>}
       </span>
       <input id={id} type="checkbox" className="cw-switch" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
     </label>
   );
 }
 
-export const settingsInputClass = 'h-8 w-full min-w-0 rounded-lg border border-border bg-panel px-2.5 text-[13px] text-text outline-none transition-colors placeholder:text-text-faint hover:border-border-hover focus-visible:border-accent/60 focus-visible:shadow-[var(--shadow-focus)] focus-visible:outline-none disabled:opacity-50';
+export const settingsInputClass = 'h-8 w-full min-w-0 rounded-lg border border-border bg-panel px-2.5 text-small text-text outline-none transition-colors placeholder:text-text-faint hover:border-border-hover focus-visible:border-accent/60 focus-visible:shadow-[var(--shadow-focus)] focus-visible:outline-none disabled:opacity-50';
 
 /** The dialog knows how to render settings, not which fields a built-in owns. */
 export function PluginSettings({ plugins, features, preferences, onFeatures, onPreferences, part }: Props) {
@@ -51,7 +51,7 @@ export function PluginSettings({ plugins, features, preferences, onFeatures, onP
           <div className="grid grid-cols-[112px_minmax(0,1fr)] items-center gap-x-3 gap-y-2" style={{ opacity: plugin.enabled(features) ? 1 : 0.55 }}>
             {plugin.settings.fields.map((field) => (
               <div key={field.id} className="contents">
-                <label htmlFor={field.id} className="text-[12.5px] text-text-secondary">{field.label}</label>
+                <label htmlFor={field.id} className="text-small text-text-secondary">{field.label}</label>
                 <input
                   id={field.id}
                   className={settingsInputClass}
@@ -59,12 +59,12 @@ export function PluginSettings({ plugins, features, preferences, onFeatures, onP
                   placeholder={field.placeholder}
                   disabled={!plugin.enabled(features)}
                   onChange={(event) => onFeatures(field.update(features, event.target.value))}
-                  style={field.monospace ? { fontFamily: fonts.mono, fontSize: 12.5 } : undefined}
+                  style={field.monospace ? { fontFamily: fonts.mono, fontSize: 13 } : undefined}
                 />
               </div>
             ))}
           </div>
-          <p className="mt-2.5 text-[11.5px] leading-[1.55] text-text-tertiary">
+          <p className="mt-2.5 text-meta leading-[1.55] text-text-tertiary">
             {plugin.settings.preview && (
               <span className="mb-0.5 block">
                 {plugin.settings.preview.label}{' '}

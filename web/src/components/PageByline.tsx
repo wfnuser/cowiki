@@ -10,11 +10,11 @@ export function PageByline({ name, editedAt }: { name?: string | null; editedAt?
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 20 }}>
       <AvatarBadge name={name} size={28} />
-      <span style={{ fontSize: 13.5, color: C.muted }}>{name}</span>
+      <span style={{ fontSize: 13, color: C.muted }}>{name}</span>
       {date && (
         <>
           <span style={{ color: C.line }}>·</span>
-          <span style={{ fontSize: 13.5, color: C.faint }}>Edited {date}</span>
+          <span style={{ fontSize: 13, color: C.faint }}>Edited {date}</span>
         </>
       )}
     </div>

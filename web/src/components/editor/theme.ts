@@ -70,6 +70,12 @@ export const editorTheme = EditorView.theme({
     paddingLeft: '1rem',
     color: C.ink2,
   },
+  // Callouts: the reader's rule colour and title (index.css, "Callouts").
+  '.cm-lp-quote:is(.cm-lp-callout-note, .cm-lp-callout-tip, .cm-lp-callout-warning, .cm-lp-callout-danger)': {
+    borderLeftColor: 'color-mix(in srgb, var(--callout) 70%, transparent)',
+  },
+  '.cm-lp-callout-title': { display: 'inline' },
+  '.cm-lp-callout-mark': { color: C.faint, fontWeight: '400' },
 
   // Fenced code blocks: the fence lines are the block's top and bottom
   // padding; their text shows only while the caret is inside.
@@ -151,16 +157,13 @@ export const editorTheme = EditorView.theme({
   },
 
   // Links
-  '.cm-lp-link': {
-    textDecoration: 'underline', textUnderlineOffset: '2px',
+  // Same as the reader's links (index.css, ".prose a").
+  '.cm-lp-link, .cm-lp-wikilink': {
+    textDecoration: 'underline 1px', textUnderlineOffset: '3px',
+    textDecorationColor: 'color-mix(in srgb, currentColor 30%, transparent)',
     cursor: 'pointer',
   },
-  '.cm-lp-wikilink': {
-    color: C.accent,
-    textDecoration: 'underline', textUnderlineOffset: '2px',
-    textDecorationColor: `color-mix(in srgb, ${C.accent} 40%, transparent)`,
-    cursor: 'pointer',
-  },
+  '.cm-lp-wikilink': { color: C.accent },
 
   // Autocomplete popup
   '.cm-tooltip.cm-tooltip-autocomplete': {
@@ -176,15 +179,15 @@ export const editorTheme = EditorView.theme({
   },
 });
 
-/** GitHub-light syntax colors for fenced code; not the UI palette. */
+/** Code colours from index.css (--color-syntax-*), with dark values; not the UI palette. */
 const syntax = {
-  keyword: '#cf222e',
-  string: '#0a3069',
-  comment: '#6e7781',
-  literal: '#0550ae',
-  type: '#953800',
-  fn: '#8250df',
-  tag: '#116329',
+  keyword: 'var(--color-syntax-keyword)',
+  string: 'var(--color-syntax-string)',
+  comment: 'var(--color-syntax-comment)',
+  literal: 'var(--color-syntax-literal)',
+  type: 'var(--color-syntax-type)',
+  fn: 'var(--color-syntax-fn)',
+  tag: 'var(--color-syntax-tag)',
 } as const;
 
 /** Inline markdown + code-token colors (GitHub-light-ish, warmed to match). */
@@ -198,7 +201,7 @@ export const editorHighlighting = syntaxHighlighting(HighlightStyle.define([
     color: C.accent, backgroundColor: C.rail,
     borderRadius: '3px', padding: '1px 4px',
   },
-  { tag: t.link, textDecoration: 'underline', textUnderlineOffset: '2px' },
+  { tag: t.link, textDecoration: 'underline 1px', textUnderlineOffset: '3px' },
   { tag: t.url, color: C.muted },
   // Markdown punctuation (visible only near the cursor)
   { tag: t.processingInstruction, color: C.faint },

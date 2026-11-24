@@ -78,7 +78,7 @@ export function AgentComposer({
         <textarea
           ref={textareaRef}
           aria-label="Message agent"
-          className="block w-full resize-none bg-transparent px-3 pb-1 pt-2.5 text-[13px] leading-[1.55] text-text outline-none placeholder:text-text-faint disabled:cursor-not-allowed"
+          className="block w-full resize-none bg-transparent px-3 pb-1 pt-2.5 text-small leading-[1.55] text-text outline-none placeholder:text-text-faint disabled:cursor-not-allowed"
           style={{ maxHeight: MAX_HEIGHT, minHeight: 44 }}
           placeholder={disabledReason ?? placeholder}
           value={text}
@@ -88,7 +88,7 @@ export function AgentComposer({
           onKeyDown={onKeyDown}
         />
         <div className="flex items-center gap-2 py-1.5 pl-3 pr-1.5">
-          <div className="min-w-0 flex-1 truncate text-[11px] text-text-tertiary">{meta}</div>
+          <div className="min-w-0 flex-1 truncate text-caption text-text-tertiary">{meta}</div>
           {busy ? (
             <button
               type="button"

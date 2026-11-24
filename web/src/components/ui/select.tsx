@@ -34,7 +34,7 @@ function SelectTrigger({
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
       className={cn(
-        "flex h-8 items-center justify-between gap-2 whitespace-nowrap rounded-lg border border-border bg-panel px-2.5 text-left text-[13px] text-text outline-none transition-colors hover:border-border-hover focus-visible:border-accent/60 focus-visible:shadow-[var(--shadow-focus)] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-text-faint [&>span]:line-clamp-1",
+        "flex h-8 items-center justify-between gap-2 whitespace-nowrap rounded-lg border border-border bg-panel px-2.5 text-left text-small text-text outline-none transition-colors hover:border-border-hover focus-visible:border-accent/60 focus-visible:shadow-[var(--shadow-focus)] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-text-faint [&>span]:line-clamp-1",
         className
       )}
       {...props}
@@ -87,7 +87,7 @@ function SelectLabel({
   return (
     <SelectPrimitive.Label
       data-slot="select-label"
-      className={cn("px-2 py-1.5 text-[11px] font-medium text-text-tertiary", className)}
+      className={cn("px-2 py-1.5 text-caption font-medium text-text-tertiary", className)}
       {...props}
     />
   )
@@ -102,7 +102,7 @@ function SelectItem({
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        "relative flex w-full cursor-pointer select-none items-center rounded-md py-1.5 pl-2 pr-8 text-[13px] text-text outline-none focus:bg-bg-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "relative flex w-full cursor-pointer select-none items-center rounded-md py-1.5 pl-2 pr-8 text-small text-text outline-none focus:bg-bg-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         className
       )}
       {...props}

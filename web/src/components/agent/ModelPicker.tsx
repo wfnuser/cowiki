@@ -45,7 +45,7 @@ export function ModelPicker({
             <DropdownMenuItem key={model.id} onSelect={() => onChange(model.id)} className="items-start gap-2">
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{model.name}</span>
-                {model.description && <span className="block truncate text-[11.5px] text-text-tertiary">{model.description}</span>}
+                {model.description && <span className="block truncate text-meta text-text-tertiary">{model.description}</span>}
               </span>
               <Check className={selected ? 'mt-0.5 size-3.5 shrink-0 text-accent' : 'mt-0.5 size-3.5 shrink-0 opacity-0'} aria-hidden />
             </DropdownMenuItem>

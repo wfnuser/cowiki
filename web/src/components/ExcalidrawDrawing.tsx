@@ -317,7 +317,7 @@ export function ExcalidrawReader({ title, body }: { title: string; body: string 
             </button>
           )}
         </div>
-        <p style={{ margin: '0 0 16px', fontSize: 12.5, color: C.muted }}>
+        <p style={{ margin: '0 0 16px', fontSize: 13, color: C.muted }}>
           Excalidraw drawing · read-only here; edit it in Obsidian&apos;s Excalidraw plugin.
         </p>
         {page.notes && (

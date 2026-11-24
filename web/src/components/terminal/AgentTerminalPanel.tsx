@@ -372,7 +372,7 @@ function AgentLaunchPage({
         {buttonLabel}
       </Button>
       {signedOut && !inlineFeedback && (
-        <p className="mt-2 max-w-72 text-[11px] leading-relaxed text-text-tertiary">
+        <p className="mt-2 max-w-72 text-caption leading-relaxed text-text-tertiary">
           Sign-in runs inside the official CLI. CoWiki does not read or store its credentials.
         </p>
       )}
@@ -410,7 +410,7 @@ function AgentPicker({
         >
           <Bot className="mr-2 size-4 text-accent" />
           <span>
-            <span className="block text-[11px] font-medium text-text-tertiary">Agent</span>
+            <span className="block text-caption font-medium text-text-tertiary">Agent</span>
             <span className="block text-xs font-semibold text-text">{agentDisplayName(selectedAgent)}</span>
           </span>
           <ChevronDown className="ml-auto size-3.5 text-text-tertiary" />
@@ -421,7 +421,7 @@ function AgentPicker({
         {SUPPORTED_AGENTS.map((agent) => (
           <DropdownMenuItem key={agent} onSelect={() => onSelectAgent(agent)}>
             <Bot /> {agentDisplayName(agent)}
-            {agent === selectedAgent && <span className="ml-auto text-[10px] text-accent">Selected</span>}
+            {agent === selectedAgent && <span className="ml-auto text-caption text-accent">Selected</span>}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -545,9 +545,9 @@ function NewViewMenu({
         )}
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-xs text-text-tertiary">Views</DropdownMenuLabel>
-        <DropdownMenuItem disabled><FileText /> Files <span className="ml-auto text-[10px]">Soon</span></DropdownMenuItem>
-        <DropdownMenuItem disabled><History /> History <span className="ml-auto text-[10px]">Soon</span></DropdownMenuItem>
-        <DropdownMenuItem disabled><SquareTerminal /> Terminal <span className="ml-auto text-[10px]">Soon</span></DropdownMenuItem>
+        <DropdownMenuItem disabled><FileText /> Files <span className="ml-auto text-caption">Soon</span></DropdownMenuItem>
+        <DropdownMenuItem disabled><History /> History <span className="ml-auto text-caption">Soon</span></DropdownMenuItem>
+        <DropdownMenuItem disabled><SquareTerminal /> Terminal <span className="ml-auto text-caption">Soon</span></DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -661,7 +661,7 @@ function AgentTerminalInstance({
       className="absolute inset-0 min-h-0 flex-col bg-text"
       style={{ display: active ? 'flex' : 'none' }}
     >
-      <div className="flex h-7 shrink-0 items-center border-b border-on-accent/8 px-2.5 text-[10px] text-on-accent/35">
+      <div className="flex h-7 shrink-0 items-center border-b border-on-accent/8 px-2.5 text-caption text-on-accent/35">
         <span>{status}</span>
         <span className="ml-2 shrink-0 text-on-accent/55">
           {tab.intent === 'login'

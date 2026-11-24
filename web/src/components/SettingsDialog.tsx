@@ -90,7 +90,7 @@ function KeyCard({
     <motion.div
       variants={itemFade}
       layout
-      className="group flex items-center justify-between rounded-lg border bg-card px-4 py-3 transition-colors hover:border-border-hover hover:bg-accent/30"
+      className="group flex items-center justify-between rounded-lg border bg-card px-4 py-3 transition-colors hover:border-border-hover"
     >
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-foreground">{keyInfo.name}</p>
@@ -114,7 +114,7 @@ function KeyCard({
       <Button
         variant="ghost"
         size="icon"
-        className="h-8 w-8 shrink-0 text-muted-foreground opacity-0 transition-all hover:bg-red-soft hover:text-red group-hover:opacity-100"
+        className="h-8 w-8 shrink-0 text-muted-foreground opacity-0 transition-[opacity,background-color,color] hover:bg-red-soft hover:text-red group-hover:opacity-100"
         disabled={isRevoking}
         onClick={() => onRevoke(keyInfo.id)}
       >
@@ -243,7 +243,7 @@ function CreateKeyDialog({
             transition={{ type: 'spring', stiffness: 400, damping: 30 }}
             className="space-y-4"
           >
-            <div className="relative overflow-hidden rounded-lg border border-border bg-gradient-to-br from-accent/5 to-accent/10 p-4">
+            <div className="relative overflow-hidden rounded-lg border border-border bg-bg-secondary p-4">
               <div className="relative space-y-3">
                 <p className="text-xs font-medium text-muted-foreground">
                   Your API Key — copy it now!
@@ -453,7 +453,7 @@ export function SettingsDialog({
       aria-current={page === id ? 'page' : undefined}
       onClick={() => setPage(id)}
       className={cn(
-        'flex h-7 w-full items-center rounded-md px-2.5 text-left text-[13px] transition-colors',
+        'flex h-7 w-full items-center rounded-md px-2.5 text-left text-small transition-colors',
         page === id ? 'bg-bg-active/70 font-medium text-text' : 'text-text-secondary hover:bg-bg-hover',
       )}
     >
@@ -471,7 +471,7 @@ export function SettingsDialog({
   if (onSpacePage && space && draft) {
     body = (
       <>
-        {!space.ready && <p role="status" className="pb-2 pt-1 text-[12.5px] text-text-tertiary">{space.configurationError || 'Loading Space settings…'}</p>}
+        {!space.ready && <p role="status" className="pb-2 pt-1 text-small text-text-tertiary">{space.configurationError || 'Loading Space settings…'}</p>}
         <fieldset disabled={!space.ready || saving || reloading} style={{ border: 0, padding: 0, margin: 0, display: 'contents' }}>
           {page === 'space-general' ? (
             <>
@@ -479,8 +479,8 @@ export function SettingsDialog({
                 <h3 className="settings-heading">Space</h3>
                 <div className="flex items-center gap-3">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13px] text-text">{space.name}</p>
-                    <p className="truncate text-[12px] text-text-tertiary">{space.place.label}{space.place.detail ? ` · ${space.place.detail}` : ''}</p>
+                    <p className="truncate text-small text-text">{space.name}</p>
+                    <p className="truncate text-meta text-text-tertiary">{space.place.label}{space.place.detail ? ` · ${space.place.detail}` : ''}</p>
                   </div>
                   {space.place.action && (
                     <Button size="sm" variant="outline" onClick={() => { onOpenChange(false); space.place.action!.onSelect(); }}>
@@ -491,7 +491,7 @@ export function SettingsDialog({
               </section>
               <section className="settings-section">
                 <h3 className="settings-heading mb-0">Modules</h3>
-                <p className="mb-1 text-[12px] leading-[1.5] text-text-tertiary">Turning a module off only hides it; your notes stay.</p>
+                <p className="mb-1 text-meta leading-[1.5] text-text-tertiary">Turning a module off only hides it; your notes stay.</p>
                 <div>
                   <PluginSettings plugins={space.plugins} features={draft} preferences={preferences} onFeatures={setDraft} onPreferences={onPreferencesChange} part="toggles" />
                   {MODULES.filter((module) => !space.plugins.some((plugin) => plugin.id === module.id)).map((module) => (
@@ -508,7 +508,7 @@ export function SettingsDialog({
               <section className="settings-section">
                 <h3 className="settings-heading">Templates</h3>
                 <div className="grid grid-cols-[112px_minmax(0,1fr)] items-center gap-x-3">
-                  <label htmlFor="templates-folder" className="text-[12.5px] text-text-secondary">Folder</label>
+                  <label htmlFor="templates-folder" className="text-small text-text-secondary">Folder</label>
                   <input
                     id="templates-folder"
                     className={settingsInputClass}
@@ -517,7 +517,7 @@ export function SettingsDialog({
                     onChange={(event) => setDraft((previous) => previous && ({ ...previous, templates: { folder: event.target.value } }))}
                   />
                 </div>
-                <p className="mt-2.5 text-[11.5px] leading-[1.55] text-text-tertiary">
+                <p className="mt-2.5 text-meta leading-[1.55] text-text-tertiary">
                   Pages in this folder are offered when you create a page. They support <code className="font-mono">{'{{title}}'}</code>, <code className="font-mono">{'{{date}}'}</code> and <code className="font-mono">{'{{time}}'}</code>.
                 </p>
               </section>
@@ -541,7 +541,7 @@ export function SettingsDialog({
                 role="radio"
                 aria-checked={theme === value}
                 onClick={() => { setTheme(value); setThemePreference(value); }}
-                className={`h-7 rounded-md px-2 text-[12.5px] transition-colors ${
+                className={`h-7 rounded-md px-2 text-small transition-colors ${
                   theme === value
                     ? 'bg-panel font-medium text-text shadow-[var(--shadow-chip)] ring-1 ring-border'
                     : 'text-text-tertiary hover:text-text-secondary'
@@ -554,7 +554,7 @@ export function SettingsDialog({
         </section>
         <section className="settings-section">
           <h3 className="settings-heading">Default Agent</h3>
-          <p className="-mt-1.5 mb-2.5 text-[12.5px] text-text-tertiary">New sessions start with it. The Agent you use last becomes the default.</p>
+          <p className="-mt-1.5 mb-2.5 text-small text-text-tertiary">New sessions start with it. The Agent you use last becomes the default.</p>
           <div className="grid grid-cols-2 gap-1.5">
             {SUPPORTED_AGENTS.map((agent) => {
               const selected = defaultAgent === agent;
@@ -567,12 +567,12 @@ export function SettingsDialog({
                   onClick={() => onDefaultAgentChange(agent)}
                   className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors ${
                     selected
-                      ? 'border-accent/40 bg-accent-soft/60 text-text'
+                      ? 'border-text-tertiary bg-bg-active/60 text-text'
                       : 'border-border-soft text-text-secondary hover:bg-bg-hover'
                   }`}
                 >
-                  <span className="text-[13px] font-medium">{definition.displayName}</span>
-                  {selected && <Check className="size-3.5 text-accent" aria-hidden />}
+                  <span className="text-small font-medium">{definition.displayName}</span>
+                  {selected && <Check className="size-3.5 text-text" aria-hidden />}
                 </button>
               );
             })}
@@ -685,16 +685,16 @@ export function SettingsDialog({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="top-1/2 flex h-[min(620px,calc(100vh-3rem))] -translate-y-1/2 flex-row gap-0 overflow-hidden p-0 sm:max-w-[800px]">
           <nav aria-label="Settings" className="flex w-[196px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border-soft bg-bg-secondary px-2 py-4">
-            <DialogTitle className="px-2.5 pb-3 text-[13px] font-semibold text-text">Settings</DialogTitle>
+            <DialogTitle className="px-2.5 pb-3 text-small font-semibold text-text">Settings</DialogTitle>
             {space && (
               <>
-                <p className="truncate px-2.5 pb-1 text-[11.5px] font-medium text-text-tertiary" title={space.name}>{space.name}</p>
+                <p className="truncate px-2.5 pb-1 text-meta font-medium text-text-tertiary" title={space.name}>{space.name}</p>
                 {navItem('space-general', 'General')}
                 {pluginPages.map((plugin) => navItem(`space-plugin:${plugin.id}`, plugin.settings!.title))}
                 <div className="h-4" />
               </>
             )}
-            <p className="px-2.5 pb-1 text-[11.5px] font-medium text-text-tertiary">App</p>
+            <p className="px-2.5 pb-1 text-meta font-medium text-text-tertiary">App</p>
             {availableTabs.includes('client') && navItem('app-general', 'General')}
             {navItem('account', 'Account')}
             {availableTabs.includes('keys') && navItem('keys', 'API Keys')}
@@ -702,8 +702,8 @@ export function SettingsDialog({
 
           <div className="flex min-w-0 flex-1 flex-col">
             <DialogHeader className="shrink-0 gap-0.5 px-7 pb-2 pt-5 pr-12">
-              <h2 className="text-[16px] font-semibold leading-6 text-text">{title}</h2>
-              <DialogDescription className="text-[12px] leading-[1.5] text-text-tertiary">
+              <h2 className="text-lead font-semibold leading-6 text-text">{title}</h2>
+              <DialogDescription className="text-meta leading-[1.5] text-text-tertiary">
                 {onSpacePage && space
                   ? <>Applies to everyone in <span className="font-medium text-text-secondary">{space.name}</span>.</>
                   : 'Only for you, on this computer.'}
@@ -713,8 +713,8 @@ export function SettingsDialog({
             {onSpacePage && space && (dirty || spaceError || space.configurationError) && (
               <div className="flex shrink-0 items-center gap-2 border-t border-border-soft bg-panel px-7 py-3">
                 {spaceError
-                  ? <p role="alert" className="min-w-0 flex-1 truncate text-[12.5px] text-red" title={spaceError}>{spaceError}</p>
-                  : <span className="flex-1 text-[12.5px] text-text-tertiary">{dirty ? 'Unsaved changes' : ''}</span>}
+                  ? <p role="alert" className="min-w-0 flex-1 truncate text-small text-red" title={spaceError}>{spaceError}</p>
+                  : <span className="flex-1 text-small text-text-tertiary">{dirty ? 'Unsaved changes' : ''}</span>}
                 {(space.configurationError || spaceError) && <Button size="sm" variant="outline" onClick={() => { void reloadSpace(); }} disabled={saving || reloading}>{reloading ? 'Reloading…' : 'Reload settings'}</Button>}
                 {dirty && <Button size="sm" variant="outline" onClick={() => setDraft(space.features)} disabled={saving || reloading}>Discard</Button>}
                 {dirty && <Button size="sm" onClick={() => { void saveSpace(); }} disabled={saving || reloading || !space.ready}>{saving ? 'Saving…' : 'Save'}</Button>}

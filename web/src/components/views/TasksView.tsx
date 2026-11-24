@@ -200,21 +200,21 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
 
       <ViewTabs label="Task lists" tabs={tabs.map(([id, label]) => ({ id, label, count: counts[id] }))} value={filter} onChange={setFilter} />
 
-      {error && <div role="alert" className="mb-3 text-[12.5px] text-red">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
 
       {filter !== 'week' && filter !== 'done' && (
-        <form onSubmit={add} className="group mb-2 flex items-center gap-2 rounded-md px-2 py-1 transition-colors focus-within:bg-bg-hover/60 hover:bg-bg-hover/60">
-          <Plus className="size-4 shrink-0 text-text-faint" aria-hidden />
+        <form onSubmit={add} className="group -mx-2 mb-3 flex items-center gap-2.5 rounded-md px-2 py-1 transition-colors focus-within:bg-bg-hover/60 hover:bg-bg-hover/60">
+          <Plus className="size-[15px] shrink-0 text-text-faint" aria-hidden />
           <input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder="Add a task"
             aria-label="New task"
-            className="h-7 min-w-0 flex-1 bg-transparent text-[13.5px] text-text outline-none placeholder:text-text-faint focus-visible:outline-none"
+            className="h-7 min-w-0 flex-1 bg-transparent text-body text-text outline-none placeholder:text-text-faint focus-visible:outline-none"
           />
           {(draft.trim() || draftDue) && <DatePicker value={draftDue} onChange={setDraftDue} label="Due date" />}
           {draft.trim() && (
-            <button type="submit" disabled={adding} className="h-7 shrink-0 rounded-md px-2.5 text-[12px] font-medium text-accent transition-colors hover:bg-accent-soft disabled:opacity-60">
+            <button type="submit" disabled={adding} className="h-7 shrink-0 rounded-md px-2.5 text-meta font-medium text-accent transition-colors hover:bg-accent-soft disabled:opacity-60">
               {adding ? 'Adding…' : 'Add'}
             </button>
           )}
@@ -222,7 +222,7 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
       )}
 
       {loading ? (
-        <p className="flex items-center gap-2 py-10 text-[12.5px] text-text-tertiary"><LoaderCircle className="size-3.5 animate-spin" /> Collecting tasks…</p>
+        <p className="flex items-center gap-2 py-10 text-small text-text-tertiary"><LoaderCircle className="size-3.5 animate-spin" /> Collecting tasks…</p>
       ) : filter === 'week' ? (
         <div>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -251,7 +251,7 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                     dropTarget === column.status ? 'bg-accent-soft/60 ring-1 ring-inset ring-accent/40' : 'bg-bg-secondary/70',
                   )}
                 >
-                  <h2 className="mb-1.5 flex items-center gap-1.5 px-1.5 pt-0.5 text-[12.5px] font-medium text-text-secondary">
+                  <h2 className="mb-1.5 flex items-center gap-1.5 px-1.5 pt-0.5 text-small font-medium text-text-secondary">
                     {column.title}
                     <span className="font-normal tabular-nums text-text-faint">{items.length}</span>
                   </h2>
@@ -279,7 +279,7 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                             aria-label={column.status === 'done' ? `Reopen ${task.text}` : `Complete ${task.text}`}
                             className="mt-[3px]"
                           />
-                          <span className={cn('min-w-0 flex-1 text-[13px] leading-[1.45] [overflow-wrap:anywhere]', column.status === 'done' ? 'text-text-tertiary' : 'text-text')}>
+                          <span className={cn('min-w-0 flex-1 text-small leading-[1.45] [overflow-wrap:anywhere]', column.status === 'done' ? 'text-text-tertiary' : 'text-text')}>
                             {readable(task.text)}
                           </span>
                           {column.status === 'todo' && (
@@ -288,7 +288,7 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                             </button>
                           )}
                         </div>
-                        <div className="mt-1 flex gap-2 pl-[23px] text-[11px] text-text-tertiary">
+                        <div className="mt-1 flex gap-2 pl-[23px] text-caption text-text-tertiary">
                           <button type="button" onClick={() => onOpenPage(task.path)} className="max-w-40 truncate hover:text-text-secondary" title={task.path}>
                             {pageLabel(task.path)}
                           </button>
@@ -303,14 +303,14 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
           </div>
         </div>
       ) : sections.every((section) => section.items.length === 0) ? (
-        <p className="py-10 text-center text-[12.5px] text-text-tertiary">
+        <p className="py-10 text-center text-small text-text-tertiary">
           {filter === 'today' ? 'Nothing due today.' : filter === 'done' ? 'Nothing finished yet.' : 'No tasks here.'}
         </p>
       ) : (
         sections.filter((section) => section.items.length > 0).map((section) => (
           <div key={section.title ?? 'all'} className="mb-5">
             {section.title && (
-              <h2 className={cn('mb-1 px-2 text-[12.5px] font-medium', section.tone === 'red' ? 'text-red' : 'text-text-secondary')}>
+              <h2 className={cn('mb-1.5 text-small font-semibold', section.tone === 'red' ? 'text-red' : 'text-text')}>
                 {section.title} <span className="font-normal tabular-nums text-text-faint">{section.items.length}</span>
               </h2>
             )}
@@ -319,14 +319,14 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                 <button
                   type="button"
                   onClick={() => onOpenPage(path)}
-                  className="group flex max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary"
+                  className="group -mx-2 flex max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-meta text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary"
                   title={path}
                 >
                   <FileText className="size-3.5 shrink-0" aria-hidden />
                   <span className="truncate">{pageLabel(path)}</span>
                   <ArrowUpRight className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
                 </button>
-                <ul className="m-0 list-none p-0">
+                <ul className="-mx-2 m-0 list-none p-0">
                   {items.map((task) => {
                     const key = taskKey(task);
                     const day = task.due ?? task.scheduled ?? task.journalDate;
@@ -339,10 +339,10 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                           disabled={pending.has(key)}
                           onChange={() => { void toggle(task); }}
                           aria-label={done ? `Reopen ${task.text}` : `Complete ${task.text}`}
-                          className="mt-[3px]"
+                          className="mt-[3.5px]"
                         />
                         <span className={cn(
-                          'min-w-0 flex-1 text-[13.5px] leading-[1.5] [overflow-wrap:anywhere]',
+                          'min-w-0 flex-1 text-body leading-[22px] [overflow-wrap:anywhere]',
                           done ? 'text-text-tertiary' : 'text-text',
                           task.status === 'cancelled' && 'line-through',
                         )}>
@@ -351,11 +351,11 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                           )}
                           {readable(task.text)}
                         </span>
-                        {task.status === 'doing' && <span className="mt-0.5 flex shrink-0 items-center gap-1 text-[11.5px] text-blue"><span className="size-1.5 rounded-full bg-current" />Doing</span>}
+                        {task.status === 'doing' && <span className="mt-[3px] flex shrink-0 items-center gap-1 text-meta leading-4 text-blue"><span className="size-1.5 rounded-full bg-current" />Doing</span>}
                         {done && task.doneDate ? (
-                          <span className="mt-0.5 shrink-0 text-[11.5px] text-text-faint">{relativeDay(task.doneDate, today)}</span>
+                          <span className="mt-[3px] shrink-0 text-meta leading-4 text-text-faint">{relativeDay(task.doneDate, today)}</span>
                         ) : day && (filter !== 'today' || day !== today) && (
-                          <span className={cn('mt-0.5 shrink-0 text-[11.5px]', !done && day < today ? 'text-red' : 'text-text-tertiary')}>
+                          <span className={cn('mt-[3px] shrink-0 text-meta leading-4 tabular-nums', !done && day < today ? 'text-red' : 'text-text-tertiary')}>
                             {relativeDay(day, today)}
                           </span>
                         )}

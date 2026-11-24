@@ -51,7 +51,7 @@ test('code is left alone and line count never changes', () => {
   assert.equal(lines[4], '');
   assert.equal(lines[5], '');
   assert.equal(lines[6], 'Visible **highlight** text');
-  assert.equal(lines[7], '> **⚠️ Careful**');
+  assert.equal(lines[7], '> **\u2063warning\u2063 Careful**');
   assert.equal(lines[8], '> body');
 });
 

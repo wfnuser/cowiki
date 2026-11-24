@@ -91,7 +91,7 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
               className="mb-4"
               title="Could not update history"
               description={error}
-              action={<button type="button" onClick={() => { void refresh(); }} className="text-[12px] font-semibold text-red">Retry</button>}
+              action={<button type="button" onClick={() => { void refresh(); }} className="text-meta font-semibold text-red">Retry</button>}
             />
           )}
 
@@ -126,7 +126,7 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
                 })}
               </ol>
               {spaceHistory.checkpoints.length === 0 && (
-                <p className="m-0 pl-[21px] text-[12.5px] text-text-tertiary">No checkpoints yet.</p>
+                <p className="m-0 pl-[21px] text-small text-text-tertiary">No checkpoints yet.</p>
               )}
             </>
           )}

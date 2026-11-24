@@ -86,6 +86,19 @@ Notifications, Review details, Cloud pages) is built the same way, with
   something is due; with nothing to study the view says *All done for
   today.* — never a disabled button.
 
+- **Callouts** (`> [!tip] Title`, `lib/callouts.ts`) look the same in the
+  reader and the editor: lucide's icon (drawn as a CSS mask) and a bold
+  title in the callout's colour, and a quote rule in that colour. No fill.
+  Families: note/info (blue), tip/success (green), question/warning (amber),
+  danger/failure/bug (red), quote/example (grey). In the editor `[!tip]`
+  shows again while the caret is on the line.
+- **Links in text** take a thin underline at 30% that firms up on hover;
+  page links are accent, web links ink. **Code** is highlighted with the
+  `--color-syntax-*` tokens, which have dark values.
+- **Diffs** label a hunk by the lines it shows ("Lines 4–6"); the raw `@@`
+  header is the tooltip. A file says *Added* or *Deleted* in green or red; an
+  edited file says nothing more.
+
 ## Start page, editing and the top bar
 
 - **No Wiki entry.** The page tree already reaches every page. Every Space
@@ -146,6 +159,10 @@ one muted line, then *Continue with GitHub* (ink) and *Continue locally*
 
 ## Navigation
 
+- Sidebar entries use `--color-text-nav`, a notch quieter than text, so
+  the page leads; hover and the open entry are ink. The Space rail shows
+  each Space as a muted colour tile; the open one is marked by a bar at the
+  rail's edge, not a ring.
 - The open item in the left navigation is a quiet grey row
   (`bg-bg-active/70`, ink text) with only its icon in the accent, the same
   treatment as the open page in the tree. No orange fills.
@@ -281,6 +298,29 @@ Tailwind `font-mono` and `fonts.mono` in `lib/design.ts` share that stack. `font
 keeps the concrete family list because xterm paints on a canvas and cannot resolve
 `var(--font-mono)`.
 
+### Type scale
+
+Interface text uses five sizes, as Tailwind classes from `index.css`
+(`--text-*`), plus display sizes for titles. Decided 2026-11-24 after an
+audit found fifteen sizes (10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 14.5,
+15, 15.5, 16, 17, 18px) drifting between screens.
+
+| Class | Size | Use |
+|-------|------|-----|
+| `text-caption` | 11px | Counts in badges, keyboard hints |
+| `text-meta` | 12px | Times, sizes, a row's detail, column heads |
+| `text-small` | 13px | Secondary sentences: descriptions, errors, empty states, menu text, section headings (600) |
+| `text-body` | 14px | Rows, inputs, buttons, the sidebar |
+| `text-lead` | 16px | Dialog titles, the search field, a flashcard face |
+| `text-title` | 22px | View titles (`.view-title`) |
+
+Larger sizes are display type (journal dates 30px, page titles 36px, the
+welcome screen) and use the serif. Page and journal text uses the
+`--doc-*` tokens, not this scale. Line height comes from the element
+(`leading-*`); a size class does not set one. Hierarchy comes from weight
+and colour (ink, secondary, tertiary, faint) before size: a section heading
+is 13px semibold ink, not a bigger size.
+
 ### Brand Mark
 ```html
 <span style="font-family: var(--font-serif); font-weight: 700;">
@@ -353,7 +393,35 @@ replacement (`<select>`, `type="number"`, `type="date"` outside
 `components/ui`), when a new shadow is written as a raw `rgba()` instead of a
 `--shadow-*` token, or when the base border colour rule is missing.
 
+It fails when interface text leaves the type scale (an arbitrary
+`text-[13.5px]`, an inline `fontSize: 15`, a CSS `font-size: 12.5px`), and
+when a transition animates `all` instead of naming its properties.
+
 It also fails when a colour token has no dark value, when a component sets
 text in ALL CAPS (`uppercase`, `textTransform: 'uppercase'`), or when a tool
 view titles itself with `.page-title` or a serif font instead of
 `ViewHeader` / `.view-title`.
+
+## Reviewing the whole app
+
+`tests/browser/screens.spec.ts` photographs every main screen (Home,
+Journals, a page read and edited, Tasks, Flashcards and a study card,
+Reviews and a diff, History, Links, search, both Settings groups, the Space
+menu) in light and dark with fixed demo data. It is skipped in normal runs;
+capture a gallery before and after a polish pass and compare:
+
+```sh
+SCREENS=/tmp/cowiki-screens npx playwright test screens --project=chromium
+```
+
+### Sources for this system
+
+The 2026-11-24 pass checked the app against:
+[Refactoring UI](https://refactoringui.com/) (hierarchy by weight and
+colour, fewer borders, labels last), Vercel's
+[Web Interface Guidelines](https://github.com/vercel-labs/web-interface-guidelines)
+(tabular numbers, no `transition: all`, visible focus, every state designed),
+Linear's [calmer interface refresh](https://linear.app/now/behind-the-latest-design-refresh)
+(navigation a notch dimmer than content, fewer and softer separators, no
+coloured icon backgrounds) and [Radix Themes](https://www.radix-ui.com/themes/docs/theme/typography)
+(a fixed type scale as tokens).

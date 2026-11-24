@@ -77,15 +77,15 @@ export function SpaceStatusMenu({
         <div className="flex gap-2.5 px-2 pb-2 pt-1.5">
           <Place size={14} className="mt-0.5 shrink-0 text-text-tertiary" />
           <span className="min-w-0">
-            <span className="block text-[13px] font-medium text-text">{context.label}</span>
-            <span className="block text-[12px] leading-4 text-text-tertiary">{context.detail}</span>
+            <span className="block text-small font-medium text-text">{context.label}</span>
+            <span className="block text-meta leading-4 text-text-tertiary">{context.detail}</span>
           </span>
         </div>
 
         {versions && (
           <>
             <DropdownMenuSeparator className="my-1" />
-            <DropdownMenuLabel className="px-2 pb-1 pt-1.5 text-[12px] font-medium text-text-tertiary">
+            <DropdownMenuLabel className="px-2 pb-1 pt-1.5 text-meta font-medium text-text-tertiary">
               Version
             </DropdownMenuLabel>
             <VersionItem
@@ -112,7 +112,7 @@ export function SpaceStatusMenu({
                 onSelect={() => onSelect({ kind: 'agent', changeId: change.id })}
               />
             ))}
-            <DropdownMenuItem onSelect={onSeeReviews} className="text-[13px] text-text-secondary">
+            <DropdownMenuItem onSelect={onSeeReviews} className="text-small text-text-secondary">
               <Rows3 />
               See all in Reviews
             </DropdownMenuItem>
@@ -122,7 +122,7 @@ export function SpaceStatusMenu({
         {cloudAction && (
           <>
             <DropdownMenuSeparator className="my-1" />
-            <DropdownMenuItem onSelect={cloudAction.onSelect} className="text-[13px] text-text-secondary">
+            <DropdownMenuItem onSelect={cloudAction.onSelect} className="text-small text-text-secondary">
               <Cloud />
               {cloudAction.label}
             </DropdownMenuItem>
@@ -150,8 +150,8 @@ function VersionItem({
     <DropdownMenuItem onSelect={onSelect} className="gap-2.5 px-2 py-1.5">
       <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: color }} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px] font-medium text-text">{label}</span>
-        <span className="block truncate text-[12px] text-text-tertiary">{meta}</span>
+        <span className="block truncate text-small font-medium text-text">{label}</span>
+        <span className="block truncate text-meta text-text-tertiary">{meta}</span>
       </span>
       {selected ? <Check size={14} style={{ color: C.accent }} /> : <span style={{ width: 14 }} />}
     </DropdownMenuItem>
@@ -167,7 +167,7 @@ const triggerStyle: React.CSSProperties = {
   border: 'none',
   borderRadius: 7,
   color: C.ink2,
-  fontSize: 12.5,
+  fontSize: 13,
   fontWeight: 500,
   cursor: 'pointer',
 };

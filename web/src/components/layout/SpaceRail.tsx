@@ -90,7 +90,6 @@ export function SpaceRail<T extends SpaceRailItem>({
           workspace={ws}
           active={activeWorkspaceId === ws.id}
           onClick={() => onSelectWorkspace(ws)}
-          color={color}
           style={{
             background: color,
             color: C.onAccent,
@@ -106,10 +105,10 @@ export function SpaceRail<T extends SpaceRailItem>({
             onClick={onCreateWorkspace}
             aria-label={createLabel}
             style={{
-              width: 42, height: 42, borderRadius: 13, border: `1.5px dashed ${C.faint}`,
+              width: 40, height: 40, borderRadius: 12, border: `1px dashed ${C.faint}`,
               background: 'transparent', cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              marginTop: 2, color: C.faint, transition: 'all 0.15s',
+              marginTop: 2, color: C.faint, transition: 'border-color 0.15s, color 0.15s',
             }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.muted; e.currentTarget.style.color = C.muted; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.faint; e.currentTarget.style.color = C.faint; }}
@@ -135,20 +134,20 @@ export function SpaceRail<T extends SpaceRailItem>({
               <button
                 style={{
                   width: 34, height: 34, borderRadius: 10,
-                  background: showCloudActions ? C.sidebar : C.accentSoft,
-                  border: showCloudActions ? `1px solid ${C.line}` : `1px solid color-mix(in srgb, ${C.accent} 25%, transparent)`,
+                  background: C.sidebar,
+                  border: `1px solid ${C.line}`,
                   cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 13, fontWeight: 600, color: showCloudActions ? C.ink2 : C.accent,
+                  fontSize: 13, fontWeight: 600, color: showCloudActions ? C.ink2 : C.muted,
                   transition: 'background 0.15s, border-color 0.15s',
                 }}
                 onMouseEnter={(e) => {
                   if (showCloudActions) return;
-                  e.currentTarget.style.background = C.accentSoftHover;
+                  e.currentTarget.style.background = C.rail;
                   e.currentTarget.style.borderColor = `color-mix(in srgb, ${C.accent} 40%, transparent)`;
                 }}
                 onMouseLeave={(e) => {
                   if (showCloudActions) return;
-                  e.currentTarget.style.background = C.accentSoft;
+                  e.currentTarget.style.background = C.sidebar;
                   e.currentTarget.style.borderColor = `color-mix(in srgb, ${C.accent} 25%, transparent)`;
                 }}
               >
@@ -217,14 +216,12 @@ function SpaceTile({
   onClick,
   style,
   icon,
-  color,
 }: {
   workspace: SpaceRailItem;
   active: boolean;
   onClick: () => void;
   style: React.CSSProperties;
   icon?: React.ReactNode;
-  color: string;
 }) {
   return (
     <Tooltip>
@@ -234,16 +231,16 @@ function SpaceTile({
           {active && (
             <div style={{
               position: 'absolute', left: -11, top: '50%', transform: 'translateY(-50%)',
-              width: 3.5, height: 20, borderRadius: 3, background: color,
+              width: 3, height: 20, borderRadius: 3, background: C.ink2,
             }} />
           )}
           <button
             onClick={onClick}
             style={{
-              width: 42, height: 42, borderRadius: 13, border: 'none', cursor: 'pointer',
+              width: 40, height: 40, borderRadius: 12, border: 'none', cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 15, fontWeight: 700, transition: 'all 0.15s',
-              boxShadow: active ? `0 0 0 2px ${C.rail}, 0 0 0 4px ${color}` : 'none',
+              fontSize: 14, fontWeight: 650, transition: 'opacity 0.15s',
+              opacity: active ? 1 : 0.7,
               ...style,
             }}
           >
@@ -276,7 +273,7 @@ function NotificationBell({ unread, onOpen }: { unread: number; onOpen: () => vo
             <span style={{
               position: 'absolute', top: -2, right: -2,
               minWidth: 16, height: 16, borderRadius: 8,
-              background: C.accent, color: C.onAccent, fontSize: 10,
+              background: C.accent, color: C.onAccent, fontSize: 11,
               fontWeight: 600, display: 'flex', alignItems: 'center',
               justifyContent: 'center', padding: '0 4px',
             }}>

@@ -3,7 +3,7 @@ import { isComposingKey } from '@/lib/ime';
 import { FileText, Search, Sparkles, CornerDownLeft, X } from 'lucide-react';
 import { searchWorkspace, type SearchResponse } from '../api';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { C, fonts } from '@/lib/design';
+import { C } from '@/lib/design';
 import { isDesktopClient } from '@/runtime';
 import { conceptIdFromPath, conceptPath, isSearchableConceptPath } from '@/lib/okf-pages';
 
@@ -25,7 +25,7 @@ function Highlight({ text, q }: { text: string; q: string }) {
     parts.push(
       <mark
         key={k++}
-        style={{ background: C.accentSoft, color: C.accent, borderRadius: 3, padding: '0 1px' }}
+        style={{ background: 'transparent', color: C.ink, fontWeight: 600 }}
       >
         {text.slice(at, at + needle.length)}
       </mark>
@@ -203,7 +203,7 @@ export function SearchModal({
             placeholder={`Search in ${workspaceName}…`}
             style={{
               flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
-              fontSize: 15.5, color: C.ink, fontFamily: 'inherit',
+              fontSize: 16, color: C.ink, fontFamily: 'inherit',
             }}
           />
           {q && (
@@ -243,23 +243,17 @@ export function SearchModal({
                     onMouseEnter={() => setSel(i)}
                     onMouseDown={(e) => { e.preventDefault(); pick(row); }}
                     style={{
-                      display: 'flex', alignItems: 'flex-start', gap: 12,
-                      margin: '0 8px', padding: '9px 10px', borderRadius: 9, cursor: 'pointer',
-                      background: sel === i ? C.accentSoft : 'transparent',
-                      transition: 'background 0.06s',
+                      display: 'flex', alignItems: 'flex-start', gap: 10,
+                      margin: '0 8px', padding: '8px 10px', borderRadius: 6, cursor: 'pointer',
+                      background: sel === i ? C.rail : 'transparent',
                     }}
                   >
-                    <div style={{
-                      width: 30, height: 30, borderRadius: 8, flexShrink: 0, marginTop: 1,
-                      background: sel === i ? C.accent : C.rail,
-                      color: sel === i ? C.onAccent : C.muted,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    }}>
-                      {row.kind === 'semantic' ? <Sparkles size={14} /> : <FileText size={14} />}
+                    <div style={{ display: 'flex', flexShrink: 0, marginTop: 2, color: sel === i ? C.ink2 : C.muted }}>
+                      {row.kind === 'semantic' ? <Sparkles size={16} /> : <FileText size={16} />}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
-                        fontSize: 14, fontWeight: 550, color: C.ink, lineHeight: 1.35,
+                        fontSize: 14, fontWeight: 500, color: C.ink, lineHeight: 1.45,
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         display: 'flex', alignItems: 'center', gap: 6,
                       }}>
@@ -267,24 +261,20 @@ export function SearchModal({
                           <Highlight text={row.title} q={q} />
                         </span>
                         {row.kind === 'semantic' && (row.source === 'draft' || row.source === 'graph' || row.source === 'vector') && (
-                          <span style={{
-                            fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 999,
-                            background: C.accentSoft, color: C.accent, flexShrink: 0,
-                            border: `1px solid ${sel === i ? C.accent : 'transparent'}`,
-                          }}>
+                          <span style={{ fontSize: 12, fontWeight: 400, color: C.faint, flexShrink: 0 }}>
                             {row.source === 'graph' ? 'linked' : row.source === 'vector' ? 'related' : row.source}
                           </span>
                         )}
                       </div>
                       <div style={{
-                        fontSize: 12.5, color: C.muted, marginTop: 2, lineHeight: 1.4,
+                        fontSize: 13, color: C.muted, marginTop: 2, lineHeight: 1.4,
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       }}>
                         {row.kind === 'keyword'
                           ? (row.titleMatch
-                              ? <span style={{ fontFamily: fonts.mono, fontSize: 11.5, color: C.faint }}>{row.slug}</span>
+                              ? <span style={{ fontSize: 12, color: C.faint }}>{row.path ?? row.slug}</span>
                               : <Highlight text={row.snippet} q={q} />)
-                          : (row.summary || <span style={{ fontFamily: fonts.mono, fontSize: 11.5, color: C.faint }}>{row.slug}</span>)}
+                          : (row.summary || <span style={{ fontSize: 12, color: C.faint }}>{row.slug}</span>)}
                       </div>
                     </div>
                     {sel === i && (
@@ -296,7 +286,7 @@ export function SearchModal({
               {semLoading && semStart === -1 && (
                 <>
                   {sectionLabel(<Sparkles size={11} />, 'Semantic')}
-                  <div style={{ padding: '4px 18px 8px', fontSize: 12.5, color: C.faint }}>Searching…</div>
+                  <div style={{ padding: '4px 18px 8px', fontSize: 13, color: C.faint }}>Searching…</div>
                 </>
               )}
             </>
@@ -307,12 +297,11 @@ export function SearchModal({
         <div style={{
           display: 'flex', alignItems: 'center', gap: 14, padding: '8px 18px',
           borderTop: `1px solid ${C.lineSoft}`, background: C.bg,
-          fontSize: 11.5, color: C.faint,
+          fontSize: 12, color: C.faint,
         }}>
           <span><Kbd>↑</Kbd><Kbd>↓</Kbd> select</span>
           <span><Kbd>↵</Kbd> open</span>
           <span><Kbd>esc</Kbd> close</span>
-          <span style={{ marginLeft: 'auto' }}>Searches your view: drafts + published</span>
         </div>
       </DialogContent>
     </Dialog>
@@ -324,7 +313,7 @@ function Empty({ children }: { children: React.ReactNode }) {
   return (
     <div style={{
       height: '100%', minHeight: 200, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      color: C.faint, fontSize: 13.5, padding: '0 18px', textAlign: 'center',
+      color: C.faint, fontSize: 13, padding: '0 18px', textAlign: 'center',
     }}>
       {children}
     </div>
@@ -337,7 +326,7 @@ function Kbd({ children }: { children: React.ReactNode }) {
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       minWidth: 16, height: 16, padding: '0 4px', marginRight: 3,
       background: C.panel, border: `1px solid ${C.line}`, borderBottomWidth: 2,
-      borderRadius: 4, fontSize: 10.5, fontFamily: 'inherit', color: C.muted,
+      borderRadius: 4, fontSize: 11, fontFamily: 'inherit', color: C.muted,
     }}>
       {children}
     </kbd>

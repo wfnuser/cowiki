@@ -255,7 +255,7 @@ function CloudReviewDetail({
       </div>
 
       {pullRequest.body && (
-        <p style={{ margin: '18px 0 0 28px', color: C.ink2, fontSize: 13.5, lineHeight: 1.6 }}>
+        <p style={{ margin: '18px 0 0 28px', color: C.ink2, fontSize: 13, lineHeight: 1.6 }}>
           {pullRequest.body}
         </p>
       )}
@@ -297,7 +297,7 @@ function ActionButton({
         background: subtle ? C.panel : C.ink,
         color: subtle ? C.muted : C.onAccent,
         cursor: disabled ? 'default' : 'pointer',
-        fontSize: 12.5,
+        fontSize: 13,
         fontWeight: 650,
         opacity: disabled ? 0.55 : 1,
         whiteSpace: 'nowrap',
@@ -315,7 +315,7 @@ const statusPillStyle: React.CSSProperties = {
   borderRadius: 999,
   background: C.panel,
   color: C.muted,
-  fontSize: 11.5,
+  fontSize: 12,
   fontWeight: 650,
 };
 

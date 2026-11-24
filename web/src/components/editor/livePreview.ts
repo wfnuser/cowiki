@@ -5,6 +5,8 @@ import type { Range } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import type { SyntaxNode } from '@lezer/common';
 
+import { CALLOUT_LINE, calloutOf } from '@/lib/callouts';
+
 /** Editor-level callbacks the host app provides (wikilink navigation). */
 export interface LivePreviewConfig {
   onWikilink?: (target: string) => void;
@@ -43,6 +45,33 @@ class CheckboxWidget extends WidgetType {
   }
   eq(other: CheckboxWidget) { return other.checked === this.checked; }
   ignoreEvent() { return false; }
+}
+
+/** A callout's icon, the same mask the reader draws (index.css, ".callout-icon"). */
+class CalloutIconWidget extends WidgetType {
+  icon: string;
+  constructor(icon: string) { super(); this.icon = icon; }
+  toDOM() {
+    const span = document.createElement('span');
+    span.className = 'callout-icon cm-lp-callout-icon';
+    span.dataset.icon = this.icon;
+    span.setAttribute('aria-hidden', 'true');
+    return span;
+  }
+  eq(other: CalloutIconWidget) { return other.icon === this.icon; }
+}
+
+/** A callout written without a title shows its type ("Tip"), as the reader does. */
+class CalloutTitleWidget extends WidgetType {
+  title: string;
+  constructor(title: string) { super(); this.title = title; }
+  toDOM() {
+    const span = document.createElement('span');
+    span.className = 'callout-title cm-lp-callout-title';
+    span.textContent = this.title;
+    return span;
+  }
+  eq(other: CalloutTitleWidget) { return other.title === this.title; }
 }
 
 class HrWidget extends WidgetType {
@@ -220,6 +249,8 @@ function buildDecorations(view: EditorView): Built {
 
           case 'Link': {
             if (reveal(nFrom, nTo)) return;
+            // `[!tip]` opening a callout is not a link (see Blockquote).
+            if (state.sliceDoc(nFrom, nFrom + 2) === '[!' && inside(nodeRef.node, new Set(['Blockquote']))) return false;
             const node = nodeRef.node;
             const marks = node.getChildren('LinkMark');
             const url = node.getChild('URL');
@@ -281,9 +312,27 @@ function buildDecorations(view: EditorView): Built {
             return false;
           }
 
-          case 'Blockquote':
+          case 'Blockquote': {
             eachLine(nFrom, nTo, (lineFrom) => lineDeco(lineFrom, 'cm-lp-quote'));
+            // A callout (`> [!tip] Title`): coloured rule, then the reader's
+            // icon and bold title; `[!tip]` shows again while the caret is on it.
+            const first = doc.lineAt(nFrom);
+            const callout = CALLOUT_LINE.exec(first.text);
+            if (callout) {
+              const { icon, family } = calloutOf(callout[3]);
+              eachLine(nFrom, nTo, (lineFrom) => lineDeco(lineFrom, `cm-lp-callout-${family}`));
+              const markFrom = first.from + callout[1].length;
+              const markTo = withSpace(markFrom + callout[2].length);
+              if (revealLine(first.from, first.to)) {
+                decos.push(Decoration.mark({ class: 'cm-lp-callout-mark' }).range(markFrom, markTo));
+              } else {
+                decos.push(Decoration.replace({ widget: new CalloutIconWidget(icon) }).range(markFrom, markTo));
+              }
+              if (first.to > markTo) decos.push(Decoration.mark({ class: 'callout-title cm-lp-callout-title' }).range(markTo, first.to));
+              else decos.push(Decoration.widget({ widget: new CalloutTitleWidget(calloutOf(callout[3]).title), side: 1 }).range(first.to));
+            }
             return;
+          }
 
           case 'QuoteMark':
             hideMark(nFrom, nTo);

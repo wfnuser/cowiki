@@ -142,7 +142,7 @@ export function SpacePanel({
       }}>
         <h2 data-space-title className="m-0 flex h-8 min-w-0 flex-1 items-center gap-2 px-1.5" title={workspace.name}>
           <SpaceTile name={workspace.name} color={spaceColor} />
-          <span className="min-w-0 truncate text-[14.5px] font-semibold text-text">{workspace.name}</span>
+          <span className="min-w-0 truncate text-body font-semibold text-text">{workspace.name}</span>
         </h2>
         <CollapseButton onClick={onCollapse} />
       </div>
@@ -158,14 +158,14 @@ export function SpacePanel({
               aria-current={active ? 'page' : undefined}
               onClick={() => n.action ? onPluginAction?.(n.action) : onTabChange(n.tab)}
               className={cn(
-                'mx-2 my-px flex w-[calc(100%-16px)] items-center gap-2.5 rounded-md px-2.5 py-[5px] text-left text-[14px] transition-colors',
-                active ? 'bg-bg-active/70 font-medium text-text' : 'text-text-secondary hover:bg-bg-hover',
+                'mx-2 my-px flex w-[calc(100%-16px)] items-center gap-2.5 rounded-md px-2.5 py-[5px] text-left text-body transition-colors',
+                active ? 'bg-bg-active/70 font-medium text-text' : 'text-text-nav hover:bg-bg-hover hover:text-text',
               )}
             >
               <span className={cn('flex shrink-0', active ? 'text-accent' : 'text-text-tertiary')}>{n.icon}</span>
               <span style={{ flex: 1 }}>{n.label}</span>
               {n.badge != null && n.badge > 0 && (
-                <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-bg-active px-1.5 text-[11px] font-semibold tabular-nums text-text-secondary">
+                <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-bg-active px-1.5 text-caption font-semibold tabular-nums text-text-secondary">
                   {n.badge}
                 </span>
               )}
@@ -189,7 +189,7 @@ export function SpacePanel({
           >
             <Search size={13} style={{ flexShrink: 0 }} />
             <span style={{ flex: 1 }}>Search…</span>
-            <span style={{ fontSize: 11.5, color: C.faint, opacity: 0.75, letterSpacing: '0.04em' }}>
+            <span style={{ fontSize: 12, color: C.faint, opacity: 0.75, letterSpacing: '0.04em' }}>
               ⌘ K
             </span>
           </button>
@@ -270,7 +270,7 @@ export function SpacePanel({
           <button
             type="button"
             onClick={onSettings}
-            className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[5px] text-left text-[14px] text-text-secondary transition-colors hover:bg-bg-hover"
+            className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[5px] text-left text-body text-text-nav transition-colors hover:bg-bg-hover hover:text-text"
           >
             <span className="flex shrink-0 text-text-tertiary"><Settings size={16} /></span>
             Settings
@@ -321,7 +321,7 @@ function SectionHeader({ title, expanded, onToggle, menuItems }: SectionHeaderPr
       style={{
         display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
         borderRadius: 6, cursor: 'pointer', userSelect: 'none',
-        fontSize: 14, color: C.ink2,
+        fontSize: 14, color: C.nav,
       }}
       onMouseEnter={(e) => { e.currentTarget.style.background = C.rail; }}
       onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
@@ -390,7 +390,7 @@ function SourceEntry({
           display: 'flex', alignItems: 'center', gap: 8, width: '100%',
           padding: '6px 10px', borderRadius: 6, border: 'none', cursor: 'pointer',
           background: active ? `color-mix(in srgb, ${C.ink} 5%, transparent)` : 'transparent',
-          color: active ? C.ink : C.ink2,
+          color: active ? C.ink : C.nav,
           fontSize: 14, fontWeight: active ? 550 : 400,
           textAlign: 'left',
         }}
@@ -448,7 +448,7 @@ function PageTreeItem({
           style={{
             display: 'flex', alignItems: 'center', gap: 8,
             padding: '6px 10px', paddingLeft: 10 + pl, borderRadius: 6,
-            cursor: 'pointer', fontSize: 14, color: C.ink2, position: 'relative',
+            cursor: 'pointer', fontSize: 14, color: C.nav, position: 'relative',
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.background = C.rail;
@@ -512,7 +512,7 @@ function PageTreeItem({
         padding: '6px 10px', paddingLeft: 10 + pl, borderRadius: 6,
         cursor: 'pointer', fontSize: 14,
         background: isActive ? `color-mix(in srgb, ${C.ink} 5%, transparent)` : 'transparent',
-        color: isActive ? C.ink : C.ink2,
+        color: isActive ? C.ink : C.nav,
         fontWeight: isActive ? 550 : 400,
         boxShadow: isActive ? shadows.tick : 'none',
       }}

@@ -198,11 +198,11 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
     const schedule = scheduleOf(store, current);
     const intervals = previewIntervals(schedule, store.ofMatrix);
     const fresh = isNew(store, current);
-    const quiet = 'inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-3.5';
+    const quiet = 'inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-meta text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-3.5';
     return (
       <section style={{ width: 'min(680px, 100%)' }}>
         <div className="mb-3 flex items-center justify-between gap-3">
-          <span className="text-[12.5px] text-text-tertiary">
+          <span className="text-small text-text-tertiary">
             {sessionDeck ? `${sessionDeck.split('/').join(' / ')} · ` : ''}<span className="tabular-nums">{session?.length ?? 0}</span> left · {fresh ? 'New' : `Review ${schedule.repeats + 1}`}
           </span>
           <div className="flex items-center">
@@ -218,10 +218,10 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
             <button type="button" onClick={endSession} className={cn(quiet, 'text-text-secondary')}>End</button>
           </div>
         </div>
-        {error && <div role="alert" className="mb-3 text-[12.5px] text-red">{error}</div>}
+        {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
         <div className="min-h-56 rounded-xl border border-border bg-panel px-8 py-7 shadow-[var(--shadow-rest)]">
           {changedSinceReview(store, current) && (
-            <p className="mb-3 flex items-center gap-1.5 text-[12px] text-amber"><span className="size-1.5 rounded-full bg-current" />The answer changed since your last review.</p>
+            <p className="mb-3 flex items-center gap-1.5 text-meta text-amber"><span className="size-1.5 rounded-full bg-current" />The answer changed since your last review.</p>
           )}
           <CardText text={renderCloze(current.front, revealed)} />
           {revealed && current.back && (
@@ -234,12 +234,12 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
         <div className="mt-4 flex justify-center gap-2">
           {!revealed ? (
             <>
-              <button type="button" onClick={() => setRevealed(true)} className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-[13px] font-medium text-on-accent transition-colors hover:bg-accent-hover">
+              <button type="button" onClick={() => setRevealed(true)} className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-small font-medium text-on-accent transition-colors hover:bg-accent-hover">
                 {current.cloze && !current.back ? 'Show clozes' : 'Show answer'}
-                <kbd className="rounded border border-on-accent/40 px-1 text-[10.5px] font-normal">Space</kbd>
+                <kbd className="rounded border border-on-accent/40 px-1 text-caption font-normal">Space</kbd>
               </button>
-              <button type="button" onClick={advance} className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-[13px] text-text-secondary transition-colors hover:bg-bg-hover">
-                Skip <kbd className="rounded border border-border px-1 text-[10.5px] text-text-tertiary">n</kbd>
+              <button type="button" onClick={advance} className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-small text-text-secondary transition-colors hover:bg-bg-hover">
+                Skip <kbd className="rounded border border-border px-1 text-caption text-text-tertiary">n</kbd>
               </button>
             </>
           ) : SCORES.map((item) => (
@@ -247,10 +247,10 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
               key={item.score}
               type="button"
               onClick={() => rate(item.score)}
-              className="flex min-w-28 flex-col items-center gap-0.5 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-text transition-colors hover:border-border-hover hover:bg-bg-hover"
+              className="flex min-w-28 flex-col items-center gap-0.5 rounded-lg border border-border bg-panel px-3 py-2 text-small font-medium text-text transition-colors hover:border-border-hover hover:bg-bg-hover"
             >
               {item.label}
-              <span className="text-[11px] font-normal text-text-tertiary">{intervals[item.score]} · {item.keys[0]}</span>
+              <span className="text-caption font-normal text-text-tertiary">{intervals[item.score]} · {item.keys[0]}</span>
             </button>
           ))}
         </div>
@@ -267,8 +267,8 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
       </PopoverPrimitive.Trigger>
       <PopoverPrimitive.Portal>
         <PopoverPrimitive.Content align="end" sideOffset={6} className="z-[200] w-60 rounded-lg border border-border bg-panel p-3 shadow-[var(--shadow-popover)]">
-          <p className="mb-2 text-[12.5px] font-medium text-text">Daily limits</p>
-          <div className="flex flex-col gap-2 text-[12.5px] text-text-secondary">
+          <p className="mb-2 text-small font-medium text-text">Daily limits</p>
+          <div className="flex flex-col gap-2 text-small text-text-secondary">
             <span className="flex items-center justify-between gap-3">
               New cards
               <NumberField label="New cards per day" value={store.settings.newPerDay} onChange={(value) => updateSetting('newPerDay', String(value))} />
@@ -291,12 +291,12 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
     <button
       type="button"
       onClick={() => study(list, deck)}
-      className="inline-flex h-8 items-center gap-2 rounded-lg bg-accent px-3.5 text-[13px] font-medium text-on-accent transition-colors hover:bg-accent-hover"
+      className="inline-flex h-8 items-center gap-2 rounded-lg bg-accent px-3.5 text-small font-medium text-on-accent transition-colors hover:bg-accent-hover"
     >
       {label}
     </button>
   );
-  const done = <p className="flex items-center gap-1.5 text-[13px] text-text-tertiary"><Check className="size-3.5 text-green" aria-hidden /> All done for today.</p>;
+  const done = <p className="flex items-center gap-1.5 text-small text-text-tertiary"><Check className="size-3.5 text-green" aria-hidden /> All done for today.</p>;
 
   // Anki's deck screen: what is due in one deck, and where its cards live.
   const deck = openDeck ? findDeck(tree, openDeck) : null;
@@ -312,11 +312,11 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
           title={deck.path.split('/').join(' / ')}
           actions={<>{limits}{refreshButton}</>}
         />
-        {error && <div role="alert" className="mb-3 text-[12.5px] text-red">{error}</div>}
+        {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
         <dl className="mb-6 flex gap-10">
-          <div><dt className="text-[12px] text-text-tertiary">New</dt><dd className={cn('m-0 text-[22px] font-medium tabular-nums', queue.fresh ? 'text-blue' : 'text-text-faint')}>{queue.fresh}</dd></div>
-          <div><dt className="text-[12px] text-text-tertiary">Due</dt><dd className={cn('m-0 text-[22px] font-medium tabular-nums', queue.due ? 'text-green' : 'text-text-faint')}>{queue.due}</dd></div>
-          <div><dt className="text-[12px] text-text-tertiary">Cards</dt><dd className="m-0 text-[22px] font-medium tabular-nums text-text-secondary">{stats.total}</dd></div>
+          <div><dt className="text-meta text-text-tertiary">New</dt><dd className={cn('m-0 text-title font-medium tabular-nums', queue.fresh ? 'text-blue' : 'text-text-faint')}>{queue.fresh}</dd></div>
+          <div><dt className="text-meta text-text-tertiary">Due</dt><dd className={cn('m-0 text-title font-medium tabular-nums', queue.due ? 'text-green' : 'text-text-faint')}>{queue.due}</dd></div>
+          <div><dt className="text-meta text-text-tertiary">Cards</dt><dd className="m-0 text-title font-medium tabular-nums text-text-secondary">{stats.total}</dd></div>
         </dl>
         <div className="mb-9">{queue.list.length ? studyButton(queue.list, deck.path, 'Study now') : done}</div>
         <ViewSectionHeading meta={byPage.size}>Notes</ViewSectionHeading>
@@ -385,10 +385,10 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
         )}
       />
 
-      {error && <div role="alert" className="mb-3 text-[12.5px] text-red">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
 
       {loading ? (
-        <p className="flex items-center gap-2 py-10 text-[12.5px] text-text-tertiary"><LoaderCircle className="size-3.5 animate-spin" /> Collecting cards…</p>
+        <p className="flex items-center gap-2 py-10 text-small text-text-tertiary"><LoaderCircle className="size-3.5 animate-spin" /> Collecting cards…</p>
       ) : cards.length === 0 ? (
         <ViewEmpty>
           <span>No cards yet. Tag a list item with <span className="text-text-secondary">#card</span> to make one.</span>
@@ -401,7 +401,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
             <span className="deck-count">Due</span>
           </div>
           <ul className="m-0 list-none border-y border-border-soft p-0" aria-label="Decks">{rows(tree, 0)}</ul>
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 px-1 text-[12.5px] text-text-tertiary">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 px-1 text-small text-text-tertiary">
             {queue.length === 0 ? done : <span />}
             <span>
               {summary.map(([value, label], index) => (

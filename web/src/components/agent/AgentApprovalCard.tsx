@@ -38,29 +38,29 @@ export function AgentApprovalCard({
           <Icon className="size-3" aria-hidden />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-medium leading-5 text-text">{approval.title}</p>
+          <p className="truncate text-small font-medium leading-5 text-text">{approval.title}</p>
           {approval.description && (
-            <p className="text-[12px] leading-[1.5] text-text-secondary">{approval.description}</p>
+            <p className="text-meta leading-[1.5] text-text-secondary">{approval.description}</p>
           )}
         </div>
       </div>
       {approval.command && (
         <pre
-          className="mt-2.5 max-h-28 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-bg-secondary px-2.5 py-2 text-[11.5px] leading-relaxed text-text"
+          className="mt-2.5 max-h-28 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-bg-secondary px-2.5 py-2 text-meta leading-relaxed text-text"
           style={{ fontFamily: fonts.mono }}
         >
           {approval.command}
         </pre>
       )}
       {approval.paths.length > 0 && (
-        <ul className="mt-2.5 space-y-0.5 rounded-lg bg-bg-secondary px-2.5 py-2 text-[11.5px] text-text-secondary" style={{ fontFamily: fonts.mono }}>
+        <ul className="mt-2.5 space-y-0.5 rounded-lg bg-bg-secondary px-2.5 py-2 text-meta text-text-secondary" style={{ fontFamily: fonts.mono }}>
           {approval.paths.slice(0, 8).map((path) => <li key={path} className="truncate">{path}</li>)}
           {approval.paths.length > 8 && <li>…and {approval.paths.length - 8} more</li>}
         </ul>
       )}
       <div className="mt-3 flex items-center gap-2">
         {approval.cwd && approval.kind === 'command' && (
-          <p className="min-w-0 flex-1 truncate text-[11px] text-text-tertiary" title={approval.cwd}>in {approval.cwd}</p>
+          <p className="min-w-0 flex-1 truncate text-caption text-text-tertiary" title={approval.cwd}>in {approval.cwd}</p>
         )}
         <div className="ml-auto flex shrink-0 gap-1.5">
           <Button

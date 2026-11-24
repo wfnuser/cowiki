@@ -45,7 +45,7 @@ export function HtmlView({ source }: { source: string }) {
       ) : (
         <pre style={{
           maxHeight: 440, margin: 0, padding: 18, overflow: 'auto',
-          background: C.bg, color: C.ink2, fontFamily: fonts.mono, fontSize: 12.5, lineHeight: 1.55,
+          background: C.bg, color: C.ink2, fontFamily: fonts.mono, fontSize: 13, lineHeight: 1.55,
         }}><code>{source}</code></pre>
       )}
     </section>
@@ -67,7 +67,7 @@ function ModeButton({
       onClick={onClick}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 8px',
-        border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 11.5, fontWeight: 600,
+        border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 12, fontWeight: 600,
         background: active ? C.accentSoft : 'transparent', color: active ? C.accent : C.faint,
       }}
     >

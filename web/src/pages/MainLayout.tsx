@@ -2472,7 +2472,7 @@ function SpaceChoice({ icon, title, description, onClick, disabled, badge }: {
     >
       <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">{icon}</span>
       <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2 text-sm font-semibold">{title}{badge && <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">{badge}</span>}</span>
+        <span className="flex items-center gap-2 text-sm font-semibold">{title}{badge && <span className="rounded-full bg-muted px-2 py-0.5 text-caption font-medium text-muted-foreground">{badge}</span>}</span>
         <span className="mt-0.5 block text-xs text-muted-foreground">{description}</span>
       </span>
     </button>
@@ -2508,7 +2508,7 @@ function LocalSpaceEmptyState({
         }}>
           Add your first Space
         </h1>
-        <p style={{ margin: '0 auto 34px', maxWidth: 490, color: C.ink2, fontSize: 17, lineHeight: 1.65 }}>
+        <p style={{ margin: '0 auto 34px', maxWidth: 490, color: C.ink2, fontSize: 16, lineHeight: 1.65 }}>
           Create a new local knowledge space or import an existing folder.<br />
           Cloud can be enabled later without changing its local-first foundation.
         </p>
@@ -2519,7 +2519,7 @@ function LocalSpaceEmptyState({
           style={{
             minWidth: 220, height: 58, padding: '0 24px', border: 'none', borderRadius: 14,
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 18,
-            background: C.accent, color: C.onAccent, fontSize: 17, fontWeight: 700,
+            background: C.accent, color: C.onAccent, fontSize: 16, fontWeight: 700,
             cursor: creating ? 'default' : 'pointer', opacity: creating ? 0.7 : 1,
             boxShadow: `0 8px 22px color-mix(in srgb, ${C.accent} 20%, transparent)`,
           }}
@@ -2602,7 +2602,7 @@ function DiscoverView() {
                 <div style={{
                   width: 40, height: 40, borderRadius: 8, background: C.rail,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 18, fontWeight: 500, color: C.ink2,
+                  fontSize: 16, fontWeight: 500, color: C.ink2,
                 }}>
                   {ws.name[0]?.toUpperCase()}
                 </div>

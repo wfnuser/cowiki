@@ -8,6 +8,7 @@ import {
   defaultCheckpointName,
   draftChangeLabel,
 } from '../src/lib/history.ts';
+import { hunkLabel } from '../src/lib/diff-label.ts';
 
 const mainLayout = readFileSync(new URL('../src/pages/MainLayout.tsx', import.meta.url), 'utf8');
 const spacePanel = readFileSync(new URL('../src/components/layout/SpacePanel.tsx', import.meta.url), 'utf8');
@@ -49,4 +50,10 @@ test('space navigation replaces Activity with History', () => {
 test('History shares the left-aligned content grid', () => {
   assert.match(historyView, /width: 'min\(860px, 100%\)'/);
   assert.doesNotMatch(historyView, /margin: '0 auto'/);
+});
+
+test('a diff hunk is labelled by the lines it shows', () => {
+  assert.equal(hunkLabel('@@ -1,2 +1,3 @@'), 'Lines 1–3');
+  assert.equal(hunkLabel('@@ -8 +9 @@ ## Notes'), 'Line 9 · ## Notes');
+  assert.equal(hunkLabel('not a hunk'), 'not a hunk');
 });

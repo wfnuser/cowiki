@@ -66,7 +66,7 @@ test('CSS and JS share the same monospace stack', () => {
 test('identity helpers keep the original palettes and hashes', () => {
   assert.equal(colorForSpaceId('Ada Lovelace'), '#5d8a6c');
   assert.equal(colorForSpaceId('Grace Hopper'), '#3f6c8c');
-  assert.equal(colorForName('Ada Lovelace'), '#14b8a6');
+  assert.equal(colorForName('Ada Lovelace'), '#3d8a83');
   assert.equal(colorForAvatarName('Ada Lovelace'), '#c2410c');
   assert.equal(colorForUserId('Ada Lovelace'), '#c2410c');
   assert.equal(spaceMonogramColor, '#5d8a6c');
@@ -142,7 +142,7 @@ test('source files do not hardcode hex colors outside the palette', () => {
   const allowedByFile = new Map<string, ReadonlySet<string>>([
     ['lib/design.ts', new Set([
       '#3f6c8c', '#5d8a6c', '#9a6f93', '#c2410c',
-      '#6366f1', '#14b8a6', '#f59e0b', '#8b5cf6',
+      '#5b679e', '#3d8a83', '#b07d2c', '#7a65a6',
       '#2f6bb0', '#2f8a5b', '#b5790f',
       '#1d1c1a', '#eeeae3', '#e2590b', '#5c5149',
     ])],
@@ -283,4 +283,34 @@ test('labels are sentence case and tool views share the sans view title', () => 
     assert.doesNotMatch(source, /page-title|font-serif|fonts\.serif/, `${rel}: use ViewHeader / .view-title`);
   }
   assert.match(css, /\.view-title \{[^}]*font-family: var\(--font-sans\)/);
+});
+
+test('interface text uses the type scale', () => {
+  // DESIGN_SYSTEM.md, "Type scale": 11 · 12 · 13 · 14 · 16, then display
+  // sizes (22 and up) for titles. Content uses the --doc-* tokens.
+  const scale = new Set([11, 12, 13, 14, 16]);
+  const off: string[] = [];
+  for (const { rel, source } of sourceFiles()) {
+    for (const match of source.matchAll(/text-\[(\d+(?:\.\d+)?)px\]/g)) off.push(`${rel}: text-[${match[1]}px] (use text-caption … text-title)`);
+    for (const match of source.matchAll(/fontSize: ?(\d+(?:\.\d+)?)\b(?!px|em|')/g)) {
+      const size = Number(match[1]);
+      if (!scale.has(size) && size < 20) off.push(`${rel}: fontSize ${size}`);
+    }
+  }
+  for (const match of css.matchAll(/font-size: ?(\d+(?:\.\d+)?)px/g)) {
+    const size = Number(match[1]);
+    if (!scale.has(size) && size < 20) off.push(`index.css: font-size ${size}px`);
+  }
+  assert.deepEqual(off, []);
+  for (const [name, size] of [['caption', 11], ['meta', 12], ['small', 13], ['body', 14], ['lead', 16], ['title', 22]] as const) {
+    assert.match(css, new RegExp(`--text-${name}: ${size}px;`));
+  }
+});
+
+test('transitions name what they animate', () => {
+  // Web Interface Guidelines: never `transition: all` (it animates layout and
+  // colour changes nobody asked for).
+  const all = sourceFiles().filter(({ source }) => /transition-all\b|transition: ?['"]all\b/.test(source)).map(({ rel }) => rel);
+  assert.deepEqual(all, []);
+  assert.doesNotMatch(css, /transition: ?all\b/);
 });

@@ -59,7 +59,7 @@ export function SpaceHome({ needs, today, recent, onOpenPage, now: fixedNow }: S
         <section aria-label="Recently edited" className="home-recent">
           <ViewSectionHeading>Recently edited</ViewSectionHeading>
           {recent.length === 0 ? (
-            <p className="m-0 py-2 text-[13px] text-text-tertiary">No pages yet.</p>
+            <p className="m-0 py-2 text-small text-text-tertiary">No pages yet.</p>
           ) : (
             <ul className="view-list">
               {recent.map((page) => {

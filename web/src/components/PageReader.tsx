@@ -144,7 +144,7 @@ const readOnlyBannerStyle: React.CSSProperties = {
   borderRadius: 9,
   background: C.sidebar,
   color: C.ink2,
-  fontSize: 12.5,
+  fontSize: 13,
 };
 
 const missingStyle: React.CSSProperties = {

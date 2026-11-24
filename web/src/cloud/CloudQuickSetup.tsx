@@ -17,7 +17,7 @@ export function CloudQuickSetup({
     return (
       <div className="h-full overflow-auto">
         <section className="w-full max-w-2xl" style={{ padding: '36px 56px 56px' }}>
-          <p className="text-[12.5px] font-medium text-accent">
+          <p className="text-small font-medium text-accent">
             Shared Space
           </p>
           <h1 className="view-title mt-2">
@@ -61,7 +61,7 @@ export function CloudQuickSetup({
         </ol>
 
         <div className="mt-8 overflow-hidden rounded-xl border border-border bg-panel">
-          <p className="px-5 py-4 font-mono text-[12.5px] leading-5 text-text-secondary">
+          <p className="px-5 py-4 font-mono text-small leading-5 text-text-secondary">
             {prompt}
           </p>
           <div className="flex justify-end border-t border-border bg-secondary/40 px-4 py-3">

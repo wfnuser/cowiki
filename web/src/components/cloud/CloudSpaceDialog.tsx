@@ -202,7 +202,7 @@ export function CloudSpaceDialog({
         {model?.kind === 'submitted' && status?.pullRequest && (
           <div className="rounded-xl border bg-secondary p-4">
             <div className="flex items-center gap-2 text-sm font-semibold"><GitPullRequest size={16} className="text-accent" />#{status.pullRequest.number} {status.pullRequest.title}</div>
-            <div className="mt-2 font-mono text-[11px] text-text-tertiary">{status.pullRequest.headRef} · {status.pullRequest.headOid.slice(0, 8)}</div>
+            <div className="mt-2 font-mono text-caption text-text-tertiary">{status.pullRequest.headRef} · {status.pullRequest.headOid.slice(0, 8)}</div>
           </div>
         )}
 

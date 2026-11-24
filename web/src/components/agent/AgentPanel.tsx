@@ -111,7 +111,7 @@ function StatusPill({ snapshot }: { snapshot: AgentSnapshot }) {
           ? 'text-accent'
           : 'text-text-tertiary';
   return (
-    <span className={cn('flex shrink-0 items-center gap-1.5 px-1 text-[11px] font-medium', tone)} role="status">
+    <span className={cn('flex shrink-0 items-center gap-1.5 px-1 text-caption font-medium', tone)} role="status">
       {busy
         ? <LoaderCircle className="size-3 animate-spin" aria-hidden />
         : <span className="size-1.5 rounded-full bg-current" aria-hidden />}
@@ -129,7 +129,7 @@ function ReadinessLine({ agent, state, onCheck, onSignIn, onCancelSignIn }: {
 }) {
   if (state.phase !== 'settled' || !state.readiness) {
     return (
-      <p className="flex items-center gap-1.5 text-[11.5px] text-text-tertiary">
+      <p className="flex items-center gap-1.5 text-meta text-text-tertiary">
         <LoaderCircle className="size-3 animate-spin" aria-hidden /> Checking {agentName(agent)}…
       </p>
     );
@@ -139,7 +139,7 @@ function ReadinessLine({ agent, state, onCheck, onSignIn, onCancelSignIn }: {
   if (!feedback) {
     const version = shortVersion(readiness.version);
     return (
-      <p className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-text-tertiary" title={readiness.version ?? undefined}>
+      <p className="flex min-w-0 items-center gap-1.5 text-meta text-text-tertiary" title={readiness.version ?? undefined}>
         <span className="size-1.5 shrink-0 rounded-full bg-green" aria-hidden />
         <span className="truncate">
           {[`${agentName(agent)}${version ? ` ${version}` : ''} is ready`, readiness.account].filter(Boolean).join(' · ')}
@@ -398,7 +398,7 @@ export function AgentPanel({
         className="flex shrink-0 items-center gap-1 border-b border-border bg-bg-secondary pl-2 pr-1"
         style={{ height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT }}
       >
-        <h2 className="min-w-0 flex-1 truncate px-1.5 text-[13px] font-semibold text-text" title={showHistory ? undefined : active?.title}>
+        <h2 className="min-w-0 flex-1 truncate px-1.5 text-small font-semibold text-text" title={showHistory ? undefined : active?.title}>
           {showHistory ? 'Sessions' : active ? active.title : 'New session'}
         </h2>
         {active && !showHistory && <StatusPill snapshot={active} />}
@@ -501,7 +501,7 @@ export function AgentPanel({
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-5">
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-medium text-text-secondary" id="agent-for-new-sessions">Agent</span>
+                <span className="text-meta font-medium text-text-secondary" id="agent-for-new-sessions">Agent</span>
                 <Select
                   value={draftAgent}
                   onValueChange={(value) => {
@@ -519,7 +519,7 @@ export function AgentPanel({
                 </Select>
               </div>
               <fieldset className="flex flex-col gap-1.5">
-                <legend className="mb-1.5 text-[12px] font-medium text-text-secondary">Where it works</legend>
+                <legend className="mb-1.5 text-meta font-medium text-text-secondary">Where it works</legend>
                 <div className="grid grid-cols-2 gap-0.5 rounded-lg bg-bg-secondary p-0.5 ring-1 ring-inset ring-border-soft" role="radiogroup" aria-label="Where it works">
                   {(['live', 'background'] as const).map((mode) => (
                     <button
@@ -528,7 +528,7 @@ export function AgentPanel({
                       role="radio"
                       aria-checked={draftMode === mode}
                       className={cn(
-                        'h-7 rounded-md px-2 text-[12px] transition-colors',
+                        'h-7 rounded-md px-2 text-meta transition-colors',
                         draftMode === mode
                           ? 'bg-panel font-medium text-text shadow-[var(--shadow-chip)] ring-1 ring-border'
                           : 'text-text-tertiary hover:text-text-secondary',
@@ -539,7 +539,7 @@ export function AgentPanel({
                     </button>
                   ))}
                 </div>
-                <p className="text-[11.5px] leading-[1.5] text-text-tertiary">
+                <p className="text-meta leading-[1.5] text-text-tertiary">
                   {draftMode === 'live'
                     ? 'Edits your Draft directly.'
                     : 'Works on a separate copy. You review the result before it reaches your Draft.'}
@@ -560,9 +560,9 @@ export function AgentPanel({
               {recent.length > 0 && (
                 <section aria-label="Recent sessions" className="-mx-2 mt-2">
                   <div className="mb-0.5 flex items-baseline justify-between px-2">
-                    <h3 className="text-[11.5px] font-medium text-text-tertiary">Recent</h3>
+                    <h3 className="text-meta font-medium text-text-tertiary">Recent</h3>
                     {ordered.length > recent.length && (
-                      <button type="button" className="text-[11.5px] text-text-tertiary hover:text-text" onClick={() => setShowHistory(true)}>
+                      <button type="button" className="text-meta text-text-tertiary hover:text-text" onClick={() => setShowHistory(true)}>
                         All {ordered.length}
                       </button>
                     )}

@@ -162,7 +162,7 @@ export function ReviewDetail({
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
           <h1 className="view-title min-w-0 truncate">{submission.summary || 'Submission'}</h1>
-          <span className="flex shrink-0 items-center gap-1.5 text-[12.5px]" style={{ color: status.fg }}>
+          <span className="flex shrink-0 items-center gap-1.5 text-small" style={{ color: status.fg }}>
             <span aria-hidden className="size-1.5 rounded-full" style={{ background: status.fg }} />
             {status.label}
           </span>
@@ -297,7 +297,7 @@ export function ReviewDetail({
             {submission.reviewed_by ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <AvatarBadge name={submission.reviewer_name || submission.reviewed_by} size={26} />
-                <span style={{ fontSize: 13.5, color: C.ink2, flex: 1 }}>{submission.reviewer_name || submission.reviewed_by.slice(0, 8)}</span>
+                <span style={{ fontSize: 13, color: C.ink2, flex: 1 }}>{submission.reviewer_name || submission.reviewed_by.slice(0, 8)}</span>
                 {/* Status pip */}
                 <div style={{
                   width: 18, height: 18, borderRadius: '50%',
@@ -310,12 +310,12 @@ export function ReviewDetail({
                 </div>
               </div>
             ) : (
-              <span style={{ fontSize: 12.5, color: C.faint }}>No reviewers yet</span>
+              <span style={{ fontSize: 13, color: C.faint }}>No reviewers yet</span>
             )}
             <button style={{
               background: 'none', border: 'none', cursor: 'pointer', padding: 0,
               display: 'flex', alignItems: 'center', gap: 4,
-              fontSize: 12.5, color: C.faint, marginTop: 8,
+              fontSize: 13, color: C.faint, marginTop: 8,
             }}>
               <Plus size={12} /> Request a reviewer
             </button>
@@ -358,7 +358,7 @@ export function ReviewDetail({
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
               {submission.paths.map((p) => (
                 <span key={p} style={{
-                  fontSize: 11.5, padding: '2px 8px', borderRadius: 999,
+                  fontSize: 12, padding: '2px 8px', borderRadius: 999,
                   background: C.rail, color: C.ink2,
                 }}>
                   {p}
@@ -374,12 +374,12 @@ export function ReviewDetail({
 
 const actionBtnStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 6,
-  padding: '9px 15px', borderRadius: 8, fontSize: 13.5, fontWeight: 600,
+  padding: '9px 15px', borderRadius: 8, fontSize: 13, fontWeight: 600,
   border: 'none', cursor: 'pointer',
 };
 
 const sidebarSectionTitle: React.CSSProperties = {
-  fontSize: 12.5, fontWeight: 600, color: C.ink2, marginBottom: 8,
+  fontSize: 13, fontWeight: 600, color: C.ink2, marginBottom: 8,
 };
 
 export default ReviewDetail;

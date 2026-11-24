@@ -124,7 +124,7 @@ export function MembersView({ workspaceSlug, canManage, currentUserRole, current
       />
 
       <div role="table" aria-label="Members">
-        <div role="row" className="grid items-center gap-3 border-b border-border-soft px-1 pb-1.5 text-[12px] text-text-tertiary" style={{ gridTemplateColumns: columns }}>
+        <div role="row" className="grid items-center gap-3 border-b border-border-soft px-1 pb-1.5 text-meta text-text-tertiary" style={{ gridTemplateColumns: columns }}>
           <span role="columnheader">Name</span>
           <span role="columnheader">Role</span>
           <span role="columnheader">Active</span>
@@ -137,8 +137,8 @@ export function MembersView({ workspaceSlug, canManage, currentUserRole, current
               <div role="cell" className="flex min-w-0 items-center gap-2.5">
                 <AvatarBadge name={m.name} size={28} kind="member" />
                 <div className="min-w-0">
-                  <div className="truncate text-[13.5px] font-medium text-text">{m.name}</div>
-                  {m.email && <div className="truncate text-[12px] text-text-tertiary">{m.email}</div>}
+                  <div className="truncate text-small font-medium text-text">{m.name}</div>
+                  {m.email && <div className="truncate text-meta text-text-tertiary">{m.email}</div>}
                 </div>
               </div>
 
@@ -156,11 +156,11 @@ export function MembersView({ workspaceSlug, canManage, currentUserRole, current
                     </SelectContent>
                   </Select>
                 ) : (
-                  <span className="text-[12.5px] capitalize text-text-secondary">{m.role}</span>
+                  <span className="text-small capitalize text-text-secondary">{m.role}</span>
                 )}
               </div>
 
-              <span role="cell" className="text-[12px] text-text-tertiary">{relativeTime(m.last_active_at)}</span>
+              <span role="cell" className="text-meta text-text-tertiary">{relativeTime(m.last_active_at)}</span>
 
               <div role="cell" className="flex justify-end">
                 {manageable && (
@@ -179,7 +179,7 @@ export function MembersView({ workspaceSlug, canManage, currentUserRole, current
                 )}
               </div>
               {confirmRemove === m.id && (
-                <div role="cell" className="col-span-full flex items-center justify-end gap-2 pb-1 text-[12.5px] text-text-secondary">
+                <div role="cell" className="col-span-full flex items-center justify-end gap-2 pb-1 text-small text-text-secondary">
                   Remove {m.name} from this Space?
                   <Button size="xs" variant="outline" onClick={() => setConfirmRemove(null)}>Cancel</Button>
                   <Button size="xs" variant="destructive" onClick={() => handleRemove(m.id)}>Remove</Button>

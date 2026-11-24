@@ -107,7 +107,7 @@ export function ObsidianImportDialog({ open, existingSlugs, onClose, onImported 
         <DialogHeader>
           <DialogTitle>Import an Obsidian vault</DialogTitle>
         </DialogHeader>
-        <p style={{ margin: '-4px 0 4px', color: C.muted, fontSize: 12.5 }}>
+        <p style={{ margin: '-4px 0 4px', color: C.muted, fontSize: 13 }}>
           CoWiki reads the vault and works on a copy. Your vault and its Obsidian settings are not changed, so you can keep using both.
         </p>
 
@@ -132,7 +132,7 @@ export function ObsidianImportDialog({ open, existingSlugs, onClose, onImported 
                 <Stat label="Size" value={formatBytes(report.totalBytes)} />
               </div>
               {plan && (
-                <p style={{ margin: '10px 0 0', fontSize: 12.5, color: C.ink2 }}>
+                <p style={{ margin: '10px 0 0', fontSize: 13, color: C.ink2 }}>
                   Journal: <code style={{ fontFamily: fonts.mono }}>{plan.journal.folder || '(root)'}/{plan.journal.format}</code>
                   {' '}— {plan.journalEntries} entries
                   {plan.journalSource === 'obsidian-settings' ? ' (from Daily Notes settings)' : plan.journalSource === 'detected' ? ' (detected)' : ''}
@@ -155,23 +155,23 @@ export function ObsidianImportDialog({ open, existingSlugs, onClose, onImported 
             )}
 
             <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '8px 12px', alignItems: 'center' }}>
-              <label htmlFor="import-name" style={{ fontSize: 12.5, color: C.ink2 }}>Space name</label>
+              <label htmlFor="import-name" style={{ fontSize: 13, color: C.ink2 }}>Space name</label>
               <Input id="import-name" value={name} onChange={(event) => setName(event.target.value)} />
-              <span style={{ fontSize: 12.5, color: C.ink2 }}>Copy to</span>
+              <span style={{ fontSize: 13, color: C.ink2 }}>Copy to</span>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
-                <code title={destination} style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5, color: C.muted }}>
+                <code title={destination} style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: C.muted }}>
                   {destination || 'Choose a folder'}
                 </code>
                 <Button variant="outline" size="sm" onClick={() => { void chooseParent(); }}>Change…</Button>
               </div>
             </div>
-            <p style={{ margin: 0, fontSize: 11.5, color: C.muted }}>
+            <p style={{ margin: 0, fontSize: 12, color: C.muted }}>
               A report with everything found is added to the new Space as “CoWiki Import Report”.
             </p>
           </>
         )}
 
-        {error && <p role="alert" style={{ color: C.red, fontSize: 12.5, margin: 0 }}>{error}</p>}
+        {error && <p role="alert" style={{ color: C.red, fontSize: 13, margin: 0 }}>{error}</p>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
           <Button variant="outline" disabled={importing} onClick={() => { reset(); onClose(); }}>Cancel</Button>
           <Button onClick={() => { void runImport(); }} disabled={!report || !destination || !name.trim() || importing}>
