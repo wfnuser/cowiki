@@ -134,3 +134,80 @@ impl Cost {
         self.unresolved += out.maintenance.as_ref().map_or(0, |r| r.unresolved.len());
     }
 }
+
+/// Apply deterministic destination spelling only after a detector selected a
+/// particular candidate occurrence and source stub. File names enforce path
+/// safety. Every redirect field used for content comes from the common packet.
+pub fn repair_redirects(
+    packet: &EvidenceBundle,
+    paths: Vec<String>,
+    result: &mut MaintenanceResult,
+    approved: &std::collections::BTreeSet<(usize, String)>,
+) -> Result<(), String> {
+    use cowiki_knowledge::{
+        governance::{redirect_patch, Citation, RedirectFields},
+        knowledge_index::{self as index, FileIndex, LinkKind},
+    };
+    if approved.is_empty() || result.final_text != packet.input.candidate {
+        return Ok(());
+    }
+    let files = FileIndex::new(paths);
+    let fields: RedirectFields = packet
+        .links
+        .values()
+        .filter_map(|r| {
+            let (line, raw) = r.redirect.as_ref()?;
+            let path = r.target.as_ref()?;
+            Some((
+                path.clone(),
+                (
+                    raw.clone(),
+                    Citation {
+                        path: path.clone(),
+                        snapshot: r.snapshot.clone()?,
+                        first: *line,
+                        last: *line,
+                    },
+                ),
+            ))
+        })
+        .collect();
+    let Some(proposal) = redirect_patch(
+        &packet.input.path,
+        &result.final_text,
+        &files,
+        &fields,
+        Some(approved),
+    ) else {
+        return Ok(());
+    };
+    let next = proposal
+        .patch
+        .preview(&packet.input.path, &result.final_text)?;
+    let (_, body) = cowiki_knowledge::okf::split_frontmatter(&next)?;
+    let prefix = next.len() - body.len();
+    let remaining: std::collections::BTreeSet<_> =
+        index::link_occurrences(body, &packet.input.path)
+            .into_iter()
+            .filter_map(|link| {
+                let line = 1 + next[..prefix + link.range.start]
+                    .bytes()
+                    .filter(|b| *b == b'\n')
+                    .count();
+                let path = match link.kind {
+                    LinkKind::Markdown => link.target,
+                    LinkKind::Wiki => files.resolve_wikilink(&link.target, &packet.input.path)?,
+                };
+                Some((line, path))
+            })
+            .collect();
+    result.unresolved.retain(|i| {
+        let Some(e) = &i.evidence else { return true };
+        let key = (i.location.first, e.path.clone());
+        i.code != "inbound_redirect" || !approved.contains(&key) || remaining.contains(&key)
+    });
+    result.final_text = next;
+    result.proposals.push(proposal);
+    result.rounds += 1;
+    Ok(())
+}

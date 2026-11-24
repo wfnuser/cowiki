@@ -73,6 +73,21 @@ fn run() -> Result<(), String> {
         let hash = digest(&serde_json::to_string(&packet).map_err(|e| e.to_string())?);
         let mut outcome = runner.run(mode, &packet);
         if let Some(r) = outcome.maintenance.as_mut() {
+            let redirects = |issues: &[cowiki_knowledge::governance::Issue]| {
+                issues
+                    .iter()
+                    .filter(|i| i.code == "inbound_redirect")
+                    .filter_map(|i| Some((i.location.first, i.evidence.as_ref()?.path.clone())))
+                    .collect::<BTreeSet<_>>()
+            };
+            let model_links = redirects(&r.initial);
+            let rule_links = redirects(&structural);
+            let approved = match mode {
+                Mode::Rules => rule_links,
+                Mode::Remote => model_links,
+                Mode::Both => rule_links.intersection(&model_links).cloned().collect(),
+                _ => BTreeSet::new(),
+            };
             for mut item in structural {
                 let same = |i: &cowiki_knowledge::governance::Issue| {
                     i.code == item.code
@@ -87,6 +102,15 @@ fn run() -> Result<(), String> {
                     r.unresolved.push(item);
                 }
             }
+            let repair_start = Instant::now();
+            let paths = dataset.families[&case.family]
+                .pages
+                .keys()
+                .cloned()
+                .chain(std::iter::once(case.path.clone()))
+                .collect();
+            cowiki_governance_bench::evaluation::repair_redirects(&packet, paths, r, &approved)?;
+            outcome.repair_and_check_ns += repair_start.elapsed().as_nanos() as u64;
             r.initial.sort();
             r.unresolved.sort();
         }

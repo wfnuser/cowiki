@@ -6,4 +6,5 @@
 pub mod embeddings;
 pub mod governance;
 pub mod knowledge_index;
+pub mod link_syntax;
 pub mod okf;

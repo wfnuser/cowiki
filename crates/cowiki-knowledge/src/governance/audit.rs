@@ -227,6 +227,19 @@ pub fn audit_space(
             }
         }
     }
+    let fields: super::RedirectFields = pages
+        .iter()
+        .filter_map(|(&path, p)| {
+            Some((
+                path.to_owned(),
+                (p.meta.redirect_to.clone()?, p.field(path, "redirect_to")?),
+            ))
+        })
+        .collect();
+    let proposals = pages
+        .iter()
+        .filter_map(|(&path, p)| super::propose_redirects(path, &p.text, &files, &fields))
+        .collect();
     let snapshot = digest(
         &serde_json::json!(pages
             .iter()
@@ -241,7 +254,7 @@ pub fn audit_space(
         issues,
         by_code: BTreeMap::new(),
         by_severity: BTreeMap::new(),
-        proposals: vec![],
+        proposals,
     };
     report.summarize();
     Ok(report)
