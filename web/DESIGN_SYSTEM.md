@@ -65,6 +65,14 @@ Notifications, Review details, Cloud pages) is built the same way, with
   loading** states are one centered sentence (`ViewEmpty`).
 - Views are left-aligned in the content area (`36px 56px` padding) with a
   `min(860px, 100%)` column; a wide board may use `min(1040px, 100%)`.
+- **Flashcards** follow Anki (user decision 2026-11-24): the view is a deck
+  tree with **New** (blue) and **Due** (green) columns, zeros faint; a deck
+  opens its own screen with the same counts, **Study now** and the notes
+  its cards live in. Decks come from tags: the card's own tags besides
+  `#card` (`#Japanese/N2` is a sub-deck), else the page's `tags`, else its
+  folder, else *Unsorted*. "Study all" appears in the title row only when
+  something is due; with nothing to study the view says *All done for
+  today.* — never a disabled button.
 
 ## Start page, editing and the top bar
 

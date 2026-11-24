@@ -9,6 +9,7 @@ import {
   changedSinceReview,
   collectCards,
   deckStats,
+  deckTree,
   emptyReviewStore,
   isDue,
   isNew,
@@ -191,4 +192,40 @@ test('stored history tolerates bad values and earlier formats', () => {
 
 test('preview intervals follow the saved schedule', () => {
   assert.deepEqual(previewIntervals(DEFAULT_SCHEDULE, {}), { 1: 'Tomorrow', 3: '4d', 5: '4d' });
+});
+
+test("decks come from the card's tags, else the page's tags, else its folder", () => {
+  const cards = collectCards([
+    { path: 'Languages/Japanese.md', content: '- 食べる #card #日语/N2\n  - to eat\n- 飲む #card #日语 #[[Daily words]]\n  - to drink\n- 見る #card\n  - to see\n' },
+    { path: 'Biology/Cells.md', content: '---\ntags: [biology, "#exam"]\n---\n- What is a ribosome? #card\n  - It makes proteins\n' },
+    { path: 'Logseq page.md', content: 'tags:: history, [[Rome]]\n\n- Year Rome fell? #card\n  - 476\n' },
+    { path: 'Loose.md', content: '- Use C#define? #card\n  - No\n' },
+  ]);
+  const byFront = Object.fromEntries(cards.map((card) => [card.front, card.decks]));
+  assert.deepEqual(byFront['食べる'], ['日语/N2']);
+  assert.deepEqual(byFront['飲む'], ['日语', 'Daily words']);
+  assert.deepEqual(byFront['見る'], ['Languages']);
+  assert.deepEqual(byFront['What is a ribosome?'], ['biology', 'exam']);
+  assert.deepEqual(byFront['Year Rome fell?'], ['history', 'Rome']);
+  // `#` inside a word is not a tag; a root page without tags is Unsorted.
+  assert.deepEqual(byFront['Use C#define?'], ['Unsorted']);
+
+  const tree = deckTree(cards);
+  assert.deepEqual(tree.map((deck) => deck.path), ['biology', 'Daily words', 'exam', 'history', 'Languages', 'Rome', '日语', 'Unsorted']);
+  const japanese = tree.find((deck) => deck.path === '日语')!;
+  assert.equal(japanese.cards.length, 2);
+  assert.deepEqual(japanese.children.map((deck) => [deck.path, deck.cards.length]), [['日语/N2', 1]]);
+});
+
+test('tagging a card keeps its review history', () => {
+  const before = parseCards('Words.md', '- 食べる #card\n  - to eat\n');
+  const after = parseCards('Words.md', '- 食べる #card #日语\n  - to eat\n');
+  assert.equal(after[0].id, before[0].id);
+  assert.equal(after[0].front, '食べる');
+  // History saved while the tag was part of the question moves to the card.
+  const store = emptyReviewStore();
+  const legacyId = 'legacy-0';
+  store.cards[legacyId] = { ...DEFAULT_SCHEDULE, path: 'Words.md', front: '食べる #日语', backHash: after[0].backHash, repeats: 3 };
+  const adopted = adoptMovedCards(after, store);
+  assert.equal(adopted.cards[after[0].id]?.repeats, 3);
 });

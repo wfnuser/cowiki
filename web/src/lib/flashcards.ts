@@ -11,6 +11,11 @@
  * (frontend/extensions/srs.cljs in Logseq 0.10.9) with its three answers.
  * A note imported from Logseq may carry `card-*::` properties; they seed a
  * card's schedule until it is first reviewed here.
+ *
+ * Decks, as in Anki, come from tags: the card's own tags besides `#card`
+ * (`#Japanese/N2` is a sub-deck), else the page's `tags`, else the page's
+ * folder. Tags are not part of the question, so adding one keeps a card's
+ * history.
  */
 
 export interface CardSchedule {
@@ -41,6 +46,8 @@ export interface Flashcard {
   backHash: string;
   /** Schedule from Logseq `card-*::` properties in the note, if any (read only). */
   imported: CardSchedule | null;
+  /** Deck paths (`Japanese/N2`): the card's tags, else the page's, else its folder. */
+  decks: string[];
 }
 
 /** Logseq's three answers: Forgotten, Took a while to recall, Remembered. */
@@ -163,10 +170,58 @@ function stripCardTag(value: string): string {
   return value.replace(/#?\[\[card\]\]/gi, '').replace(/(^|\s)#card(?=$|[\s.,;:!?)])/gi, '$1').replace(/\s+$/, '').trim();
 }
 
+/** A `#tag` or `#[[multi word tag]]` that starts a word. */
+const TAG = /(^|\s)#(?:\[\[([^\]]+)\]\]|([^\s#.,;:!?()[\]{}"'`]+))/gu;
+
+/** The question without its tags, and the tags (besides `card`). */
+function splitTags(value: string): { text: string; tags: string[] } {
+  const tags: string[] = [];
+  const text = value.replace(TAG, (_match, lead: string, bracketed?: string, plain?: string) => {
+    const name = (bracketed ?? plain ?? '').trim();
+    if (name && name.toLowerCase() !== 'card') tags.push(name);
+    return lead;
+  });
+  return { text: text.replace(/[ \t]+$/gm, '').trim(), tags };
+}
+
+function cleanTag(value: string): string {
+  return value.trim().replace(/^["']|["']$/g, '').replace(/^#/, '').replace(/^\[\[|\]\]$/g, '').trim();
+}
+
+function tagList(value: string): string[] {
+  const inner = value.trim().replace(/^\[(?!\[)(.*)\]$/, '$1');
+  return inner.split(',').map(cleanTag).filter(Boolean);
+}
+
+/** A page's tags: frontmatter `tags` (list or inline), or Logseq's `tags::` page property. */
+function pageTags(lines: string[]): string[] {
+  const end = frontmatterEnd(lines);
+  const tags: string[] = [];
+  for (let index = 1; index < end - 1; index += 1) {
+    const match = /^tags\s*:\s*(.*)$/i.exec(lines[index]);
+    if (!match) continue;
+    if (match[1].trim()) tags.push(...tagList(match[1]));
+    else {
+      for (let item = index + 1; item < end - 1 && /^\s*-\s+/.test(lines[item]); item += 1) {
+        tags.push(cleanTag(lines[item].replace(/^\s*-\s+/, '')));
+      }
+    }
+  }
+  for (let index = end; index < lines.length && !BULLET.test(lines[index]); index += 1) {
+    const match = /^tags::\s*(.*)$/i.exec(lines[index].trim());
+    if (match) tags.push(...tagList(match[1]));
+  }
+  return [...new Set(tags.filter(Boolean))];
+}
+
+export const UNSORTED_DECK = 'Unsorted';
+
 interface Block {
   /** Index of the bullet line. */
   line: number;
   properties: Map<string, string>;
+  /** The question's tags besides `#card`. */
+  tags: string[];
   front: string;
   back: string;
 }
@@ -202,10 +257,12 @@ function cardBlocks(content: string): Block[] {
     }
     while (children.length > 0 && children.at(-1)!.trim() === '') children.pop();
     const base = Math.min(...children.filter((line) => line.trim()).map((line) => /^\s*/.exec(line)![0].length));
+    const question = splitTags(stripCardTag(front.join('\n')));
     blocks.push({
       line: index,
       properties,
-      front: stripCardTag(front.join('\n')),
+      tags: question.tags,
+      front: question.text,
       back: children.map((line) => line.slice(Number.isFinite(base) ? base : 0)).join('\n').trim(),
     });
     index = next - 1;
@@ -216,6 +273,8 @@ function cardBlocks(content: string): Block[] {
 /** Cards defined in one page. */
 export function parseCards(path: string, content: string): Flashcard[] {
   const seen = new Map<string, number>();
+  const onPage = pageTags(content.split(/\r?\n/));
+  const folder = path.split('/').slice(0, -1).join('/');
   return cardBlocks(content)
     .filter((block) => block.front || block.back)
     .map((block) => {
@@ -237,6 +296,7 @@ export function parseCards(path: string, content: string): Flashcard[] {
         cloze: /\{\{cloze:?\s/.test(`${block.front}\n${block.back}`),
         backHash: hash(block.back.replace(/\s+/g, ' ').trim()),
         imported,
+        decks: block.tags.length ? [...new Set(block.tags)] : onPage.length ? onPage : [folder || UNSORTED_DECK],
       };
     });
 }
@@ -365,7 +425,10 @@ export function adoptMovedCards(cards: Flashcard[], store: ReviewStore): ReviewS
   let next = store;
   for (const [id, state] of orphans) {
     const same = (card: Flashcard) => card.front === state.front && card.backHash === state.backHash;
-    const matches = unsaved.filter((card) => same(card) && card.path !== state.path);
+    // A card that moved pages, or whose tags left its question (same page).
+    const matches = unsaved.filter((card) => same(card) || (
+      card.path === state.path && card.backHash === state.backHash && card.front === splitTags(state.front).text
+    ));
     const others = orphans.filter(([otherId, other]) => otherId !== id && other.front === state.front && other.backHash === state.backHash);
     if (matches.length !== 1 || others.length > 0) continue;
     const [card] = matches;
@@ -379,6 +442,50 @@ export function adoptMovedCards(cards: Flashcard[], store: ReviewStore): ReviewS
     };
   }
   return next;
+}
+
+/** A deck and its sub-decks; `cards` includes every card below it, once. */
+export interface DeckNode {
+  name: string;
+  /** `Japanese/N2` */
+  path: string;
+  cards: Flashcard[];
+  children: DeckNode[];
+}
+
+/** Decks as a tree, by name, with Unsorted last. A card with two tags is in both decks. */
+export function deckTree(cards: Flashcard[]): DeckNode[] {
+  const nodes = new Map<string, DeckNode & { ids: Set<string> }>();
+  const roots: DeckNode[] = [];
+  const node = (path: string) => {
+    let found = nodes.get(path);
+    if (!found) {
+      const parts = path.split('/');
+      found = { name: parts.at(-1)!, path, cards: [], children: [], ids: new Set() };
+      nodes.set(path, found);
+      const parent = parts.length > 1 ? node(parts.slice(0, -1).join('/')) : null;
+      (parent ? parent.children : roots).push(found);
+    }
+    return found;
+  };
+  for (const card of cards) {
+    for (const deck of card.decks) {
+      const parts = deck.split('/').map((part) => part.trim()).filter(Boolean);
+      for (let depth = 1; depth <= parts.length; depth += 1) {
+        const target = node(parts.slice(0, depth).join('/'));
+        if (!target.ids.has(card.id)) { target.ids.add(card.id); target.cards.push(card); }
+      }
+    }
+  }
+  const order = (list: DeckNode[]) => {
+    list.sort((left, right) => (left.path === UNSORTED_DECK ? 1 : right.path === UNSORTED_DECK ? -1 : left.name.localeCompare(right.name)));
+    for (const item of list) {
+      delete (item as Partial<DeckNode & { ids: Set<string> }>).ids;
+      order(item.children);
+    }
+  };
+  order(roots);
+  return roots;
 }
 
 export interface DeckStats {

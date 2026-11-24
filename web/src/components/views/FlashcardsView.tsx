@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowUpRight, FileText, LoaderCircle, PauseCircle, RefreshCw, RotateCcw, SlidersHorizontal } from 'lucide-react';
+import { ArrowUpRight, Check, ChevronLeft, ChevronRight, FileText, LoaderCircle, PauseCircle, RefreshCw, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import { Popover as PopoverPrimitive } from 'radix-ui';
 
 import { withObsidianReader } from '@/components/ObsidianReader';
 import { NumberField } from '@/components/ui/number-field';
-import { ViewHeader, ViewIconButton } from '@/components/ui/view-header';
+import { ViewEmpty, ViewHeader, ViewIconButton, ViewSectionHeading } from '@/components/ui/view-header';
 import { listCardSources, readCardReviews, writeCardReviews } from '@/local-api';
 import { C } from '@/lib/design';
 import { dateKey } from '@/lib/journal';
@@ -19,6 +19,7 @@ import {
   changedSinceReview,
   collectCards,
   deckStats,
+  deckTree,
   emptyReviewStore,
   isNew,
   parseReviewStore,
@@ -27,6 +28,7 @@ import {
   resetCard,
   scheduleOf,
   setSuspended,
+  type DeckNode,
   type Flashcard,
   type ReviewStore,
   type Score,
@@ -60,6 +62,11 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
   const [session, setSession] = useState<Flashcard[] | null>(null);
+  /** The deck being studied, for the session's top line; null for all decks. */
+  const [sessionDeck, setSessionDeck] = useState<string | null>(null);
+  /** The deck whose overview is open (Anki's deck screen). */
+  const [openDeck, setOpenDeck] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [reviewed, setReviewed] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const [now, setNow] = useState(() => new Date());
@@ -103,11 +110,19 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
 
   const stats = useMemo(() => deckStats(cards, store, now), [cards, store, now]);
   const queue = useMemo(() => buildQueue(cards, store, now, today), [cards, store, now, today]);
-  const decks = useMemo(() => {
-    const byPage = new Map<string, Flashcard[]>();
-    for (const item of cards) byPage.set(item.path, [...(byPage.get(item.path) ?? []), item]);
-    return [...byPage.entries()].sort(([left], [right]) => left.localeCompare(right));
-  }, [cards]);
+  const tree = useMemo(() => deckTree(cards), [cards]);
+  /** Today's queue of some cards, split like Anki's New and Due columns. */
+  const queueOf = (some: Flashcard[]) => {
+    const list = buildQueue(some, store, now, today);
+    const fresh = list.filter((card) => isNew(store, card)).length;
+    return { list, fresh, due: list.length - fresh };
+  };
+  const study = (list: Flashcard[], deck: string | null) => {
+    setSession(list);
+    setSessionDeck(deck);
+    setReviewed(0);
+    setRevealed(false);
+  };
 
   const current = session?.[0] ?? null;
 
@@ -188,7 +203,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
       <section style={{ width: 'min(680px, 100%)' }}>
         <div className="mb-3 flex items-center justify-between gap-3">
           <span className="text-[12.5px] text-text-tertiary">
-            <span className="tabular-nums">{session?.length ?? 0}</span> left · {fresh ? 'New' : `Review ${schedule.repeats + 1}`}
+            {sessionDeck ? `${sessionDeck.split('/').join(' / ')} · ` : ''}<span className="tabular-nums">{session?.length ?? 0}</span> left · {fresh ? 'New' : `Review ${schedule.repeats + 1}`}
           </span>
           <div className="flex items-center">
             <button type="button" onClick={() => onOpenSource(current.path)} className={quiet} title={current.path}>
@@ -243,46 +258,129 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
     );
   }
 
+  const limits = (
+    <PopoverPrimitive.Root>
+      <PopoverPrimitive.Trigger asChild>
+        <button type="button" aria-label="Daily limits" title="Daily limits" className="flex size-8 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text">
+          <SlidersHorizontal className="size-3.5" />
+        </button>
+      </PopoverPrimitive.Trigger>
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Content align="end" sideOffset={6} className="z-[200] w-60 rounded-lg border border-border bg-panel p-3 shadow-[var(--shadow-popover)]">
+          <p className="mb-2 text-[12.5px] font-medium text-text">Daily limits</p>
+          <div className="flex flex-col gap-2 text-[12.5px] text-text-secondary">
+            <span className="flex items-center justify-between gap-3">
+              New cards
+              <NumberField label="New cards per day" value={store.settings.newPerDay} onChange={(value) => updateSetting('newPerDay', String(value))} />
+            </span>
+            <span className="flex items-center justify-between gap-3">
+              Reviews
+              <NumberField label="Reviews per day" value={store.settings.reviewsPerDay} step={10} onChange={(value) => updateSetting('reviewsPerDay', String(value))} />
+            </span>
+          </div>
+        </PopoverPrimitive.Content>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
+  );
+  const refreshButton = (
+    <ViewIconButton label="Refresh" onClick={() => setReloadKey((key) => key + 1)}>
+      <RefreshCw className="size-3.5" />
+    </ViewIconButton>
+  );
+  const studyButton = (list: Flashcard[], deck: string | null, label: string) => (
+    <button
+      type="button"
+      onClick={() => study(list, deck)}
+      className="inline-flex h-8 items-center gap-2 rounded-lg bg-accent px-3.5 text-[13px] font-medium text-on-accent transition-colors hover:bg-accent-hover"
+    >
+      {label}
+    </button>
+  );
+  const done = <p className="flex items-center gap-1.5 text-[13px] text-text-tertiary"><Check className="size-3.5 text-green" aria-hidden /> All done for today.</p>;
+
+  // Anki's deck screen: what is due in one deck, and where its cards live.
+  const deck = openDeck ? findDeck(tree, openDeck) : null;
+  if (deck) {
+    const queue = queueOf(deck.cards);
+    const stats = deckStats(deck.cards, store, now);
+    const byPage = new Map<string, number>();
+    for (const item of deck.cards) byPage.set(item.path, (byPage.get(item.path) ?? 0) + 1);
+    return (
+      <section style={{ width: 'min(760px, 100%)' }}>
+        <ViewHeader
+          leading={<ViewIconButton label="All decks" onClick={() => setOpenDeck(null)}><ChevronLeft className="size-4" /></ViewIconButton>}
+          title={deck.path.split('/').join(' / ')}
+          actions={<>{limits}{refreshButton}</>}
+        />
+        {error && <div role="alert" className="mb-3 text-[12.5px] text-red">{error}</div>}
+        <dl className="mb-6 flex gap-10">
+          <div><dt className="text-[12px] text-text-tertiary">New</dt><dd className={cn('m-0 text-[22px] font-medium tabular-nums', queue.fresh ? 'text-blue' : 'text-text-faint')}>{queue.fresh}</dd></div>
+          <div><dt className="text-[12px] text-text-tertiary">Due</dt><dd className={cn('m-0 text-[22px] font-medium tabular-nums', queue.due ? 'text-green' : 'text-text-faint')}>{queue.due}</dd></div>
+          <div><dt className="text-[12px] text-text-tertiary">Cards</dt><dd className="m-0 text-[22px] font-medium tabular-nums text-text-secondary">{stats.total}</dd></div>
+        </dl>
+        <div className="mb-9">{queue.list.length ? studyButton(queue.list, deck.path, 'Study now') : done}</div>
+        <ViewSectionHeading meta={byPage.size}>Notes</ViewSectionHeading>
+        <ul className="m-0 list-none divide-y divide-border-soft border-y border-border-soft p-0">
+          {[...byPage.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([path, count]) => (
+            <li key={path}>
+              <button type="button" onClick={() => onOpenSource(path)} className="home-row" title={path}>
+                <span className="home-row-icon"><FileText size={15} /></span>
+                <span className="min-w-0 flex-1 truncate text-text">{path.replace(/\.md$/i, '')}</span>
+                <span className="shrink-0 text-[12.5px] tabular-nums text-text-tertiary">{count} {count === 1 ? 'card' : 'cards'}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+    );
+  }
+
+  const rows = (nodes: DeckNode[], depth: number): React.ReactNode => nodes.map((node) => {
+    const queue = queueOf(node.cards);
+    const open = !collapsed.has(node.path);
+    return (
+      <li key={node.path}>
+        <div className="deck-row" style={{ paddingLeft: 4 + depth * 18 }}>
+          {node.children.length > 0 ? (
+            <button
+              type="button"
+              aria-label={open ? `Collapse ${node.name}` : `Expand ${node.name}`}
+              onClick={() => setCollapsed((current) => {
+                const next = new Set(current);
+                if (open) next.add(node.path); else next.delete(node.path);
+                return next;
+              })}
+              className="deck-row-toggle"
+            >
+              <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} aria-hidden />
+            </button>
+          ) : <span className="deck-row-toggle" aria-hidden />}
+          <button type="button" className="deck-row-main" onClick={() => setOpenDeck(node.path)}>
+            <span className="min-w-0 flex-1 truncate text-text">{node.name}</span>
+            <span className={cn('deck-count', queue.fresh ? 'text-blue' : 'text-text-faint')}>{queue.fresh}</span>
+            <span className={cn('deck-count', queue.due ? 'text-green' : 'text-text-faint')}>{queue.due}</span>
+          </button>
+        </div>
+        {open && node.children.length > 0 && <ul className="m-0 list-none p-0">{rows(node.children, depth + 1)}</ul>}
+      </li>
+    );
+  });
+
   // Only counts worth reading: a zero says nothing.
   const summary = ([
-    [stats.due, 'due'],
-    [stats.fresh, 'new'],
     [stats.total, stats.total === 1 ? 'card' : 'cards'],
     [stats.suspended, 'suspended'],
   ] as Array<[number, string]>).filter(([value, label]) => value > 0 || label.startsWith('card'));
 
   return (
-    <section style={{ width: 'min(860px, 100%)' }}>
+    <section style={{ width: 'min(760px, 100%)' }}>
       <ViewHeader
         title="Flashcards"
-        className="mb-5"
         actions={(
           <>
-          <PopoverPrimitive.Root>
-            <PopoverPrimitive.Trigger asChild>
-              <button type="button" aria-label="Daily limits" title="Daily limits" className="flex size-8 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text">
-                <SlidersHorizontal className="size-3.5" />
-              </button>
-            </PopoverPrimitive.Trigger>
-            <PopoverPrimitive.Portal>
-              <PopoverPrimitive.Content align="end" sideOffset={6} className="z-[200] w-60 rounded-lg border border-border bg-panel p-3 shadow-[var(--shadow-popover)]">
-                <p className="mb-2 text-[12.5px] font-medium text-text">Daily limits</p>
-                <div className="flex flex-col gap-2 text-[12.5px] text-text-secondary">
-                  <span className="flex items-center justify-between gap-3">
-                    New cards
-                    <NumberField label="New cards per day" value={store.settings.newPerDay} onChange={(value) => updateSetting('newPerDay', String(value))} />
-                  </span>
-                  <span className="flex items-center justify-between gap-3">
-                    Reviews
-                    <NumberField label="Reviews per day" value={store.settings.reviewsPerDay} step={10} onChange={(value) => updateSetting('reviewsPerDay', String(value))} />
-                  </span>
-                </div>
-              </PopoverPrimitive.Content>
-            </PopoverPrimitive.Portal>
-          </PopoverPrimitive.Root>
-            <ViewIconButton label="Refresh" onClick={() => setReloadKey((key) => key + 1)}>
-              <RefreshCw className="size-3.5" />
-            </ViewIconButton>
+            {queue.length > 0 && <span className="mr-1">{studyButton(queue, null, `Study all · ${queue.length}`)}</span>}
+            {limits}
+            {refreshButton}
           </>
         )}
       />
@@ -291,56 +389,40 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
 
       {loading ? (
         <p className="flex items-center gap-2 py-10 text-[12.5px] text-text-tertiary"><LoaderCircle className="size-3.5 animate-spin" /> Collecting cards…</p>
+      ) : cards.length === 0 ? (
+        <ViewEmpty className="flex-col">
+          <span>No cards yet. Tag a bullet with <code className="font-mono">#card</code>; its child bullets are the answer.</span>
+          <span>Other tags on the card or its page, like <code className="font-mono">#Japanese/N2</code>, sort it into decks.</span>
+        </ViewEmpty>
       ) : (
         <>
-          <div className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-2">
-            <button
-              type="button"
-              disabled={queue.length === 0}
-              onClick={() => { setSession(queue); setReviewed(0); setRevealed(false); }}
-              className="inline-flex h-9 items-center rounded-lg bg-accent px-4 text-[13px] font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:bg-bg-active disabled:text-text-tertiary"
-            >
-              {queue.length === 0 ? 'Nothing to review' : `Review ${queue.length}`}
-            </button>
-            <span className="text-[12.5px] text-text-tertiary">
+          <div className="deck-head" aria-hidden>
+            <span className="flex-1">Deck</span>
+            <span className="deck-count">New</span>
+            <span className="deck-count">Due</span>
+          </div>
+          <ul className="m-0 list-none border-y border-border-soft p-0" aria-label="Decks">{rows(tree, 0)}</ul>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 px-1 text-[12.5px] text-text-tertiary">
+            {queue.length === 0 ? done : <span />}
+            <span>
               {summary.map(([value, label], index) => (
-                <span key={label}>{index > 0 && ' · '}<span className="tabular-nums text-text-secondary">{value}</span> {label}</span>
+                <span key={label}>{index > 0 && ' · '}<span className="tabular-nums">{value}</span> {label}</span>
               ))}
               {reviewed > 0 && <> · {reviewed} reviewed now</>}
-              {stats.changed > 0 && <span className="text-amber"> · {stats.changed} changed</span>}
+              {stats.changed > 0 && <span className="text-amber"> · {stats.changed} changed since review</span>}
             </span>
           </div>
-
-          {decks.length === 0 ? (
-            <p className="py-10 text-center text-[12.5px] text-text-tertiary">No cards yet. Tag a bullet with <code className="font-mono">#card</code>; its child bullets are the answer.</p>
-          ) : (
-            <ul className="m-0 list-none border-t border-border-soft p-0">
-              {decks.map(([path, items]) => {
-                const deck = deckStats(items, store, now);
-                return (
-                  <li key={path} className="border-b border-border-soft">
-                    <button
-                      type="button"
-                      onClick={() => onOpenSource(path)}
-                      className="group flex w-full items-center gap-2.5 px-2 py-2.5 text-left transition-colors hover:bg-bg-hover/60"
-                      title={path}
-                    >
-                      <FileText className="size-3.5 shrink-0 text-text-faint" aria-hidden />
-                      <span className="min-w-0 flex-1 truncate text-[13.5px] text-text">{path.replace(/\.md$/i, '')}</span>
-                      <span className="shrink-0 text-[12px] tabular-nums text-text-tertiary">
-                        {deck.due > 0 && <span className="text-text-secondary">{deck.due} due · </span>}
-                        {deck.total} {deck.total === 1 ? 'card' : 'cards'}
-                        {deck.suspended > 0 ? ` · ${deck.suspended} suspended` : ''}
-                      </span>
-                      <ArrowUpRight className="size-3 shrink-0 text-text-faint opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
         </>
       )}
     </section>
   );
+}
+
+function findDeck(nodes: DeckNode[], path: string): DeckNode | null {
+  for (const node of nodes) {
+    if (node.path === path) return node;
+    const found = findDeck(node.children, path);
+    if (found) return found;
+  }
+  return null;
 }
