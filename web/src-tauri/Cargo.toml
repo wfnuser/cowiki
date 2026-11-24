@@ -46,3 +46,6 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 zip = { version = "8", default-features = false, features = ["deflate"] }
 
 tempfile = "3"
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }

@@ -8,6 +8,9 @@ use std::collections::BTreeSet;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+mod governance_review;
+pub use governance_review::GovernanceReview;
+
 const BASE_REF_PREFIX: &str = "refs/cowiki/agent-bases/";
 const BRANCH_REF_PREFIX: &str = "refs/heads/agent/";
 const CONFLICT_REF_PREFIX: &str = "refs/cowiki/agent-conflicts/";
@@ -49,6 +52,19 @@ impl LocalEngine {
             .and_then(|head| head.peel_to_commit())
             .map_err(|_| "the Space needs a Git checkpoint before running an Agent".to_string())?;
         let tree_id = snapshot_worktree(&repo)?;
+        self.create_change_at_tree(space_slug, &repo, &parent, tree_id, title, agent_name)
+    }
+
+    fn create_change_at_tree(
+        &self,
+        space_slug: &str,
+        repo: &Repository,
+        parent: &git2::Commit<'_>,
+        tree_id: Oid,
+        title: &str,
+        agent_name: &str,
+    ) -> Result<AgentChange, String> {
+        let space = self.find_space(space_slug)?;
         let tree = repo.find_tree(tree_id).map_err(|error| error.to_string())?;
         let signature = Signature::now("CoWiki Agent", "agent@cowiki.app")
             .map_err(|error| error.to_string())?;
@@ -66,22 +82,22 @@ impl LocalEngine {
                 &signature,
                 &message,
                 &tree,
-                &[&parent],
+                &[parent],
             )
             .map_err(|error| error.to_string())?;
         let branch_ref = branch_ref(&id);
         if let Err(error) =
             repo.reference(&branch_ref, base_id, false, "Create CoWiki Agent Change")
         {
-            delete_reference_if_present(&repo, &base_ref);
+            delete_reference_if_present(repo, &base_ref);
             return Err(error.to_string());
         }
 
         let worktree_path = match self.prepare_change_worktree_path(&space.id, &id) {
             Ok(path) => path,
             Err(error) => {
-                delete_reference_if_present(&repo, &branch_ref);
-                delete_reference_if_present(&repo, &base_ref);
+                delete_reference_if_present(repo, &branch_ref);
+                delete_reference_if_present(repo, &base_ref);
                 return Err(error);
             }
         };
@@ -91,8 +107,8 @@ impl LocalEngine {
         let mut options = git2::WorktreeAddOptions::new();
         options.reference(Some(&branch));
         if let Err(error) = repo.worktree(&worktree_name(&id), &worktree_path, Some(&options)) {
-            delete_reference_if_present(&repo, &branch_ref);
-            delete_reference_if_present(&repo, &base_ref);
+            delete_reference_if_present(repo, &branch_ref);
+            delete_reference_if_present(repo, &base_ref);
             return Err(error.to_string());
         }
 
@@ -325,13 +341,14 @@ impl LocalEngine {
 
     /// Caller selects an already-reviewed preview. This method owns the
     /// start/close lease and the mutation lock throughout preflight and capture.
-    pub fn stage_governance_in_change(
+    fn stage_governance_in_change(
         &self,
         gate: &crate::agent_execution_gate::AgentExecutionGate,
         space_slug: &str,
         change_id: &str,
         selections: &[cowiki_knowledge::governance::ReviewSelection],
         as_of: &str,
+        reviewed_base: Oid,
     ) -> Result<AgentChange, String> {
         let _lease = gate.begin_close(space_slug, change_id)?;
         let _mutation = self.lock_mutations()?;
@@ -343,9 +360,7 @@ impl LocalEngine {
         {
             return Err("proposal requires the active managed Agent Change branch".into());
         }
-        let tree = reference_commit(&repo, &base_ref(change_id))?
-            .tree()
-            .map_err(|e| e.to_string())?;
+        let tree = repo.find_tree(reviewed_base).map_err(|e| e.to_string())?;
         if selections.is_empty() {
             return Err("select at least one proposal".into());
         }
@@ -411,39 +426,6 @@ impl LocalEngine {
             };
         }
         result
-    }
-
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "Review UI integration will call this staging entry point"
-        )
-    )]
-    pub fn stage_governance_as_new_change(
-        &self,
-        gate: &crate::agent_execution_gate::AgentExecutionGate,
-        space_slug: &str,
-        selections: &[cowiki_knowledge::governance::ReviewSelection],
-        as_of: &str,
-    ) -> Result<AgentChange, String> {
-        let change = {
-            let _mutation = self.lock_mutations()?;
-            self.create_agent_change_with_identity(
-                space_slug,
-                "Governance repair",
-                "CoWiki Governance",
-            )?
-        };
-        // A newly created change remains reviewable on failure. Never discard
-        // another editor's work if it changed concurrently with our preflight.
-        self.stage_governance_in_change(gate, space_slug, &change.id, selections, as_of)
-            .map_err(|e| {
-                format!(
-                    "Governance change {} remains open for review: {e}",
-                    change.id
-                )
-            })
     }
 
     pub fn agent_change_worktree(
@@ -1191,6 +1173,11 @@ mod governance_tests {
     use cowiki_knowledge::governance::{
         digest, FilePatch, RepairProposal, ReviewSelection, TextEdit,
     };
+    fn base_tree(change: &AgentChange) -> Oid {
+        let repo = Repository::open(&change.worktree_path).unwrap();
+        let commit = reference_commit(&repo, &base_ref(&change.id)).unwrap();
+        commit.tree_id()
+    }
     fn selection(base: &str, doc: &str) -> ReviewSelection {
         let start = doc.find("unsupported").unwrap();
         ReviewSelection {
@@ -1238,7 +1225,8 @@ mod governance_tests {
                 &space.slug,
                 &open.id,
                 &[first, second],
-                "2026-11-23"
+                "2026-11-23",
+                base_tree(&open),
             )
             .is_err());
         assert_eq!(
@@ -1263,7 +1251,17 @@ mod governance_tests {
         let index = std::fs::read(folder.join(".git/index")).unwrap();
         let day = "2026-11-23";
         let new = engine
-            .stage_governance_as_new_change(&gate, &space.slug, &[selection(doc, doc)], day)
+            .create_agent_change(&space.slug, "Governance repair")
+            .unwrap();
+        let new = engine
+            .stage_governance_in_change(
+                &gate,
+                &space.slug,
+                &new.id,
+                &[selection(doc, doc)],
+                day,
+                base_tree(&new),
+            )
             .unwrap();
         let staged = std::fs::read_to_string(new.worktree_path.join("guide.md")).unwrap();
         assert!(staged.contains("verified: false"));
@@ -1281,6 +1279,7 @@ mod governance_tests {
         let candidate = format!("{doc}Independent edit\n");
         let path = open.worktree_path.join("guide.md");
         let selected = selection(doc, &candidate);
+        let reviewed_base = base_tree(&open);
         let stage = || {
             engine.stage_governance_in_change(
                 &gate,
@@ -1288,6 +1287,7 @@ mod governance_tests {
                 &open.id,
                 std::slice::from_ref(&selected),
                 day,
+                reviewed_base,
             )
         };
         assert!(stage().is_err());
