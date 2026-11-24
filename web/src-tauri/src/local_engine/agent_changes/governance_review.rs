@@ -178,17 +178,15 @@ impl LocalEngine {
             .into_iter()
             .map(|p| (p.id, p.selection))
             .collect();
-        let mut paths = BTreeSet::new();
-        let mut selected = Vec::new();
+        let mut selections = Vec::new();
         for key in proposal_ids {
-            let selection = available
-                .remove(key)
-                .ok_or("Repair preview changed or selection is invalid. Refresh the audit.")?;
-            if !paths.insert(selection.proposal.patch.path.to_lowercase()) {
-                return Err("Select only one alternative per file.".into());
-            }
-            selected.push(selection);
+            selections.push(
+                available
+                    .remove(key)
+                    .ok_or("Repair preview changed or selection is invalid. Refresh the audit.")?,
+            );
         }
+        let selected = combine_selections(selections)?;
         let base = repo
             .find_commit(trees.base_commit)
             .map_err(|e| e.to_string())?;
@@ -213,6 +211,52 @@ impl LocalEngine {
         self.stage_governance_in_change(gate, slug, &new.id, &selected, day, base.tree_id())
             .map_err(|e| format!("Governance change {} remains open for review: {e}", new.id))
     }
+}
+
+/// Combine independent edits to the same candidate before the worktree writer
+/// checks each file's preimage and resets its trust metadata once.
+fn combine_selections(selections: Vec<ReviewSelection>) -> Result<Vec<ReviewSelection>, String> {
+    let mut files = BTreeMap::<String, ReviewSelection>::new();
+    for selected in selections {
+        let path = &selected.proposal.patch.path;
+        match files.entry(path.to_lowercase()) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(selected);
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                let existing = entry.get_mut();
+                if existing.proposal.patch.path != *path {
+                    return Err(format!("Selected paths differ only by case: {path}."));
+                }
+                existing
+                    .proposal
+                    .patch
+                    .edits
+                    .extend(selected.proposal.patch.edits);
+                existing
+                    .proposal
+                    .evidence
+                    .extend(selected.proposal.evidence);
+            }
+        }
+    }
+    for selected in files.values_mut() {
+        let patch = &mut selected.proposal.patch;
+        patch.edits.sort_by_key(|e| (e.start, e.end));
+        patch.edits.dedup();
+        if patch
+            .edits
+            .windows(2)
+            .any(|w| w[0].end > w[1].start || w[0].start == w[1].start)
+        {
+            return Err(format!(
+                "Selected repairs overlap in {}. Select one of the alternatives.",
+                patch.path
+            ));
+        }
+        patch.preview(&patch.path, &selected.candidate)?;
+    }
+    Ok(files.into_values().collect())
 }
 
 // Only actual source links in a checkpoint can ground a revision correction.
@@ -591,7 +635,7 @@ mod tests {
             .unwrap();
         fs::write(
             f.root.join("cache.md"),
-            "# Cache\nThe cache timeout is 90 seconds.\n",
+            "# Cache\nThe cache timeout is 90 seconds.\nSee [[old]].\n",
         )
         .unwrap();
         let review = f.review(None);
@@ -611,23 +655,36 @@ mod tests {
         );
         assert_eq!(conflict.issue.location.as_ref().unwrap().path, "cache.md");
         assert_eq!(conflict.issue.evidence.as_ref().unwrap().path, "limits.md");
-        let choice = review
+        assert!(review.proposals.iter().any(|p| p.diff.path == "links.md"));
+        let repairs: Vec<_> = review
             .proposals
             .iter()
-            .find(|p| p.diff.path == "links.md")
-            .unwrap();
+            .filter(|p| p.diff.path == "cache.md")
+            .collect();
+        assert_eq!(repairs.len(), 2);
+        let ids: Vec<_> = repairs.iter().map(|p| p.id.clone()).collect();
         let gate = AgentExecutionGate::default();
         let staged = f
             .engine
-            .stage_governance_as_new_change(
-                &gate,
-                "notes",
-                None,
-                DAY,
-                std::slice::from_ref(&choice.id),
-            )
+            .stage_governance_as_new_change(&gate, "notes", None, DAY, &ids)
             .unwrap();
-        assert_eq!(staged.diffs.as_slice(), std::slice::from_ref(&choice.diff));
-        assert_eq!(fs::read_to_string(f.root.join("links.md")).unwrap(), LINK);
+        assert_eq!(staged.diffs.len(), 1);
+        assert_eq!(staged.diffs[0].path, "cache.md");
+        assert_eq!(
+            staged.diffs[0].new_content.as_deref(),
+            Some("# Cache\nThe cache timeout is 30 seconds.\nSee [[guide]].\n")
+        );
+        assert_eq!(
+            fs::read_to_string(f.root.join("cache.md")).unwrap(),
+            "# Cache\nThe cache timeout is 90 seconds.\nSee [[old]].\n"
+        );
+        let first = repairs[0].selection.clone();
+        let mut other = first.clone();
+        other.proposal.patch.edits[0]
+            .after
+            .push_str(" conflicting alternative");
+        assert!(combine_selections(vec![first, other])
+            .unwrap_err()
+            .contains("overlap"));
     }
 }
