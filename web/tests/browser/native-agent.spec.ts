@@ -233,7 +233,7 @@ test('switching Spaces shows only that Space’s sessions and keeps the other ru
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect(page.getByText('Reading')).toBeVisible();
   await page.getByRole('button', { name: 'W', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Space menu' })).toHaveAttribute('title', 'Work');
+  await expect(page.locator('[data-space-title]')).toHaveAttribute('title', 'Work');
   await expect(page.getByText('Personal task')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Stop the Agent' })).toHaveCount(0);
   await page.getByRole('button', { name: 'P', exact: true }).click();

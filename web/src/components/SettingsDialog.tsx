@@ -1,12 +1,15 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { isSubmitEnter } from '@/lib/ime';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, Check, Clock, Cloud, Copy, Key, Loader2, Plus, Shield, Trash2 } from 'lucide-react';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
+import { PluginSettings, SettingSwitch, settingsInputClass } from '@/plugins/PluginSettings';
+import type { BuiltinPlugin } from '@/plugins/host';
+import { MODULES, type ModuleId, type PersonalPreferences, type SpaceFeatures } from '@/lib/space-features';
+import { cn } from '@/lib/utils';
 import {
   listApiKeys, createApiKey, revokeApiKey,
   type ApiKeyInfo, type ApiKeyCreated,
@@ -19,9 +22,31 @@ import {
 import { agentDefinition, SUPPORTED_AGENTS } from '../lib/agents';
 import { loadTheme, setThemePreference, THEME_CHOICES, type ThemePreference } from '../lib/theme';
 
+/** The open Space's settings, stored in the Space and shared with its members. */
+export interface SpaceSettingsInput {
+  name: string;
+  features: SpaceFeatures;
+  plugins: readonly BuiltinPlugin[];
+  ready: boolean;
+  configurationError?: string;
+  /** Where the Space lives ("Local only", "Synced with Cloud") and its Cloud action. */
+  place: { label: string; detail?: string; action: { label: string; onSelect: () => void } | null };
+  onReload: () => Promise<void>;
+  onSave: (features: SpaceFeatures) => Promise<void>;
+}
+
+export type SettingsGroup = 'space' | 'app';
+
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Which group to open on: the Space's settings or the app's. */
+  group?: SettingsGroup;
+  /** null when the open Space has no settings here (a Cloud Space in the browser). */
+  space?: SpaceSettingsInput | null;
+  /** Personal preferences: only this person, only this computer. */
+  preferences: PersonalPreferences;
+  onPreferencesChange: (preferences: PersonalPreferences) => void;
   clientMode: boolean;
   cloudConnected: boolean;
   auth: AuthUser | null;
@@ -306,9 +331,20 @@ function RevokeConfirmDialog({
 
 // ── Main Settings Dialog ──
 
+type Page = 'space-general' | `space-plugin:${string}` | 'app-general' | 'account' | 'keys';
+
+/**
+ * One Settings window, as in Notion or Linear: the open Space's settings
+ * (stored in the Space, shared with everyone in it, saved together) and the
+ * app's (only you, this computer, applied at once), side by side.
+ */
 export function SettingsDialog({
   open,
   onOpenChange,
+  group = 'app',
+  space,
+  preferences,
+  onPreferencesChange,
   clientMode,
   cloudConnected,
   auth,
@@ -317,6 +353,13 @@ export function SettingsDialog({
   onConnectCloud,
 }: SettingsDialogProps) {
   const availableTabs = settingsTabs({ clientMode, cloudConnected });
+  const pluginPages = (space?.plugins ?? []).filter((plugin) => plugin.settings?.fields.length);
+  const firstPage: Page = group === 'space' && space ? 'space-general' : availableTabs.includes('client') ? 'app-general' : 'account';
+  const [page, setPage] = useState<Page>(firstPage);
+  const [draft, setDraft] = useState<SpaceFeatures | null>(space?.features ?? null);
+  const [saving, setSaving] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  const [spaceError, setSpaceError] = useState('');
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
   const [theme, setTheme] = useState<ThemePreference>(loadTheme);
   const [loading, setLoading] = useState(false);
@@ -324,6 +367,20 @@ export function SettingsDialog({
   const [showCreate, setShowCreate] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<ApiKeyInfo | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
+
+  // Opening starts from the saved settings, on the group that was asked for.
+  const spaceFeatures = space?.features;
+  useEffect(() => {
+    if (!open) return;
+    const pending = window.setTimeout(() => {
+      setPage(firstPage);
+      setDraft(spaceFeatures ?? null);
+      setSpaceError('');
+    }, 0);
+    return () => window.clearTimeout(pending);
+    // Only when the window opens or the saved settings change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, spaceFeatures]);
 
   const fetchKeys = useCallback(async () => {
     setLoading(true);
@@ -368,178 +425,302 @@ export function SettingsDialog({
     }
   };
 
+  const dirty = !!space && !!draft && JSON.stringify(draft) !== JSON.stringify(space.features);
+  const saveSpace = async () => {
+    if (!space || !draft) return;
+    setSaving(true);
+    setSpaceError('');
+    try { await space.onSave(draft); }
+    catch (caught) { setSpaceError(caught instanceof Error ? caught.message : String(caught)); }
+    finally { setSaving(false); }
+  };
+  const reloadSpace = async () => {
+    if (!space) return;
+    setReloading(true);
+    setSpaceError('');
+    try { await space.onReload(); }
+    catch (caught) { setSpaceError(caught instanceof Error ? caught.message : String(caught)); }
+    finally { setReloading(false); }
+  };
+  const setModule = (id: ModuleId, enabled: boolean) => {
+    setDraft((previous) => previous && ({ ...previous, modules: { ...previous.modules, [id]: enabled } }));
+  };
+
+  const navItem = (id: Page, label: string) => (
+    <button
+      key={id}
+      type="button"
+      aria-current={page === id ? 'page' : undefined}
+      onClick={() => setPage(id)}
+      className={cn(
+        'flex h-7 w-full items-center rounded-md px-2.5 text-left text-[13px] transition-colors',
+        page === id ? 'bg-bg-active/70 font-medium text-text' : 'text-text-secondary hover:bg-bg-hover',
+      )}
+    >
+      {label}
+    </button>
+  );
+  const pluginPage = page.startsWith('space-plugin:') ? pluginPages.find((plugin) => `space-plugin:${plugin.id}` === page) : undefined;
+  const title = page === 'space-general' ? 'General'
+    : pluginPage ? pluginPage.settings!.title
+    : page === 'app-general' ? 'General'
+    : page === 'account' ? 'Account' : 'API Keys';
+  const onSpacePage = page.startsWith('space-');
+
+  let body: ReactNode = null;
+  if (onSpacePage && space && draft) {
+    body = (
+      <>
+        {!space.ready && <p role="status" className="pb-2 pt-1 text-[12.5px] text-text-tertiary">{space.configurationError || 'Loading Space settings…'}</p>}
+        <fieldset disabled={!space.ready || saving || reloading} style={{ border: 0, padding: 0, margin: 0, display: 'contents' }}>
+          {page === 'space-general' ? (
+            <>
+              <section className="settings-section is-first">
+                <h3 className="settings-heading">Space</h3>
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] text-text">{space.name}</p>
+                    <p className="truncate text-[12px] text-text-tertiary">{space.place.label}{space.place.detail ? ` · ${space.place.detail}` : ''}</p>
+                  </div>
+                  {space.place.action && (
+                    <Button size="sm" variant="outline" onClick={() => { onOpenChange(false); space.place.action!.onSelect(); }}>
+                      {space.place.action.label}
+                    </Button>
+                  )}
+                </div>
+              </section>
+              <section className="settings-section">
+                <h3 className="settings-heading mb-0">Modules</h3>
+                <p className="mb-1 text-[12px] leading-[1.5] text-text-tertiary">Turning a module off only hides it; your notes stay.</p>
+                <div>
+                  <PluginSettings plugins={space.plugins} features={draft} preferences={preferences} onFeatures={setDraft} onPreferences={onPreferencesChange} part="toggles" />
+                  {MODULES.filter((module) => !space.plugins.some((plugin) => plugin.id === module.id)).map((module) => (
+                    <SettingSwitch
+                      key={module.id}
+                      label={module.label}
+                      description={module.description}
+                      checked={draft.modules[module.id]}
+                      onChange={(enabled) => setModule(module.id, enabled)}
+                    />
+                  ))}
+                </div>
+              </section>
+              <section className="settings-section">
+                <h3 className="settings-heading">Templates</h3>
+                <div className="grid grid-cols-[112px_minmax(0,1fr)] items-center gap-x-3">
+                  <label htmlFor="templates-folder" className="text-[12.5px] text-text-secondary">Folder</label>
+                  <input
+                    id="templates-folder"
+                    className={settingsInputClass}
+                    value={draft.templates.folder}
+                    placeholder="Templates"
+                    onChange={(event) => setDraft((previous) => previous && ({ ...previous, templates: { folder: event.target.value } }))}
+                  />
+                </div>
+                <p className="mt-2.5 text-[11.5px] leading-[1.55] text-text-tertiary">
+                  Pages in this folder are offered when you create a page. They support <code className="font-mono">{'{{title}}'}</code>, <code className="font-mono">{'{{date}}'}</code> and <code className="font-mono">{'{{time}}'}</code>.
+                </p>
+              </section>
+            </>
+          ) : pluginPage ? (
+            <PluginSettings plugins={[pluginPage]} features={draft} preferences={preferences} onFeatures={setDraft} onPreferences={onPreferencesChange} part="fields" />
+          ) : null}
+        </fieldset>
+      </>
+    );
+  } else if (page === 'app-general') {
+    body = (
+      <>
+        <section className="settings-section is-first">
+          <h3 className="settings-heading">Appearance</h3>
+          <div className="grid grid-cols-3 gap-0.5 rounded-lg bg-bg-secondary p-0.5 ring-1 ring-inset ring-border-soft" role="radiogroup" aria-label="Appearance">
+            {THEME_CHOICES.map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={theme === value}
+                onClick={() => { setTheme(value); setThemePreference(value); }}
+                className={`h-7 rounded-md px-2 text-[12.5px] transition-colors ${
+                  theme === value
+                    ? 'bg-panel font-medium text-text shadow-[var(--shadow-chip)] ring-1 ring-border'
+                    : 'text-text-tertiary hover:text-text-secondary'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </section>
+        <section className="settings-section">
+          <h3 className="settings-heading">Default Agent</h3>
+          <p className="-mt-1.5 mb-2.5 text-[12.5px] text-text-tertiary">New sessions start with it. The Agent you use last becomes the default.</p>
+          <div className="grid grid-cols-2 gap-1.5">
+            {SUPPORTED_AGENTS.map((agent) => {
+              const selected = defaultAgent === agent;
+              const definition = agentDefinition(agent);
+              return (
+                <button
+                  key={agent}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => onDefaultAgentChange(agent)}
+                  className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors ${
+                    selected
+                      ? 'border-accent/40 bg-accent-soft/60 text-text'
+                      : 'border-border-soft text-text-secondary hover:bg-bg-hover'
+                  }`}
+                >
+                  <span className="text-[13px] font-medium">{definition.displayName}</span>
+                  {selected && <Check className="size-3.5 text-accent" aria-hidden />}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+        <section className="settings-section">
+          <h3 className="settings-heading mb-0">History</h3>
+          <div>
+            {space && <PluginSettings plugins={space.plugins} features={space.features} preferences={preferences} onFeatures={() => {}} onPreferences={onPreferencesChange} part="preferences" />}
+            <SettingSwitch
+              label="Save checkpoints automatically"
+              description="After 5 minutes without changes, and when CoWiki quits. Kept in History; never committed or shared."
+              checked={preferences.autoCheckpoint}
+              onChange={(autoCheckpoint) => onPreferencesChange({ ...preferences, autoCheckpoint })}
+            />
+          </div>
+        </section>
+      </>
+    );
+  } else if (page === 'account') {
+    body = cloudConnected && auth ? (
+      <div className="space-y-3 pt-1">
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">Name</label>
+          <p className="text-sm">{auth.name}</p>
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">User ID</label>
+          <p className="font-mono text-xs text-muted-foreground">{auth.id}</p>
+        </div>
+      </div>
+    ) : (
+      <div className="flex min-h-[280px] flex-col items-center justify-center text-center">
+        <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft">
+          <Cloud className="h-5 w-5 text-accent" />
+        </div>
+        <p className="text-sm font-medium">Connect to CoWiki Cloud</p>
+        <p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">
+          Keep local Spaces account-free. Sign in only when you want to publish or join a shared Space.
+        </p>
+        <Button
+          className="mt-4 bg-accent text-on-accent hover:bg-accent-hover"
+          onClick={() => {
+            onOpenChange(false);
+            onConnectCloud();
+          }}
+        >
+          Sign up / Sign in
+        </Button>
+      </div>
+    );
+  } else if (page === 'keys') {
+    body = (
+      <div className="flex flex-col">
+        <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-amber/30 bg-amber-soft px-3.5 py-2.5 text-sm text-amber-ink">
+          <Shield className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>API keys are only shown once upon creation. Copy and store them securely.</span>
+        </div>
+        <div className="mb-4 flex items-center justify-between">
+          <h4 className="text-sm font-medium">Your API Keys</h4>
+          <Button size="sm" className="gap-1.5" onClick={() => setShowCreate(true)}>
+            <Plus className="h-3.5 w-3.5" />
+            New Key
+          </Button>
+        </div>
+        {loading && (
+          <div className="space-y-2">
+            <KeyCardSkeleton />
+            <KeyCardSkeleton />
+          </div>
+        )}
+        {!loading && error && (
+          <div className="flex flex-col items-center gap-2 rounded-lg border border-red/20 bg-red-soft py-6 text-center">
+            <p className="text-sm text-red">{error}</p>
+            <Button variant="outline" size="sm" onClick={fetchKeys}>Retry</Button>
+          </div>
+        )}
+        {!loading && !error && keys.length === 0 && (
+          <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+              <Key className="h-5 w-5 text-muted-foreground" />
+            </div>
+            <p className="text-sm font-medium text-foreground">No API keys yet</p>
+            <p className="mt-1 text-xs text-muted-foreground">Create your first API key to get started.</p>
+          </div>
+        )}
+        {!loading && !error && keys.length > 0 && (
+          <motion.div initial="initial" animate="animate" className="space-y-2">
+            <AnimatePresence mode="popLayout">
+              {keys.map((k) => (
+                <KeyCard
+                  key={k.id}
+                  keyInfo={k}
+                  onRevoke={(id) => {
+                    const target = keys.find((kk) => kk.id === id);
+                    if (target) setRevokeTarget(target);
+                  }}
+                  revoking={revoking}
+                />
+              ))}
+            </AnimatePresence>
+          </motion.div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Settings</DialogTitle>
-          </DialogHeader>
-
-          <Tabs
-            key={`${clientMode}:${cloudConnected}`}
-            defaultValue={availableTabs[0]}
-            className="w-full"
-          >
-            <TabsList className="w-full">
-              {availableTabs.includes('client') && (
-                <TabsTrigger value="client" className="flex-1">Client</TabsTrigger>
-              )}
-              <TabsTrigger value="account" className="flex-1">Account</TabsTrigger>
-              {availableTabs.includes('keys') && (
-                <TabsTrigger value="keys" className="flex-1">API Keys</TabsTrigger>
-              )}
-            </TabsList>
-
-            {availableTabs.includes('client') && (
-              <TabsContent value="client" className="mt-4 data-[state=inactive]:hidden" forceMount style={{ minHeight: 320 }}>
-                <section className="settings-section is-first">
-                  <h3 className="settings-heading">Appearance</h3>
-                  <div className="grid grid-cols-3 gap-0.5 rounded-lg bg-bg-secondary p-0.5 ring-1 ring-inset ring-border-soft" role="radiogroup" aria-label="Appearance">
-                    {THEME_CHOICES.map(([value, label]) => (
-                      <button
-                        key={value}
-                        type="button"
-                        role="radio"
-                        aria-checked={theme === value}
-                        onClick={() => { setTheme(value); setThemePreference(value); }}
-                        className={`h-7 rounded-md px-2 text-[12.5px] transition-colors ${
-                          theme === value
-                            ? 'bg-panel font-medium text-text shadow-[var(--shadow-chip)] ring-1 ring-border'
-                            : 'text-text-tertiary hover:text-text-secondary'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-                <section className="settings-section">
-                  <h3 className="settings-heading">Default Agent</h3>
-                  <p className="-mt-1.5 mb-2.5 text-[12.5px] text-text-tertiary">New sessions start with it. The Agent you use last becomes the default.</p>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {SUPPORTED_AGENTS.map((agent) => {
-                      const selected = defaultAgent === agent;
-                      const definition = agentDefinition(agent);
-                      return (
-                        <button
-                          key={agent}
-                          type="button"
-                          aria-pressed={selected}
-                          onClick={() => onDefaultAgentChange(agent)}
-                          className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors ${
-                            selected
-                              ? 'border-accent/40 bg-accent-soft/60 text-text'
-                              : 'border-border-soft text-text-secondary hover:bg-bg-hover'
-                          }`}
-                        >
-                          <span className="text-[13px] font-medium">{definition.displayName}</span>
-                          {selected && <Check className="size-3.5 text-accent" aria-hidden />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </section>
-              </TabsContent>
+        <DialogContent className="top-1/2 flex h-[min(620px,calc(100vh-3rem))] -translate-y-1/2 flex-row gap-0 overflow-hidden p-0 sm:max-w-[800px]">
+          <nav aria-label="Settings" className="flex w-[196px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border-soft bg-bg-secondary px-2 py-4">
+            <DialogTitle className="px-2.5 pb-3 text-[13px] font-semibold text-text">Settings</DialogTitle>
+            {space && (
+              <>
+                <p className="truncate px-2.5 pb-1 text-[11.5px] font-medium text-text-tertiary" title={space.name}>{space.name}</p>
+                {navItem('space-general', 'General')}
+                {pluginPages.map((plugin) => navItem(`space-plugin:${plugin.id}`, plugin.settings!.title))}
+                <div className="h-4" />
+              </>
             )}
+            <p className="px-2.5 pb-1 text-[11.5px] font-medium text-text-tertiary">App</p>
+            {availableTabs.includes('client') && navItem('app-general', 'General')}
+            {navItem('account', 'Account')}
+            {availableTabs.includes('keys') && navItem('keys', 'API Keys')}
+          </nav>
 
-            <TabsContent value="account" className="mt-4 data-[state=inactive]:hidden" forceMount style={{ minHeight: 320 }}>
-              {cloudConnected && auth ? (
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground">Name</label>
-                    <p className="text-sm">{auth.name}</p>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground">User ID</label>
-                    <p className="font-mono text-xs text-muted-foreground">{auth.id}</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex min-h-[280px] flex-col items-center justify-center text-center">
-                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft">
-                    <Cloud className="h-5 w-5 text-accent" />
-                  </div>
-                  <p className="text-sm font-medium">Connect to CoWiki Cloud</p>
-                  <p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">
-                    Keep local Spaces account-free. Sign in only when you want to publish or join a shared Space.
-                  </p>
-                  <Button
-                    className="mt-4 bg-accent text-on-accent hover:bg-accent-hover"
-                    onClick={() => {
-                      onOpenChange(false);
-                      onConnectCloud();
-                    }}
-                  >
-                    Sign up / Sign in
-                  </Button>
-                </div>
-              )}
-            </TabsContent>
-
-            {availableTabs.includes('keys') && (
-              <TabsContent value="keys" className="mt-4 flex flex-col data-[state=inactive]:hidden" forceMount style={{ minHeight: 320 }}>
-              <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-amber/30 bg-amber-soft px-3.5 py-2.5 text-sm text-amber-ink">
-                <Shield className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>API keys are only shown once upon creation. Copy and store them securely.</span>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <DialogHeader className="shrink-0 gap-0.5 px-7 pb-2 pt-5 pr-12">
+              <h2 className="text-[16px] font-semibold leading-6 text-text">{title}</h2>
+              <DialogDescription className="text-[12px] leading-[1.5] text-text-tertiary">
+                {onSpacePage && space
+                  ? <>Applies to everyone in <span className="font-medium text-text-secondary">{space.name}</span>.</>
+                  : 'Only for you, on this computer.'}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-4">{body}</div>
+            {onSpacePage && space && (dirty || spaceError || space.configurationError) && (
+              <div className="flex shrink-0 items-center gap-2 border-t border-border-soft bg-panel px-7 py-3">
+                {spaceError
+                  ? <p role="alert" className="min-w-0 flex-1 truncate text-[12.5px] text-red" title={spaceError}>{spaceError}</p>
+                  : <span className="flex-1 text-[12.5px] text-text-tertiary">{dirty ? 'Unsaved changes' : ''}</span>}
+                {(space.configurationError || spaceError) && <Button size="sm" variant="outline" onClick={() => { void reloadSpace(); }} disabled={saving || reloading}>{reloading ? 'Reloading…' : 'Reload settings'}</Button>}
+                {dirty && <Button size="sm" variant="outline" onClick={() => setDraft(space.features)} disabled={saving || reloading}>Discard</Button>}
+                {dirty && <Button size="sm" onClick={() => { void saveSpace(); }} disabled={saving || reloading || !space.ready}>{saving ? 'Saving…' : 'Save'}</Button>}
               </div>
-
-              <div className="flex items-center justify-between mb-4">
-                <h4 className="text-sm font-medium">Your API Keys</h4>
-                <Button size="sm" className="gap-1.5" onClick={() => setShowCreate(true)}>
-                  <Plus className="h-3.5 w-3.5" />
-                  New Key
-                </Button>
-              </div>
-
-              {loading && (
-                <div className="space-y-2">
-                  <KeyCardSkeleton />
-                  <KeyCardSkeleton />
-                </div>
-              )}
-
-              {!loading && error && (
-                <div className="flex flex-col items-center gap-2 rounded-lg border border-red/20 bg-red-soft py-6 text-center">
-                  <p className="text-sm text-red">{error}</p>
-                  <Button variant="outline" size="sm" onClick={fetchKeys}>Retry</Button>
-                </div>
-              )}
-
-              {!loading && !error && keys.length === 0 && (
-                <div className="flex flex-1 flex-col items-center justify-center text-center">
-                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-                    <Key className="h-5 w-5 text-muted-foreground" />
-                  </div>
-                  <p className="text-sm font-medium text-foreground">No API keys yet</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Create your first API key to get started.</p>
-                </div>
-              )}
-
-              {!loading && !error && keys.length > 0 && (
-                <motion.div
-                  initial="initial"
-                  animate="animate"
-                  className="space-y-2"
-                >
-                  <AnimatePresence mode="popLayout">
-                    {keys.map((k) => (
-                      <KeyCard
-                        key={k.id}
-                        keyInfo={k}
-                        onRevoke={(id) => {
-                          const target = keys.find((kk) => kk.id === id);
-                          if (target) setRevokeTarget(target);
-                        }}
-                        revoking={revoking}
-                      />
-                    ))}
-                  </AnimatePresence>
-                </motion.div>
-              )}
-              </TabsContent>
             )}
-          </Tabs>
+          </div>
         </DialogContent>
       </Dialog>
 

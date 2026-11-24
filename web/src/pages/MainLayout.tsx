@@ -101,7 +101,6 @@ import { FlashcardsView } from '../components/views/FlashcardsView';
 import { JournalDay, JournalsView } from '../components/views/JournalsView';
 import { SpaceHome, type HomeNeed } from '../components/views/SpaceHome';
 import { loadHomeCounts, type HomeCounts } from '@/lib/home-counts';
-import { SpaceFeaturesDialog } from '../components/SpaceFeaturesDialog';
 import { ObsidianImportDialog } from '../components/ObsidianImportDialog';
 import { ObsidianReaderContext, withObsidianReader, type ReaderCallbacks } from '../components/ObsidianReader';
 import { autoCheckpoint, readAsset, readSpaceConfig, recentPages, setAutoCheckpoint, writeSpaceConfig, type RecentPage } from '@/local-api';
@@ -218,7 +217,6 @@ export function MainLayout() {
   const [preferences, setPreferences] = useState<PersonalPreferences>(safePreferences);
   // Bumped when an automatic checkpoint lands, so an open History view reloads.
   const [checkpointTick, setCheckpointTick] = useState(0);
-  const [modulesDialogOpen, setModulesDialogOpen] = useState(false);
   const [obsidianImportOpen, setObsidianImportOpen] = useState(false);
   const assetUrls = useRef(new Map<string, string>());
   const [spaceActivation] = useState(createSpaceActivationTracker);
@@ -366,6 +364,9 @@ export function MainLayout() {
     return () => clearTimeout(t);
   }, [message]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // The Settings window opens on the Space's group from the sidebar, the app's from the avatar menu.
+  const [settingsGroup, setSettingsGroup] = useState<'space' | 'app'>('app');
+  const openSettings = (group: 'space' | 'app') => { setSettingsGroup(group); setSettingsOpen(true); };
   const [cloudDialogOpen, setCloudDialogOpen] = useState(false);
   const [editingPage, setEditingPage] = useState(false);
   // Where a click in the reader asked the editor to put the caret.
@@ -1010,6 +1011,16 @@ export function MainLayout() {
     await writePage(conceptIdFromPath(path), insertTaskLine(page, line), userBranch, ws.slug, 'wiki', page);
   };
 
+  /** Personal preferences apply at once: only this person, only this computer. */
+  const savePreferences = (nextPreferences: PersonalPreferences) => {
+    try {
+      savePersonalPreferences(window.localStorage, nextPreferences);
+    } catch {
+      // Preferences fall back to this session when storage is unavailable.
+    }
+    setPreferences(nextPreferences);
+  };
+
   const saveModules = async (features: SpaceFeatures, nextPreferences: PersonalPreferences) => {
     const ws = activeWorkspace;
     if (!ws || !isLocalSpace(ws) || !spaceFeatures[ws.id]) throw new Error('Space settings are not ready');
@@ -1375,6 +1386,19 @@ export function MainLayout() {
     hasLocalChanges: activeWorkingDiffs.length > 0,
     statusKnown: !desktop || !!activeCloudState,
   });
+  // Publish or sync this Space: from the status menu and from Settings.
+  const spaceCloudAction = {
+    label: !cloudSession
+      ? 'Sign in to share…'
+      : workspaceContext.kind === 'linked' ? 'Cloud sync…' : 'Publish to Cloud…',
+    onSelect: () => {
+      if (!cloudSession) {
+        navigate('/login');
+        return;
+      }
+      setCloudDialogOpen(true);
+    },
+  };
 
   // Every Space opens on Home: what needs you, today's journal (when the
   // Journal module is on) and recently edited pages. Journals is the full
@@ -1522,7 +1546,7 @@ export function MainLayout() {
               if (!hasAuth(auth)) { navigate('/login'); return; }
               setShowCreate(true); setNewName(''); setNewSlug('');
             }}
-            onSettings={() => setSettingsOpen(true)}
+            onSettings={() => openSettings('app')}
             onDiscover={() => { setActiveView(null); navigate('/discover'); }}
             onLogout={handleLogout}
             onConnectCloud={() => navigate('/login')}
@@ -1560,13 +1584,12 @@ export function MainLayout() {
                 onRenamePath={(path, isFolder, title) => setPathOp({ kind: 'rename', path, isFolder, title, value: title })}
                 onDeletePath={(path, isFolder, title) => setPathOp({ kind: 'delete', path, isFolder, title })}
                 onShowIngest={() => setShowIngest(true)}
-                onSettings={() => setSettingsOpen(true)}
+                onSettings={() => openSettings(isLocalSpace(activeWorkspace) ? 'space' : 'app')}
                 modules={activeModules}
                 // The journal's own entry is Journals (the start page), not a command.
                 pluginActions={pluginActions.filter((action) => action.id !== 'journal:today')}
                 onPluginAction={(id) => { void dispatchPluginAction(id); }}
                 journals={journalsAvailable}
-                onModules={isLocalSpace(activeWorkspace) ? () => setModulesDialogOpen(true) : undefined}
                 onCollapse={() => setSidebarLayout((current) => ({ ...current, collapsed: true }))}
               />
               <div
@@ -1725,18 +1748,7 @@ export function MainLayout() {
                     }}
                     onSeeReviews={() => handleTabChange('reviews')}
                     versions={!isHtmlPage}
-                    cloudAction={{
-                      label: !cloudSession
-                        ? 'Sign in to share…'
-                        : workspaceContext.kind === 'linked' ? 'Cloud sync…' : 'Publish to Cloud…',
-                      onSelect: () => {
-                        if (!cloudSession) {
-                          navigate('/login');
-                          return;
-                        }
-                        setCloudDialogOpen(true);
-                      },
-                    }}
+                    cloudAction={spaceCloudAction}
                   />
                 )}
 
@@ -2311,21 +2323,6 @@ export function MainLayout() {
         </DialogContent>
       </Dialog>
 
-      {/* Settings dialog */}
-      {activeWorkspace && (
-        <SpaceFeaturesDialog
-          open={modulesDialogOpen}
-          spaceName={activeWorkspace.name}
-          features={activeFeatures}
-          preferences={preferences}
-          plugins={BUILTIN_PLUGINS}
-          ready={activeFeaturesReady}
-          configurationError={featureLoadErrors[activeWorkspace.id]}
-          onReload={async () => { await loadSpaceFeatures(activeWorkspace); }}
-          onClose={() => setModulesDialogOpen(false)}
-          onSave={saveModules}
-        />
-      )}
       <ObsidianImportDialog
         open={obsidianImportOpen}
         existingSlugs={workspaces.map((workspace) => workspace.slug)}
@@ -2335,6 +2332,19 @@ export function MainLayout() {
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
+        group={settingsGroup}
+        space={activeWorkspace && isLocalSpace(activeWorkspace) ? {
+          name: activeWorkspace.name,
+          features: activeFeatures,
+          plugins: BUILTIN_PLUGINS,
+          ready: activeFeaturesReady,
+          configurationError: featureLoadErrors[activeWorkspace.id],
+          place: { label: workspaceContext.label, detail: workspaceContext.detail, action: desktop ? spaceCloudAction : null },
+          onReload: async () => { await loadSpaceFeatures(activeWorkspace); },
+          onSave: (features) => saveModules(features, preferences),
+        } : null}
+        preferences={preferences}
+        onPreferencesChange={savePreferences}
         clientMode={desktop}
         cloudConnected={isRemoteAuth(auth)}
         auth={auth}

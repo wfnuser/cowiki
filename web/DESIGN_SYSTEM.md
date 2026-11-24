@@ -137,9 +137,17 @@ one muted line, then *Continue with GitHub* (ink) and *Continue locally*
 - The open item in the left navigation is a quiet grey row
   (`bg-bg-active/70`, ink text) with only its icon in the accent, the same
   treatment as the open page in the tree. No orange fills.
-- Space-wide settings (Modules & settings, Space settings) live in the
-  **Space menu**: click the Space name at the top of the sidebar. The
-  navigation list holds only places.
+- **One Settings window** (user decision 2026-11-24), as in Notion or
+  Linear: a left list in two groups. **The open Space** (General: where it
+  lives and its Cloud action, modules, templates; then one page per module
+  with options, e.g. Journal) is stored in the Space and shared with its
+  members, so its changes are saved together from a bar that appears once
+  something changed. **App** (General: appearance, default Agent, history
+  checkpoints; Account; API Keys) is only you, on this computer, and
+  applies at once. The **Settings** gear at the foot of the sidebar opens
+  the Space's group; *Settings* in the avatar menu opens the app's. The
+  Space name at the top of the sidebar is a plain title, not a menu.
+  Members stay a navigation entry of a Cloud Space, not a settings page.
 - The Agent panel is organised by **session**. Its header shows the
   session's title, its status only when it needs attention, and three quiet
   icons: Session history, New session, More. History lists every session of

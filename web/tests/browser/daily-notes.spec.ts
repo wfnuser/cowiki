@@ -16,9 +16,10 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await server.close(); });
 
+// One Settings window; the sidebar's gear opens it on the Space's group.
 async function openModulesSettings(page: Page) {
-  await page.getByRole('button', { name: 'Space menu' }).click();
-  await page.getByRole('menuitem', { name: /Modules & settings/i }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('dialog').getByRole('heading', { name: 'General', exact: true })).toBeVisible();
 }
 
 const today = 'Daily/2026-11-01'; // local day at 02:30 UTC on November 2
@@ -120,6 +121,9 @@ test('a Space opens on Home with today to write in; Journals holds the earlier d
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('checkbox', { name: /Daily journal|Daily Notes/i }).uncheck();
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  // Saved: the bar goes; the window stays open until closed.
+  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
+  await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   await expect(journalsButton(page)).toHaveCount(0);
   await expect(homeButton(page)).toBeVisible();
@@ -196,11 +200,11 @@ for (const switchBack of [false, true]) test(`a slow first write to today is dro
     await emptyDay(page).click();
     await started.promise;
     await page.getByRole('button', { name: 'W', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Space menu' })).toHaveAttribute('title', 'Work');
+    await expect(page.locator('[data-space-title]')).toHaveAttribute('title', 'Work');
     await expect(todayEntry(page)).toBeVisible();
     if (switchBack) {
       await page.getByRole('button', { name: 'P', exact: true }).click();
-      await expect(page.getByRole('button', { name: 'Space menu' })).toHaveAttribute('title', 'Personal');
+      await expect(page.locator('[data-space-title]')).toHaveAttribute('title', 'Personal');
     }
   } finally { gate.resolve(); }
   await page.waitForFunction(() => Reflect.get(window, '__TAURI_INTERNALS__').pending === 0);
@@ -215,9 +219,13 @@ test('saving a journal folder does not revert an external update to another plug
   await expect(journalsButton(page)).toBeVisible();
   await openModulesSettings(page);
   const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Journal', exact: true }).click();
   await dialog.locator('section').filter({ has: page.getByRole('heading', { name: 'Journal', exact: true }) }).getByLabel('Folder', { exact: true }).fill('Diary');
   state.config().features.modules.later = true; // another client after opening
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  // Saved: the bar goes; the window stays open until closed.
+  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
+  await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   expect(state.config().features.journal.folder).toBe('Diary');
   expect(state.config().features.modules.later).toBe(true);
@@ -235,7 +243,8 @@ for (const entry of ['/', '/personal/Welcome']) test(`unreadable settings recove
   await openModulesSettings(page);
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('Unreadable settings document');
-  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
+  await expect(dialog.getByRole('checkbox', { name: /Daily journal/ })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
   expect(state.creates).toEqual([]);
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
@@ -243,7 +252,7 @@ for (const entry of ['/', '/personal/Welcome']) test(`unreadable settings recove
   await openModulesSettings(page);
   damaged = false;
   await dialog.getByRole('button', { name: 'Reload settings', exact: true }).click();
-  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
+  await expect(dialog.getByRole('checkbox', { name: /Daily journal/ })).toBeEnabled();
   await page.keyboard.press('Escape');
   await expect(journalsButton(page)).toBeVisible();
   await page.waitForFunction(() => Reflect.get(window, '__TAURI_INTERNALS__').pending === 0);
@@ -270,7 +279,7 @@ test('selecting another Space while the first is loading shows the new Space', a
     await expect(journalsButton(page)).toBeVisible();
   } finally { gate.resolve(); }
   await page.waitForFunction(() => Reflect.get(window, '__TAURI_INTERNALS__').pending === 0);
-  await expect(page.getByRole('button', { name: 'Space menu' })).toHaveAttribute('title', 'Work');
+  await expect(page.locator('[data-space-title]')).toHaveAttribute('title', 'Work');
   await expect(todayEntry(page)).toBeVisible();
   expect(state.creates).toEqual([]);
 });
@@ -282,8 +291,10 @@ test('the settings dialog stays inside a short window with its actions visible',
   await openModulesSettings(page);
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'General', exact: true })).toBeInViewport({ ratio: 1 });
+  // Space changes are saved together, from a bar that appears once something changed.
+  await dialog.getByRole('checkbox', { name: /Daily journal/ }).uncheck();
   await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeInViewport({ ratio: 1 });
-  await expect(dialog.getByRole('heading', { name: 'Modules & settings' })).toBeInViewport({ ratio: 1 });
   const box = (await dialog.boundingBox())!;
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.y + box.height).toBeLessThanOrEqual(600);

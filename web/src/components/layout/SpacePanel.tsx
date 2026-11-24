@@ -3,7 +3,7 @@ import {
   ChevronRight, FileText, Folder,
   MoreHorizontal, Plus, FolderPlus, Settings, House, GitPullRequest, Users, History,
   FileCode, Pencil, Trash2, Search, Unlink,
-  PanelLeft, CalendarDays, CheckSquare, SlidersHorizontal, Layers, ChevronDown,
+  PanelLeft, CalendarDays, CheckSquare, Layers,
 } from 'lucide-react';
 import type { Workspace, PageMeta, SourceItem } from '../../api';
 import { SearchModal } from '../SearchModal';
@@ -42,6 +42,7 @@ interface SpacePanelProps {
   onRenamePath: (path: string, isFolder: boolean, title: string) => void;
   onDeletePath: (path: string, isFolder: boolean, title: string) => void;
   onShowIngest: () => void;
+  /** Open Settings on this Space's group (the gear at the foot of the sidebar). */
   onSettings?: () => void;
   onCollapse: () => void;
   /** Cloud main uses the same panel and tree without local mutation controls. */
@@ -51,8 +52,6 @@ interface SpacePanelProps {
   modules?: ModuleId[];
   pluginActions?: PluginAction[];
   onPluginAction?: (id: string) => void;
-  /** Open the Space modules & journal settings. */
-  onModules?: () => void;
   /** The Journal module is on: Journals (the stream of days) follows Home. */
   journals?: boolean;
 }
@@ -69,7 +68,6 @@ export function SpacePanel({
   isPersonal,
   showReviews = !isPersonal,
   showLinkDiagnostics = false,
-  isOwner,
   onSelectPage,
   onSelectSource,
   onNewPage,
@@ -83,7 +81,6 @@ export function SpacePanel({
   modules = [],
   pluginActions = [],
   onPluginAction,
-  onModules,
   onCollapse,
   readOnly = false,
   showHistory = true,
@@ -132,42 +129,21 @@ export function SpacePanel({
   ];
 
   const wikiActive = activeTab === 'wiki';
-  const spaceMenu = Boolean((onModules && !readOnly) || (!isPersonal && isOwner && onSettings));
   const spaceColor = colorForSpaceId(workspace.id || workspace.slug);
 
   return (
     <aside style={panelStyle}>
       {/* Space name header */}
-      {/* Its menu holds the Space-wide settings. */}
+      {/* A plain title; Settings live behind the gear at the foot. */}
       <div data-tauri-drag-region="deep" style={{
         padding: '0 10px 0 10px', display: 'flex', alignItems: 'center', gap: 4,
         borderBottom: `1px solid ${C.line}`,
         height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT, userSelect: 'none',
       }}>
-        {spaceMenu ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button type="button" aria-label="Space menu" title={workspace.name} className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 text-left transition-colors hover:bg-bg-hover data-[state=open]:bg-bg-hover">
-                <SpaceTile name={workspace.name} color={spaceColor} />
-                <span className="min-w-0 truncate text-[14.5px] font-semibold text-text">{workspace.name}</span>
-                <ChevronDown size={13} className="shrink-0 text-text-faint" aria-hidden />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56">
-              {onModules && !readOnly && (
-                <DropdownMenuItem onClick={onModules}><SlidersHorizontal size={14} className="mr-2" /> Modules & settings…</DropdownMenuItem>
-              )}
-              {!isPersonal && isOwner && onSettings && (
-                <DropdownMenuItem onClick={onSettings}><Settings size={14} className="mr-2" /> Space settings…</DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : (
-          <div className="flex h-8 min-w-0 flex-1 items-center gap-2 px-1.5">
-            <SpaceTile name={workspace.name} color={spaceColor} />
-            <span className="min-w-0 truncate text-[14.5px] font-semibold text-text">{workspace.name}</span>
-          </div>
-        )}
+        <h2 data-space-title className="m-0 flex h-8 min-w-0 flex-1 items-center gap-2 px-1.5" title={workspace.name}>
+          <SpaceTile name={workspace.name} color={spaceColor} />
+          <span className="min-w-0 truncate text-[14.5px] font-semibold text-text">{workspace.name}</span>
+        </h2>
         <CollapseButton onClick={onCollapse} />
       </div>
 
@@ -288,6 +264,19 @@ export function SpacePanel({
           ) : undefined}
         />
       </div>
+
+      {onSettings && !readOnly && (
+        <div style={{ padding: '6px 8px 10px', borderTop: `1px solid ${C.lineSoft}` }}>
+          <button
+            type="button"
+            onClick={onSettings}
+            className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[5px] text-left text-[14px] text-text-secondary transition-colors hover:bg-bg-hover"
+          >
+            <span className="flex shrink-0 text-text-tertiary"><Settings size={16} /></span>
+            Settings
+          </button>
+        </div>
+      )}
 
       {!readOnly && (
         <SearchModal
