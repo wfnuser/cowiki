@@ -234,3 +234,5 @@ impl EvidenceLookup for SnapshotIndex<'_> {
 
 mod conflict;
 pub use conflict::*;
+mod repair;
+pub use repair::*;

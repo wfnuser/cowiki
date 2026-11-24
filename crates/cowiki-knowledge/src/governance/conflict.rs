@@ -353,3 +353,12 @@ pub fn interpret(bundle: &EvidenceBundle, verdicts: &[Verdict]) -> Result<Vec<Is
     }
     Ok(issues.into_iter().collect())
 }
+
+pub(super) fn safe_to_replace_line(candidate: &str, supported: &str) -> bool {
+    let a = statement(candidate);
+    let b = statement(supported);
+    a.subject == b.subject
+        && (a.qualifiers == b.qualifiers || a.qualifiers.is_empty())
+        && !candidate.contains(['[', '`', ';'])
+        && !supported.contains(['[', '`', ';'])
+}

@@ -14,13 +14,7 @@ pub struct Family {
     pub pages: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Revision {
-    pub id: String,
-    pub path: String,
-    pub text: String,
-    pub source_path: String,
-}
+pub use cowiki_knowledge::governance::Revision;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Case {
@@ -236,4 +230,63 @@ impl Counts {
             "unintended_change_rate": ratio(self.unintended_changes, self.cases),
         })
     }
+}
+
+pub fn evidence_packet(
+    family: &Family,
+    case: &Case,
+) -> Result<cowiki_knowledge::governance::EvidenceBundle, String> {
+    use cowiki_knowledge::{
+        embeddings::LocalHashProjectionEmbedder,
+        governance::{EvidenceLookup, GovernanceInput, SnapshotIndex},
+        knowledge_index, okf,
+    };
+    let space = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let mut pages = family.pages.clone();
+    if !case.base.is_empty() {
+        pages.insert(case.path.clone(), case.base.clone());
+    }
+    for (path, text) in pages {
+        let (_, file) = okf::safe_resolve_under_space(space.path(), &path)?;
+        fs::create_dir_all(file.parent().ok_or("invalid page path")?).map_err(|e| e.to_string())?;
+        fs::write(file, text).map_err(|e| e.to_string())?;
+    }
+    let mut db = rusqlite::Connection::open_in_memory().map_err(|e| e.to_string())?;
+    let embedder = LocalHashProjectionEmbedder::default();
+    knowledge_index::initialize(&mut db)?;
+    knowledge_index::rebuild_space_with_embedder(&mut db, "base", space.path(), &embedder)?;
+    SnapshotIndex {
+        connection: &db,
+        space_id: "base",
+        root: space.path(),
+        embedder: &embedder,
+    }
+    .locate(
+        GovernanceInput {
+            path: case.path.clone(),
+            request: case.request.clone(),
+            base: case.base.clone(),
+            candidate: case.candidate.clone(),
+            history: case.history.clone(),
+        },
+        "2026-11-23",
+    )
+}
+
+pub fn semantic_findings(issues: &[cowiki_knowledge::governance::Issue]) -> Vec<Finding> {
+    let span = |c: &cowiki_knowledge::governance::Citation| Span {
+        path: c.path.clone(),
+        first: c.first,
+        last: c.last,
+    };
+    issues
+        .iter()
+        .filter_map(|i| {
+            Some(Finding {
+                code: i.code.clone(),
+                candidate: span(&i.location),
+                evidence: span(i.evidence.as_ref()?),
+            })
+        })
+        .collect()
 }
