@@ -80,7 +80,7 @@ The frozen selection favored an erroneous alert or edit, a missed finding, and d
 
 ## Limitations
 
-**After the registered evaluation closed.** A product trace located two evidence-handling defects: the packet could omit named revision sources, and the citation could omit the adjacent withdrawal notice. Fix `ef9f93a` addresses both. A separate post-hoc rules run scored 0/7 retired and 0/6 revision findings. Each cache-only model arm matched 2/2 replayable retired findings (5 unavailable) and 0/5 replayable revision findings (1 unavailable). All 13 candidate assertions were reworded, and the history guard still depends on deterministic entailment. The registered counts and confidence intervals above remain final. [Post-hoc trace and coverage](held-out/POSTHOC_FIX.md)
+**After the registered evaluation closed.** A product trace located two evidence-handling defects: the packet could omit named revision sources, and the citation could omit the adjacent withdrawal notice. Fix `95b240a` addresses both. A separate post-hoc rules run scored 0/7 retired and 0/6 revision findings. Each cache-only model arm matched 2/2 replayable retired findings (5 unavailable) and 0/5 replayable revision findings (1 unavailable). All 13 candidate assertions were reworded, and the history guard still depends on deterministic entailment. The registered counts and confidence intervals above remain final. [Post-hoc trace and coverage](held-out/POSTHOC_FIX.md)
 
 **Limitations recorded at freeze.**
 
