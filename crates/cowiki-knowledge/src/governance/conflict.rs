@@ -211,7 +211,7 @@ fn sentence_relation(candidate: &str, evidence: &str) -> Relation {
 
 // Split only at sentence boundaries. A decimal, a version number or an
 // identifier containing punctuation must remain a single claim.
-fn sentences(text: &str) -> Vec<&str> {
+pub(super) fn sentences(text: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut start = 0;
     for (i, ch) in text.char_indices() {

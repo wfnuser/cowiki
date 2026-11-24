@@ -96,6 +96,7 @@ fn run() -> Result<(), String> {
     let mut by_type = BTreeMap::<String, (Counts, Cost)>::new();
     let mut by_code = BTreeMap::<String, Counts>::new();
     let mut rows = Vec::new();
+    let mut repair_checks = BTreeMap::<String, BTreeMap<String, usize>>::new();
     for case in &dataset.cases {
         let start = Instant::now();
         let (packet, structural) = prepare_case(
@@ -106,8 +107,22 @@ fn run() -> Result<(), String> {
         let packet = protocol::pack(packet);
         let lookup_ns = start.elapsed().as_nanos() as u64;
         let hash = digest(&serde_json::to_string(&packet).map_err(|e| e.to_string())?);
-        let mut outcome = runner.run(mode, &packet);
+        let mut outcome = runner.run_with_audit(mode, &packet, &|text| {
+            cowiki_governance_bench::audit_case_text(
+                &dataset.families[&case.family],
+                &case.path,
+                text,
+                &packet.as_of,
+            )
+        });
         if let Some(r) = outcome.maintenance.as_mut() {
+            for check in &r.repair_checks {
+                *repair_checks
+                    .entry(check.origin.clone())
+                    .or_default()
+                    .entry(check.outcome.clone())
+                    .or_default() += 1;
+            }
             let redirects = |issues: &[cowiki_knowledge::governance::Issue]| {
                 issues
                     .iter()
@@ -222,8 +237,11 @@ fn run() -> Result<(), String> {
         let m=c.metrics();
         (code,json!({"tp":c.tp,"fp":c.fp,"fn":c.fn_,"precision":m["precision"],"recall":m["recall"],"f1":m["f1"]}))
     }).collect();
-    let report = json!({"schema_version":2,"split":split,"verifier":verifier,"dev_slice":dev_slice,"baseline":baseline,"total":total.metrics(),"cost":cost_report(&cost,baseline),
+    let mut report = json!({"schema_version":2,"split":split,"verifier":verifier,"dev_slice":dev_slice,"baseline":baseline,"total":total.metrics(),"cost":cost_report(&cost,baseline),
         "by_type":groups,"detection_by_code":codes,"cases":rows});
+    if matches!(mode, Mode::Remote | Mode::Both) {
+        report["repair_validation"] = json!(repair_checks);
+    }
     let text = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
     if let Some(path) = out {
         fs::write(&path, format!("{text}\n")).map_err(|e| format!("{path}: {e}"))?

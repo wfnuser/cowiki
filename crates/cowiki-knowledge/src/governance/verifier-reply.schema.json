@@ -1,0 +1,147 @@
+{
+  "type": "object",
+  "properties": {
+    "judgments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "candidate": {
+            "type": "integer"
+          },
+          "evidence": {
+            "type": "integer"
+          },
+          "relation": {
+            "type": "string",
+            "enum": [
+              "contradiction",
+              "entailment",
+              "neutral",
+              "scope_difference",
+              "insufficient"
+            ]
+          }
+        },
+        "required": [
+          "candidate",
+          "evidence",
+          "relation"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "repairs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "candidate": {
+            "type": "integer"
+          },
+          "evidence": {
+            "type": "integer"
+          },
+          "support": {
+            "type": "integer"
+          },
+          "before": {
+            "type": "string"
+          },
+          "after": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate",
+          "evidence",
+          "support",
+          "before",
+          "after"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "structural": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "source": {
+            "type": "string"
+          },
+          "source_line": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "line",
+          "source",
+          "source_line"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "candidate": {
+            "type": "integer"
+          },
+          "evidence": {
+            "type": "integer"
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate",
+          "evidence",
+          "code"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "edits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "candidate": {
+            "type": "integer"
+          },
+          "before": {
+            "type": "string"
+          },
+          "after": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate",
+          "before",
+          "after"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "judgments",
+    "repairs",
+    "structural",
+    "findings",
+    "edits"
+  ],
+  "additionalProperties": false
+}

@@ -47,6 +47,18 @@ pub struct Outcome {
 }
 impl Runner {
     pub fn run(&self, mode: Mode, packet: &EvidenceBundle) -> Outcome {
+        self.run_with_audit(mode, packet, &|_| Err("scratch audit unavailable".into()))
+    }
+
+    pub fn run_with_audit(
+        &self,
+        mode: Mode,
+        packet: &EvidenceBundle,
+        _audit: &dyn Fn(
+            &str,
+        )
+            -> Result<cowiki_knowledge::governance::GovernanceAuditReport, String>,
+    ) -> Outcome {
         let start = Instant::now();
         let mut outcome = Outcome::default();
         let result = match mode {
@@ -74,7 +86,8 @@ impl Runner {
                 if mode == Mode::SinglePass {
                     single_pass(packet, &response).map(Some)
                 } else {
-                    verified_maintenance(packet, &response, mode == Mode::Both).map(Some)
+                    verified_maintenance_with_audit(packet, &response, mode == Mode::Both, _audit)
+                        .map(Some)
                 }
             })(),
             #[cfg(not(feature = "remote-verifier"))]

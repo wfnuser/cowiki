@@ -58,10 +58,16 @@ The independently authored split has 64 development edits in eight CMake command
 | `none` | Accept the candidate verbatim. |
 | `single-pass` | Ask the model once for findings and a repair. |
 | `rules` | M2 with deterministic classification and bounded scratch repair. |
-| `remote` | M2 with a batched model classification and local proposal validation. |
-| `both` | Full M2. Queue findings from either detector and withhold patches on disputed claims. |
+| `remote` | M2 with batched judgments and optional cited repairs in the same response. |
+| `both` | Full M2. Queue findings from either detector. An explicit opposing rule verdict blocks a model repair. A lexical abstention leaves it eligible for the scratch checks. |
 
 For model arms, enable `--features remote-verifier` and set `COWIKI_VERIFIER_URL` (full chat-completions URL), `COWIKI_VERIFIER_MODEL` (pin the deployment revision), `COWIKI_VERIFIER_CACHE_DIR` and, for authenticated servers, `COWIKI_VERIFIER_API_KEY`. Use `--cache record` to record misses, or `--cache replay` to require disk records. Both successes and terminal provider failures replay without HTTP. Remote and both share the same verification request. A replay counts the original logical call and reports zero physical calls. A transport failure without provider usage conservatively charges the reserved budget and marks the estimate.
+
+### One-call cited repairs
+
+The verifier’s strict reply schema attaches a repair to a judgment by its zero-based candidate and evidence indices. Each attachment quotes a unique preimage substring, gives a replacement and cites the supporting evidence entry. A retired finding needs an active, verified correction. The verifier binds the result to the candidate snapshot digest. Single-pass retains its original prompt, reply format and cache key.
+
+M2 validates each attachment independently on a private scratch copy. A replacement must restore a cited assertion or a base qualifier or value corroborated by the cited source. M2 compares deterministic rule findings and complete, freshly indexed Space audits before and after each eligible edit. Any new issue vetoes the edit. Rejected attachments leave their finding in review and suppress the rule fallback on that claim. Every accepted proposal retains its original preimage and exact byte range. Reports include per-case `repair_checks` and aggregate `repair_validation` counts by origin and outcome. Transport failures and over-budget answers are counted separately from repair rejections.
 
 ### Model arms on development data
 

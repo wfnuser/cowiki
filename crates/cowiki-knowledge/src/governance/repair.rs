@@ -47,7 +47,18 @@ pub struct RepairProposal {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepairCheck {
+    pub candidate: Option<usize>,
+    pub evidence: Option<usize>,
+    pub support: Option<usize>,
+    pub origin: String,
+    pub outcome: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MaintenanceResult {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repair_checks: Vec<RepairCheck>,
     pub initial: Vec<Issue>,
     pub proposals: Vec<RepairProposal>,
     pub unresolved: Vec<Issue>,
@@ -143,6 +154,7 @@ pub fn maintain(
     }
     Ok(MaintenanceResult {
         initial,
+        repair_checks: Vec::new(),
         rounds: proposals.len(),
         proposals,
         unresolved: issues,

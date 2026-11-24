@@ -13,6 +13,8 @@ use std::{
 const BYTE_LIMIT: u64 = 512 * 1024;
 use super::protocol::{admission, prompt, OUTPUT_LIMIT, TOKEN_LIMIT};
 pub use super::protocol::{model_input, Task, Usage};
+mod cited_repair;
+pub use cited_repair::{CitedRepair, RepairAttachment};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheMode {
     Record,
@@ -159,6 +161,8 @@ fn structural_findings(
 pub struct ModelAnswer {
     #[serde(default)]
     pub structural: Vec<StructuralFinding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repairs: Vec<RepairAttachment>,
     pub judgments: Vec<Verdict>,
     pub findings: Vec<ModelFinding>,
     pub edits: Vec<ModelEdit>,
@@ -192,6 +196,7 @@ pub struct Attempt {
 }
 
 pub struct Response {
+    pub candidate_digest: String,
     pub answer: ModelAnswer,
     pub usage: Usage,
     pub key: String,
@@ -227,8 +232,18 @@ impl RemoteVerifier {
     ) -> Result<Response, String> {
         *attempt = Attempt::default();
         let user = model_input(packet).to_string();
-        let system = prompt(task);
-        // A conservative bound for byte-based BPE models, including chat framing.
+        let mut system = prompt(task);
+        let format = if task == Task::Verify {
+            system.push_str(" For a newly introduced contradiction or regression, also propose one minimal repair per changed claim if supported. In repairs link candidate/evidence to its judgment, and support to the active verified evidence entry justifying the correction. before is an exact unique substring within the cited candidate line, after its replacement. Preserve unaffected content and use the original base wording when it is supported. Otherwise omit the repair.");
+            let schema: Value = serde_json::from_str(include_str!("verifier-reply.schema.json"))
+                .map_err(|e| e.to_string())?;
+            json!({"type":"json_schema","json_schema":{"name":"m2_cited_repair_v1","strict":true,"schema":schema}})
+        } else {
+            json!({"type":"json_object"})
+        };
+        // Keep the paired content admission identical to single-pass. The
+        // provider's measured total, including the reply schema and harness,
+        // is checked before any judgment or proposal can be consumed.
         let reserved = admission(packet);
         if reserved + OUTPUT_LIMIT > TOKEN_LIMIT
             || reserved + self.limits.output_tokens > self.limits.total_tokens
@@ -236,7 +251,7 @@ impl RemoteVerifier {
             return Err("packet exceeds equal per-case token budget before dispatch".into());
         }
         let request = json!({"model":self.model,"temperature":0,"max_tokens":self.limits.output_tokens,"stream":false,
-            "response_format":{"type":"json_object"},"messages":[{"role":"system","content":system},{"role":"user","content":user}]});
+            "response_format":format,"messages":[{"role":"system","content":system},{"role":"user","content":user}]});
         let key = digest(&json!(["cowiki-governance/1", &self.endpoint, &request]).to_string());
         let file = self.cache_dir.join(format!("{key}.json"));
         attempt.key = Some(key.clone());
@@ -305,6 +320,7 @@ impl RemoteVerifier {
         };
         validate(&record, packet, task, &key, self.limits)?;
         Ok(Response {
+            candidate_digest: digest(&packet.input.candidate),
             key,
             answer: record.answer,
             usage: attempt.usage.clone(),
@@ -405,7 +421,7 @@ fn validate(
     {
         return Err("incomplete or invalid verifier judgments".into());
     }
-    if task == Task::SinglePass && !pairs.is_empty() {
+    if task == Task::SinglePass && (!pairs.is_empty() || !a.repairs.is_empty()) {
         return Err("unexpected single-pass judgments".into());
     }
     for f in &a.findings {
@@ -528,6 +544,7 @@ pub fn single_pass(
     // There is no second verifier call. Leave semantic verification to the
     // independent scorer/reviewer rather than equating a model edit with success.
     Ok(MaintenanceResult {
+        repair_checks: Vec::new(),
         rounds: proposals.len(),
         unresolved: findings.clone(),
         initial: findings,
@@ -537,68 +554,62 @@ pub fn single_pass(
 }
 
 /// Apply a single batch of model judgments. An independent positive from either
-/// detector reaches the review queue. A disputed claim cannot receive a patch.
+/// detector reaches the review queue. Without a scratch Space audit, semantic
+/// edits remain unresolved. Use `verified_maintenance_with_audit` for repairs.
 pub fn verified_maintenance(
     packet: &EvidenceBundle,
     response: &Response,
     combine: bool,
 ) -> Result<super::MaintenanceResult, String> {
-    use super::{interpret, propose_claim_repairs, MaintenanceResult, RuleConflictDetector};
+    verified_maintenance_with_audit(packet, response, combine, &|_| {
+        Err("scratch audit unavailable".into())
+    })
+}
+
+/// Validate each attachment against immutable cited evidence and full scratch Space audits.
+pub fn verified_maintenance_with_audit(
+    packet: &EvidenceBundle,
+    response: &Response,
+    combine: bool,
+    audit: &dyn Fn(&str) -> Result<super::GovernanceAuditReport, String>,
+) -> Result<super::MaintenanceResult, String> {
+    use super::{interpret, MaintenanceResult, RuleConflictDetector};
     let mut model = interpret(packet, &response.answer.judgments)?;
     model.extend(structural_findings(packet, &response.answer)?);
     let mut initial: BTreeSet<_> = model.iter().cloned().collect();
-    let mut eligible = initial.clone();
     let mut disputed = BTreeSet::new();
+    let mut rules = Vec::new();
     if combine {
-        let rules: BTreeSet<_> = interpret(packet, &RuleConflictDetector.classify(packet)?)?
-            .into_iter()
-            .collect();
-        for issue in rules.symmetric_difference(&initial) {
+        rules = RuleConflictDetector.classify(packet)?;
+        let rule_issues = interpret(packet, &rules)?.into_iter().collect();
+        for issue in initial.symmetric_difference(&rule_issues) {
             disputed.insert(issue.location.clone());
         }
-        initial.extend(rules);
-        eligible.retain(|i| !disputed.contains(&i.location));
+        initial.extend(rule_issues);
     }
-    let eligible = eligible.into_iter().collect::<Vec<_>>();
-    let proposal = propose_claim_repairs(packet, &eligible);
-    let final_text = match &proposal {
-        Some(p) => p
-            .patch
-            .preview(&packet.input.path, &packet.input.candidate)?,
-        None => packet.input.candidate.clone(),
-    };
-    let unresolved = initial
-        .iter()
-        .filter_map(|i| {
-            let mut item = i.clone();
-            // Only an exact replacement by this very citation is mechanically
-            // confirmed. All other semantic judgments need review at the call cap.
-            if proposal.as_ref().is_some_and(|p| {
-                i.code == "contradicts_verified"
-                    && i.evidence.as_ref().is_some_and(|c| p.evidence.contains(c))
-                    && packet.evidence.iter().any(|e| {
-                        Some(&e.claim.location) == i.evidence.as_ref()
-                            && final_text
-                                .lines()
-                                .nth(i.location.first - 1)
-                                .is_some_and(|l| l.trim() == e.claim.text)
-                    })
-            }) {
-                return None;
-            }
-            if disputed.contains(&i.location) {
-                item.message
-                    .push_str(" Detectors disagree; review required.");
-            }
-            Some(item)
-        })
-        .collect();
-    let proposals: Vec<_> = proposal.into_iter().collect();
-    Ok(MaintenanceResult {
+    let mut result = MaintenanceResult {
         initial: initial.into_iter().collect(),
-        unresolved,
-        rounds: proposals.len(),
-        proposals,
-        final_text,
-    })
+        unresolved: Vec::new(),
+        proposals: Vec::new(),
+        final_text: packet.input.candidate.clone(),
+        repair_checks: Vec::new(),
+        rounds: 0,
+    };
+    result.unresolved = result.initial.clone();
+    cited_repair::apply(
+        packet,
+        response,
+        &model,
+        &rules,
+        &disputed,
+        audit,
+        &mut result,
+    );
+    for i in &mut result.unresolved {
+        if disputed.contains(&i.location) {
+            i.message.push_str(" Detectors disagree; review required.");
+        }
+    }
+    result.rounds = usize::from(!result.proposals.is_empty());
+    Ok(result)
 }

@@ -294,6 +294,45 @@ pub fn evidence_packet(
     Ok(prepare_case(family, case, false)?.0)
 }
 
+fn write_snapshot(root: &Path, family: &Family, path: &str, text: &str) -> Result<(), String> {
+    use cowiki_knowledge::okf;
+    for (name, contents) in family
+        .pages
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .filter(|(k, _)| *k != path || text.is_empty())
+        .chain((!text.is_empty()).then_some((path, text)))
+    {
+        let (_, file) = okf::safe_resolve_under_space(root, name)?;
+        fs::create_dir_all(file.parent().ok_or("invalid page path")?).map_err(|e| e.to_string())?;
+        fs::write(file, contents).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Rebuild the full Space and index on scratch. The model never receives the audit.
+pub fn audit_case_text(
+    family: &Family,
+    path: &str,
+    text: &str,
+    as_of: &str,
+) -> Result<cowiki_knowledge::governance::GovernanceAuditReport, String> {
+    use cowiki_knowledge::{
+        embeddings::LocalHashProjectionEmbedder, governance::audit_space, knowledge_index,
+    };
+    let space = tempfile::tempdir().map_err(|e| e.to_string())?;
+    write_snapshot(space.path(), family, path, text)?;
+    let mut db = rusqlite::Connection::open_in_memory().map_err(|e| e.to_string())?;
+    knowledge_index::initialize(&mut db)?;
+    knowledge_index::rebuild_space_with_embedder(
+        &mut db,
+        "scratch",
+        space.path(),
+        &LocalHashProjectionEmbedder::default(),
+    )?;
+    audit_space(space.path(), &db, "scratch", as_of)
+}
+
 /// Audit the edit on disposable snapshots only for arms that include symbolic
 /// checks. Both snapshots share the immutable family pages and the same date.
 pub fn prepare_case(
@@ -313,15 +352,7 @@ pub fn prepare_case(
         knowledge_index, okf,
     };
     let space = tempfile::tempdir().map_err(|e| e.to_string())?;
-    let mut pages = family.pages.clone();
-    if !case.base.is_empty() {
-        pages.insert(case.path.clone(), case.base.clone());
-    }
-    for (path, text) in pages {
-        let (_, file) = okf::safe_resolve_under_space(space.path(), &path)?;
-        fs::create_dir_all(file.parent().ok_or("invalid page path")?).map_err(|e| e.to_string())?;
-        fs::write(file, text).map_err(|e| e.to_string())?;
-    }
+    write_snapshot(space.path(), family, &case.path, &case.base)?;
     let mut db = rusqlite::Connection::open_in_memory().map_err(|e| e.to_string())?;
     let embedder = LocalHashProjectionEmbedder::default();
     knowledge_index::initialize(&mut db)?;

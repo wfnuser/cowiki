@@ -51,6 +51,16 @@ fn same_packet_equal_caps_cited_disagreement_and_single_call_replay() {
             let req = read_request(&socket);
             assert_eq!(req["max_tokens"], 768);
             assert_eq!(req["temperature"], 0);
+            if verify {
+                assert_eq!(req["response_format"]["type"], "json_schema");
+                assert_eq!(req["response_format"]["json_schema"]["strict"], true);
+                assert!(
+                    req["response_format"]["json_schema"]["schema"]["properties"]["repairs"]
+                        .is_object()
+                );
+            } else {
+                assert_eq!(req["response_format"], json!({"type":"json_object"}));
+            }
             let input: Value =
                 serde_json::from_str(req["messages"][1]["content"].as_str().unwrap()).unwrap();
             assert_eq!(input, expected);
