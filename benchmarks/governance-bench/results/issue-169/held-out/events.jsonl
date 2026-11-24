@@ -1,0 +1,12 @@
+{"code": "2ffe8163f4db107c439c740db874a589b0615579", "event": "run_start", "time": 1795438958.9550257}
+{"arm": "none", "event": "arm_start", "pid": 637500, "time": 1795438958.9770324}
+{"arm": "none", "event": "arm_complete", "status": 0, "time": 1795438959.5808606, "wall_s": 0.6020864155143499}
+{"arm": "rules", "event": "arm_start", "pid": 637505, "time": 1795438959.7332911}
+{"arm": "rules", "event": "arm_complete", "status": 0, "time": 1795438960.4880018, "wall_s": 0.7525339499115944}
+{"arm": "remote", "event": "arm_start", "pid": 637511, "time": 1795438960.6414046}
+{"arm": "single-pass", "event": "arm_start", "pid": 637512, "time": 1795438960.643153}
+{"arm": "single-pass", "event": "arm_complete", "status": 1, "time": 1795441223.1016798, "wall_s": 2262.4543245453387}
+{"arm": "remote", "event": "arm_complete", "status": 1, "time": 1795441797.1427815, "wall_s": 2836.4977495837957}
+{"arm": "both", "event": "arm_start", "pid": 806737, "time": 1795441797.307116}
+{"arm": "both", "event": "arm_complete", "status": 1, "time": 1795441798.2128665, "wall_s": 0.9029317852109671}
+{"event": "run_complete", "time": 1795441798.37923}
