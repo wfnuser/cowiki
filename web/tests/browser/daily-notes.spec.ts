@@ -80,6 +80,8 @@ async function desktop(page: Page, options: FixtureOptions = {}) {
 const todayLabel = 'Sunday, November 1, 2026';
 const journalsButton = (page: Page) => page.getByRole('button', { name: 'Journals', exact: true });
 const todayEntry = (page: Page) => page.getByRole('region', { name: todayLabel });
+// An empty day is one bullet ready for text, as in Logseq.
+const emptyDay = (page: Page) => todayEntry(page).getByRole('button', { name: 'Write in this day' });
 
 test('a personal Space opens on Journals; today is written where you click and survives disabling', async ({ page }) => {
   const state = await desktop(page);
@@ -88,11 +90,11 @@ test('a personal Space opens on Journals; today is written where you click and s
   await expect(journalsButton(page)).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('button', { name: 'Wiki', exact: true })).toHaveCount(0);
   // Today first, earlier days below; opening Journals writes nothing.
-  await expect(todayEntry(page)).toContainText('Click to write');
+  await expect(emptyDay(page)).toBeVisible();
   await expect(page.getByRole('region', { name: 'Friday, October 30, 2026' })).toContainText('An earlier day');
   expect(state.creates).toEqual([]);
 
-  await todayEntry(page).getByText('Click to write').click();
+  await emptyDay(page).click();
   // The template's title is the day's heading, so only its body is edited.
   await expect(todayEntry(page).locator('.cm-content')).toHaveText('From my template 2026-11-01');
   await page.keyboard.press('End');
@@ -131,7 +133,7 @@ test('a deep link opens its page; the root opens Journals without writing a note
   await expect(page.locator('article')).toContainText('Welcome');
   await expect(journalsButton(page)).toBeVisible();
   await page.goto(origin);
-  await expect(todayEntry(page)).toContainText('Click to write');
+  await expect(emptyDay(page)).toBeVisible();
   expect(state.creates).toEqual([]);
 });
 
@@ -185,7 +187,7 @@ for (const switchBack of [false, true]) test(`a slow first write to today is dro
   } });
   try {
     await page.goto(origin);
-    await todayEntry(page).getByText('Click to write').click();
+    await emptyDay(page).click();
     await started.promise;
     await page.getByRole('button', { name: 'W', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Space menu' })).toHaveAttribute('title', 'Work');
@@ -242,7 +244,7 @@ for (const entry of ['/', '/personal/Welcome']) test(`unreadable settings recove
   await expect(page).toHaveURL(originalSelection);
   expect(state.creates).toEqual([]);
   if (entry === '/') {
-    await todayEntry(page).getByText('Click to write').click();
+    await emptyDay(page).click();
     await expect(todayEntry(page).locator('.cm-content')).toHaveText('From my template 2026-11-01');
   } else {
     await expect(page.locator('article')).toContainText('Welcome');

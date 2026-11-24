@@ -55,9 +55,9 @@ Uniform \`inline code\` here.
 `;
 const MARKERS = ['Parity', 'Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel', 'wrapwordhere', 'India', 'Juliet', 'Kilo', 'Lima', 'Mike', 'November', 'Oscar', 'Papa', 'Quebec', 'Romeo', 'Sierra', 'Tango', 'Uniform'];
 
-async function setup(page: Page, body: string) {
+async function setup(page: Page, body: string, more: Array<[string, string]> = []) {
   const space = { name: 'Personal', slug: 'personal', id: 'personal', visibility: 'private', role: 'owner', localPath: '/fixture/personal' };
-  const files = new Map([['Doc', body]]);
+  const files = new Map([['Doc', body], ...more]);
   const meta = (slug: string) => ({ slug, path: slug + '.md', title: slug, summary: '', branch: 'main', kind: 'page', children: [] });
   await page.route('**/*', (route) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
   await page.exposeFunction('fixtureInvoke', async (cmd: string, args: { pageSlug: string; content: string }) => {
@@ -66,7 +66,7 @@ async function setup(page: Page, body: string) {
       case 'local_list_pages': return Array.from(files.keys(), meta);
       case 'local_get_page': return { ...meta(args.pageSlug), body: files.get(args.pageSlug), edited_by: 'wfnuser', edited_at: 1700000000 };
       case 'local_write_page': files.set(args.pageSlug, args.content); return;
-      case 'local_read_space_config': return { features: { modules: { journal: true } } };
+      case 'local_read_space_config': return { features: { modules: { journal: true }, journal: { format: 'YYYY-MM-DD', folder: 'Daily', template: null } } };
       case 'local_list_page_comments': return { comments: [], snapshots: [] };
       case 'local_working_diff': case 'local_list_agent_changes': case 'local_list_sources': case 'local_list_backlinks': case 'local_recent_pages': return [];
       case 'cloud_get_status': return { state: 'unlinked', conflicts: [], message: '', pullRequest: null, committed: false, cloudSpaceId: null, cloudBaseUrl: null };
@@ -81,7 +81,7 @@ async function setup(page: Page, body: string) {
 }
 
 /** Position of each marker's first character relative to the page column. */
-async function positions(page: Page, rootSelector: string) {
+async function positions(page: Page, rootSelector: string, markers = MARKERS) {
   return page.evaluate(({ rootSelector, markers }) => {
     const root = document.querySelector(rootSelector)!;
     const column = root.querySelector('.page-column')!.getBoundingClientRect();
@@ -100,7 +100,7 @@ async function positions(page: Page, rootSelector: string) {
       }
     }
     return out;
-  }, { rootSelector, markers: MARKERS });
+  }, { rootSelector, markers });
 }
 
 test('clicking to edit leaves every line where it was', async ({ page }) => {
@@ -154,4 +154,26 @@ test('list and heading markup never shifts the text', async ({ page }) => {
   expect(text.slice(text.indexOf('Golf'), text.indexOf('Hotel'))).toBe('Golf bullet\nZulu\n');
   await page.locator('.cm-lp-checkbox').first().click();
   await expect(page.locator('.cm-lp-checkbox').first()).toBeChecked();
+});
+
+test('a journal day is written in place without moving', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.clock.setFixedTime(new Date('2026-11-24T15:00:00'));
+  const day = '---\ntype: Journal\n---\n\n# Monday, November 23, 2026\n\n## Plan\n- Alpha item\n- Bravo item\n\n## Notes\nCharlie note\nDelta line\n';
+  await setup(page, BODY, [['Daily/2026-11-23', day], ['Daily/2026-11-20', '# 2026-11-20\n\nEcho earlier day\n']]);
+  await page.goto(origin);
+  const yesterday = page.getByRole('region', { name: 'Monday, November 23, 2026' });
+  await expect(yesterday.getByRole('heading', { name: 'Nov 23rd, 2026' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Tuesday, November 24, 2026' }).getByRole('button', { name: 'Write in this day' })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath('journals.png') });
+  const markers = ['Plan', 'Alpha', 'Bravo', 'Notes', 'Charlie', 'Delta', 'Echo'];
+  const read = await positions(page, 'main', markers);
+  await yesterday.getByText('Charlie note').click();
+  await expect(yesterday.locator('.cm-content')).toBeVisible();
+  const edit = await positions(page, 'main', markers);
+  for (const marker of markers) {
+    expect(Math.abs(edit[marker][0] - read[marker][0]), `${marker} moved sideways`).toBeLessThan(0.6);
+    expect(Math.abs(edit[marker][1] - read[marker][1]), `${marker} moved down`).toBeLessThan(1);
+  }
+  await page.screenshot({ path: test.info().outputPath('journals-edit.png') });
 });

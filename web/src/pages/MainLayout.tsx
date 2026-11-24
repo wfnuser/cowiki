@@ -2040,7 +2040,8 @@ export function MainLayout() {
 
               /* Start page: Journals */
               ) : showJournals && activeWorkspace ? (
-                <div style={{ position: 'absolute', inset: 0, overflow: 'auto', padding: '36px 56px 56px' }}>
+                <div style={{ position: 'absolute', inset: 0, overflow: 'auto' }}>
+                  <div className="page-column">
                   <JournalsView
                     key={activeWorkspace.slug}
                     config={activeFeatures.journal}
@@ -2053,6 +2054,7 @@ export function MainLayout() {
                     loadAsset={canReadAssets ? loadAssetFrom : undefined}
                     getPageSlugs={() => collectSlugs(spacePages[activeWorkspace.id] || [])}
                   />
+                  </div>
                 </div>
 
               /* Start page: Home overview */

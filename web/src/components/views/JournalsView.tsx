@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-import { LivePreviewEditor } from '@/components/editor/LivePreviewEditor';
+import { LivePreviewEditor, type LivePreviewEditorHandle } from '@/components/editor/LivePreviewEditor';
 import { ObsidianReaderContext, withObsidianReader } from '@/components/ObsidianReader';
 import {
   joinLeadingTitle,
@@ -42,8 +42,9 @@ interface JournalsViewProps {
 }
 
 /**
- * Journals, as in Logseq: today first, earlier days below as you scroll. Each
- * day reads like a page and turns into an editor where you click.
+ * Journals, as in Logseq: one stream you scroll with the wheel, today first,
+ * earlier days loading below. Every day is written in place: a click opens
+ * the editor where you clicked, an empty day is a bullet waiting for text.
  */
 export function JournalsView({ config, paths, now = () => new Date(), ...day }: JournalsViewProps) {
   const today = now();
@@ -65,7 +66,7 @@ export function JournalsView({ config, paths, now = () => new Date(), ...day }: 
   }, [entries.length, shown]);
 
   return (
-    <div className="journals" style={{ width: 'min(760px, 100%)' }}>
+    <div className="journals">
       {entries.slice(0, shown).map((entry) => (
         <JournalDay key={entry.key} entry={entry} today={entry.key === todayKey} {...day} />
       ))}
@@ -94,6 +95,7 @@ function JournalDay({
   const timer = useRef<number | null>(null);
   const saving = useRef(false);
   const editing = useRef(false);
+  const editor = useRef<LivePreviewEditorHandle>(null);
   useEffect(() => { editing.current = !!session; }, [session]);
 
   useEffect(() => {
@@ -170,25 +172,31 @@ function JournalDay({
     }
   };
 
-  const title = formatDate(entry.date, 'dddd, MMMM D, YYYY');
+  const label = formatDate(entry.date, 'dddd, MMMM D, YYYY');
+  const title = formatDate(entry.date, 'MMM Do, YYYY');
   const shownText = typeof body === 'string' ? splitLeadingTitle(body).content.trim() : '';
 
   return (
-    <section className="journal-day" aria-label={title}>
-      <header className="journal-day-header">
-        {body === null ? (
-          <h2 className="journal-day-title">{title}</h2>
-        ) : (
-          <h2 className="journal-day-title">
-            <button type="button" onClick={() => onOpenPage(entry.path)} title="Open as a page">{title}</button>
-          </h2>
+    <section className={today ? 'journal-day is-today' : 'journal-day'} aria-label={label}>
+      <h2 className="journal-day-title">
+        {body === null ? title : (
+          <button type="button" onClick={() => onOpenPage(entry.path)} title="Open as a page">{title}</button>
         )}
-        {today && <span className="journal-day-today">Today</span>}
-      </header>
+      </h2>
 
       {session ? (
-        <div className="journal-day-editor">
+        <div
+          className="journal-day-editor"
+          onMouseDown={(event) => {
+            // The day's empty space below the text writes at its end.
+            const target = event.target as HTMLElement;
+            if (target.closest('.cm-editor')) return;
+            event.preventDefault();
+            editor.current?.focusEnd();
+          }}
+        >
           <LivePreviewEditor
+            ref={editor}
             initialDoc={session.content}
             initialCursor={session.cursor}
             onDocChanged={(doc) => {
@@ -229,7 +237,10 @@ function JournalDay({
               </div>
             </ObsidianReaderContext.Provider>
           ) : (
-            <p className="journal-day-placeholder">Click to write</p>
+            // Like Logseq: an empty day is one bullet, ready for text.
+            <div className="journal-day-empty" role="button" tabIndex={0} aria-label="Write in this day"
+              onClick={(event) => { event.stopPropagation(); void startEdit(null); }}
+              onKeyDown={(event) => { if (event.key === 'Enter') void startEdit(null); }} />
           )}
         </div>
       )}

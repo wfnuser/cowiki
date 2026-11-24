@@ -70,11 +70,14 @@ Notifications, Review details, Cloud pages) is built the same way, with
 
 - **No Wiki entry.** The page tree already reaches every page. A Space opens
   on its **start page**, never on its first file:
-  - a personal Space opens on **Journals**, as in Logseq: today first, earlier
-    days as you scroll (seven at a time). Each day reads like a page under
-    its date (serif, 24px); headings inside a day are 15px sans section
-    labels. Opening Journals writes nothing; today's file is created from
-    the journal template on the first click.
+  - a personal Space opens on **Journals**, as in Logseq: one stream you
+    scroll with the wheel, today first, earlier days loading below (seven
+    at a time; only days that have a note, plus today). Each day sits under
+    its date ("Nov 24th, 2026", serif 30px) with room below its text (today
+    the most) and a hairline between days; headings inside a day are 15px
+    sans section labels. An empty day is a single faint bullet, ready for
+    text. Opening Journals writes nothing; today's file is created from the
+    journal template on the first click.
   - a shared Space (a team Space, or a local Space published to Cloud) opens
     on **Home**: *Waiting for review* (your unsent draft, open Agent
     changes, member submissions) and *Recently edited* pages, as hairline

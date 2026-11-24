@@ -295,26 +295,41 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .page-reader-editable { cursor: text; }
 .page-reader-editable :is(a, button, input, label, summary, [role="button"]) { cursor: pointer; }
 
-/* Journals: one day after another, each under its date. */
-.journal-day { padding: 4px 0 36px; }
-.journal-day + .journal-day { padding-top: 32px; border-top: 1px solid var(--color-border-soft); }
-.journal-day-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+/* Journals, as in Logseq: one stream scrolled with the wheel. Each day keeps
+   some room below its text, today the most, so days read as a sequence and
+   the last one can scroll up. */
+.journals { padding-bottom: 30vh; }
+.journal-day { display: flex; min-height: 200px; flex-direction: column; padding: 0 0 40px; }
+.journal-day.is-today { min-height: 42vh; }
+.journal-day + .journal-day { padding-top: 36px; border-top: 1px solid var(--color-border-soft); }
 .journal-day-title {
-  margin: 0;
+  margin: 0 0 14px;
   color: var(--color-text);
   font-family: var(--font-serif);
-  font-size: 24px;
-  font-weight: 650;
-  line-height: 1.25;
-  letter-spacing: -0.015em;
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
 }
 .journal-day-title button { color: inherit; font: inherit; letter-spacing: inherit; text-align: left; cursor: pointer; }
-.journal-day-title button:hover { text-decoration: underline; text-decoration-color: var(--color-border-hover); text-underline-offset: 4px; }
-.journal-day-today { color: var(--color-text-tertiary); font-size: 12.5px; font-weight: 500; }
-.journal-day-body { min-height: 28px; cursor: text; }
-.journal-day-body > :first-child { margin-top: 0; }
+.journal-day-title button:hover { text-decoration: underline; text-decoration-color: var(--color-border-hover); text-underline-offset: 5px; }
+.journal-day-body, .journal-day-editor { flex: 1; cursor: text; }
 .journal-day-body :is(a, button, input, label, summary) { cursor: pointer; }
 .journal-day-placeholder { margin: 0; color: var(--color-text-faint); }
+/* An empty day: one bullet, drawn like a list bullet (index.css .prose li). */
+.journal-day-empty { position: relative; height: calc(var(--doc-line) * var(--doc-size)); cursor: text; }
+.journal-day-empty::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: calc(var(--doc-line) * var(--doc-size) / 2 - 2.5px);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-text-faint);
+}
+.journal-day-empty:focus-visible { outline: none; }
+.journal-day-empty:focus-visible::before { background: var(--color-accent); }
 .journal-day-error { margin: 8px 0 0; color: var(--color-red); font-size: 12.5px; }
 /* Inside a day, headings (Plan, Notes…) are section labels under the date,
    the same size whether the day is read or edited. */
