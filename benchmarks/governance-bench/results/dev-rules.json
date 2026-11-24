@@ -1,0 +1,1476 @@
+{
+  "baseline": true,
+  "by_type": {
+    "concurrent_edits": {
+      "cost": {
+        "cache_hits": 0,
+        "completion_tokens": 0,
+        "estimated_cases": 0,
+        "failures": 0,
+        "http_calls": 0,
+        "logical_calls": 0,
+        "prompt_tokens": 0,
+        "retrieval_calls": 10,
+        "retrieval_tokens": 1026,
+        "total_tokens": 0,
+        "unresolved": 0
+      },
+      "metrics": {
+        "counts": {
+          "cases": 5,
+          "faulty_cases": 1,
+          "fn": 1,
+          "fp": 0,
+          "repaired_cases": 0,
+          "residual_cases": 1,
+          "tp": 0,
+          "unintended_changes": 0,
+          "valid_cases": 4,
+          "valid_false_alarms": 0
+        },
+        "f1": 0.0,
+        "false_alarm_rate": 0.0,
+        "precision": null,
+        "recall": 0.0,
+        "repair_success": 0.0,
+        "unintended_change_rate": 0.0
+      }
+    },
+    "duplicate_overlap": {
+      "cost": {
+        "cache_hits": 0,
+        "completion_tokens": 0,
+        "estimated_cases": 0,
+        "failures": 0,
+        "http_calls": 0,
+        "logical_calls": 0,
+        "prompt_tokens": 0,
+        "retrieval_calls": 2,
+        "retrieval_tokens": 215,
+        "total_tokens": 0,
+        "unresolved": 0
+      },
+      "metrics": {
+        "counts": {
+          "cases": 1,
+          "faulty_cases": 1,
+          "fn": 1,
+          "fp": 0,
+          "repaired_cases": 0,
+          "residual_cases": 1,
+          "tp": 0,
+          "unintended_changes": 0,
+          "valid_cases": 0,
+          "valid_false_alarms": 0
+        },
+        "f1": 0.0,
+        "false_alarm_rate": null,
+        "precision": null,
+        "recall": 0.0,
+        "repair_success": 0.0,
+        "unintended_change_rate": 0.0
+      }
+    },
+    "entailment": {
+      "cost": {
+        "cache_hits": 0,
+        "completion_tokens": 0,
+        "estimated_cases": 0,
+        "failures": 0,
+        "http_calls": 0,
+        "logical_calls": 0,
+        "prompt_tokens": 0,
+        "retrieval_calls": 18,
+        "retrieval_tokens": 2121,
+        "total_tokens": 0,
+        "unresolved": 0
+      },
+      "metrics": {
+        "counts": {
+          "cases": 9,
+          "faulty_cases": 0,
+          "fn": 0,
+          "fp": 0,
+          "repaired_cases": 0,
+          "residual_cases": 0,
+          "tp": 0,
+          "unintended_changes": 0,
+          "valid_cases": 9,
+          "valid_false_alarms": 0
+        },
+        "f1": null,
+        "false_alarm_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "repair_success": null,
+        "unintended_change_rate": 0.0
+      }
+    },
+    "historical_context": {
+      "cost": {
+        "cache_hits": 0,
+        "completion_tokens": 0,
+        "estimated_cases": 0,
+        "failures": 0,
+        "http_calls": 0,
+        "logical_calls": 0,
+        "prompt_tokens": 0,
+        "retrieval_calls": 4,
+        "retrieval_tokens": 521,
+        "total_tokens": 0,
+        "unresolved": 0
+      },
+      "metrics": {
+        "counts": {
+          "cases": 2,
+          "faulty_cases": 0,
+          "fn": 0,
+          "fp": 0,
+          "repaired_cases": 0,
+          "residual_cases": 0,
+          "tp": 0,
+          "unintended_changes": 0,
+          "valid_cases": 2,
+          "valid_false_alarms": 0
+        },
+        "f1": null,
+        "false_alarm_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "repair_success": null,
+        "unintended_change_rate": 0.0
+      }
+    },
+    "multi_sentence_inference": {
+      "cost": {
+        "cache_hits": 0,
+        "completion_tokens": 0,
+        "estimated_cases": 0,
+        "failures": 0,
+        "http_calls": 0,
+        "logical_calls": 0,
+        "prompt_tokens": 0,
+        "retrieval_calls": 14,
+        "retrieval_tokens": 1607,
+        "total_tokens": 0,
+        "unresolved": 0
+      },
+      "metrics": {
+        "counts": {
+          "cases": 7,
+          "faulty_cases": 5,
+          "fn": 5,
+          "fp": 0,
+          "repaired_cases": 0,
+          "residual_cases": 5,
+          "tp": 0,
+          "unintended_changes": 0,
+          "valid_cases": 2,
+          "valid_false_alarms": 0
+        },
+        "f1": 0.0,
+        "false_alarm_rate": 0.0,
+        "precision": null,
+        "recall": 0.0,
+        "repair_success": 0.0,
+        "unintended_change_rate": 0.0
+      }
+    },
+    "neutral": {
+      "cost": {
+        "cache_hits": 0,
+        "completion_tokens": 0,
+        "estimated_cases": 0,
+        "failures": 0,
+        "http_calls": 0,
+        "logical_calls": 0,
+        "prompt_tokens": 0,
+        "retrieval_calls": 2,
+        "retrieval_tokens": 209,
+        "total_tokens": 0,
+        "unresolved": 0
+      },
+      "metrics": {
+        "counts": {
+          "cases": 1,
+          "faulty_cases": 0,
+          "fn": 0,
+          "fp": 0,
+          "repaired_cases": 0,
+          "residual_cases": 0,
+          "tp": 0,
+          "unintended_changes": 0,
+          "valid_cases": 1,
+          "valid_false_alarms": 0
+        },
+        "f1": null,
+        "false_alarm_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "repair_success": null,
+        "unintended_change_rate": 0.0
+      }
+    },
+    "paraphrased_contradiction": {
+      "cost": {
+        "cache_hits": 0,
+        "completion_tokens": 0,
+        "estimated_cases": 0,
+        "failures": 0,
+        "http_calls": 0,
+        "logical_calls": 0,
+        "prompt_tokens": 0,
+        "retrieval_calls": 12,
+        "retrieval_tokens": 1246,
+        "total_tokens": 0,
+        "unresolved": 0
+      },
+      "metrics": {
+        "counts": {
+          "cases": 6,
+          "faulty_cases": 6,
+          "fn": 6,
+          "fp": 0,
+          "repaired_cases": 0,
+          "residual_cases": 6,
+          "tp": 0,
+          "unintended_changes": 0,
+          "valid_cases": 0,
+          "valid_false_alarms": 0
+        },
+        "f1": 0.0,
+        "false_alarm_rate": null,
+        "precision": null,
+        "recall": 0.0,
+        "repair_success": 0.0,
+        "unintended_change_rate": 0.0
+      }
+    },
+    "reintroduced_error": {
+      "cost": {
+        "cache_hits": 0,
+        "completion_tokens": 0,
+        "estimated_cases": 0,
+        "failures": 0,
+        "http_calls": 0,
+        "logical_calls": 0,
+        "prompt_tokens": 0,
+        "retrieval_calls": 8,
+        "retrieval_tokens": 1071,
+        "total_tokens": 0,
+        "unresolved": 0
+      },
+      "metrics": {
+        "counts": {
+          "cases": 4,
+          "faulty_cases": 4,
+          "fn": 7,
+          "fp": 0,
+          "repaired_cases": 0,
+          "residual_cases": 4,
+          "tp": 0,
+          "unintended_changes": 0,
+          "valid_cases": 0,
+          "valid_false_alarms": 0
+        },
+        "f1": 0.0,
+        "false_alarm_rate": null,
+        "precision": null,
+        "recall": 0.0,
+        "repair_success": 0.0,
+        "unintended_change_rate": 0.0
+      }
+    },
+    "release_transition": {
+      "cost": {
+        "cache_hits": 0,
+        "completion_tokens": 0,
+        "estimated_cases": 0,
+        "failures": 0,
+        "http_calls": 0,
+        "logical_calls": 0,
+        "prompt_tokens": 0,
+        "retrieval_calls": 18,
+        "retrieval_tokens": 1932,
+        "total_tokens": 0,
+        "unresolved": 0
+      },
+      "metrics": {
+        "counts": {
+          "cases": 9,
+          "faulty_cases": 0,
+          "fn": 0,
+          "fp": 0,
+          "repaired_cases": 0,
+          "residual_cases": 0,
+          "tp": 0,
+          "unintended_changes": 0,
+          "valid_cases": 9,
+          "valid_false_alarms": 0
+        },
+        "f1": null,
+        "false_alarm_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "repair_success": null,
+        "unintended_change_rate": 0.0
+      }
+    },
+    "revision_regression": {
+      "cost": {
+        "cache_hits": 0,
+        "completion_tokens": 0,
+        "estimated_cases": 0,
+        "failures": 0,
+        "http_calls": 0,
+        "logical_calls": 0,
+        "prompt_tokens": 0,
+        "retrieval_calls": 6,
+        "retrieval_tokens": 741,
+        "total_tokens": 0,
+        "unresolved": 0
+      },
+      "metrics": {
+        "counts": {
+          "cases": 3,
+          "faulty_cases": 3,
+          "fn": 6,
+          "fp": 0,
+          "repaired_cases": 0,
+          "residual_cases": 3,
+          "tp": 0,
+          "unintended_changes": 0,
+          "valid_cases": 0,
+          "valid_false_alarms": 0
+        },
+        "f1": 0.0,
+        "false_alarm_rate": null,
+        "precision": null,
+        "recall": 0.0,
+        "repair_success": 0.0,
+        "unintended_change_rate": 0.0
+      }
+    },
+    "scope_condition": {
+      "cost": {
+        "cache_hits": 0,
+        "completion_tokens": 0,
+        "estimated_cases": 0,
+        "failures": 0,
+        "http_calls": 0,
+        "logical_calls": 0,
+        "prompt_tokens": 0,
+        "retrieval_calls": 18,
+        "retrieval_tokens": 1883,
+        "total_tokens": 0,
+        "unresolved": 1
+      },
+      "metrics": {
+        "counts": {
+          "cases": 9,
+          "faulty_cases": 8,
+          "fn": 7,
+          "fp": 0,
+          "repaired_cases": 0,
+          "residual_cases": 8,
+          "tp": 1,
+          "unintended_changes": 0,
+          "valid_cases": 1,
+          "valid_false_alarms": 0
+        },
+        "f1": 0.2222222222222222,
+        "false_alarm_rate": 0.0,
+        "precision": 1.0,
+        "recall": 0.125,
+        "repair_success": 0.0,
+        "unintended_change_rate": 0.0
+      }
+    },
+    "structural_safety": {
+      "cost": {
+        "cache_hits": 0,
+        "completion_tokens": 0,
+        "estimated_cases": 0,
+        "failures": 0,
+        "http_calls": 0,
+        "logical_calls": 0,
+        "prompt_tokens": 0,
+        "retrieval_calls": 16,
+        "retrieval_tokens": 1689,
+        "total_tokens": 0,
+        "unresolved": 4
+      },
+      "metrics": {
+        "counts": {
+          "cases": 8,
+          "faulty_cases": 7,
+          "fn": 2,
+          "fp": 1,
+          "repaired_cases": 2,
+          "residual_cases": 5,
+          "tp": 5,
+          "unintended_changes": 0,
+          "valid_cases": 1,
+          "valid_false_alarms": 0
+        },
+        "f1": 0.7692307692307693,
+        "false_alarm_rate": 0.0,
+        "precision": 0.8333333333333334,
+        "recall": 0.7142857142857143,
+        "repair_success": 0.2857142857142857,
+        "unintended_change_rate": 0.0
+      }
+    }
+  },
+  "cases": [
+    {
+      "family": "038a0c882ea6f693",
+      "final_text_hash": "fd520677a361ede4b012bc57c6e64e65b100069bdfb54d03df61154035efd34e",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "09cec524c3ea5df3",
+      "maintenance_hash": "de5e12fb142e4e5c2ef0a2e569ce0da3322cc36217a86c700610e702af993c5e",
+      "packet_hash": "4d1034e9542e33c4211675e3d04d4a27f5e1a7beb9b0e6ea5282931d008561dd",
+      "primary_type": "entailment",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 254,
+      "semantic_gold": 0
+    },
+    {
+      "family": "8b2717cda357f155",
+      "final_text_hash": "df1575dba9618ede142d3d0a327fa37f253b17c443fb51e7227a34e2836d7213",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "0c4cfa54c47ac0a6",
+      "maintenance_hash": "3542950e4cea316b801b304c7cd54fe13eb390dd734dfcce1adc701427f4d334",
+      "packet_hash": "a87495c4ac122086e2235261a82a7d6d039c7c912cc68f238db48b0817833362",
+      "primary_type": "release_transition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 221,
+      "semantic_gold": 0
+    },
+    {
+      "family": "fe432b2201d1a0fd",
+      "final_text_hash": "5d529fd8339774d51dda57b5f6d318816175b72a18b6d667134179c935b5ee5d",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "10be9f086b232d00",
+      "maintenance_hash": "66028062fa69955848c5d12e087d0dfdcced84955b28fc2c68153e3a60d81ee4",
+      "packet_hash": "2a4eabfff1fe5ee53469980e15d63369b0c60bb02141fa2a6ac8aa4af6ae98c6",
+      "primary_type": "concurrent_edits",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 207,
+      "semantic_gold": 0
+    },
+    {
+      "family": "852697d4026dfa7f",
+      "final_text_hash": "ee8edc432b5b290e3c14bafd097bce8346edff5227283c44a88d5f77bb987ed4",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "153eeb17461400e8",
+      "maintenance_hash": "4106749f44e132d2d78e09c2c24a966eb60ab7666d8a8eaea2540876789e0eb2",
+      "packet_hash": "4911f3c6b4f3bdef7e4bff123e5e7383c65347b2136b83fd02024e8f103c20fd",
+      "primary_type": "release_transition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 228,
+      "semantic_gold": 0
+    },
+    {
+      "family": "8a8d2374fa4291db",
+      "final_text_hash": "ec2d51cfcd982abb5951acec7fc879554892439db58d7d562e3f40da3371a08b",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "162967a9dababb0f",
+      "maintenance_hash": "ef1e19c39438b63d6f25ddd55f2071155a9935aaa3b94a02b18164f6d7bbe331",
+      "packet_hash": "18d909379e4b5e4ba5f7275b27ee76307b42e34494f5ba13a917d7c3582c2386",
+      "primary_type": "multi_sentence_inference",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 264,
+      "semantic_gold": 1
+    },
+    {
+      "family": "ce78452e0efed04a",
+      "final_text_hash": "35de6cfa77c102af80ad7c00ba9403b9e5bdb0ae7717617a7b45ed95fb7c41e2",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "17044835c191ed02",
+      "maintenance_hash": "9f6c5d6c938b1c558a5f730d69b3026826aeafeaeb6ea26650eb4edd92dd3f19",
+      "packet_hash": "7c9e3190b60011114617c83f242ff597363ef9c62e9612a55f5a4ceca11be73e",
+      "primary_type": "historical_context",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 295,
+      "semantic_gold": 0
+    },
+    {
+      "family": "8a8d2374fa4291db",
+      "final_text_hash": "7bca7093f20d1797375e4aa3d5bc931371051147094319367cb46ae5daabc347",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "1ac50b0f5839e204",
+      "maintenance_hash": "5c6b67437a21a7dc5fe00a73a1d5c52338ad4103696084d69234c286914f97a7",
+      "packet_hash": "4ed0da4180c1065eb77c84dc32882b7dc970ccb70c9756d29c040bb11d67d617",
+      "primary_type": "neutral",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 209,
+      "semantic_gold": 0
+    },
+    {
+      "family": "fe432b2201d1a0fd",
+      "final_text_hash": "d7ea648028e08901accdb1076acf06db613a7c808f7676a5f34dfe8a00fd809a",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "1dff1133fcf3d2d2",
+      "maintenance_hash": "0acd8456acc5df095b6683c07f2a501e7f80f50b14b089a4728b0e4660b2e772",
+      "packet_hash": "964fb0d0daae7f1ea59f72c4a366625f66be3c0ff12ffcdb751c6c1e04c60b60",
+      "primary_type": "paraphrased_contradiction",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 222,
+      "semantic_gold": 1
+    },
+    {
+      "family": "68dbfeb4e5ed11db",
+      "final_text_hash": "6e00233b2f371b3a06eccd8d6c631bb09b423dda5dd8937851ea6cdeea0489a7",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "1ef19760f5f9d199",
+      "maintenance_hash": "3d1993e0adfce160d9a152b88f2c5f60963da669a81414fe44c1ba8776bf8c87",
+      "packet_hash": "3633a9f8ac64551a5cb7f4920e59880392bf300ea9a2beb521d03d8935842f1a",
+      "primary_type": "multi_sentence_inference",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 167,
+      "semantic_gold": 0
+    },
+    {
+      "family": "fe432b2201d1a0fd",
+      "final_text_hash": "f30ff229c1c58b5529fa0adce0ffc31d950da2ce9b27747650ada69218dadb7b",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "295352ffd7997806",
+      "maintenance_hash": "6bd14f538e8347fcce25dfff418b0f75b385e9ca10be45c8638be6758ee5f082",
+      "packet_hash": "f77fb4a45d2d6b517b0cdca612c9786483dfec2425e8045039ca28ad008a59bf",
+      "primary_type": "multi_sentence_inference",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 222,
+      "semantic_gold": 1
+    },
+    {
+      "family": "ce78452e0efed04a",
+      "final_text_hash": "8191bace20a0e7ff23b6bd7f207229fd75d39924cbefd8b8b78a7978fb238943",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "2babdee5b3da0fbc",
+      "maintenance_hash": "3d1d8c8ffe8b50341617747821653408d691509a4dc480d90e4a58f23e831de1",
+      "packet_hash": "081334773c966358f14980091bad1b359387c280190501623aac0f027c31e760",
+      "primary_type": "entailment",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 254,
+      "semantic_gold": 0
+    },
+    {
+      "family": "852697d4026dfa7f",
+      "final_text_hash": "5bd4112ecb9fb27c48b03ef3e72b5968abc4a04d8e7a1d4949d37f7d54101495",
+      "findings": [],
+      "gold_evidence_retrieved": 2,
+      "id": "2ee984a6acec91d6",
+      "maintenance_hash": "4973b6b356af4f000d3178d3fee824889f98064e72d3561df10cfa3981529037",
+      "packet_hash": "2118ba58bb3a856cd4947912fb00d39c9454fa0cbb632fbb0b1c3d0a27b46139",
+      "primary_type": "revision_regression",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 243,
+      "semantic_gold": 2
+    },
+    {
+      "family": "ce78452e0efed04a",
+      "final_text_hash": "03e25abab3b2f7a1dbe35efb8b48cd4c29b216fec36bb7134b726563fbc59e6c",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "30d14f9ec15936e7",
+      "maintenance_hash": "cf9b60a9c63f23bf80df13bfaa5f647b1260e896f018fcd87d0e0630d9557656",
+      "packet_hash": "06a47751926d1d8aa146b8b89dfd01daf83a4cdc547aea60b215ae1f7cd26da2",
+      "primary_type": "paraphrased_contradiction",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 224,
+      "semantic_gold": 1
+    },
+    {
+      "family": "fe432b2201d1a0fd",
+      "final_text_hash": "d5a7d7853a1f63311c1a0ea3ed37a5b6f257436122fe3c087047721913fcc061",
+      "findings": [
+        {
+          "candidate": {
+            "first": 9,
+            "last": 9,
+            "path": "headers-documentation-shortcut.md"
+          },
+          "code": "broken_redirect",
+          "evidence": {
+            "first": 9,
+            "last": 9,
+            "path": "headers-documentation-shortcut.md"
+          }
+        }
+      ],
+      "gold_evidence_retrieved": 0,
+      "id": "31ee050df4eff88c",
+      "maintenance_hash": "09c473b57a5b2e43941a05b61421cca2db3608b087b0ecc2815a0425497ec081",
+      "packet_hash": "f7e6f97fd5879a5e7d9dfdfa6e19f17ea7727223f1045a22b9f56d882952d648",
+      "primary_type": "structural_safety",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 207,
+      "semantic_gold": 0
+    },
+    {
+      "family": "8b2717cda357f155",
+      "final_text_hash": "fa5dc075e80cf4f978e09eefe4e6ae979846036d809d7e92379f60e28e84243b",
+      "findings": [
+        {
+          "candidate": {
+            "first": 15,
+            "last": 15,
+            "path": "build-message-navigation.md"
+          },
+          "code": "inbound_redirect",
+          "evidence": {
+            "first": 9,
+            "last": 9,
+            "path": "build-messages.md"
+          }
+        }
+      ],
+      "gold_evidence_retrieved": 0,
+      "id": "36d6acb0d77730d8",
+      "maintenance_hash": "63aef7fdfa457a99f725108f3ead99bd6a992f4466b34fe01d2955d94bf2bff5",
+      "packet_hash": "8092ee1bfdb0efe9258fb279820eb3e49318ea1709b4100226e3ab4dabe33f21",
+      "primary_type": "structural_safety",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 169,
+      "semantic_gold": 0
+    },
+    {
+      "family": "8b2717cda357f155",
+      "final_text_hash": "92bffe3f8059356fa8838c0b40093c73478c3795f99f8b3b15f859e3b0bdd3c0",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "3a52afb39c985fcd",
+      "maintenance_hash": "56d5a03ca2c9fc36e21b5933b7c93dab19e1b5a4017fbb8c114df8457d054425",
+      "packet_hash": "99753ebe6fc63271356e545730a3bbe0450c12b4f2cd430ef4af93544d35db6f",
+      "primary_type": "multi_sentence_inference",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 222,
+      "semantic_gold": 1
+    },
+    {
+      "family": "22e93c7f75d45bbd",
+      "final_text_hash": "181ccdb967dc38c78b43687e05f90958cf522ffba03a6c4db298f4cd7b550bda",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "3d4d900ad04d22f6",
+      "maintenance_hash": "9a953432dbeb171b642a5a6ab49cf6038c6cc8b739a3fbea9fc0e5d62e52ca38",
+      "packet_hash": "6bbd4e7316188b9e9edf4a2def8de0a259cfa448ef8cbc40655797054bb93b3d",
+      "primary_type": "release_transition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 209,
+      "semantic_gold": 0
+    },
+    {
+      "family": "ce78452e0efed04a",
+      "final_text_hash": "85f712790d017b64a6ec6edd56469c254359caed1f2ab769033e0e9bc25b8c99",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "3d90a713849e6f68",
+      "maintenance_hash": "f0e89c00221de79c4ca10520bea33796b7fe4b5346f2810d8dfa282cae0ba24a",
+      "packet_hash": "efe4b9bc4e8ca89d048f6c829e42061cb4dd09e593037f9ee49d6b1651788f79",
+      "primary_type": "structural_safety",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 198,
+      "semantic_gold": 0
+    },
+    {
+      "family": "68dbfeb4e5ed11db",
+      "final_text_hash": "2227df8aef017af090278fc4ce8f1f92c2c51589eaf889ec63cf850a0256768d",
+      "findings": [
+        {
+          "candidate": {
+            "first": 16,
+            "last": 16,
+            "path": "pipeline-references.md"
+          },
+          "code": "broken_link",
+          "evidence": {
+            "first": 16,
+            "last": 16,
+            "path": "pipeline-references.md"
+          }
+        }
+      ],
+      "gold_evidence_retrieved": 0,
+      "id": "475c64ba04e0e445",
+      "maintenance_hash": "330682a58fe9ebb09c0f5e762a75dcd4c50e6c1210f8a2316ea91cc2c86c78c5",
+      "packet_hash": "41d1d02304ae27c2b81151c2f68c97769e75d72218a5ea659e26a83fbc738d8a",
+      "primary_type": "structural_safety",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 224,
+      "semantic_gold": 0
+    },
+    {
+      "family": "8b2717cda357f155",
+      "final_text_hash": "0787bc5ed907b2257c2fd8c972a93f846d21a7f0b85072991a9b254d71e90f19",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "4a3f0b14cb6afef4",
+      "maintenance_hash": "7484d7d5d2e5233feb5fa54492e67f4cc2971a80dd64114fbb4f2c9d343a9c59",
+      "packet_hash": "fa178305cd30cc34c4ed6cf86acb87276b6411d563f1869f9b819d3b612411c6",
+      "primary_type": "scope_condition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 165,
+      "semantic_gold": 1
+    },
+    {
+      "family": "038a0c882ea6f693",
+      "final_text_hash": "6b046644fa64867cbd99612ec8a65e88b343bc93757547278b12d4c9f162f6cb",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "4a48212a62812418",
+      "maintenance_hash": "ef2aca4d7354b8d26b41dffbf5302e929f352259f06cc3854d9ba0426e2dca41",
+      "packet_hash": "3b1870a97d8f822054144b95773ee6e012a6e9466a01435d8c65040d6b97a60a",
+      "primary_type": "multi_sentence_inference",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 253,
+      "semantic_gold": 0
+    },
+    {
+      "family": "fe432b2201d1a0fd",
+      "final_text_hash": "f876786514b48c8bb5f7be83c72088606808e556db818ae845c6a38d961fb5e4",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "4fbc8e7bd8bd2e49",
+      "maintenance_hash": "9afcaecb1a484dd82bda662b399fedfb0e79486c8486670911e2f56ef58b505f",
+      "packet_hash": "d8e1eb959ff472e260ec55d0e134a5c0e2de73420b4df73df6e0b7171911e972",
+      "primary_type": "release_transition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 221,
+      "semantic_gold": 0
+    },
+    {
+      "family": "852697d4026dfa7f",
+      "final_text_hash": "8fb41e77dbdd0730e4fb1447a048d18f76dbb3cc40683e14ae3056cc7acc30fe",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "553a4b97ff9cc620",
+      "maintenance_hash": "bdc2ee2396138e47f5026ff3688e08b85a46902ae40ecbc496324015030372f7",
+      "packet_hash": "97536a3fc7164d0a873b0e07fdd326426bdc0093700ee9ac0a45c315fec86f17",
+      "primary_type": "release_transition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 211,
+      "semantic_gold": 0
+    },
+    {
+      "family": "038a0c882ea6f693",
+      "final_text_hash": "e74e2b2b677dbdc43cac655c6fd25d5dcbaf8fd45b44737ca5f461e5f18cffde",
+      "findings": [
+        {
+          "candidate": {
+            "first": 9,
+            "last": 9,
+            "path": "provider-documentation-shortcut.md"
+          },
+          "code": "redirect_cycle",
+          "evidence": {
+            "first": 9,
+            "last": 9,
+            "path": "provider-glossary.md"
+          }
+        }
+      ],
+      "gold_evidence_retrieved": 0,
+      "id": "560753fe5c0a0404",
+      "maintenance_hash": "d47438c5d7470d3e9fc0af49cb2c9497505716581acfa552b935188197bbdef9",
+      "packet_hash": "9294bc0ddb834c486b36eedd54abffe2106f24c15dd550ad1f5051137ca63da1",
+      "primary_type": "structural_safety",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 240,
+      "semantic_gold": 0
+    },
+    {
+      "family": "22e93c7f75d45bbd",
+      "final_text_hash": "e1a2927f67670e761b400a2ee989b695c5a3179f93fc407b56d1511c57cbbada",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "5e58b62bfe0d1876",
+      "maintenance_hash": "7b89ea850f69469018a3da2ad512e5eb628d9d8eee10c9928eced488be12dde1",
+      "packet_hash": "c4d565278e0cc72db7615e13907f5224ca546035095dacc7771ff232a014e0d6",
+      "primary_type": "scope_condition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 204,
+      "semantic_gold": 1
+    },
+    {
+      "family": "038a0c882ea6f693",
+      "final_text_hash": "53bbd8136e84e98bae1827699a697d1919f75388b0135131b9eb2ab78c3eebf5",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "6074e6f24f2b2ec3",
+      "maintenance_hash": "fd7cd52c4a8a95683b5e02eeab356ad2a83c9b572a0294690bd0b0258d58d222",
+      "packet_hash": "77ddaaadb4b4ab2f380d38cf6b4333a5884030859984f3a5fdf7f16a6662ba62",
+      "primary_type": "scope_condition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 215,
+      "semantic_gold": 1
+    },
+    {
+      "family": "8a8d2374fa4291db",
+      "final_text_hash": "2f96aba59f99578df100752bdc37fb66c5fcfdca55c95de13ab9f0bf0779d16d",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "63f7850be749e67c",
+      "maintenance_hash": "23b712d20c5d79ded28755dce211bd56bd5eda048d6f95194530867dc495eb26",
+      "packet_hash": "2fa4645f91971d830c02676cbfbe464899d5520b3547b2ca6523c71b52d7b348",
+      "primary_type": "scope_condition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 259,
+      "semantic_gold": 1
+    },
+    {
+      "family": "fe432b2201d1a0fd",
+      "final_text_hash": "09c4bef9ba484c63150dc5881a62a40ce061b57a3a317fffb7999a9f7ec00cef",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "64da2ca58f9cd0a6",
+      "maintenance_hash": "5048ffaf41e55203c27d14e8d06df11be0fe4e4d773c76278d9a5e74d3371c90",
+      "packet_hash": "da66ff0e331af583602807eb5c9f3ebe5804dedfe769dc18444935202f74aa01",
+      "primary_type": "scope_condition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 219,
+      "semantic_gold": 1
+    },
+    {
+      "family": "ce78452e0efed04a",
+      "final_text_hash": "6df9e7df1eac80fe2f31b011a569a287c8bb6c90080e6b15e455718174299eba",
+      "findings": [],
+      "gold_evidence_retrieved": 2,
+      "id": "6c74c6951ac4529d",
+      "maintenance_hash": "cfc4f232138c1dcaebb542b45ea4d77711b55b746712c7713d7a26126ce6dad5",
+      "packet_hash": "d5cd33895e8dc2474953afd00b28c230ab748148f33fae5dd40a61efd1e83d3a",
+      "primary_type": "reintroduced_error",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 270,
+      "semantic_gold": 2
+    },
+    {
+      "family": "22e93c7f75d45bbd",
+      "final_text_hash": "38b565a8e1281d568df17b8f0f9be98f164ce53da5a5f590ec2b80f354caaf37",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "6e94467a6f4a5e6f",
+      "maintenance_hash": "9b2541605321b6566be5507bec4cdea4e86feb55e9092a0c8e34d6529f8b24b4",
+      "packet_hash": "c9c27bd4aee4b261bd51da5b6394f4d75c368f7db2efab16dd640257167e569e",
+      "primary_type": "duplicate_overlap",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 215,
+      "semantic_gold": 1
+    },
+    {
+      "family": "852697d4026dfa7f",
+      "final_text_hash": "76821777ae94bf338e6b5b050a81e80e9c1d1efb5f4f756b4ff844cbf59ddcb5",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "6f451462810b0fd1",
+      "maintenance_hash": "f00c8903065b65caf17d2c9f8e8b53d7e2a436cb588892fef339b77a001c7486",
+      "packet_hash": "ab57633180997731ae1e6573a45100180e4f5b75b287bbe57035e37cd7a5cb2b",
+      "primary_type": "concurrent_edits",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 211,
+      "semantic_gold": 0
+    },
+    {
+      "family": "22e93c7f75d45bbd",
+      "final_text_hash": "ba0eddf2c0609cf7becb25d14eb559679fb5a1c8c079509792c64d5cdbb8e359",
+      "findings": [],
+      "gold_evidence_retrieved": 2,
+      "id": "701076de5c42d6b0",
+      "maintenance_hash": "f142c78bb1450479870a83b265b892dc07aa901b984839f8883d2960c8b41fcd",
+      "packet_hash": "340b99d46d2cb2933d960515fce8adf21fb4a4baeac03ab2a3c0468a21d16d1e",
+      "primary_type": "revision_regression",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 261,
+      "semantic_gold": 2
+    },
+    {
+      "family": "68dbfeb4e5ed11db",
+      "final_text_hash": "fa0f5b77241963e8f3affa561cdd1ff04b5df03ff663ba3145aa925c057b8f55",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "78a66a20ab2d3ecd",
+      "maintenance_hash": "9a93a29da9c10b9548c8e6cbee33355cde3245dbe67e2a5a9c74ed263d373319",
+      "packet_hash": "e7301526d63c859c074b8c0b6f310f8819ad472f3c824a39b48239d022a008f5",
+      "primary_type": "entailment",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 222,
+      "semantic_gold": 0
+    },
+    {
+      "family": "8a8d2374fa4291db",
+      "final_text_hash": "be7470432ee4930fcfc4029c4d11c5bb82a9a08c13f4d3ff9648e81872b43dc1",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "79105045a56af900",
+      "maintenance_hash": "21632c6c5090d7149d813933b56f3f2c979c86d20a65e1d1896cb18917dcceeb",
+      "packet_hash": "10ec2cb5a4a5c26b452028ea08f802de31d971a3ec00accc376a839eeeb8f9f0",
+      "primary_type": "paraphrased_contradiction",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 226,
+      "semantic_gold": 1
+    },
+    {
+      "family": "038a0c882ea6f693",
+      "final_text_hash": "f079ef7a2fdb66b6035fb3a109cc0897ca44b931ac1bf276777d14376dfa042c",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "7ece1667fd29be64",
+      "maintenance_hash": "927d6328a86175f4f5c2aaacb642c22ecec9039eefd0c18d0159326c07f276e1",
+      "packet_hash": "7e937c8e0f71a0278f4e6df5e04145a1a1fbd9c3019c20909fdd794cbd01c4ad",
+      "primary_type": "paraphrased_contradiction",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 165,
+      "semantic_gold": 1
+    },
+    {
+      "family": "8a8d2374fa4291db",
+      "final_text_hash": "c3b5a688cbbf4b1b9c9520dcbdec66df2c26af6da9ba1b9720c4184591d2fd43",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "8d1d4b4a183d5826",
+      "maintenance_hash": "24768344e4efcc2c44bf33ff51284e5c8e54c12b0c610211ef31c5f02014f9c8",
+      "packet_hash": "5d56e52215810c49f124a7eeaf864afb58891995bd9758fb40bbfd482420a2e9",
+      "primary_type": "release_transition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 226,
+      "semantic_gold": 0
+    },
+    {
+      "family": "852697d4026dfa7f",
+      "final_text_hash": "92f158ca91b2634c473e39b5101034421aef99e68ac1384f41828f735e84f72d",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "94650b44be73165b",
+      "maintenance_hash": "212688a49bebcab871b4a8ffffa6f8fd0835937a7fbebfa099bafe6a4a729b27",
+      "packet_hash": "c87b0a01afacf231f53960e187274c777ef1a699cc70d7d2a4f5305c5552edeb",
+      "primary_type": "multi_sentence_inference",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 225,
+      "semantic_gold": 1
+    },
+    {
+      "family": "038a0c882ea6f693",
+      "final_text_hash": "865db0a4cbdbb461c09912e3e7aa1122eaa9f580ec467ad9022ea2a28ba4c6c4",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "94e599406c267686",
+      "maintenance_hash": "b8bf24f8246e778e84d8d3d93d65396009c33edd7d6461d3fa732d2ee9929eca",
+      "packet_hash": "de6345f6b6d289574ecf6fb3df7626dcbdd45949299c338c95ffe22882cbb3a5",
+      "primary_type": "release_transition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 170,
+      "semantic_gold": 0
+    },
+    {
+      "family": "68dbfeb4e5ed11db",
+      "final_text_hash": "846a6fa33fe5b7e6829b68559fdf81d3532e7257327944c38ec3bc2571958e01",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "95424e0c34c3b230",
+      "maintenance_hash": "89b319f43d0715a747466dc3422b0824be353ee3317973a3d511480a6c982f5b",
+      "packet_hash": "e00cc7804a29e777db325ed4c38ca66767aaef27b01cd18ba517d9d1540955ef",
+      "primary_type": "reintroduced_error",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 244,
+      "semantic_gold": 2
+    },
+    {
+      "family": "68dbfeb4e5ed11db",
+      "final_text_hash": "34480e24b99dcef2ea8b2b049f6006a413d96a3dbc7046114a0e805ead81b829",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "9afc40d609e9f6b0",
+      "maintenance_hash": "a4fdd25091bd63bf9cce2eb6aa88feb96516b14de24a873cf3e1c725dde4f2dd",
+      "packet_hash": "801ebe452ffcf360e396bc26a2731dd6fb25f04554fee99c61effdf74da52e8a",
+      "primary_type": "scope_condition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 167,
+      "semantic_gold": 1
+    },
+    {
+      "family": "22e93c7f75d45bbd",
+      "final_text_hash": "d931cd7e873e09d1cfbd2db8ad62c0c8d5e017522b0925d4ef1f99b442da2c3c",
+      "findings": [
+        {
+          "candidate": {
+            "first": 9,
+            "last": 9,
+            "path": "timestamp-guide-review.md"
+          },
+          "code": "expired_stale_after",
+          "evidence": {
+            "first": 9,
+            "last": 9,
+            "path": "timestamp-guide-review.md"
+          }
+        }
+      ],
+      "gold_evidence_retrieved": 0,
+      "id": "9c704068bdd21791",
+      "maintenance_hash": "f38834896b2a785ea967ab02db139f5950e70f36594045c4af2a7fe822273810",
+      "packet_hash": "7ed6490b388d69f35d03f09323cb881886e30a317564e8baaed7f0d0d05e4134",
+      "primary_type": "structural_safety",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 199,
+      "semantic_gold": 0
+    },
+    {
+      "family": "8a8d2374fa4291db",
+      "final_text_hash": "a67d8f05bd1d9a5801a6a174278df12f320edaa7f1f3e16dc5d673a22d32cb1a",
+      "findings": [
+        {
+          "candidate": {
+            "first": 15,
+            "last": 15,
+            "path": "component-rule-index.md"
+          },
+          "code": "inbound_redirect",
+          "evidence": {
+            "first": 9,
+            "last": 9,
+            "path": "old-component-map.md"
+          }
+        }
+      ],
+      "gold_evidence_retrieved": 0,
+      "id": "9fcba8f9a8312304",
+      "maintenance_hash": "dfc5391fdfc810e728d21b369762d2c2c43566adcb003ef32eff7bbb97cfafa7",
+      "packet_hash": "37176cfa183e26a4966a051f55c4eac07a6559128589fc3475c5ffbb8b8c9351",
+      "primary_type": "structural_safety",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 228,
+      "semantic_gold": 0
+    },
+    {
+      "family": "8b2717cda357f155",
+      "final_text_hash": "14334d7e6f204373ae6cd27991a4dc727232407633d2e7b257ddf07bf4d34f54",
+      "findings": [],
+      "gold_evidence_retrieved": 2,
+      "id": "a034af4132cd3419",
+      "maintenance_hash": "7323236741d22482fc3f50b1f8be7f63a13a7bb242bb3e0bff2e17b4a5c277fa",
+      "packet_hash": "60eff02ba3112a051a19a8b8f129edd90eaecc74edc3c4f3bef6e3c69532fe9f",
+      "primary_type": "revision_regression",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 237,
+      "semantic_gold": 2
+    },
+    {
+      "family": "ce78452e0efed04a",
+      "final_text_hash": "7a57f65960f4811edd085ba8fcfb0c7d8cac5252cab2bddb28a89ec67b33b441",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "a2760126a47827e9",
+      "maintenance_hash": "58ef796339ee8746aaa88ff99771fd9d9e094620f555784a8ab4772b5df85bf4",
+      "packet_hash": "3d671b4f33a0fbf74310632df3834b914870e4c75e58af2809ea77a705a63bf7",
+      "primary_type": "scope_condition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 217,
+      "semantic_gold": 1
+    },
+    {
+      "family": "22e93c7f75d45bbd",
+      "final_text_hash": "88f7c9897a831ea476ad61b7b66dddb135601acba315ff30acd747b799da027b",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "a6aef395f57680a0",
+      "maintenance_hash": "42ede092f4c63a160f7d3773e564e7ad0829e6fb3440fa0f9ab96ae774a5216b",
+      "packet_hash": "591433a22f26376931ccc89efcebc525dc0a182c4163a7fbc099db1e23b2639a",
+      "primary_type": "entailment",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 241,
+      "semantic_gold": 0
+    },
+    {
+      "family": "68dbfeb4e5ed11db",
+      "final_text_hash": "17182bb03acc97fd81a82da35968c8572d6595570a0c79094142b604be482118",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "a7c6718bc576ffa1",
+      "maintenance_hash": "4041934f5a162743408b3816b5e208a9fdd5a34f3d819a3ba32b4584a5e1bf77",
+      "packet_hash": "8f491dc1b46d3996f94c741ac211fa32d628f9c16425030b14ab141673348657",
+      "primary_type": "release_transition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 226,
+      "semantic_gold": 0
+    },
+    {
+      "family": "ce78452e0efed04a",
+      "final_text_hash": "719b5b5d279bc417c845e781680a74e953e5cfa71e553a3c5099d023f8d6604c",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "aa42c73c5d587bb0",
+      "maintenance_hash": "ae6ef65fb84bd7c95687779362e9b8bd84eb88ccf6df9e393c4cb09f55d44af9",
+      "packet_hash": "9f43048406c6c8a653544f6fe6b3e3f51f7bbe21f65f6fe9154b138e354acb51",
+      "primary_type": "release_transition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 220,
+      "semantic_gold": 0
+    },
+    {
+      "family": "8b2717cda357f155",
+      "final_text_hash": "65b98b4e2209b3e77f39f3f4fc858480352fd2def00ccf136bed2547aebe97fc",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "ad53f4d8468300a8",
+      "maintenance_hash": "0cda240b9c9a74528a3e4c58eed1fcc235dded750d0a511e25c66e72687afef4",
+      "packet_hash": "917cdb5a4b5544e6b3a3075b962cf9c2d3cf3f3753397b9902f4619a7f2a0706",
+      "primary_type": "entailment",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 222,
+      "semantic_gold": 0
+    },
+    {
+      "family": "852697d4026dfa7f",
+      "final_text_hash": "455e51357a517cfb332741761f1198e256f3bb6359c086d76f56d0d98f2a14ba",
+      "findings": [
+        {
+          "candidate": {
+            "first": 13,
+            "last": 13,
+            "path": "recently-produced-inputs.md"
+          },
+          "code": "contradicts_verified",
+          "evidence": {
+            "first": 17,
+            "last": 17,
+            "path": "file-3.28.0.md"
+          }
+        }
+      ],
+      "gold_evidence_retrieved": 1,
+      "id": "aeee390db252024e",
+      "maintenance_hash": "d7523d99f388eab38f55bf7d0c79afaa3dd90800a2281e8c035709a37d676602",
+      "packet_hash": "a683ddabff18148971d9b40bc6594b23c88dafebcdae9878269b8d28d73561a7",
+      "primary_type": "scope_condition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 230,
+      "semantic_gold": 1
+    },
+    {
+      "family": "852697d4026dfa7f",
+      "final_text_hash": "0dc74e0ad055040e667a7de656c3aff4ba5ebfbf724728173bbc2c87c109c3cc",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "af0faa6662b2cce4",
+      "maintenance_hash": "ea116ea1b80f6ff996d384024fbf558e3de273966134058b940b0e1766093d97",
+      "packet_hash": "45effdf1e22ae5562d371eb63424151ee580aa10f91afa52175b1292b8a7ef39",
+      "primary_type": "entailment",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 229,
+      "semantic_gold": 0
+    },
+    {
+      "family": "038a0c882ea6f693",
+      "final_text_hash": "d7e6fe49ce44c4e20694f4ee88d6613c85979a43dfddd33907ab64a38297f148",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "b1e5efab89b69301",
+      "maintenance_hash": "9f7fd4148652ae47348812c088e7afa427400da78451c516faeb5791f7754e29",
+      "packet_hash": "5ac0f14dcfe743576c22bcaab7052571c2eb06ecbf946cdf487df655086dc1f1",
+      "primary_type": "reintroduced_error",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 277,
+      "semantic_gold": 2
+    },
+    {
+      "family": "038a0c882ea6f693",
+      "final_text_hash": "ca1c83e9196f01d0cc8a88805bb33f3577289a7dec0e28845b92a4d532cab44b",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "b6bf9fedba4f2053",
+      "maintenance_hash": "6515617bd38f71b3ef16db3e429d6e400350a37555b41ac96fd49a0908ffd9d4",
+      "packet_hash": "9cb7360b09fbea9c6d7c82aeb3f2d560d1f34db1a302d0d25f1cdba9f646006f",
+      "primary_type": "concurrent_edits",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 226,
+      "semantic_gold": 1
+    },
+    {
+      "family": "68dbfeb4e5ed11db",
+      "final_text_hash": "2f05418d8a281327b2f12049f40cae49a8d9dc017c73c241803a426cb14b31eb",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "bc77217d227af56f",
+      "maintenance_hash": "e549815e9b2e8d120c8d964f724d2325609de4f5c297b6b8c06c3a740f87fd26",
+      "packet_hash": "a00d66f7e982258b79d48431e4bbd2c9d3a0dace756e32e0242e376a9b511880",
+      "primary_type": "paraphrased_contradiction",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 223,
+      "semantic_gold": 1
+    },
+    {
+      "family": "fe432b2201d1a0fd",
+      "final_text_hash": "36eb914d4d9723fc118c76a124ab6efa464882c71b63f4c4d58c18080fa43912",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "bd63039f7d906c27",
+      "maintenance_hash": "e7454b663c2061677d17e17facc5f9b9c890f756f3c66c5c89f1626bad1f9f96",
+      "packet_hash": "3d793e08f59848a65cd4381d5d3b0b9815155c8c448092062c05eb20532597ff",
+      "primary_type": "entailment",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 221,
+      "semantic_gold": 0
+    },
+    {
+      "family": "68dbfeb4e5ed11db",
+      "final_text_hash": "f72f0ae81da5dccbc7eabdae14ac1344faae8df9bc339cbff5ef0d634f3b80d2",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "bee1a66dc7ce16da",
+      "maintenance_hash": "de41ce30d62068acd16610c275e80230b552d31cc9e8d6cc015ef974a9f50786",
+      "packet_hash": "c349748112057e7924d0da8a87489abf6a288c2027cf7118d8c37975391380d2",
+      "primary_type": "historical_context",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 226,
+      "semantic_gold": 0
+    },
+    {
+      "family": "22e93c7f75d45bbd",
+      "final_text_hash": "d6b5d1c88f5d4c11629b312f75e23554ee4930d8087337c4d3d9f75deff203b0",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "c98b0ada3b0e7ad2",
+      "maintenance_hash": "841ed513238e658524593473ec0ea6a841874381f0279a49246c4e5af8759a07",
+      "packet_hash": "eff8ed23ec11ed50709064138fa8961c0bbf267827e0b4600fbf1c8b0079fbbd",
+      "primary_type": "concurrent_edits",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 207,
+      "semantic_gold": 0
+    },
+    {
+      "family": "852697d4026dfa7f",
+      "final_text_hash": "be452b98609ef4916204664f8842728f897504135a97a3c7b6234df58acab8f9",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "cfe8c8697350eb5d",
+      "maintenance_hash": "438793478b2fcadc6689e3ba9b16586545eecfc2784887211cb04f585ecbebc3",
+      "packet_hash": "bc8a4741814fd454b93a101bcab5570a7d4ade38885c20b000e44dacc8de1e9f",
+      "primary_type": "structural_safety",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 224,
+      "semantic_gold": 0
+    },
+    {
+      "family": "22e93c7f75d45bbd",
+      "final_text_hash": "64afabb9baf9cfeb10af915c0f0e5e4152fcbbc41e3ce275dac1f565507cc0aa",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "d39aa6566a2aaca3",
+      "maintenance_hash": "8709905d16c1bf5a6d472de192e68da8a2d1b97806d64b8f84d4e212e4912ec3",
+      "packet_hash": "9e9daaba66a57ea3144609e97698d8226ea7c29f2d2e266e3964f64b97f5f0ed",
+      "primary_type": "paraphrased_contradiction",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 186,
+      "semantic_gold": 1
+    },
+    {
+      "family": "8a8d2374fa4291db",
+      "final_text_hash": "264300b653ce07ac8ecfdc85f6a97350053f45a386804d055fc2e31a6674ec9a",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "e3097c3fd6459de9",
+      "maintenance_hash": "be2036aeca8e4885d906076ce82eec3f4b3683173b4a528ea56f379baf7aa355",
+      "packet_hash": "953029fd270e7bbec7348301a847ab3b7b79a18643f06005470beefd2ff2230c",
+      "primary_type": "entailment",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 258,
+      "semantic_gold": 0
+    },
+    {
+      "family": "8b2717cda357f155",
+      "final_text_hash": "54a27218d45bac578dbe927d90b7e598e77f1c9a9152396105935af9896f7ece",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "e5fc98adba271185",
+      "maintenance_hash": "8dd3f69be4974516f4ca472b0aa0dde6a0578bcf3720d7e02495a01f91a5f7c8",
+      "packet_hash": "7fc0ca56b7092e42f286756850582ee39b6bb71fb3199613c22573686682984d",
+      "primary_type": "concurrent_edits",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 175,
+      "semantic_gold": 0
+    },
+    {
+      "family": "fe432b2201d1a0fd",
+      "final_text_hash": "75476453db3a6dd483326e0b81878f7d058f863c792e19abfd8f36ddff9f2586",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "e9cfdf5be9aa30dd",
+      "maintenance_hash": "1cee8e879a0dc952d603ec243b053f19ae0c499c84b4207dfada644c01f6f2f6",
+      "packet_hash": "3bcd2407a02a3e1bce16f6272502ec287377a3a7d8b220d84309efa07b25fbc0",
+      "primary_type": "entailment",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 220,
+      "semantic_gold": 0
+    },
+    {
+      "family": "8b2717cda357f155",
+      "final_text_hash": "3370f6ae49019035935303bb3847ef1a50de6c2f0321a3b630b399f88b128045",
+      "findings": [],
+      "gold_evidence_retrieved": 0,
+      "id": "f40a45d228d94bbc",
+      "maintenance_hash": "11138043a6bef7034a15489df611703aa36206cccae452f3ca66029d5bdd2dc3",
+      "packet_hash": "9f0fbb4ea67a49eb951fbe482e00b28ae1e469f26e67d1c3bab79b8f7cc11a4d",
+      "primary_type": "scope_condition",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 207,
+      "semantic_gold": 0
+    },
+    {
+      "family": "8a8d2374fa4291db",
+      "final_text_hash": "7c1527b1dbce22b063abf20536863d236b103f36a1353b719bb68c0fbca4bede",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "f54ed8908bb448e2",
+      "maintenance_hash": "c1c9c3dc4d284c50180e4cc1d89e97fad0c7362c1c4a7288347f256d36a379fc",
+      "packet_hash": "0624038c2cd336a7c11a6b45989df78175277e299d412333577df88d3a6c2ce0",
+      "primary_type": "reintroduced_error",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 280,
+      "semantic_gold": 1
+    },
+    {
+      "family": "ce78452e0efed04a",
+      "final_text_hash": "8f415207e53f9056e257253cd7b55952ba629584bc1313f7353b56a6f5e5ca10",
+      "findings": [],
+      "gold_evidence_retrieved": 1,
+      "id": "fd929bb8fff3cbf9",
+      "maintenance_hash": "7a602d4af7d2e783fd49e5c986d452b6a5e10fb3b6132931cd13e10b5047ee39",
+      "packet_hash": "2a953eca6e179fed0ca680e1af6145f8106791495632ab518096f4078fa37931",
+      "primary_type": "multi_sentence_inference",
+      "retrieval_calls": 2,
+      "retrieval_tokens": 254,
+      "semantic_gold": 1
+    }
+  ],
+  "cost": {
+    "cache_hits": 0,
+    "completion_tokens": 0,
+    "estimated_cases": 0,
+    "failures": 0,
+    "http_calls": 0,
+    "logical_calls": 0,
+    "prompt_tokens": 0,
+    "retrieval_calls": 128,
+    "retrieval_tokens": 14261,
+    "total_tokens": 0,
+    "unresolved": 5
+  },
+  "detection_by_code": {
+    "broken_link": {
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "tp": 1
+    },
+    "broken_redirect": {
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "tp": 1
+    },
+    "contradicts_verified": {
+      "f1": 0.07407407407407407,
+      "fn": 25,
+      "fp": 0,
+      "precision": 1.0,
+      "recall": 0.038461538461538464,
+      "tp": 1
+    },
+    "duplicate_overlap": {
+      "f1": 0.0,
+      "fn": 1,
+      "fp": 0,
+      "precision": null,
+      "recall": 0.0,
+      "tp": 0
+    },
+    "expired_stale_after": {
+      "f1": 0.0,
+      "fn": 1,
+      "fp": 1,
+      "precision": 0.0,
+      "recall": 0.0,
+      "tp": 0
+    },
+    "inbound_redirect": {
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "tp": 2
+    },
+    "missing_generated_sources": {
+      "f1": 0.0,
+      "fn": 1,
+      "fp": 0,
+      "precision": null,
+      "recall": 0.0,
+      "tp": 0
+    },
+    "redirect_cycle": {
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "tp": 1
+    },
+    "reintroduces_retired": {
+      "f1": 0.0,
+      "fn": 4,
+      "fp": 0,
+      "precision": null,
+      "recall": 0.0,
+      "tp": 0
+    },
+    "revision_regression": {
+      "f1": 0.0,
+      "fn": 3,
+      "fp": 0,
+      "precision": null,
+      "recall": 0.0,
+      "tp": 0
+    }
+  },
+  "dev_slice": null,
+  "schema_version": 2,
+  "split": "dev",
+  "total": {
+    "counts": {
+      "cases": 64,
+      "faulty_cases": 35,
+      "fn": 35,
+      "fp": 1,
+      "repaired_cases": 2,
+      "residual_cases": 33,
+      "tp": 6,
+      "unintended_changes": 0,
+      "valid_cases": 29,
+      "valid_false_alarms": 0
+    },
+    "f1": 0.25,
+    "false_alarm_rate": 0.0,
+    "precision": 0.8571428571428571,
+    "recall": 0.14634146341463414,
+    "repair_success": 0.05714285714285714,
+    "unintended_change_rate": 0.0
+  },
+  "verifier": "rules"
+}

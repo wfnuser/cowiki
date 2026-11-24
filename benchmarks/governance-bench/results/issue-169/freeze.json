@@ -1,0 +1,134 @@
+{
+  "arms": [
+    "none",
+    "rules",
+    "remote",
+    "single-pass",
+    "both"
+  ],
+  "binary": "heldout_eval/frozen-bench",
+  "bootstrap": {
+    "confidence": 0.95,
+    "draws": 10000,
+    "interval": "paired percentile, linear interpolation",
+    "seed": 16920261207,
+    "undefined": "exclude only for that metric; report number defined",
+    "unit": "source family, keeping all cases"
+  },
+  "branch": "feat/governance-169",
+  "cache": {
+    "records": 252,
+    "sha256": "9cd588af87b4f6233b2b64c5cb664fe014a1e4b571e507db2500078b48a1412a"
+  },
+  "calibration_input_tokens": {
+    "both": 12348,
+    "remote": 12348,
+    "single-pass": 12260
+  },
+  "caps": {
+    "calls": 1,
+    "cli_timeout_s": 120,
+    "content_admission_including_output": 4096,
+    "http_timeout_s": 140,
+    "output_tokens": 768,
+    "total_tokens": 16384
+  },
+  "cli_version": "codex-cli 0.166.0",
+  "code_commit": "2ffe8163f4db107c439c740db874a589b0615579",
+  "concurrency": 2,
+  "created_utc": "2026-11-23T13:02:32Z",
+  "effort": "medium",
+  "files": {
+    "cowiki/benchmarks/governance-bench/Cargo.lock": "5c96908863440256047c439a78326f8436bb8537249f9777627d11e5a9095759",
+    "cowiki/benchmarks/governance-bench/Cargo.toml": "957a5629c5d27b27715eef50bfabeb7a4abc111587fb218086d6f6c4ca73b41a",
+    "cowiki/benchmarks/governance-bench/analysis/PROTOCOL.md": "9715dafe754fa8e96b79b4ed468486c9a04bb868850fd387ad85577398cd4815",
+    "cowiki/benchmarks/governance-bench/analysis/cluster_report.py": "f11985c3d1689f454135e479e51273ae40ed6e5bd7003597100a3b31bc9036c4",
+    "cowiki/benchmarks/governance-bench/analysis/cost_report.py": "158dd7409e1f43d63fff1d4e8668e9ee10e900a0972322af407ebf71cd059ccb",
+    "cowiki/benchmarks/governance-bench/analysis/render_tables.py": "c663b7fa36d53e9ae3bc892e473064aff20d6f19cf050f07208e1600eb671af1",
+    "cowiki/benchmarks/governance-bench/analysis/run_frozen.py": "ff6070eb93370c2e549619716115f5e19b53198ca665b72bbb3f97f78c9ee98f",
+    "cowiki/benchmarks/governance-bench/analysis/test_cluster_report.py": "e5763a754c08948d9b3f307c2a1cb3191bfab4fe1ac748d6533a80da2071245a",
+    "cowiki/benchmarks/governance-bench/analysis/test_runner.py": "0f85cc6e03c77420ac2850b0a581b5fd86347e20c89f48320540c9b654c8413d",
+    "cowiki/benchmarks/governance-bench/data/dev/cases.jsonl": "ebf725695b1695b58f7c05fdb18e5fc93a9e923ce6fc1f33e486e8883b9819a0",
+    "cowiki/benchmarks/governance-bench/data/dev/families.jsonl": "299a0c40b718ae2ffe9a1ff097ef4981161ef92f55e1ebc817684f9c958c7eab",
+    "cowiki/benchmarks/governance-bench/data/dev/gold.jsonl": "ee774fb824dea95ade39171daf19cd9fe79ed949381a2d6fd9bd87a9d1aefebc",
+    "cowiki/benchmarks/governance-bench/data/dev/provenance.jsonl": "4cae54cf0b774954238171f1e9140d3dba476d892c969e2ce6ff18352c9e2665",
+    "cowiki/benchmarks/governance-bench/data/held-out/SHA256SUMS": "d5ff4e3c358355c2bceb4c26ff8812081eaeb1f63b741b8c719b4deda3db9397",
+    "cowiki/benchmarks/governance-bench/data/held-out/cases.jsonl": "8d19fb8e4c7761942cf9c1687d80950caea2ff6ff77c9c0503e1af4ca2c028e4",
+    "cowiki/benchmarks/governance-bench/data/held-out/families.jsonl": "1d162766f44ede46dd0f8e81ccab0b58832805e4c8348dae7ffa38ba8a919f0a",
+    "cowiki/benchmarks/governance-bench/data/held-out/gold.jsonl": "69d3642bbca633501bb835033ccfa40a190817c5d1a189239185bf46de42b220",
+    "cowiki/benchmarks/governance-bench/data/held-out/provenance.jsonl": "8168cf17788e8f1435f28c715e5df6c6c7361a5e4c8196bd6d5bdf5e3163517f",
+    "cowiki/benchmarks/governance-bench/examples/protocol_fingerprint.rs": "ac3b6ff3dc293a1b7302bd3365a2a60cc8a22c147b68af014093ead8d0ff06bc",
+    "cowiki/benchmarks/governance-bench/results/issue-169/cache-before.sha256": "9cd588af87b4f6233b2b64c5cb664fe014a1e4b571e507db2500078b48a1412a",
+    "cowiki/benchmarks/governance-bench/src/evaluation.rs": "d85dd7ef31ace6636c9db139070d38868ed1d3fe24a1f09f7772ffc105b57e76",
+    "cowiki/benchmarks/governance-bench/src/lib.rs": "6de0b9300c2a938c45a644a5cde8cb7e4c7f9514ea93d4d3b5d6afec8ad59994",
+    "cowiki/benchmarks/governance-bench/src/main.rs": "4cd2c53c274ad29878a9e6359ca815658a1f7e5e67b7e73a4a2849c73b6d1843",
+    "cowiki/crates/cowiki-knowledge/Cargo.toml": "79090e8535b8979527f1fdeb27b2d88ba88436cfe880d6ad1e9b768aab3a68f0",
+    "cowiki/crates/cowiki-knowledge/src/embeddings.rs": "554a33bda26f3c65a5224d5efe8b605474b4d218cc4a201ee9ee0056ea511b9a",
+    "cowiki/crates/cowiki-knowledge/src/governance/alignment.rs": "d2c111fd33fa72e57c764baf71044a4556273727abe33b5c1c4ccc0b7740208e",
+    "cowiki/crates/cowiki-knowledge/src/governance/audit.rs": "f85a0210e7fa9ab25501c27192f0ecc8a35abb840114754011eef17d78993dba",
+    "cowiki/crates/cowiki-knowledge/src/governance/conflict.rs": "4a876adf88515e394258e070252fdd787c405966044c9110cfee92c152902839",
+    "cowiki/crates/cowiki-knowledge/src/governance/mod.rs": "9f4dcc21ae42011e5443f9b080af4c92f57d51a6d74f8ec4dc74bb0c76b9818e",
+    "cowiki/crates/cowiki-knowledge/src/governance/protocol.rs": "0d455956620ef62446a433fc4bb05564da484e7b5e70bf60d6056c7c152e6e88",
+    "cowiki/crates/cowiki-knowledge/src/governance/redirects.rs": "b4b6365cf65c15adff0fb525952d556bea9c03a8cb1255a48402a5eb9fae08e8",
+    "cowiki/crates/cowiki-knowledge/src/governance/remote.rs": "d3516e0f8937c414b083d38a3a959ef550aaeddb94e96ba6520c143665ef6d5d",
+    "cowiki/crates/cowiki-knowledge/src/governance/remote/cited_repair.rs": "d67b2716797810f1fa8f6d793677f687047dc29ed06c24bea90c4e9192fa99b4",
+    "cowiki/crates/cowiki-knowledge/src/governance/repair.rs": "eefd3ced962c00dd021c3720ed6107dd2d79915e64fe8f1208ee1c248432f965",
+    "cowiki/crates/cowiki-knowledge/src/governance/staging.rs": "25b71f80910039bc811225b8aa0e4b4bc6c068a0d7f6c59abe4d7a39432925d8",
+    "cowiki/crates/cowiki-knowledge/src/governance/verifier-reply.schema.json": "ff66ab0e3c07db55779f9c92c6270561ff1d720caa9ce82554a8df5959cc4463",
+    "cowiki/crates/cowiki-knowledge/src/knowledge_index.rs": "935d92e9adc69ecda911007e9dce1579d3df1d0723121617b42a7499fd3c2855",
+    "cowiki/crates/cowiki-knowledge/src/okf.rs": "622001dcccd529c74747727413e67bbd06edbd6977367ae679dc31b69851af6d",
+    "dev_results/final-dev/arms/calibration.json": "cb8492ac1d9bec662bd2382f1ff4bdea997ea309a3a336a4bea2d678c97a2f46",
+    "dev_results/final-dev/wire-hashes.txt": "a5a7950c1b519007496584b53a8a87c0fdad2e1fcfbc30874324de78c082e5ef",
+    "heldout_eval/frozen-bench": "b8d2e4252e0918e75a5517f8f6494499655cd9660382b378c5b91b6846c322b8",
+    "llm_shim/calibration.json": "8609b4790cc7d0bc99f1b194ac47f6890bd65e244aa4590e304c85fd209d2557",
+    "llm_shim/quota_windows.py": "1e529b2461b8f3560d8467e4518b4d613ce310c5533728d8dc2f78de71114825",
+    "llm_shim/shim.py": "c7b0ed45dda77dc417a311374dcbf5518090246f6871ca47c9d06e8c06850323",
+    "llm_shim/start.sh": "ff6f7e243922457c916f9311d93a415b3feb66f7636af814ac762bba2aee9b7e"
+  },
+  "hashes": {
+    "m2": {
+      "prompt": "be5e85c51de79e299f9c25a97d1068ee8286a54034a0bdd31fdbf5cd17f52b68",
+      "wire_response_format": "757210b0eb82fe3c4d79c316fd8a3282191d6dfe6a5b944788c497cfe463171a"
+    },
+    "shim": {
+      "instruction": "77ebc1c4d9a42ba152846c33da19cafc0c112475ade9088ee33b88448a06dd42",
+      "m2_cli_schema": "89fa998f8413865405c4e0f4f4c0d1cb0569229b1b6e4754f8fb56608283ac72",
+      "single_pass_cli_schema": "04626fe323239ef16424fca12085f30186f6ef3fd4caa866634f5a089605623f"
+    },
+    "single_pass": {
+      "prompt": "82f11d1e09bcefba58d5e72f1603b1bac8e89675886f08237df4e61ec0fd8f33",
+      "wire_response_format": "376bde7986cc2f8fd182f04e745c607933760bea7c306ea6e8e992b7f70be25a"
+    }
+  },
+  "heldout_seal": "d5ff4e3c358355c2bceb4c26ff8812081eaeb1f63b741b8c719b4deda3db9397",
+  "rules": {
+    "alignment.rs": {
+      "commit": "9f79905e80e7e7fa91165aa9d04e1c0699f908c8",
+      "sha256": "d2c111fd33fa72e57c764baf71044a4556273727abe33b5c1c4ccc0b7740208e"
+    },
+    "audit.rs": {
+      "commit": "22f0917d2a0453e479a2b96d59d229dcc58e1f1e",
+      "sha256": "f85a0210e7fa9ab25501c27192f0ecc8a35abb840114754011eef17d78993dba"
+    },
+    "conflict.rs": {
+      "commit": "4a3b84d72b6a8a22a27091e1145d1ea577d8c0fd",
+      "sha256": "4a876adf88515e394258e070252fdd787c405966044c9110cfee92c152902839"
+    },
+    "redirects.rs": {
+      "commit": "22f0917d2a0453e479a2b96d59d229dcc58e1f1e",
+      "sha256": "b4b6365cf65c15adff0fb525952d556bea9c03a8cb1255a48402a5eb9fae08e8"
+    },
+    "repair.rs": {
+      "commit": "4a3b84d72b6a8a22a27091e1145d1ea577d8c0fd",
+      "sha256": "eefd3ced962c00dd021c3720ed6107dd2d79915e64fe8f1208ee1c248432f965"
+    }
+  },
+  "verifier_environment": {
+    "COWIKI_VERIFIER_CACHE_DIR": "/data/zhongqiyu/AIAA5032_cowiki_m2/verifier_cache",
+    "COWIKI_VERIFIER_MODEL": "gpt-6.2-sol",
+    "COWIKI_VERIFIER_OUTPUT_TOKENS": "768",
+    "COWIKI_VERIFIER_TIMEOUT_SECS": "140",
+    "COWIKI_VERIFIER_TOTAL_TOKENS": "16384",
+    "COWIKI_VERIFIER_URL": "http://127.0.0.1:18769/v1/chat/completions"
+  }
+}

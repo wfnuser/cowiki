@@ -1152,6 +1152,20 @@ pub fn hybrid_search_with_embedder(
     options: &HybridSearchOptions,
     embedder: &dyn EmbeddingProvider,
 ) -> Result<HybridSearchResult, String> {
+    hybrid_search_subset(connection, space_id, root, query, options, embedder, false)
+}
+
+// The historical pass filters *before* the lexical/vector candidate limits.
+// Otherwise active copies of a popular claim can hide its withdrawn version.
+pub(crate) fn hybrid_search_subset(
+    connection: &Connection,
+    space_id: &str,
+    root: &Path,
+    query: &str,
+    options: &HybridSearchOptions,
+    embedder: &dyn EmbeddingProvider,
+    retired_only: bool,
+) -> Result<HybridSearchResult, String> {
     let started = Instant::now();
     let token_budget = options.token_budget.unwrap_or(1200).clamp(64, 16_000);
     let max_hops = options.max_hops.unwrap_or(2).min(2);
@@ -1207,13 +1221,15 @@ pub fn hybrid_search_with_embedder(
                             bm25(knowledge_units_fts, 3.0, 2.2, 2.5, 1.0) AS rank_score
                      FROM knowledge_units_fts
                      JOIN knowledge_units AS u ON u.id = knowledge_units_fts.rowid
-                     WHERE knowledge_units_fts MATCH ?1 AND u.space_id = ?2
+                     WHERE knowledge_units_fts MATCH ?1 AND u.space_id = ?2 AND (?3 = 0 OR u.status = 'retired')
                      ORDER BY rank_score ASC, u.unit_id ASC
                      LIMIT 64",
                 )
                 .map_err(|e| e.to_string())?;
             let rows = seed_stmt
-                .query_map(params![or_query, space_id], |row| row.get::<_, String>(0))
+                .query_map(params![or_query, space_id, retired_only], |row| {
+                    row.get::<_, String>(0)
+                })
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())?;
@@ -1232,11 +1248,11 @@ pub fn hybrid_search_with_embedder(
             .prepare(
                 "SELECT unit_id, embedding_model, embedding_blob
                  FROM knowledge_units
-                 WHERE space_id = ?1",
+                 WHERE space_id = ?1 AND (?2 = 0 OR status = 'retired')",
             )
             .map_err(|e| e.to_string())?;
         let rows = vec_stmt
-            .query_map([space_id], |row| {
+            .query_map(params![space_id, retired_only], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -2617,17 +2633,38 @@ pub fn extract_links_with_anchors(
     body: &str,
     source_path: &str,
 ) -> Vec<(String, Option<String>, LinkKind)> {
-    let mut links: Vec<(String, Option<String>, LinkKind)> = Vec::new();
-    let excluded = code_ranges(body);
-    let wikilinks = extract_wikilinks_with_anchors(body, &excluded);
-    for (_, target, anchor) in &wikilinks {
+    let mut links = Vec::new();
+    for occurrence in link_occurrences(body, source_path) {
         if !links
             .iter()
-            .any(|(existing, _, kind)| existing == target && *kind == LinkKind::Wiki)
+            .any(|(target, _, kind)| target == &occurrence.target && *kind == occurrence.kind)
         {
-            links.push((target.clone(), anchor.clone(), LinkKind::Wiki));
+            links.push((occurrence.target, occurrence.anchor, occurrence.kind));
         }
     }
+    links
+}
+
+/// Original Markdown body byte range for one parsed internal link.
+pub struct LinkOccurrence {
+    pub range: Range<usize>,
+    pub target: String,
+    pub anchor: Option<String>,
+    pub kind: LinkKind,
+}
+
+pub fn link_occurrences(body: &str, source_path: &str) -> Vec<LinkOccurrence> {
+    let excluded = code_ranges(body);
+    let wikilinks = extract_wikilinks_with_anchors(body, &excluded);
+    let mut links: Vec<_> = wikilinks
+        .iter()
+        .map(|(range, target, anchor)| LinkOccurrence {
+            range: range.clone(),
+            target: target.clone(),
+            anchor: anchor.clone(),
+            kind: LinkKind::Wiki,
+        })
+        .collect();
 
     let mut code_block_depth = 0;
     for (event, range) in Parser::new_ext(body, Options::all()).into_offset_iter() {
@@ -2642,11 +2679,12 @@ pub fn extract_links_with_anchors(
             {
                 if let Some(target) = resolve_markdown_target(source_path, dest_url.as_ref()) {
                     let anchor = extract_link_anchor(dest_url.as_ref());
-                    if !links.iter().any(|(existing, _, kind)| {
-                        existing == &target && *kind == LinkKind::Markdown
-                    }) {
-                        links.push((target, anchor, LinkKind::Markdown));
-                    }
+                    links.push(LinkOccurrence {
+                        range,
+                        target,
+                        anchor,
+                        kind: LinkKind::Markdown,
+                    });
                 }
             }
             _ => {}
