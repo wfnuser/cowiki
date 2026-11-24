@@ -35,6 +35,8 @@ pub struct Evidence {
     pub scope: String,
     pub version: String,
     pub sources: Vec<String>,
+    pub updated_at: Option<String>,
+    pub supersedes: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +179,10 @@ impl EvidenceLookup for SnapshotIndex<'_> {
                     let (_, path) = okf::safe_resolve_under_space(self.root, &item.page_path)?;
                     let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
                     let meta = okf::parse_metadata(&text);
+                    let supersedes = okf::split_frontmatter(&text)?
+                        .0
+                        .and_then(|raw| serde_yaml::from_str::<serde_yaml::Mapping>(raw).ok())
+                        .and_then(|map| map.get("supersedes")?.as_str().map(str::to_owned));
                     let (first, last) = item
                         .citation
                         .rsplit_once("#L")
@@ -207,6 +213,8 @@ impl EvidenceLookup for SnapshotIndex<'_> {
                                 scope: meta.scope.clone(),
                                 version: meta.version.clone(),
                                 sources: meta.sources.clone(),
+                                updated_at: meta.updated_at.clone(),
+                                supersedes: supersedes.clone(),
                             },
                         );
                     }
@@ -223,3 +231,6 @@ impl EvidenceLookup for SnapshotIndex<'_> {
         })
     }
 }
+
+mod conflict;
+pub use conflict::*;
