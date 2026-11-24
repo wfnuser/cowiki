@@ -50,6 +50,7 @@ import { HistoryView } from '../components/views/HistoryView';
 import { LinksView } from '../components/views/LinksView';
 import { InviteDialog } from '../components/InviteDialog';
 import { PageEditor, type PageEditorHandle } from '../components/PageEditor';
+import { PageByline } from '../components/PageByline';
 import { PageReader } from '../components/PageReader';
 import { TransferDialog } from '../components/TransferDialog';
 import { NotificationsPage } from '../components/notifications/NotificationsPage';
@@ -368,6 +369,8 @@ export function MainLayout() {
   const [editingPage, setEditingPage] = useState(false);
   // Where a click in the reader asked the editor to put the caret.
   const [editStart, setEditStart] = useState<{ path: string; cursor: number; top: number } | null>(null);
+  // Where the editor was scrolled when editing stopped; the reader opens there.
+  const [readerScroll, setReaderScroll] = useState<{ path: string; top: number } | null>(null);
   // The comments button pressed while editing: back to reading with the panel open.
   const [commentsAfterEdit, setCommentsAfterEdit] = useState(false);
   // Tree path ops (rename/delete of pages & folders on the draft branch)
@@ -682,6 +685,7 @@ export function MainLayout() {
     setActiveTab('wiki');
     setEditingPage(false);
     setCommentsAfterEdit(false);
+    setReaderScroll(null);
     persistedPageBody.current = null;
     externalConflictNotified.current = false;
     setActiveView({ kind: 'page', slug: conceptId, path: repoPath, content: null });
@@ -1303,6 +1307,9 @@ export function MainLayout() {
 
   // Leave edit mode; pull the saved page back so the read view is fresh.
   const handleDoneEditing = async () => {
+    if (activeView?.kind === 'page') {
+      setReaderScroll({ path: activeView.path ?? '', top: pageEditorRef.current?.scrollTop() ?? 0 });
+    }
     setEditingPage(false);
     if (!activeWorkspace || activeView?.kind !== 'page') return;
     try {
@@ -1977,6 +1984,9 @@ export function MainLayout() {
                       if (activeWorkspace) loadSpacePages(activeWorkspace);
                     }}
                     onDone={() => { void handleDoneEditing(); }}
+                    header={versionSelection.kind === 'working'
+                      ? <PageByline name={activeView.content.edited_by} editedAt={activeView.content.edited_at} />
+                      : undefined}
                     onWikilink={(target) => { void openWikilink(target); }}
                     loadImage={canReadAssets ? loadAssetUrl : undefined}
                     getPageSlugs={() => (activeWorkspace ? collectSlugs(spacePages[activeWorkspace.id] || []) : [])}
@@ -2006,6 +2016,7 @@ export function MainLayout() {
                       name: activeView.content.edited_by,
                       editedAt: activeView.content.edited_at,
                     } : undefined}
+                    initialScrollTop={readerScroll && readerScroll.path === (activeView.path ?? '') ? readerScroll.top : undefined}
                     readOnlyLabel={versionSelection.kind !== 'working' ? readonlyVersionLabel : undefined}
                     readOnlyDotColor={versionSelection.kind === 'upstream' ? C.purple : C.blue}
                     missingMessage={viewedPageMissing
@@ -2015,7 +2026,7 @@ export function MainLayout() {
                     onEditAt={canEditInline ? (click, top) => {
                       const body = splitSystemFrontmatter(activeView.content!.body).body;
                       const cursor = click ? sourceOffsetForClick(body, click) ?? body.length : body.length;
-                      setEditStart({ path: activeView.path ?? '', cursor, top: Math.max(0, top - 12) });
+                      setEditStart({ path: activeView.path ?? '', cursor, top: Math.max(0, top) });
                       setCommentsAfterEdit(false);
                       setEditingPage(true);
                     } : undefined}

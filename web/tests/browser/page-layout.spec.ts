@@ -1,0 +1,157 @@
+import { test, expect, type Page } from '@playwright/test';
+import { createServer, type ViteDevServer } from 'vite';
+import { fileURLToPath } from 'node:url';
+
+// Click to edit must not move the page (DESIGN_SYSTEM.md, "Editing"): the
+// reader and the editor lay out every kind of block at the same place.
+let server: ViteDevServer;
+let origin: string;
+test.beforeAll(async () => {
+  server = await createServer({ root: fileURLToPath(new URL('../../', import.meta.url)), logLevel: 'silent', server: { host: '127.0.0.1', port: 0 } });
+  await server.listen();
+  const address = server.httpServer!.address();
+  if (!address || typeof address === 'string') throw new Error('Missing test port');
+  origin = 'http://127.0.0.1:' + address.port;
+});
+test.afterAll(async () => { await server.close(); });
+
+const BODY = `# Parity Title
+
+Alpha paragraph with **bold** and a [[Linked page|link]] in it.
+Bravo second line of the same paragraph.
+
+## Charlie heading
+
+Delta para after heading.
+## Echo tight heading
+Foxtrot para right under a heading.
+
+- Golf bullet
+- Hotel bullet that is long enough to wrap around the column width so we can check hanging indentation lines in both views really wrapwordhere
+  - India nested
+    Juliet continuation
+- [ ] Kilo task
+- [x] Lima done
+
+1. Mike one
+2. November two
+
+> Oscar quote
+>
+> Papa quote
+
+\`\`\`js
+Quebec code
+\`\`\`
+
+Romeo after code.
+
+---
+
+Sierra after rule.
+
+### Tango h3
+Uniform \`inline code\` here.
+`;
+const MARKERS = ['Parity', 'Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel', 'wrapwordhere', 'India', 'Juliet', 'Kilo', 'Lima', 'Mike', 'November', 'Oscar', 'Papa', 'Quebec', 'Romeo', 'Sierra', 'Tango', 'Uniform'];
+
+async function setup(page: Page, body: string) {
+  const space = { name: 'Personal', slug: 'personal', id: 'personal', visibility: 'private', role: 'owner', localPath: '/fixture/personal' };
+  const files = new Map([['Doc', body]]);
+  const meta = (slug: string) => ({ slug, path: slug + '.md', title: slug, summary: '', branch: 'main', kind: 'page', children: [] });
+  await page.route('**/*', (route) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
+  await page.exposeFunction('fixtureInvoke', async (cmd: string, args: { pageSlug: string; content: string }) => {
+    switch (cmd) {
+      case 'local_list_spaces': return [space];
+      case 'local_list_pages': return Array.from(files.keys(), meta);
+      case 'local_get_page': return { ...meta(args.pageSlug), body: files.get(args.pageSlug), edited_by: 'wfnuser', edited_at: 1700000000 };
+      case 'local_write_page': files.set(args.pageSlug, args.content); return;
+      case 'local_read_space_config': return { features: { modules: { journal: true } } };
+      case 'local_list_page_comments': return { comments: [], snapshots: [] };
+      case 'local_working_diff': case 'local_list_agent_changes': case 'local_list_sources': case 'local_list_backlinks': case 'local_recent_pages': return [];
+      case 'cloud_get_status': return { state: 'unlinked', conflicts: [], message: '', pullRequest: null, committed: false, cloudSpaceId: null, cloudBaseUrl: null };
+      case 'local_set_auto_checkpoint': case 'local_auto_checkpoint': return null;
+      default: throw new Error('Unsupported fixture IPC: ' + cmd);
+    }
+  });
+  await page.addInitScript(() => {
+    Object.assign(window, { __TAURI_INTERNALS__: { invoke: (cmd: string, args: unknown) => Reflect.get(window, 'fixtureInvoke')(cmd, args) } });
+    localStorage.setItem('cowiki.personal.preferences', JSON.stringify({ autoCheckpoint: false }));
+  });
+}
+
+/** Position of each marker's first character relative to the page column. */
+async function positions(page: Page, rootSelector: string) {
+  return page.evaluate(({ rootSelector, markers }) => {
+    const root = document.querySelector(rootSelector)!;
+    const column = root.querySelector('.page-column')!.getBoundingClientRect();
+    const out: Record<string, [number, number]> = {};
+    for (const marker of markers) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const index = node.textContent!.indexOf(marker);
+        if (index < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + 1);
+        const rect = range.getClientRects()[0];
+        out[marker] = [Math.round((rect.left - column.left) * 10) / 10, Math.round((rect.top - column.top) * 10) / 10];
+        break;
+      }
+    }
+    return out;
+  }, { rootSelector, markers: MARKERS });
+}
+
+test('clicking to edit leaves every line where it was', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await setup(page, BODY);
+  await page.goto(origin + '/personal/Doc');
+  await page.locator('article').getByText('Delta para').waitFor();
+  const read = await positions(page, 'main');
+  const before = await page.getByText('Delta para').boundingBox();
+  await page.getByText('Delta para').click({ position: { x: 10, y: 8 } });
+  await expect(page.locator('.cm-content')).toBeVisible();
+  const edit = await positions(page, 'main');
+  for (const marker of MARKERS) {
+    expect(edit[marker], marker).toBeTruthy();
+    expect(Math.abs(edit[marker][0] - read[marker][0]), `${marker} moved sideways`).toBeLessThan(0.6);
+    expect(Math.abs(edit[marker][1] - read[marker][1]), `${marker} moved down`).toBeLessThan(1);
+  }
+  // The clicked line stays at the same place on screen.
+  const after = await page.locator('.cm-line', { hasText: 'Delta para' }).boundingBox();
+  expect(Math.abs(after!.y - before!.y)).toBeLessThan(1);
+
+  // And back: Esc returns to the reader at the editor's scroll position.
+  await page.locator('main [style*="overflow: auto"]').first().evaluate((element) => { element.scrollTop = 120; });
+  const editorTop = await page.locator('.cm-line', { hasText: 'Romeo' }).boundingBox();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.cm-content')).toHaveCount(0);
+  const readerTop = await page.locator('article').getByText('Romeo').boundingBox();
+  expect(Math.abs(readerTop!.y - editorTop!.y)).toBeLessThan(1);
+});
+
+test('list and heading markup never shifts the text', async ({ page }) => {
+  await setup(page, BODY);
+  await page.goto(origin + '/personal/Doc');
+  await page.getByText('Charlie heading').click();
+  // `## ` sits in the margin while the caret is on the heading.
+  const mark = await page.locator('.cm-lp-hmark').boundingBox();
+  const line = await page.locator('.cm-line', { hasText: 'Charlie' }).boundingBox();
+  expect(mark!.x + mark!.width).toBeLessThanOrEqual(line!.x + 0.5);
+  // Code fences show only while the caret is in the block.
+  await expect(page.locator('.cm-lp-fence-shown')).toHaveCount(0);
+  await page.locator('.cm-line', { hasText: 'Quebec' }).click();
+  await expect(page.locator('.cm-lp-fence-shown')).toHaveCount(2);
+  // Enter continues a list; Home then Backspace removes the new bullet.
+  await page.locator('.cm-line', { hasText: 'Golf bullet' }).click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Zulu');
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Backspace');
+  const text = await page.locator('.cm-content').innerText();
+  expect(text.slice(text.indexOf('Golf'), text.indexOf('Hotel'))).toBe('Golf bullet\nZulu\n');
+  await page.locator('.cm-lp-checkbox').first().click();
+  await expect(page.locator('.cm-lp-checkbox').first()).toBeChecked();
+});

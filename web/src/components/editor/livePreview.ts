@@ -1,7 +1,7 @@
 import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view';
 import type { DecorationSet, ViewUpdate } from '@codemirror/view';
-import { Facet } from '@codemirror/state';
-import type { EditorState, Range } from '@codemirror/state';
+import { EditorSelection, EditorState, Facet } from '@codemirror/state';
+import type { Range } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import type { SyntaxNode } from '@lezer/common';
 
@@ -25,7 +25,7 @@ class BulletWidget extends WidgetType {
   toDOM() {
     const span = document.createElement('span');
     span.className = 'cm-lp-bullet';
-    span.textContent = '•';
+    span.setAttribute('aria-hidden', 'true');
     return span;
   }
   eq() { return true; }
@@ -79,13 +79,27 @@ class ImageWidget extends WidgetType {
 
 // ── Decoration builder ───────────────────────────────────────────────
 
-const bulletDeco = Decoration.replace({ widget: new BulletWidget() });
 const hide = Decoration.replace({});
+const LIST = new Set(['BulletList', 'OrderedList']);
+const NO_GAPS = new Set(['FencedCode', 'CodeBlock', 'Frontmatter', 'Table', 'HTMLBlock']);
 
-function buildDecorations(view: EditorView): DecorationSet {
+interface Built {
+  decorations: DecorationSet;
+  /** List markers the caret steps over and Backspace removes whole. */
+  atomic: DecorationSet;
+}
+
+/**
+ * The editor draws a page the way the reader does (see the `--doc-*` tokens in
+ * index.css): block markers never appear or move with the caret, a blank line
+ * is the reader's gap between blocks, and list items hang at the same indent.
+ */
+function buildDecorations(view: EditorView): Built {
   const decos: Range<Decoration>[] = [];
+  const atomic: Range<Decoration>[] = [];
   const { state } = view;
   const doc = state.doc;
+  const tree = syntaxTree(state);
 
   /** True when a selection endpoint or range touches [from, to]. */
   const reveal = (from: number, to: number) =>
@@ -111,34 +125,77 @@ function buildDecorations(view: EditorView): DecorationSet {
       pos = line.to + 1;
     }
   };
-
+  const withSpace = (to: number) => (to < doc.length && state.sliceDoc(to, to + 1) === ' ' ? to + 1 : to);
   /** Hide a mark, swallowing one following space (e.g. `# `, `> `). */
-  const hideMark = (from: number, to: number, limit: number) => {
-    const end = to < limit && state.sliceDoc(to, to + 1) === ' ' ? to + 1 : to;
-    decos.push(hide.range(from, end));
+  const hideMark = (from: number, to: number) => { decos.push(hide.range(from, withSpace(to))); };
+  const hideMarker = (from: number, to: number) => {
+    if (to <= from) return;
+    decos.push(hide.range(from, to));
+    atomic.push(hide.range(from, to));
   };
-
   const hideChildMarks = (node: SyntaxNode, markName: string) => {
     for (let child = node.firstChild; child; child = child.nextSibling) {
       if (child.name === markName) decos.push(hide.range(child.from, child.to));
     }
   };
+  const inside = (node: SyntaxNode | null, names: Set<string>) => {
+    for (let at = node; at; at = at.parent) if (names.has(at.name)) return true;
+    return false;
+  };
+
+  // Gaps between top-level blocks: the first block has none above it; a block
+  // written on the line right under the previous one gets the reader's gap.
+  let previous: SyntaxNode | null = null;
+  for (let block = tree.topNode.firstChild; block; block = block.nextSibling) {
+    if (!previous) lineDeco(block.from, 'cm-lp-first');
+    else if (doc.lineAt(block.from).number === doc.lineAt(previous.to).number + 1) lineDeco(block.from, 'cm-lp-tight');
+    previous = block;
+  }
 
   for (const { from, to } of view.visibleRanges) {
-    syntaxTree(state).iterate({
+    // Blank lines, and list items hanging at their indent.
+    for (let pos = from; pos <= to;) {
+      const line = doc.lineAt(pos);
+      const text = line.text;
+      const indent = /^\s*/.exec(text)![0].length;
+      const at = tree.resolveInner(line.from + indent, 1);
+      if (/^\s*$/.test(text) || (/^\s*(>\s*)+$/.test(text) && inside(at, new Set(['Blockquote'])))) {
+        if (!inside(at, NO_GAPS)) lineDeco(line.from, 'cm-lp-blank');
+      } else if (!inside(at, NO_GAPS)) {
+        let item: SyntaxNode | null = null;
+        let depth = -1;
+        for (let node: SyntaxNode | null = at; node; node = node.parent) {
+          if (!item && node.name === 'ListItem') item = node;
+          if (item && LIST.has(node.name)) depth++;
+        }
+        if (item) {
+          const first = item.from >= line.from && item.from <= line.to;
+          const style = `padding-left: calc(var(--doc-indent) * ${depth + 1})`
+            + (first ? '; text-indent: calc(var(--doc-indent) * -1)' : '');
+          decos.push(Decoration.line({ attributes: { style } }).range(line.from));
+          hideMarker(line.from, first ? item.from : line.from + indent);
+        }
+      }
+      if (line.to >= to) break;
+      pos = line.to + 1;
+    }
+
+    tree.iterate({
       from, to,
       enter: (nodeRef) => {
         const name = nodeRef.name;
         const nFrom = nodeRef.from;
         const nTo = nodeRef.to;
 
-        // Headings: size the whole line, hide the leading `# ` marks.
+        // Headings: size the whole line; `# ` hides, or moves to the margin
+        // while the caret is on the heading.
         const headingLevel = name.startsWith('ATXHeading') ? Number(name.slice(10)) : 0;
         if (headingLevel) {
           lineDeco(nFrom, `cm-lp-h${headingLevel}`);
-          if (!revealLine(nFrom, nTo)) {
-            const mark = nodeRef.node.getChild('HeaderMark');
-            if (mark) hideMark(mark.from, mark.to, nTo);
+          const mark = nodeRef.node.getChild('HeaderMark');
+          if (mark && mark.from === doc.lineAt(nFrom).from) {
+            if (revealLine(nFrom, nTo)) decos.push(Decoration.mark({ class: 'cm-lp-hmark' }).range(mark.from, withSpace(mark.to)));
+            else hideMark(mark.from, mark.to);
           }
           return;
         }
@@ -229,41 +286,54 @@ function buildDecorations(view: EditorView): DecorationSet {
             return;
 
           case 'QuoteMark':
-            if (!revealLine(nFrom, nTo)) hideMark(nFrom, nTo, doc.length);
+            hideMark(nFrom, nTo);
             return;
 
           case 'ListMark': {
             const text = state.sliceDoc(nFrom, nTo);
-            if (/^[-*+]$/.test(text) && !revealLine(nFrom, nTo)) {
-              // Skip the bullet swap when a task checkbox follows: the box is enough.
-              const after = state.sliceDoc(nTo + 1, nTo + 2);
-              if (after === '[') decos.push(hide.range(nFrom, Math.min(nTo + 1, doc.length)));
-              else decos.push(bulletDeco.range(nFrom, nTo));
+            const end = withSpace(nTo);
+            if (/^[-*+]$/.test(text)) {
+              // A task's checkbox stands in for its bullet.
+              if (state.sliceDoc(end, end + 1) === '[' && nodeRef.node.nextSibling?.name === 'Task') hideMarker(nFrom, end);
+              else {
+                decos.push(Decoration.replace({ widget: new BulletWidget() }).range(nFrom, end));
+                atomic.push(hide.range(nFrom, end));
+              }
+            } else {
+              decos.push(Decoration.mark({ class: 'cm-lp-ol-mark' }).range(nFrom, nTo));
+              if (end > nTo) hideMarker(nTo, end);
             }
             return;
           }
 
           case 'TaskMarker': {
-            if (revealLine(nFrom, nTo)) return;
             const checked = /x/i.test(state.sliceDoc(nFrom, nTo));
-            hideMark(nFrom, nTo, doc.length);
-            decos.push(Decoration.widget({ widget: new CheckboxWidget(checked), side: 1 }).range(nFrom));
+            decos.push(Decoration.replace({ widget: new CheckboxWidget(checked) }).range(nFrom, withSpace(nTo)));
+            atomic.push(hide.range(nFrom, withSpace(nTo)));
             return;
           }
 
           case 'HorizontalRule':
+            lineDeco(nFrom, 'cm-lp-rule');
             if (!revealLine(nFrom, nTo)) {
               decos.push(Decoration.replace({ widget: new HrWidget() }).range(nFrom, nTo));
             }
             return;
 
-          case 'FencedCode':
+          case 'FencedCode': {
+            const marks = nodeRef.node.getChildren('CodeMark');
+            const closed = marks.length > 1 && doc.lineAt(marks[marks.length - 1].from).from !== doc.lineAt(nFrom).from;
+            const shown = revealLine(nFrom, nTo);
             eachLine(nFrom, nTo, (lineFrom, first, last) => {
               lineDeco(lineFrom, 'cm-lp-code');
-              if (first) lineDeco(lineFrom, 'cm-lp-code-first');
-              if (last) lineDeco(lineFrom, 'cm-lp-code-last');
+              if (first || (last && closed)) {
+                lineDeco(lineFrom, 'cm-lp-fence');
+                lineDeco(lineFrom, first ? 'cm-lp-fence-open' : 'cm-lp-fence-close');
+                if (shown) lineDeco(lineFrom, 'cm-lp-fence-shown');
+              }
             });
             return;
+          }
 
           case 'Frontmatter':
             eachLine(nFrom, nTo, (lineFrom) => lineDeco(lineFrom, 'cm-lp-frontmatter'));
@@ -277,7 +347,7 @@ function buildDecorations(view: EditorView): DecorationSet {
     });
   }
 
-  return Decoration.set(decos, true);
+  return { decorations: Decoration.set(decos, true), atomic: Decoration.set(atomic, true) };
 }
 
 // ── Click handling ───────────────────────────────────────────────────
@@ -298,17 +368,19 @@ function toggleCheckbox(view: EditorView, pos: number): boolean {
 export const livePreview = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
+    atomic: DecorationSet;
     constructor(view: EditorView) {
-      this.decorations = buildDecorations(view);
+      ({ decorations: this.decorations, atomic: this.atomic } = buildDecorations(view));
     }
     update(update: ViewUpdate) {
       if (update.docChanged || update.selectionSet || update.viewportChanged) {
-        this.decorations = buildDecorations(update.view);
+        ({ decorations: this.decorations, atomic: this.atomic } = buildDecorations(update.view));
       }
     }
   },
   {
     decorations: (v) => v.decorations,
+    provide: (plugin) => EditorView.atomicRanges.of((view) => view.plugin(plugin)?.atomic ?? Decoration.none),
     eventHandlers: {
       mousedown(event, view) {
         const target = event.target as HTMLElement;
@@ -332,4 +404,34 @@ export const livePreview = ViewPlugin.fromClass(
   },
 );
 
-export type { EditorState };
+/** Hidden block markup at the start of a line: indentation, `- `, `1. `, `- [ ] `, `> `. */
+const LINE_MARKUP = /^(?:\s*(?:[-*+]|\d+[.)])(?:\s+\[[ xX]\])?\s+|\s*(?:>\s?)+)/;
+
+/**
+ * The caret never sits inside hidden list or quote markup: Home and clicks at
+ * the left edge land after the bullet, so Backspace there removes the bullet
+ * (markdownKeymap) instead of joining the item to the line above.
+ */
+export const caretAfterMarkup = EditorState.transactionFilter.of((tr) => {
+  if (!tr.selection) return tr;
+  const state = tr.state;
+  let changed = false;
+  const ranges = tr.selection.ranges.map((range) => {
+    if (!range.empty) return range;
+    const line = state.doc.lineAt(range.head);
+    const markup = LINE_MARKUP.exec(line.text)?.[0];
+    if (!markup || range.head >= line.from + markup.length) return range;
+    const node = syntaxTree(state).resolveInner(line.from + markup.length, -1);
+    let marked = false;
+    for (let at: SyntaxNode | null = node; at; at = at.parent) {
+      if (at.name === 'ListItem' || at.name === 'Blockquote') { marked = true; break; }
+      if (at.name === 'FencedCode' || at.name === 'CodeBlock') break;
+    }
+    if (!marked) return range;
+    changed = true;
+    return EditorSelection.cursor(line.from + markup.length);
+  });
+  if (!changed) return tr;
+  return [tr, { selection: EditorSelection.create(ranges, tr.selection.mainIndex), sequential: true }];
+});
+

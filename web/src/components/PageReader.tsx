@@ -1,4 +1,4 @@
-import { useId, useRef, type Ref, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, type Ref, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { C } from '@/lib/design';
@@ -9,6 +9,10 @@ import type { PageLineage as PageLineageModel } from '@/lib/page-lineage';
 import { withHtmlMarkdownComponents } from './HtmlView';
 import { useMemo } from 'react';
 import { renderedClick, type RenderedClick } from '@/lib/click-to-edit';
+import { remarkSoftBreaks } from '@/lib/remark-soft-breaks';
+
+const REMARK = [remarkGfm, remarkSoftBreaks];
+
 
 interface PageReaderProps {
   body: string;
@@ -28,10 +32,13 @@ interface PageReaderProps {
   onOpenReview?: (id: string) => void;
   loadSource?: LoadLineageSource;
   /**
-   * Click to edit: called with the clicked text (null for blank space) and the
-   * click's distance from the top of the page. Links and controls never edit.
+   * Click to edit: called with the clicked text (null for blank space) and how
+   * far below the top of the visible page the clicked character sits, so the
+   * editor can open with it in the same place. Links and controls never edit.
    */
   onEditAt?: (click: RenderedClick | null, top: number) => void;
+  /** Scroll position to open at, e.g. where the editor was when editing stopped. */
+  initialScrollTop?: number;
 }
 
 export function PageReader({
@@ -49,7 +56,15 @@ export function PageReader({
   onOpenReview,
   loadSource,
   onEditAt,
+  initialScrollTop,
 }: PageReaderProps) {
+  const column = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const scroller = column.current?.parentElement;
+    if (initialScrollTop && scroller) scroller.scrollTop = initialScrollTop;
+    // Only where the page opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [lineageOpen, setLineageOpen] = useReaderLineagePanel();
   const lineageId = useId();
   const lineageTrigger = useRef<HTMLButtonElement>(null);
@@ -62,13 +77,15 @@ export function PageReader({
       <article
         ref={articleRef}
         className={onEditAt ? 'prose page-reader-editable' : 'prose'}
-        style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '36px 48px 56px 56px' }}
+        style={{ flex: 1, minWidth: 0, overflow: 'auto' }}
         onClick={onEditAt ? (event) => {
           const click = renderedClick(event.nativeEvent, event.currentTarget);
           if (click === undefined) return;
-          onEditAt(click, event.clientY - event.currentTarget.getBoundingClientRect().top);
+          const top = (click?.clientTop ?? event.clientY) - event.currentTarget.getBoundingClientRect().top;
+          onEditAt(click, top);
         } : undefined}
       >
+        <div ref={column} className="page-column">
         {readOnlyLabel && (
           <div style={readOnlyBannerStyle}>
             <span
@@ -89,12 +106,11 @@ export function PageReader({
         ) : (
           <>
             {byline && <PageByline name={byline.name} editedAt={byline.editedAt} />}
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={components}
-            >
-              {body}
-            </ReactMarkdown>
+            <div className="doc-body">
+              <ReactMarkdown remarkPlugins={REMARK} components={components}>
+                {body}
+              </ReactMarkdown>
+            </div>
             {lineage && (
               <PageLineage
                 lineage={lineage}
@@ -106,6 +122,7 @@ export function PageReader({
             )}
           </>
         )}
+        </div>
       </article>
       {lineage && lineageOpen && !missingMessage && <PageLineagePanel
         lineage={lineage} panelId={lineageId} onClose={closeLineage}

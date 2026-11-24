@@ -20,6 +20,7 @@ import {
 } from '@/lib/journal';
 import { obsidianToReaderMarkdown, renderedLineOffset } from '@/lib/obsidian-markdown';
 import { applyTaskToggle } from '@/lib/tasks';
+import { remarkSoftBreaks } from '@/lib/remark-soft-breaks';
 
 const COMPONENTS = withObsidianReader({});
 const PAGE = 7;
@@ -201,6 +202,7 @@ function JournalDay({
             onWikilink={async (target) => { if (await flush()) onWikilink?.(target); }}
             loadImage={loadAsset ? (src) => loadAsset(entry.path, src) : undefined}
             getPageSlugs={getPageSlugs}
+            className="doc-editor"
             style={{ height: 'auto' }}
           />
         </div>
@@ -220,9 +222,11 @@ function JournalDay({
               loadAsset: loadAsset ? (src) => loadAsset(entry.path, src) : undefined,
               onToggleTask: (line) => { void toggleTask(line); },
             }}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>
-                {obsidianToReaderMarkdown(shownText)}
-              </ReactMarkdown>
+              <div className="doc-body">
+                <ReactMarkdown remarkPlugins={[remarkGfm, remarkSoftBreaks]} components={COMPONENTS}>
+                  {obsidianToReaderMarkdown(shownText)}
+                </ReactMarkdown>
+              </div>
             </ObsidianReaderContext.Provider>
           ) : (
             <p className="journal-day-placeholder">Click to write</p>

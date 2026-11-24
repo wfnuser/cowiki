@@ -7,7 +7,7 @@ import { markdown, markdownLanguage, markdownKeymap } from '@codemirror/lang-mar
 import { languages } from '@codemirror/language-data';
 import { autocompletion, completionStatus } from '@codemirror/autocomplete';
 import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete';
-import { livePreview, livePreviewConfig } from './livePreview';
+import { caretAfterMarkup, livePreview, livePreviewConfig } from './livePreview';
 import { WikiLink, Frontmatter } from './markdownExtensions';
 import { editorTheme, editorHighlighting } from './theme';
 
@@ -37,6 +37,8 @@ export interface LivePreviewEditorProps {
 export interface LivePreviewEditorHandle {
   /** Replace the open document synchronously after host-side revision checks. */
   replaceDocument: (doc: string) => void;
+  /** Put the caret at the end of the document (a click below the last line). */
+  focusEnd: () => void;
 }
 
 /**
@@ -115,6 +117,7 @@ export const LivePreviewEditor = forwardRef<LivePreviewEditorHandle, LivePreview
           editorTheme,
           editorHighlighting,
           livePreview,
+          caretAfterMarkup,
           livePreviewConfig.of({
             onWikilink: (target) => callbacks.current.onWikilink?.(target),
             loadImage: (src) => (callbacks.current.loadImage
@@ -196,6 +199,12 @@ export const LivePreviewEditor = forwardRef<LivePreviewEditorHandle, LivePreview
       } finally {
         applyingExternalDoc.current = false;
       }
+    },
+    focusEnd: () => {
+      const view = viewRef.current;
+      if (!view) return;
+      view.focus();
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
     },
   }), []);
 

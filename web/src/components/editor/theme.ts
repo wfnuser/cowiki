@@ -4,12 +4,21 @@ import { tags as t } from '@lezer/highlight';
 import { C, fonts, shadows } from '@/lib/design';
 
 /**
- * Editor chrome + live-preview line styles, mirroring the `.prose`
- * typography of the read view so edit mode is visually seamless.
+ * Editor chrome + live-preview line styles. Sizes come from the `--doc-*`
+ * tokens in index.css that the reader's `.prose` uses too, so a line sits at
+ * the same place whether the page is read or edited. The host lays out the
+ * page (padding, width); the editor adds no padding of its own.
  */
+const heading = (level: 1 | 2 | 3 | 4) => ({
+  fontSize: `var(--doc-h${level}-size)`,
+  lineHeight: `var(--doc-h${level}-line)`,
+  // A heading's space above, less the blank line or gap that comes before it.
+  paddingTop: `calc(var(--doc-h${level}-above) - var(--doc-gap))`,
+});
+
 export const editorTheme = EditorView.theme({
   '&': {
-    fontSize: '14px',
+    fontSize: 'var(--doc-size)',
     color: C.ink,
     backgroundColor: 'transparent',
     height: '100%',
@@ -17,32 +26,42 @@ export const editorTheme = EditorView.theme({
   '&.cm-focused': { outline: 'none' },
   '.cm-scroller': {
     fontFamily: fonts.sans,
-    lineHeight: '1.72',
+    lineHeight: 'var(--doc-line)',
     overflow: 'auto',
   },
   '.cm-content': {
-    padding: '36px 48px 56px 56px',
+    padding: '0',
     caretColor: C.ink,
-    maxWidth: '820px',
   },
-  '.cm-line': { padding: '0.08rem 0' },
+  '.cm-line': { padding: '0' },
 
-  // Headings — match .prose h1/h2/h3
-  '.cm-lp-h1': {
-    fontFamily: fonts.serif, fontSize: '2.25rem', fontWeight: '700',
-    lineHeight: '1.25', paddingTop: '1.1rem', paddingBottom: '0.35rem',
-  },
-  '.cm-lp-h2': {
-    fontFamily: fonts.serif, fontSize: '1.5rem', fontWeight: '600',
-    lineHeight: '1.3', paddingTop: '1.15rem', paddingBottom: '0.4rem',
-  },
-  '.cm-lp-h3': {
-    fontSize: '1.125rem', fontWeight: '600',
-    paddingTop: '0.9rem', paddingBottom: '0.25rem',
-  },
-  '.cm-lp-h4, .cm-lp-h5, .cm-lp-h6': {
-    fontSize: '1rem', fontWeight: '600',
-    paddingTop: '0.7rem', paddingBottom: '0.2rem',
+  // A blank line between blocks is the reader's gap between them; a block
+  // written right under another gets the same gap above it.
+  '.cm-lp-blank': { lineHeight: 'var(--doc-gap)', fontSize: '10px' },
+  // CodeMirror's caret helpers beside hidden markup must not make a line taller.
+  '.cm-widgetBuffer': { verticalAlign: 'middle' },
+  // A rule is the reader's: 24px above and below a 1px line (blank lines give 12 each).
+  '.cm-lp-rule': { lineHeight: '25px' },
+  '.cm-lp-tight': { paddingTop: 'var(--doc-gap)' },
+
+  // Headings — the same sizes as .prose h1…h6
+  '.cm-lp-h1': { ...heading(1), fontFamily: 'var(--doc-display-font)', fontWeight: '700', letterSpacing: '-0.01em' },
+  '.cm-lp-h2': { ...heading(2), fontFamily: 'var(--doc-display-font)', fontWeight: '600' },
+  '.cm-lp-h3': { ...heading(3), fontWeight: '600' },
+  '.cm-lp-h4, .cm-lp-h5, .cm-lp-h6': { ...heading(4), fontWeight: '600' },
+  '.cm-lp-h1.cm-lp-tight': { paddingTop: 'var(--doc-h1-above)' },
+  '.cm-lp-h2.cm-lp-tight': { paddingTop: 'var(--doc-h2-above)' },
+  '.cm-lp-h3.cm-lp-tight': { paddingTop: 'var(--doc-h3-above)' },
+  '.cm-lp-h4.cm-lp-tight, .cm-lp-h5.cm-lp-tight, .cm-lp-h6.cm-lp-tight': { paddingTop: 'var(--doc-h4-above)' },
+  '.cm-line.cm-lp-first': { paddingTop: '0' },
+  // `## ` shows in the margin while the caret is on the heading, so the
+  // heading's text does not move.
+  '.cm-lp-hmark': {
+    position: 'absolute',
+    transform: 'translateX(-100%)',
+    paddingRight: '0.25em',
+    color: C.faint,
+    fontWeight: '400',
   },
 
   // Blockquote
@@ -52,16 +71,27 @@ export const editorTheme = EditorView.theme({
     color: C.ink2,
   },
 
-  // Fenced code blocks
+  // Fenced code blocks: the fence lines are the block's top and bottom
+  // padding; their text shows only while the caret is inside.
   '.cm-lp-code': {
     backgroundColor: C.sidebar,
     fontFamily: fonts.mono,
-    fontSize: '0.85em',
-    lineHeight: '1.6',
-    padding: '0 1rem',
+    fontSize: 'var(--doc-code-size)',
+    lineHeight: 'var(--doc-code-line)',
+    paddingLeft: '16px',
+    paddingRight: '16px',
   },
-  '.cm-lp-code-first': { borderRadius: '6px 6px 0 0', paddingTop: '0.5rem' },
-  '.cm-lp-code-last': { borderRadius: '0 0 6px 6px', paddingBottom: '0.5rem' },
+  // Keep a code block's gap above outside its background.
+  '.cm-lp-code.cm-lp-tight': {
+    paddingTop: '0',
+    borderTop: 'var(--doc-gap) solid transparent',
+    backgroundClip: 'padding-box',
+  },
+  '.cm-lp-fence': { lineHeight: 'var(--doc-code-pad)', color: 'transparent' },
+  '.cm-lp-fence.cm-lp-fence-shown': { color: C.faint },
+  '.cm-lp-fence:not(.cm-lp-fence-shown) span': { color: 'transparent' },
+  '.cm-lp-fence-open': { borderRadius: '6px 6px 0 0' },
+  '.cm-lp-fence-close': { borderRadius: '0 0 6px 6px' },
 
   // Frontmatter
   '.cm-lp-frontmatter': {
@@ -74,17 +104,45 @@ export const editorTheme = EditorView.theme({
   // Tables stay source-mode; mono keeps the pipes aligned
   '.cm-lp-table': { fontFamily: fonts.mono, fontSize: '0.85em', lineHeight: '1.6' },
 
-  // Inline widgets
-  '.cm-lp-bullet': { color: C.faint, display: 'inline-block', width: '1em' },
+  // List markers fill one --doc-indent, like the reader's (see .prose li).
+  '.cm-lp-bullet': {
+    display: 'inline-block',
+    position: 'relative',
+    width: 'var(--doc-indent)',
+    height: 'calc(var(--doc-line) * 1em)',
+    verticalAlign: 'top',
+    textIndent: '0',
+  },
+  '.cm-lp-bullet::before': {
+    content: '""',
+    position: 'absolute',
+    left: '9px',
+    top: 'calc(var(--doc-line) * 0.5em - 2.5px)',
+    width: '5px',
+    height: '5px',
+    borderRadius: '50%',
+    background: 'var(--color-text-tertiary)',
+  },
+  '.cm-lp-ol-mark': {
+    display: 'inline-block',
+    width: 'var(--doc-indent)',
+    paddingRight: '0.3em',
+    boxSizing: 'border-box',
+    textAlign: 'right',
+    textIndent: '0',
+    color: C.ink2,
+    fontVariantNumeric: 'tabular-nums',
+    whiteSpace: 'nowrap',
+  },
+  '.cm-lp-ol-mark span': { color: 'inherit' },
   '.cm-lp-hr': {
     display: 'inline-block', width: '100%', verticalAlign: 'middle',
     borderTop: `1px solid ${C.line}`,
   },
   '.cm-lp-checkbox': {
-    accentColor: C.accent,
-    width: '14px', height: '14px',
-    verticalAlign: 'middle',
-    margin: '0 0.45em 0.2em 0',
+    width: '15px', height: '15px',
+    verticalAlign: 'top',
+    margin: 'calc((var(--doc-line) * 1em - 15px) / 2) 7px 0 2px',
     cursor: 'pointer',
   },
   '.cm-lp-image': {
@@ -158,5 +216,6 @@ export const editorHighlighting = syntaxHighlighting(HighlightStyle.define([
   { tag: t.operator, color: syntax.keyword },
   { tag: t.tagName, color: syntax.tag },
   { tag: t.attributeName, color: syntax.literal },
-  { tag: t.heading, fontWeight: '600' },
+  // Weight comes from the heading's line (.cm-lp-h1…), as in the reader.
+  { tag: t.heading, fontWeight: 'inherit' },
 ]));

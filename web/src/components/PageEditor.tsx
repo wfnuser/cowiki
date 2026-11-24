@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { Check, X } from 'lucide-react';
 import { C, fonts, shadows } from '@/lib/design';
 import {
@@ -37,6 +37,8 @@ export interface PageEditorHandle {
   applyExternalFile: (fullBody: string) => 'applied' | 'conflict';
   /** Handle an Agent deleting or renaming the open file without losing human text. */
   applyExternalDeletion: () => 'applied' | 'conflict';
+  /** How far the page is scrolled, so the reader can open at the same place. */
+  scrollTop: () => number;
 }
 
 type ExternalConflict =
@@ -56,8 +58,10 @@ export const PageEditor = forwardRef<PageEditorHandle, {
   getPageSlugs?: () => string[];
   /** Caret position in the body (without CoWiki frontmatter) when editing starts. */
   initialCursor?: number;
-  /** Pixel distance from the top of the page to the caret's line when editing starts. */
+  /** How far below the top of the visible page the caret's character sits when editing starts. */
   initialCursorTop?: number;
+  /** Shown above the text, as in the reader (the byline), so nothing moves. */
+  header?: ReactNode;
 }>(function PageEditor({
   initialBody,
   onSave,
@@ -69,7 +73,9 @@ export const PageEditor = forwardRef<PageEditorHandle, {
   getPageSlugs,
   initialCursor,
   initialCursorTop,
+  header,
 }, ref) {
+  const scroller = useRef<HTMLDivElement>(null);
   const [feedback, setFeedback] = useState<SaveFeedback>(null);
   const [externalConflict, setExternalConflict] = useState<ExternalConflict | null>(null);
   const initialPage = useRef(splitSystemFrontmatter(initialBody));
@@ -170,6 +176,7 @@ export const PageEditor = forwardRef<PageEditorHandle, {
       onExternalDeleted?.();
       return 'applied';
     },
+    scrollTop: () => scroller.current?.scrollTop ?? 0,
   }), [onExternalDeleted]);
 
   const handleDone = useCallback(async () => {
@@ -240,18 +247,38 @@ export const PageEditor = forwardRef<PageEditorHandle, {
 
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
-      <LivePreviewEditor
-        ref={liveEditor}
-        initialDoc={initialPage.current.body}
-        onDocChanged={handleDocChanged}
-        onRequestSave={() => { void flush(true); }}
-        onWikilink={handleWikilink}
-        loadImage={loadImage}
-        getPageSlugs={getPageSlugs}
-        initialCursor={initialCursor}
-        initialCursorTop={initialCursorTop}
-        onEscape={() => { void handleDone(); }}
-      />
+      {/* The reader's layout (PageReader): one scrolling column, byline first. */}
+      <div
+        ref={scroller}
+        style={{ position: 'absolute', inset: 0, overflow: 'auto', cursor: 'text' }}
+        onMouseDown={(event) => {
+          // A click below the last line writes at the end, as in a text field.
+          const target = event.target as HTMLElement;
+          if (target.closest('.cm-editor, button, a, input')) return;
+          const editor = scroller.current?.querySelector('.cm-editor')?.getBoundingClientRect();
+          if (!editor || event.clientY < editor.bottom) return;
+          event.preventDefault();
+          liveEditor.current?.focusEnd();
+        }}
+      >
+        <div className="page-column">
+          {header}
+          <LivePreviewEditor
+            ref={liveEditor}
+            className="doc-editor"
+            style={{ height: 'auto' }}
+            initialDoc={initialPage.current.body}
+            onDocChanged={handleDocChanged}
+            onRequestSave={() => { void flush(true); }}
+            onWikilink={handleWikilink}
+            loadImage={loadImage}
+            getPageSlugs={getPageSlugs}
+            initialCursor={initialCursor}
+            initialCursorTop={initialCursorTop}
+            onEscape={() => { void handleDone(); }}
+          />
+        </div>
+      </div>
 
       {feedback && <div style={{
         position: 'absolute', top: 12, right: 18, zIndex: 10,

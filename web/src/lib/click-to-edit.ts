@@ -13,6 +13,8 @@ export interface RenderedClick {
   offset: number;
   /** Where that text sits in the whole rendered page, from 0 (top) to 1 (end). */
   ratio: number;
+  /** Viewport top of the clicked character, to open the editor with it in place. */
+  clientTop?: number;
 }
 
 const CONTEXT = 24;
@@ -87,7 +89,20 @@ export function renderedClick(event: MouseEvent, root: HTMLElement): RenderedCli
     text: caret.node.textContent ?? '',
     offset: caret.offset,
     ratio: total ? (before + caret.offset) / total : 1,
+    clientTop: characterTop(caret.node, caret.offset),
   };
+}
+
+/** Top of the character at `offset` (or the one before it at the end of the text). */
+function characterTop(node: Text, offset: number): number | undefined {
+  const length = node.textContent?.length ?? 0;
+  if (!length) return undefined;
+  const from = offset < length ? offset : length - 1;
+  const range = document.createRange();
+  range.setStart(node, from);
+  range.setEnd(node, from + 1);
+  const rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
+  return rect.height ? rect.top : undefined;
 }
 
 function caretAt(x: number, y: number): { node: Text; offset: number } | null {

@@ -89,6 +89,17 @@ Notifications, Review details, Cloud pages) is built the same way, with
   any open completion menu and any selection) returns to reading; a journal
   day also returns when focus leaves it. While editing, the comments
   button saves, returns to reading and opens the comments.
+- **Editing never moves the page.** The reader (`.prose`) and the editor
+  (`components/editor/theme.ts`, `livePreview.ts`) share the `--doc-*`
+  tokens in `index.css` and the same text column (`.page-column`, byline
+  first), so every line stays where it was when you click to edit and
+  when you return (`tests/browser/page-layout.spec.ts` checks this to
+  within a pixel). In the editor a blank line is one `--doc-gap`, the
+  reader's space between blocks; bullets, numbers, checkboxes and quote
+  bars are drawn the same way in both and never turn back into `- ` or
+  `> ` under the caret; a heading's `## ` appears in the left margin while
+  the caret is on it; code fences show only while the caret is in the
+  block. A single newline is a line break in both, as in Obsidian.
 - **Top bar, right to left:** the Agent toggle in the corner, comments, the
   Space status. The Agent sidebar opens from the top bar's right corner and
   closes from the same corner of its own header (`PanelRight` both ways), so
