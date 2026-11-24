@@ -4,5 +4,6 @@
 //! - Derived SQLite FTS5 + dense vector + link-graph index (`knowledge_index`)
 
 pub mod embeddings;
+pub mod governance;
 pub mod knowledge_index;
 pub mod okf;
