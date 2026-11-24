@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { GitBranch, GitCommitHorizontal } from 'lucide-react';
+import { Bot, FilePenLine } from 'lucide-react';
 
 import {
   getLocalWorkingDiff,
@@ -7,6 +7,7 @@ import {
   type AgentChange,
   type FileDiff,
 } from '@/api';
+import { shortAgo } from '@/lib/agent-session';
 import { ReviewInbox, ReviewInboxRow } from './ReviewInbox';
 import {
   localReviewSelectionForRow,
@@ -58,13 +59,12 @@ export function LocalReviewInbox({
               <ReviewInboxRow
                 key={row.id}
                 title="Current Draft"
-                subtitle="Compared with the latest checkpoint"
-                status={draftDiffs.length ? 'Not checkpointed' : 'Clean'}
-                files={draftDiffs.length}
+                status={draftDiffs.length ? undefined : 'No changes'}
+                files={draftDiffs.length || undefined}
                 additions={sum(draftDiffs, 'additions')}
                 deletions={sum(draftDiffs, 'deletions')}
                 first={index === 0}
-                icon={<GitCommitHorizontal size={16} className="shrink-0 text-text-faint" />}
+                icon={<FilePenLine size={16} />}
                 onOpen={() => onOpen(localReviewSelectionForRow(row))}
               />
             );
@@ -74,14 +74,14 @@ export function LocalReviewInbox({
             <ReviewInboxRow
               key={row.id}
               title={change.title}
-              subtitle={`Agent change · ${change.id.slice(0, 8)}`}
+              subtitle={shortAgo(change.createdAt * 1000)}
               status={statusLabel(change.status)}
               statusTone={change.status === 'needsResolution' ? 'danger' : 'muted'}
               files={change.diffs.length}
               additions={sum(change.diffs, 'additions')}
               deletions={sum(change.diffs, 'deletions')}
               first={index === 0}
-              icon={<GitBranch size={16} className="shrink-0 text-text-faint" />}
+              icon={<Bot size={16} />}
               onOpen={() => onOpen(localReviewSelectionForRow(row))}
             />
           );
@@ -95,12 +95,13 @@ function sum(diffs: FileDiff[], field: 'additions' | 'deletions'): number {
   return diffs.reduce((total, diff) => total + diff[field], 0);
 }
 
-function statusLabel(status: AgentChange['status']): string {
+/** An open change says nothing extra; the others say what happened. */
+function statusLabel(status: AgentChange['status']): string | undefined {
   switch (status) {
     case 'needsResolution': return 'Needs resolution';
     case 'merged': return 'Merged';
     case 'discarded': return 'Discarded';
-    default: return 'Open';
+    default: return undefined;
   }
 }
 

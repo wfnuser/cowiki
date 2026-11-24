@@ -27,7 +27,7 @@ export function ReviewInbox({
       {loading ? (
         <ViewEmpty>Loading…</ViewEmpty>
       ) : children ? (
-        <div className="divide-y divide-border-soft border-y border-border-soft">{children}</div>
+        <ul aria-label="Reviews" className="view-list">{children}</ul>
       ) : (
         <ViewEmpty>{empty ?? 'No reviews yet.'}</ViewEmpty>
       )}
@@ -35,6 +35,7 @@ export function ReviewInbox({
   );
 }
 
+/** One change to review: what it is, then how big it is; a status only when it asks for something. */
 export function ReviewInboxRow({
   additions,
   deletions,
@@ -50,39 +51,39 @@ export function ReviewInboxRow({
   additions?: number;
   deletions?: number;
   files?: number;
-  /** Kept for callers; rows are separated by the list's hairlines. */
+  /** Kept for callers; rows are separated by space, not rules. */
   first?: boolean;
   icon: React.ReactNode;
   onOpen: () => void;
-  status: string;
+  /** Leave out the ordinary state ("Open"); say only what differs. */
+  status?: string;
   statusTone?: 'muted' | 'danger';
-  subtitle: string;
+  /** A second thing about the change, shown after its title (an author, a time). */
+  subtitle?: string;
   title: string;
   trailing?: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="group flex w-full min-w-0 items-center gap-3 px-1 py-2.5 text-left transition-colors hover:bg-bg-hover/60"
-    >
-      {icon}
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[13.5px] font-medium text-text">{title}</div>
-        <div className="mt-px truncate text-[12px] text-text-tertiary">{subtitle}</div>
-      </div>
-      {files != null && additions != null && deletions != null && (
-        <span className="whitespace-nowrap text-[12px] tabular-nums text-text-tertiary">
-          {files} file{files === 1 ? '' : 's'}{' '}
-          <span className="text-green">+{additions}</span>{' '}
-          <span className="text-red">−{deletions}</span>
+    <li>
+      <button type="button" onClick={onOpen} className="view-row group">
+        <span className="view-row-icon">{icon}</span>
+        <span className="view-row-title">
+          {title}
+          {subtitle && <span className="view-row-detail">{subtitle}</span>}
         </span>
-      )}
-      <span className={cn('whitespace-nowrap text-[12px]', statusTone === 'danger' ? 'font-medium text-red' : 'text-text-tertiary')}>
-        {status}
-      </span>
-      {trailing}
-      <ChevronRight size={14} className="shrink-0 text-text-faint opacity-0 transition-opacity group-hover:opacity-100" />
-    </button>
+        {status && (
+          <span className={cn('view-row-meta', statusTone === 'danger' && 'font-medium text-red')}>{status}</span>
+        )}
+        {files != null && additions != null && deletions != null && (
+          <span className="view-row-meta">
+            {files} {files === 1 ? 'file' : 'files'}
+            <span className={cn('ml-2', additions ? 'text-green' : 'text-text-faint')}>+{additions}</span>
+            <span className={cn('ml-1', deletions ? 'text-red' : 'text-text-faint')}>−{deletions}</span>
+          </span>
+        )}
+        {trailing}
+        <ChevronRight size={14} className="-mr-1 shrink-0 text-text-faint opacity-0 transition-opacity group-hover:opacity-100" />
+      </button>
+    </li>
   );
 }

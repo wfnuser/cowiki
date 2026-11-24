@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import {
   canCreateCheckpoint,
+  checkpointTime,
   defaultCheckpointName,
   draftChangeLabel,
 } from '../src/lib/history.ts';
@@ -18,11 +19,18 @@ test('checkpoint names use the user local date and time', () => {
   assert.equal(defaultCheckpointName(localTime), 'Checkpoint 2026-07-15 23:05');
 });
 
-test('the current draft distinguishes saved files from checkpoints', () => {
-  assert.equal(draftChangeLabel(0, false), 'No saved changes in the current draft');
-  assert.equal(draftChangeLabel(1, false), '1 saved file in the current draft');
-  assert.equal(draftChangeLabel(3, true), '3 saved files changed since the latest checkpoint');
-  assert.equal(draftChangeLabel(0, true), 'No changes since the latest checkpoint');
+test('the current draft says how many files changed', () => {
+  assert.equal(draftChangeLabel(0), 'No changes');
+  assert.equal(draftChangeLabel(1), '1 file changed');
+  assert.equal(draftChangeLabel(3), '3 files changed');
+});
+
+test('checkpoint times read like a person says them', () => {
+  const now = new Date(2026, 10, 24, 18, 0);
+  assert.equal(checkpointTime(new Date(2026, 10, 24, 16, 5), now, 'en-US'), '4:05 PM');
+  assert.equal(checkpointTime(new Date(2026, 10, 23, 23, 59), now, 'en-US'), 'Yesterday, 11:59 PM');
+  assert.equal(checkpointTime(new Date(2026, 10, 2, 9, 30), now, 'en-US'), 'Nov 2, 9:30 AM');
+  assert.equal(checkpointTime(new Date(2025, 11, 31, 9, 30), now, 'en-US'), 'Dec 31, 2025, 9:30 AM');
 });
 
 test('a checkpoint requires at least one change from its baseline', () => {

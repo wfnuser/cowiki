@@ -60,9 +60,21 @@ Notifications, Review details, Cloud pages) is built the same way, with
 - **Tabs** under the title are line tabs (`ViewTabs`): the open tab is
   underlined in ink, counts are faint numbers, never pills.
 - **Groups** use `ViewSectionHeading` (13px, weight 600, sentence case, a
-  faint count on the right). **Lists** are hairline-separated rows
-  (`divide-y divide-border-soft`), never a box of cards. **Empty and
-  loading** states are one centered sentence (`ViewEmpty`).
+  faint count on the right). **Lists** are plain rows (`.view-list` /
+  `.view-row` in `index.css`): no frame and no rule between rows; spacing
+  and a hover fill separate them, and each row reaches 8px past the column
+  so its icon lines up with the view title (user decision 2026-11-24:
+  "lists looked unfinished next to the rest"). A row is one line: an icon,
+  the name, an optional detail after it in tertiary (a folder, an author, a
+  time), then at most one or two quiet values on the right (`5 files +31
+  −0`; zeros faint). A table with columns (the deck list) keeps hairlines.
+  Never show raw ids or hashes; times read the way a person says them
+  ("4:05 PM", "Yesterday, 4:05 PM"). **Empty and loading** states are one
+  centered sentence (`ViewEmpty`).
+- **History** is a timeline: the Current Draft (an accent ring) on top, then
+  checkpoints newest first on one line of dots; named checkpoints are ink,
+  automatic ones muted. *Create checkpoint* sits in the title row and
+  appears only when the Draft has changes.
 - Views are left-aligned in the content area (`36px 56px` padding) with a
   `min(860px, 100%)` column; a wide board may use `min(1040px, 100%)`.
 - **Flashcards** follow Anki (user decision 2026-11-24): the view is a deck

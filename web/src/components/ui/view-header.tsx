@@ -35,7 +35,7 @@ function ViewHeader({
 /** A group heading inside a view: sentence case, never small caps. */
 function ViewSectionHeading({ children, meta, className }: { children: ReactNode; meta?: ReactNode; className?: string }) {
   return (
-    <div className={cn("mb-2 flex items-baseline justify-between gap-3 px-1", className)}>
+    <div className={cn("mb-1.5 flex items-baseline justify-between gap-3", className)}>
       <h2 className="text-[13px] font-semibold leading-5 text-text">{children}</h2>
       {meta != null && <span className="text-[12px] tabular-nums text-text-tertiary">{meta}</span>}
     </div>

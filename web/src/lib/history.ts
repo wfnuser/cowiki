@@ -9,15 +9,29 @@ export function defaultCheckpointName(now = new Date()): string {
   ].join(' ');
 }
 
-export function draftChangeLabel(changedFiles: number, hasCheckpoint: boolean): string {
-  if (changedFiles === 0 && hasCheckpoint) return 'No changes since the latest checkpoint';
-  if (changedFiles === 0) return 'No saved changes in the current draft';
-  if (hasCheckpoint) {
-    if (changedFiles === 1) return '1 saved file changed since the latest checkpoint';
-    return `${changedFiles} saved files changed since the latest checkpoint`;
-  }
-  if (changedFiles === 1) return '1 saved file in the current draft';
-  return `${changedFiles} saved files in the current draft`;
+/** What the Draft holds, said after its name in History: "3 files changed". */
+export function draftChangeLabel(changedFiles: number): string {
+  if (changedFiles === 0) return 'No changes';
+  return `${changedFiles} ${changedFiles === 1 ? 'file' : 'files'} changed`;
+}
+
+/** Checkpoints the app records on its own, as opposed to ones someone named. */
+export const AUTO_CHECKPOINT_LABEL = 'Auto checkpoint';
+
+/**
+ * When a checkpoint was made, as a person says it: "4:05 PM" today,
+ * "Yesterday, 4:05 PM", "Nov 22, 4:05 PM", and the year only when it differs.
+ */
+export function checkpointTime(created: Date, now = new Date(), locales?: string | string[]): string {
+  const time = created.toLocaleTimeString(locales, { hour: 'numeric', minute: '2-digit' });
+  const dayOf = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const days = Math.round((dayOf(now) - dayOf(created)) / 86_400_000);
+  if (days === 0) return time;
+  if (days === 1) return `Yesterday, ${time}`;
+  const date = created.toLocaleDateString(locales, created.getFullYear() === now.getFullYear()
+    ? { month: 'short', day: 'numeric' }
+    : { month: 'short', day: 'numeric', year: 'numeric' });
+  return `${date}, ${time}`;
 }
 
 export function canCreateCheckpoint(changedFiles: number | undefined): boolean {

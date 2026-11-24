@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, GitBranch, GitMerge } from 'lucide-react';
+import { Check, GitBranch, GitMerge, GitPullRequest } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 import { DiffView } from '../components/review/DiffView';
@@ -162,7 +162,7 @@ export function CloudReviewsView({
                 <ReviewInboxRow
                   key={pullRequest.id}
                   first={index === 0}
-                  icon={<GitBranch size={16} className="shrink-0 text-text-faint" />}
+                  icon={<GitPullRequest size={16} />}
                   title={`#${pullRequest.number} ${pullRequest.title}`}
                   subtitle={`${pullRequest.authorName} · ${pullRequest.headRef} → ${pullRequest.baseRef}`}
                   status={statusLabel(pullRequest.status)}

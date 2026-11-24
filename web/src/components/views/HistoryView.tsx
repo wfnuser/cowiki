@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import {
-  BookmarkPlus,
-  FilePenLine,
-  GitCommitHorizontal,
-  LoaderCircle,
-} from 'lucide-react';
+import { BookmarkPlus, LoaderCircle } from 'lucide-react';
 
 import {
   createLocalCheckpoint,
@@ -13,13 +8,15 @@ import {
 } from '@/api';
 import { Button } from '@/components/ui/button';
 import { InlineFeedback } from '@/components/ui/inline-feedback';
-import { ViewEmpty, ViewHeader, ViewSectionHeading } from '@/components/ui/view-header';
-import { fonts } from '@/lib/design';
+import { ViewEmpty, ViewHeader } from '@/components/ui/view-header';
 import {
+  AUTO_CHECKPOINT_LABEL,
   canCreateCheckpoint,
+  checkpointTime,
   defaultCheckpointName,
   draftChangeLabel,
 } from '@/lib/history';
+import { cn } from '@/lib/utils';
 
 interface HistoryViewProps {
   workspaceSlug: string;
@@ -64,74 +61,75 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
     }
   };
 
-  const checkpointButton = local && (
+  // The view's one action, in the title row, and only when there is something to record.
+  const checkpointButton = local && (creating || checkpointReady) && (
     <Button
       type="button"
       size="sm"
-      variant="outline"
+      variant="ghost"
       onClick={() => { void createCheckpoint(); }}
-      disabled={creating || loading || !checkpointReady}
-      title={checkpointReady ? 'Record the current Draft as a named snapshot' : 'Save a change first'}
+      disabled={creating || loading}
+      title="Record the current Draft as a named snapshot"
+      className="text-text-secondary hover:text-text"
     >
       {creating ? <LoaderCircle size={14} className="animate-spin" /> : <BookmarkPlus size={14} />}
       {creating ? 'Creating…' : 'Create checkpoint'}
     </Button>
   );
+  const now = new Date();
 
   return (
     <section style={{ width: 'min(860px, 100%)' }}>
-      <ViewHeader title="History" />
+      <ViewHeader title="History" actions={checkpointButton || undefined} />
 
       {!local ? (
         <InlineFeedback tone="neutral" compact title="History is kept for local Spaces only." />
       ) : (
         <>
-          <div className="flex items-center gap-3 rounded-lg px-1 py-1">
-            <FilePenLine size={16} className="shrink-0 text-accent" aria-hidden />
-            <div className="min-w-0 flex-1">
-              <p className="text-[14px] font-medium leading-5 text-text">Current Draft</p>
-              <p className="text-[12.5px] leading-5 text-text-tertiary">
-                {spaceHistory
-                  ? draftChangeLabel(spaceHistory.currentDraft.changedFiles, spaceHistory.checkpoints.length > 0)
-                  : 'Reading the Draft…'}
-              </p>
-            </div>
-            {checkpointButton}
-          </div>
-
           {error && (
             <InlineFeedback
-              className="mt-3.5"
+              className="mb-4"
               title="Could not update history"
               description={error}
               action={<button type="button" onClick={() => { void refresh(); }} className="text-[12px] font-semibold text-red">Retry</button>}
             />
           )}
 
-          <div className="mt-8">
-            <ViewSectionHeading meta={spaceHistory?.checkpoints.length || undefined}>Checkpoints</ViewSectionHeading>
-            {loading ? (
-              <ViewEmpty><LoaderCircle size={15} className="animate-spin" /> Loading…</ViewEmpty>
-            ) : spaceHistory?.checkpoints.length ? (
-              <ol className="m-0 list-none divide-y divide-border-soft border-y border-border-soft p-0">
+          {loading && !spaceHistory ? (
+            <ViewEmpty><LoaderCircle size={15} className="animate-spin" /> Loading…</ViewEmpty>
+          ) : spaceHistory && (
+            <>
+              <ol aria-label="History" className="history-timeline">
+                <li>
+                  <span aria-hidden className="history-dot is-draft" />
+                  <span className="view-row-title">
+                    Current Draft
+                    <span className="view-row-detail">{draftChangeLabel(spaceHistory.currentDraft.changedFiles)}</span>
+                  </span>
+                </li>
                 {spaceHistory.checkpoints.map((checkpoint) => {
                   const created = new Date(checkpoint.createdAt * 1000);
+                  const named = checkpoint.name !== AUTO_CHECKPOINT_LABEL;
                   return (
-                    <li key={checkpoint.id} className="flex min-w-0 items-center gap-3 px-1 py-2.5">
-                      <GitCommitHorizontal size={15} className="shrink-0 text-text-faint" aria-hidden />
-                      <span className="min-w-0 flex-1 truncate text-[13.5px] text-text">{checkpoint.name}</span>
-                      <time dateTime={created.toISOString()} className="shrink-0 text-[12px] text-text-tertiary">
-                        {created.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                    <li key={checkpoint.id}>
+                      <span aria-hidden className={cn('history-dot', named && 'is-named')} />
+                      <span className={cn('view-row-title', named ? 'text-text' : 'text-text-secondary')}>{checkpoint.name}</span>
+                      <time
+                        dateTime={created.toISOString()}
+                        title={created.toLocaleString([], { dateStyle: 'full', timeStyle: 'short' })}
+                        className="view-row-meta"
+                      >
+                        {checkpointTime(created, now)}
                       </time>
-                      <code title={checkpoint.id} className="shrink-0 text-[11px] text-text-faint" style={{ fontFamily: fonts.mono }}>{checkpoint.id.slice(0, 7)}</code>
                     </li>
                   );
                 })}
               </ol>
-            ) : (
-              <ViewEmpty>No checkpoints yet.</ViewEmpty>
-            )}
-          </div>
+              {spaceHistory.checkpoints.length === 0 && (
+                <p className="m-0 pl-[21px] text-[12.5px] text-text-tertiary">No checkpoints yet.</p>
+              )}
+            </>
+          )}
         </>
       )}
     </section>

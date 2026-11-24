@@ -306,7 +306,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
     const byPage = new Map<string, number>();
     for (const item of deck.cards) byPage.set(item.path, (byPage.get(item.path) ?? 0) + 1);
     return (
-      <section style={{ width: 'min(760px, 100%)' }}>
+      <section style={{ width: 'min(860px, 100%)' }}>
         <ViewHeader
           leading={<ViewIconButton label="All decks" onClick={() => setOpenDeck(null)}><ChevronLeft className="size-4" /></ViewIconButton>}
           title={deck.path.split('/').join(' / ')}
@@ -320,13 +320,13 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
         </dl>
         <div className="mb-9">{queue.list.length ? studyButton(queue.list, deck.path, 'Study now') : done}</div>
         <ViewSectionHeading meta={byPage.size}>Notes</ViewSectionHeading>
-        <ul className="m-0 list-none divide-y divide-border-soft border-y border-border-soft p-0">
+        <ul className="view-list">
           {[...byPage.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([path, count]) => (
             <li key={path}>
-              <button type="button" onClick={() => onOpenSource(path)} className="home-row" title={path}>
-                <span className="home-row-icon"><FileText size={15} /></span>
-                <span className="min-w-0 flex-1 truncate text-text">{path.replace(/\.md$/i, '')}</span>
-                <span className="shrink-0 text-[12.5px] tabular-nums text-text-tertiary">{count} {count === 1 ? 'card' : 'cards'}</span>
+              <button type="button" onClick={() => onOpenSource(path)} className="view-row" title={path}>
+                <span className="view-row-icon"><FileText size={16} /></span>
+                <span className="view-row-title">{path.replace(/\.md$/i, '')}</span>
+                <span className="view-row-meta">{count} {count === 1 ? 'card' : 'cards'}</span>
               </button>
             </li>
           ))}
@@ -373,7 +373,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
   ] as Array<[number, string]>).filter(([value, label]) => value > 0 || label.startsWith('card'));
 
   return (
-    <section style={{ width: 'min(760px, 100%)' }}>
+    <section style={{ width: 'min(860px, 100%)' }}>
       <ViewHeader
         title="Flashcards"
         actions={(
@@ -390,9 +390,8 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
       {loading ? (
         <p className="flex items-center gap-2 py-10 text-[12.5px] text-text-tertiary"><LoaderCircle className="size-3.5 animate-spin" /> Collecting cards…</p>
       ) : cards.length === 0 ? (
-        <ViewEmpty className="flex-col">
-          <span>No cards yet. Tag a bullet with <code className="font-mono">#card</code>; its child bullets are the answer.</span>
-          <span>Other tags on the card or its page, like <code className="font-mono">#Japanese/N2</code>, sort it into decks.</span>
+        <ViewEmpty>
+          <span>No cards yet. Tag a list item with <span className="text-text-secondary">#card</span> to make one.</span>
         </ViewEmpty>
       ) : (
         <>

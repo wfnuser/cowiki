@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { FileText } from 'lucide-react';
 
-import { ViewEmpty, ViewSectionHeading } from '@/components/ui/view-header';
+import { ViewSectionHeading } from '@/components/ui/view-header';
 import { shortAgo } from '@/lib/agent-session';
 
 /** One thing Home asks you to do, e.g. "3 tasks due". Only non-zero ones are passed. */
@@ -59,22 +59,20 @@ export function SpaceHome({ needs, today, recent, onOpenPage, now: fixedNow }: S
         <section aria-label="Recently edited" className="home-recent">
           <ViewSectionHeading>Recently edited</ViewSectionHeading>
           {recent.length === 0 ? (
-            <ViewEmpty className="justify-start px-1 py-3 text-left">No pages yet.</ViewEmpty>
+            <p className="m-0 py-2 text-[13px] text-text-tertiary">No pages yet.</p>
           ) : (
-            <ul className="m-0 list-none divide-y divide-border-soft border-y border-border-soft p-0">
+            <ul className="view-list">
               {recent.map((page) => {
                 const folder = page.path.split('/').slice(0, -1).join(' / ');
                 return (
                   <li key={page.path}>
-                    <button type="button" onClick={() => onOpenPage(page.path)} className="home-row">
-                      <span className="home-row-icon"><FileText size={15} /></span>
-                      <span className="min-w-0 flex-1 truncate">
-                        <span className="text-text">{page.title}</span>
-                        {folder && <span className="ml-2 text-[12.5px] text-text-tertiary">{folder}</span>}
+                    <button type="button" onClick={() => onOpenPage(page.path)} className="view-row">
+                      <span className="view-row-icon"><FileText size={16} /></span>
+                      <span className="view-row-title">
+                        {page.title}
+                        {folder && <span className="view-row-detail">{folder}</span>}
                       </span>
-                      <span className="shrink-0 text-[12.5px] tabular-nums text-text-tertiary">
-                        {shortAgo(page.modifiedAt * 1000, now)}
-                      </span>
+                      <span className="view-row-meta">{shortAgo(page.modifiedAt * 1000, now)}</span>
                     </button>
                   </li>
                 );
