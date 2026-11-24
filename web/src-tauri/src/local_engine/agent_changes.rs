@@ -323,6 +323,122 @@ impl LocalEngine {
         self.agent_change(space_slug, change_id)
     }
 
+    /// Caller selects an already-reviewed preview. This method owns the
+    /// start/close lease and the mutation lock throughout preflight and capture.
+    pub fn stage_governance_in_change(
+        &self,
+        gate: &crate::agent_execution_gate::AgentExecutionGate,
+        space_slug: &str,
+        change_id: &str,
+        selections: &[cowiki_knowledge::governance::ReviewSelection],
+        as_of: &str,
+    ) -> Result<AgentChange, String> {
+        let _lease = gate.begin_close(space_slug, change_id)?;
+        let _mutation = self.lock_mutations()?;
+        let root = self.agent_change_worktree(space_slug, change_id)?;
+        let repo = Repository::open(&root).map_err(|e| e.to_string())?;
+        if !repo.is_worktree()
+            || repo.head().ok().as_ref().and_then(|h| h.name())
+                != Some(branch_ref(change_id).as_str())
+        {
+            return Err("proposal requires the active managed Agent Change branch".into());
+        }
+        let tree = reference_commit(&repo, &base_ref(change_id))?
+            .tree()
+            .map_err(|e| e.to_string())?;
+        if selections.is_empty() {
+            return Err("select at least one proposal".into());
+        }
+        let mut paths = BTreeSet::new();
+        let mut pending = Vec::new();
+        for selected in selections {
+            use cowiki_knowledge::governance::{digest, eligible_concept, prepare_review};
+            let patch = &selected.proposal.patch;
+            if !eligible_concept(&patch.path) || !paths.insert(patch.path.to_lowercase()) {
+                return Err("invalid or repeated governance proposal path".into());
+            }
+            let path = safe_repo_path(&patch.path)?;
+            let old = tree_bytes(&repo, &tree, path)?.unwrap_or_default();
+            let base = std::str::from_utf8(&old).map_err(|e| e.to_string())?;
+            if digest(base) != selected.base_digest {
+                return Err("Agent Change base differs from governance preview".into());
+            }
+            let change = prepare_review(patch, base, &selected.candidate, as_of)?;
+            let current = read_optional_file_no_follow(&root, path)?
+                .ok_or("proposal target no longer exists")?;
+            if current == change.after.as_bytes() {
+                continue;
+            }
+            if current != change.before.as_bytes() {
+                return Err("proposal target changed after preview".into());
+            }
+            pending.push(change);
+        }
+        let mut applied = Vec::new();
+        let result = (|| {
+            for change in &pending {
+                write_optional_file_cas(
+                    &root,
+                    Path::new(&change.path),
+                    Some(change.before.as_bytes()),
+                    Some(change.after.as_bytes()),
+                )?;
+                applied.push(change);
+            }
+            self.agent_change(space_slug, change_id)
+        })();
+        if let Err(cause) = result {
+            let mut rolled_back = Vec::new();
+            for c in applied.into_iter().rev() {
+                if write_optional_file_cas(
+                    &root,
+                    Path::new(&c.path),
+                    Some(c.after.as_bytes()),
+                    Some(c.before.as_bytes()),
+                )
+                .is_err()
+                {
+                    rolled_back.push(c.path.as_str())
+                }
+            }
+            return if rolled_back.is_empty() {
+                Err(cause)
+            } else {
+                Err(format!(
+                    "{cause}. Concurrent changes prevented rollback of {}",
+                    rolled_back.join(", ")
+                ))
+            };
+        }
+        result
+    }
+
+    pub fn stage_governance_as_new_change(
+        &self,
+        gate: &crate::agent_execution_gate::AgentExecutionGate,
+        space_slug: &str,
+        selections: &[cowiki_knowledge::governance::ReviewSelection],
+        as_of: &str,
+    ) -> Result<AgentChange, String> {
+        let change = {
+            let _mutation = self.lock_mutations()?;
+            self.create_agent_change_with_identity(
+                space_slug,
+                "Governance repair",
+                "CoWiki Governance",
+            )?
+        };
+        // A newly created change remains reviewable on failure. Never discard
+        // another editor's work if it changed concurrently with our preflight.
+        self.stage_governance_in_change(gate, space_slug, &change.id, selections, as_of)
+            .map_err(|e| {
+                format!(
+                    "Governance change {} remains open for review: {e}",
+                    change.id
+                )
+            })
+    }
+
     pub fn agent_change_worktree(
         &self,
         space_slug: &str,
@@ -1058,5 +1174,145 @@ fn worktree_name(change_id: &str) -> String {
 fn delete_reference_if_present(repo: &Repository, name: &str) {
     if let Ok(mut reference) = repo.find_reference(name) {
         let _ = reference.delete();
+    }
+}
+
+#[cfg(test)]
+mod governance_tests {
+    use super::*;
+    use crate::agent_execution_gate::{AgentExecutionGate, ExecutionScope};
+    use cowiki_knowledge::governance::{
+        digest, FilePatch, RepairProposal, ReviewSelection, TextEdit,
+    };
+    fn selection(base: &str, doc: &str) -> ReviewSelection {
+        let start = doc.find("unsupported").unwrap();
+        ReviewSelection {
+            base_digest: digest(base),
+            candidate: doc.into(),
+            proposal: RepairProposal {
+                rationale: "Restore supported text.".into(),
+                evidence: vec![],
+                patch: FilePatch {
+                    path: "guide.md".into(),
+                    preimage: digest(doc),
+                    edits: vec![TextEdit {
+                        start,
+                        end: start + 11,
+                        before: "unsupported".into(),
+                        after: "supported".into(),
+                    }],
+                },
+            },
+        }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn symlink_in_second_selection_cannot_write_through_or_partially_stage() {
+        let temp = tempfile::tempdir().unwrap();
+        let folder = temp.path().join("wiki");
+        std::fs::create_dir_all(&folder).unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        let gate = AgentExecutionGate::default();
+        let doc = "# Note\nunsupported\n";
+        for p in ["guide.md", "other.md"] {
+            std::fs::write(folder.join(p), doc).unwrap();
+        }
+        let open = engine.create_agent_change(&space.slug, "Test").unwrap();
+        let first = selection(doc, doc);
+        let mut second = first.clone();
+        second.proposal.patch.path = "other.md".into();
+        let victim = open.worktree_path.join("other.md");
+        std::fs::remove_file(&victim).unwrap();
+        std::os::unix::fs::symlink(folder.join("other.md"), &victim).unwrap();
+        assert!(engine
+            .stage_governance_in_change(
+                &gate,
+                &space.slug,
+                &open.id,
+                &[first, second],
+                "2026-11-23"
+            )
+            .is_err());
+        assert_eq!(
+            std::fs::read_to_string(open.worktree_path.join("guide.md")).unwrap(),
+            doc
+        );
+        assert_eq!(
+            std::fs::read_to_string(folder.join("other.md")).unwrap(),
+            doc
+        );
+    }
+    #[test]
+    fn stage_pending_then_discard_retry_or_merge_without_draft_writes() {
+        let temp = tempfile::tempdir().unwrap();
+        let folder = temp.path().join("wiki");
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        std::fs::create_dir_all(&folder).unwrap();
+        let space = engine.add_space("Notes", "notes", &folder).unwrap();
+        let gate = AgentExecutionGate::default();
+        let doc="---\ntype: Policy\ntitle: Guide\nverified: true\ncustom: intact\n---\n# Guide\nunsupported\n";
+        std::fs::write(folder.join("guide.md"), doc).unwrap();
+        let index = std::fs::read(folder.join(".git/index")).unwrap();
+        let day = "2026-11-23";
+        let new = engine
+            .stage_governance_as_new_change(&gate, &space.slug, &[selection(doc, doc)], day)
+            .unwrap();
+        let staged = std::fs::read_to_string(new.worktree_path.join("guide.md")).unwrap();
+        assert!(staged.contains("verified: false"));
+        assert_eq!(
+            std::fs::read_to_string(folder.join("guide.md")).unwrap(),
+            doc
+        );
+        assert_eq!(std::fs::read(folder.join(".git/index")).unwrap(), index);
+        engine.discard_agent_change(&space.slug, &new.id).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(folder.join("guide.md")).unwrap(),
+            doc
+        );
+        let open = engine.create_agent_change(&space.slug, "Test").unwrap();
+        let candidate = format!("{doc}Independent edit\n");
+        let path = open.worktree_path.join("guide.md");
+        let selected = selection(doc, &candidate);
+        let stage = || {
+            engine.stage_governance_in_change(
+                &gate,
+                &space.slug,
+                &open.id,
+                std::slice::from_ref(&selected),
+                day,
+            )
+        };
+        assert!(stage().is_err());
+        std::fs::write(&path, &candidate).unwrap();
+        let lease = gate
+            .reserve_start(ExecutionScope::background(&space.slug, &open.id))
+            .unwrap();
+        assert!(stage().is_err());
+        drop(lease);
+        stage().unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.ends_with("supported\nIndependent edit\n"));
+        assert!(after.contains("custom: intact"));
+        stage().unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), after);
+        std::fs::write(&path, "another person's edit").unwrap();
+        assert!(stage().is_err());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "another person's edit"
+        );
+        std::fs::write(&path, &after).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(folder.join("guide.md")).unwrap(),
+            doc
+        );
+        assert_eq!(std::fs::read(folder.join(".git/index")).unwrap(), index);
+        engine.merge_agent_change(&space.slug, &open.id).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(folder.join("guide.md")).unwrap(),
+            after
+        );
+        assert!(stage().is_err());
     }
 }
