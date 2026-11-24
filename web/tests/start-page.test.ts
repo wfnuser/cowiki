@@ -82,41 +82,38 @@ test('Enter that confirms an input-method candidate never sends', () => {
   }
 });
 
-test('a Space opens on its start page, not on its first file, and pages edit where clicked', () => {
+test('a Space opens on Home, not on its first file, and pages edit where clicked', () => {
   assert.match(mainLayout, /setActiveView\(\{ kind: 'home', workspaceSlug: ws\.slug \}\)/);
   assert.match(mainLayout, /setActiveView\(\{ kind: 'home', workspaceSlug: personal\.slug \}\)/);
   assert.doesNotMatch(mainLayout, /resolveWorkspaceSwitchTarget|firstConcept/);
-  // Personal: Journals. Shared (team, or published to Cloud): Home.
-  assert.match(mainLayout, /journalsAvailable && !sharedSpace \? 'journals' : 'overview'/);
+  // User decision 2026-11-24: every Space opens on Home; Journals is the stream.
+  assert.match(mainLayout, /const showOverview = !!activeWorkspace && onStartPage;/);
+  assert.match(mainLayout, /<JournalDay[\s\S]*entry=\{todayEntry\}/);
   assert.match(mainLayout, /onEditAt=\{canEditInline \?/);
   assert.match(mainLayout, /initialCursor=\{editStart && editStart\.path === activeView\.path/);
 });
 
-test('the team Home lists what waits for review and what changed', async () => {
+test('Home shows only what needs you, today and recent pages', async () => {
   const vite = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), appType: 'custom', logLevel: 'silent', server: { middlewareMode: true } });
   try {
     const { SpaceHome } = await vite.ssrLoadModule('/src/components/views/SpaceHome.tsx');
     const now = Date.UTC(2026, 10, 23, 12);
     const html = renderToStaticMarkup(React.createElement(SpaceHome, {
-      name: 'Research', now,
-      reviews: [{ id: 'c1', title: 'Summarize sources', meta: 'Agent · 3 files', agent: true, onOpen: () => {} }],
+      now,
+      needs: [
+        { id: 'tasks', count: 3, label: 'tasks due', onOpen: () => {} },
+        { id: 'reviews', count: 1, label: 'change to review', onOpen: () => {} },
+      ],
+      today: React.createElement('section', { 'aria-label': 'Today' }, 'Nov 23rd, 2026'),
       recent: [{ path: 'notes/Plan.md', title: 'Plan', modifiedAt: now / 1000 - 600 }],
       onOpenPage: () => {},
     }));
-    assert.match(html, /class="view-title[^"]*">Research</);
-    assert.match(html, /aria-label="Waiting for review"[\s\S]*Summarize sources[\s\S]*Agent · 3 files/);
-    assert.match(html, /aria-label="Recently edited"[\s\S]*Plan[\s\S]*notes[\s\S]*10m/);
+    assert.match(html, /aria-label="Needs you"[\s\S]*3<\/span> tasks due[\s\S]*1<\/span> change to review/);
+    assert.match(html, /aria-label="Today"[\s\S]*aria-label="Recently edited"[\s\S]*Plan[\s\S]*notes[\s\S]*10m/);
 
-    const empty = renderToStaticMarkup(React.createElement(SpaceHome, {
-      name: 'Research', now, reviews: [], recent: null, moreReviews: 0, onOpenPage: () => {},
-    }));
-    assert.match(empty, /Nothing is waiting for review\./);
-    // A Cloud Space in the browser cannot list edit times: no empty section.
-    assert.doesNotMatch(empty, /Recently edited/);
-    const cloud = renderToStaticMarkup(React.createElement(SpaceHome, {
-      name: 'Research', now, reviews: [], recent: null, moreReviews: 2, onSeeReviews: () => {}, onOpenPage: () => {},
-    }));
-    assert.match(cloud, /2 submissions from members/);
+    // Nothing to do: no line at all. A Cloud Space in the browser has no edit times.
+    const empty = renderToStaticMarkup(React.createElement(SpaceHome, { now, needs: [], recent: null, onOpenPage: () => {} }));
+    assert.doesNotMatch(empty, /Needs you|Recently edited/);
   } finally {
     await vite.close();
   }

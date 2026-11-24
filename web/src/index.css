@@ -340,6 +340,14 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
   --doc-h1-above: 14px; --doc-h2-above: 14px; --doc-h3-above: 14px; --doc-h4-above: 14px;
 }
 
+/* Home: a quiet line of what needs you, today's journal, recent pages. */
+.home-needs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 0; margin: 0 0 28px; color: var(--color-text-tertiary); font-size: 13px; }
+.home-needs button { border-radius: 4px; padding: 1px 3px; margin: 0 -3px; color: inherit; cursor: pointer; }
+.home-needs button:hover { color: var(--color-text-secondary); background: var(--color-bg-hover); }
+.home-needs-dot { padding: 0 8px; color: var(--color-text-faint); }
+.space-home .journal-day.is-today { min-height: 180px; }
+.home-recent { margin-top: 12px; }
+
 /* A row in a start-page list: icon, title, quiet meta on the right. */
 .home-row {
   display: flex;

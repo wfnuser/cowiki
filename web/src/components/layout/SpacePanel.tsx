@@ -53,12 +53,7 @@ interface SpacePanelProps {
   onPluginAction?: (id: string) => void;
   /** Open the Space modules & journal settings. */
   onModules?: () => void;
-  /**
-   * What the start page shows: Journals for a personal Space, the Home
-   * overview for a shared one. null while the Space's settings load.
-   */
-  home?: 'journals' | 'overview' | null;
-  /** A shared Space with the journal on lists Journals under Home. */
+  /** The Journal module is on: Journals (the stream of days) follows Home. */
   journals?: boolean;
 }
 
@@ -92,7 +87,6 @@ export function SpacePanel({
   onCollapse,
   readOnly = false,
   showHistory = true,
-  home = 'overview',
   journals = false,
 }: SpacePanelProps) {
   const [searchOpen, setSearchOpen] = useState(false);
@@ -125,10 +119,8 @@ export function SpacePanel({
   }
 
   const navItems: { tab: NavTab; icon: React.ReactNode; label: string; badge?: number; hide?: boolean; action?: string }[] = [
-    home === 'journals'
-      ? { tab: 'home', icon: <CalendarDays size={16} />, label: 'Journals' }
-      : { tab: 'home', icon: <House size={16} />, label: 'Home', hide: home === null },
-    { tab: 'journals', icon: <CalendarDays size={16} />, label: 'Journals', hide: home !== 'overview' || !journals },
+    { tab: 'home', icon: <House size={16} />, label: 'Home' },
+    { tab: 'journals', icon: <CalendarDays size={16} />, label: 'Journals', hide: !journals },
     ...pluginActions.map((action) => ({ tab: `plugin:${action.id}` as const, action: action.id,
       icon: action.icon === 'calendar' ? <CalendarDays size={16} /> : <FileText size={16} />, label: action.label })),
     { tab: 'tasks', icon: <CheckSquare size={16} />, label: 'Tasks', hide: !modules.includes('tasks') },

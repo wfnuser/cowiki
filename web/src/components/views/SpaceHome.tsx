@@ -1,15 +1,15 @@
-import { useState } from 'react';
-import { Bot, FilePenLine, FileText, GitPullRequest } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { FileText } from 'lucide-react';
 
-import { ViewEmpty, ViewHeader, ViewSectionHeading } from '@/components/ui/view-header';
+import { ViewEmpty, ViewSectionHeading } from '@/components/ui/view-header';
 import { shortAgo } from '@/lib/agent-session';
 
-export interface HomeReview {
+/** One thing Home asks you to do, e.g. "3 tasks due". Only non-zero ones are passed. */
+export interface HomeNeed {
   id: string;
-  title: string;
-  /** One short line: who and how much, e.g. "Agent · 3 files". */
-  meta: string;
-  agent: boolean;
+  count: number;
+  /** Words after the count: "tasks due", "cards to review". */
+  label: string;
   onOpen: () => void;
 }
 
@@ -21,11 +21,10 @@ export interface HomeRecentPage {
 }
 
 interface SpaceHomeProps {
-  name: string;
-  reviews: HomeReview[];
-  /** Pending reviews counted but not listed here (Cloud submissions). */
-  moreReviews?: number;
-  onSeeReviews?: () => void;
+  /** Due tasks, cards to review, changes waiting for review; empty hides the line. */
+  needs: HomeNeed[];
+  /** Today's journal day, written in place (when the Journal module is on). */
+  today?: ReactNode;
   /** null when this Space cannot list edit times (a Cloud Space in the browser). */
   recent: HomeRecentPage[] | null;
   onOpenPage: (path: string) => void;
@@ -33,52 +32,31 @@ interface SpaceHomeProps {
 }
 
 /**
- * A team Space's start page: what is waiting for someone to review, then what
- * changed lately. Like the overview of a Confluence space or a GitHub
- * repository, it is a place to start, not a page anyone writes.
+ * Every Space opens here. Small on purpose: one quiet line of what needs you,
+ * today's journal to write in, and the pages that changed lately.
  */
-export function SpaceHome({
-  name, reviews, moreReviews = 0, onSeeReviews, recent, onOpenPage, now: fixedNow,
-}: SpaceHomeProps) {
+export function SpaceHome({ needs, today, recent, onOpenPage, now: fixedNow }: SpaceHomeProps) {
   const [openedAt] = useState(() => Date.now());
   const now = fixedNow ?? openedAt;
-  const waiting = reviews.length + moreReviews;
   return (
-    <div style={{ width: 'min(760px, 100%)' }}>
-      <ViewHeader title={name} />
+    <div className="space-home">
+      {needs.length > 0 && (
+        <nav aria-label="Needs you" className="home-needs">
+          {needs.map((need, index) => (
+            <span key={need.id}>
+              {index > 0 && <span aria-hidden className="home-needs-dot">·</span>}
+              <button type="button" onClick={need.onOpen}>
+                <span className="tabular-nums text-text">{need.count}</span> {need.label}
+              </button>
+            </span>
+          ))}
+        </nav>
+      )}
 
-      <section aria-label="Waiting for review" className="mb-9">
-        <ViewSectionHeading meta={waiting || undefined}>Waiting for review</ViewSectionHeading>
-        {waiting === 0 ? (
-          <ViewEmpty className="justify-start px-1 py-3 text-left">Nothing is waiting for review.</ViewEmpty>
-        ) : (
-          <ul className="m-0 list-none divide-y divide-border-soft border-y border-border-soft p-0">
-            {reviews.map((review) => (
-              <li key={review.id}>
-                <button type="button" onClick={review.onOpen} className="home-row">
-                  <span className="home-row-icon">{review.agent ? <Bot size={15} /> : <FilePenLine size={15} />}</span>
-                  <span className="min-w-0 flex-1 truncate text-text">{review.title}</span>
-                  <span className="shrink-0 text-[12.5px] text-text-tertiary">{review.meta}</span>
-                </button>
-              </li>
-            ))}
-            {moreReviews > 0 && onSeeReviews && (
-              <li>
-                <button type="button" onClick={onSeeReviews} className="home-row">
-                  <span className="home-row-icon"><GitPullRequest size={15} /></span>
-                  <span className="min-w-0 flex-1 truncate text-text">
-                    {moreReviews} {moreReviews === 1 ? 'submission' : 'submissions'} from members
-                  </span>
-                  <span className="shrink-0 text-[12.5px] text-text-tertiary">Open Reviews</span>
-                </button>
-              </li>
-            )}
-          </ul>
-        )}
-      </section>
+      {today}
 
       {recent && (
-        <section aria-label="Recently edited">
+        <section aria-label="Recently edited" className="home-recent">
           <ViewSectionHeading>Recently edited</ViewSectionHeading>
           {recent.length === 0 ? (
             <ViewEmpty className="justify-start px-1 py-3 text-left">No pages yet.</ViewEmpty>

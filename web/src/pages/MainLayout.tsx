@@ -98,8 +98,9 @@ import { cloudPageCommentStore, desktopPageCommentStore } from '@/lib/page-comme
 import { openExternalUrl } from '@/external-links';
 import { TasksView } from '../components/views/TasksView';
 import { FlashcardsView } from '../components/views/FlashcardsView';
-import { JournalsView } from '../components/views/JournalsView';
-import { SpaceHome, type HomeReview } from '../components/views/SpaceHome';
+import { JournalDay, JournalsView } from '../components/views/JournalsView';
+import { SpaceHome, type HomeNeed } from '../components/views/SpaceHome';
+import { loadHomeCounts, type HomeCounts } from '@/lib/home-counts';
 import { SpaceFeaturesDialog } from '../components/SpaceFeaturesDialog';
 import { ObsidianImportDialog } from '../components/ObsidianImportDialog';
 import { ObsidianReaderContext, withObsidianReader, type ReaderCallbacks } from '../components/ObsidianReader';
@@ -115,7 +116,7 @@ import {
   type PersonalPreferences,
   type SpaceFeatures,
 } from '@/lib/space-features';
-import { dateKey } from '@/lib/journal';
+import { dateKey, journalTimeline } from '@/lib/journal';
 import { ensureDatePage } from '@/lib/date-page';
 import { BUILTIN_PLUGINS } from '@/plugins/builtins';
 import { createPluginHost, createSpaceActivationTracker, type PluginHostOptions, type PluginSnapshot } from '@/plugins/host';
@@ -1375,23 +1376,17 @@ export function MainLayout() {
     statusKnown: !desktop || !!activeCloudState,
   });
 
-  // The start page. A personal Space opens on Journals, like Logseq; a shared
-  // one (a team Space, or a local Space published to Cloud) opens on Home,
-  // which shows what waits for review and what changed. Undecided (null)
-  // while a local Space's settings or Cloud link are still loading.
+  // Every Space opens on Home: what needs you, today's journal (when the
+  // Journal module is on) and recently edited pages. Journals is the full
+  // stream of days. A shared Space (a team Space, or a local Space published
+  // to Cloud) also lists your unsent draft among the changes to review.
   const activeLocal = isLocalSpace(activeWorkspace);
   const journalsAvailable = pluginActions.some((action) => action.id === 'journal:today');
   const sharedSpace = !personal
     || (!!activeCloudState && activeCloudState !== 'unlinked' && activeCloudState !== 'unavailable');
-  const startDecided = !activeLocal
-    || ((activeFeaturesReady || !!featureLoadErrors[activeWorkspace?.id ?? '']) && !!activeCloudState);
-  const homeKind: 'journals' | 'overview' | null = !activeWorkspace || !startDecided
-    ? null
-    : journalsAvailable && !sharedSpace ? 'journals' : 'overview';
   const onStartPage = activeView === null || activeView.kind === 'home';
-  const showJournals = !!activeWorkspace && (
-    (activeView?.kind === 'journals' && journalsAvailable) || (onStartPage && homeKind === 'journals'));
-  const showOverview = !!activeWorkspace && onStartPage && homeKind === 'overview';
+  const showJournals = !!activeWorkspace && activeView?.kind === 'journals' && journalsAvailable;
+  const showOverview = !!activeWorkspace && onStartPage;
   const journalPaths = useMemo(() => activeFlatPages.map((page) => page.path), [activeFlatPages]);
   const journalSpaceSlug = activeWorkspace?.slug ?? '';
   const readJournal = useCallback(
@@ -1414,22 +1409,31 @@ export function MainLayout() {
       .catch(() => { if (live) setRecent({ spaceSlug: journalSpaceSlug, pages: [] }); });
     return () => { live = false; };
   }, [showOverview, activeLocal, journalSpaceSlug, pagesVersion, reviewRefreshKey]);
-  const homeReviews: HomeReview[] = desktop && activeWorkspace?.localPath ? [
-    ...(sharedSpace && activeWorkingDiffs.length > 0 ? [{
-      id: 'draft',
-      title: 'Your draft',
-      meta: `${activeWorkingDiffs.length} changed ${activeWorkingDiffs.length === 1 ? 'file' : 'files'} · not uploaded`,
-      agent: false,
-      onOpen: () => openReviewDetail({ kind: 'local-draft' }),
-    }] : []),
-    ...openAgentChanges.map((change) => ({
-      id: change.id,
-      title: change.title,
-      meta: `Agent · ${change.diffs.length} ${change.diffs.length === 1 ? 'file' : 'files'}`,
-      agent: true,
-      onOpen: () => openReviewDetail({ kind: 'local-agent', changeId: change.id }),
-    })),
-  ] : [];
+  const [homeCounts, setHomeCounts] = useState<HomeCounts & { spaceSlug: string } | null>(null);
+  const countTasks = activeFeaturesReady && activeFeatures.modules.tasks;
+  const countCards = activeFeaturesReady && activeFeatures.modules.flashcards;
+  const journalConfig = activeFeatures.journal;
+  useEffect(() => {
+    if (!showOverview || !activeLocal || !journalSpaceSlug || !activeFeaturesReady) return;
+    let live = true;
+    loadHomeCounts({ spaceSlug: journalSpaceSlug, journal: journalConfig, tasks: countTasks, cards: countCards })
+      .then((counts) => { if (live) setHomeCounts({ spaceSlug: journalSpaceSlug, ...counts }); })
+      .catch(() => { if (live) setHomeCounts(null); });
+    return () => { live = false; };
+  }, [showOverview, activeLocal, journalSpaceSlug, activeFeaturesReady, journalConfig, countTasks, countCards, pagesVersion]);
+  const counts = homeCounts?.spaceSlug === journalSpaceSlug ? homeCounts : null;
+  const changesToReview = (desktop && activeWorkspace?.localPath
+    ? openAgentChanges.length + (sharedSpace && activeWorkingDiffs.length > 0 ? 1 : 0)
+    : reviewCount);
+  const homeNeeds: HomeNeed[] = [
+    { id: 'tasks', count: counts?.tasks ?? 0, label: counts?.tasks === 1 ? 'task due' : 'tasks due', onOpen: () => handleTabChange('tasks') },
+    { id: 'cards', count: counts?.cards ?? 0, label: counts?.cards === 1 ? 'card to review' : 'cards to review', onOpen: () => handleTabChange('flashcards') },
+    { id: 'reviews', count: changesToReview, label: changesToReview === 1 ? 'change to review' : 'changes to review', onOpen: () => handleTabChange('reviews') },
+  ].filter((need) => need.count > 0);
+  const todayEntry = useMemo(
+    () => (journalsAvailable ? journalTimeline(journalConfig, journalPaths, new Date())[0] ?? null : null),
+    [journalsAvailable, journalConfig, journalPaths],
+  );
 
   // Determine active page/source for panel highlight
   const currentActivePage = activeView?.kind === 'page' ? activeView.slug : null;
@@ -1536,7 +1540,7 @@ export function MainLayout() {
             }}>
               <SpacePanel
                 workspace={activeWorkspace}
-                activeTab={showJournals && homeKind === 'journals' ? 'home' : showJournals ? 'journals' : showOverview ? 'home' : activeTab}
+                activeTab={showJournals ? 'journals' : showOverview ? 'home' : activeTab}
                 onTabChange={handleTabChange}
                 pages={activeWorkspace ? (spacePages[activeWorkspace.id] || []) : []}
                 sources={activeWorkspace ? (spaceSources[activeWorkspace.id] || []) : []}
@@ -1561,7 +1565,6 @@ export function MainLayout() {
                 // The journal's own entry is Journals (the start page), not a command.
                 pluginActions={pluginActions.filter((action) => action.id !== 'journal:today')}
                 onPluginAction={(id) => { void dispatchPluginAction(id); }}
-                home={homeKind}
                 journals={journalsAvailable}
                 onModules={isLocalSpace(activeWorkspace) ? () => setModulesDialogOpen(true) : undefined}
                 onCollapse={() => setSidebarLayout((current) => ({ ...current, collapsed: true }))}
@@ -2038,7 +2041,7 @@ export function MainLayout() {
               ) : location.pathname === '/discover' ? (
                 <DiscoverView />
 
-              /* Start page: Journals */
+              /* Journals: the stream of days */
               ) : showJournals && activeWorkspace ? (
                 <div style={{ position: 'absolute', inset: 0, overflow: 'auto' }}>
                   <div className="page-column">
@@ -2057,16 +2060,31 @@ export function MainLayout() {
                   </div>
                 </div>
 
-              /* Start page: Home overview */
+              /* Start page: Home */
               ) : showOverview && activeWorkspace ? (
-                <SpaceHome
-                  name={activeWorkspace.name}
-                  reviews={homeReviews}
-                  moreReviews={desktop ? 0 : reviewCount}
-                  onSeeReviews={() => handleTabChange('reviews')}
-                  recent={activeLocal ? (recent?.spaceSlug === activeWorkspace.slug ? recent.pages : []) : null}
-                  onOpenPage={(path) => { void selectPage(activeWorkspace, conceptIdFromPath(path), path); }}
-                />
+                <div style={{ position: 'absolute', inset: 0, overflow: 'auto' }}>
+                  <div className="page-column">
+                    <SpaceHome
+                      needs={homeNeeds}
+                      today={todayEntry && (
+                        <JournalDay
+                          key={activeWorkspace.slug + ':' + todayEntry.key}
+                          entry={todayEntry}
+                          today
+                          read={readJournal}
+                          write={writeJournal}
+                          createToday={async () => (await ensureTodayEntry(activeWorkspace)).path}
+                          onOpenPage={(path) => { void selectPage(activeWorkspace, conceptIdFromPath(path), path); }}
+                          onWikilink={(target) => { void openWikilink(target); }}
+                          loadAsset={canReadAssets ? loadAssetFrom : undefined}
+                          getPageSlugs={() => collectSlugs(spacePages[activeWorkspace.id] || [])}
+                        />
+                      )}
+                      recent={activeLocal ? (recent?.spaceSlug === activeWorkspace.slug ? recent.pages : []) : null}
+                      onOpenPage={(path) => { void selectPage(activeWorkspace, conceptIdFromPath(path), path); }}
+                    />
+                  </div>
+                </div>
               ) : null}
             </div>
             </CommentsProvider>

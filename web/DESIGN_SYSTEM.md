@@ -68,22 +68,24 @@ Notifications, Review details, Cloud pages) is built the same way, with
 
 ## Start page, editing and the top bar
 
-- **No Wiki entry.** The page tree already reaches every page. A Space opens
-  on its **start page**, never on its first file:
-  - a personal Space opens on **Journals**, as in Logseq: one stream you
-    scroll with the wheel, today first, earlier days loading below (seven
-    at a time; only days that have a note, plus today). Each day sits under
-    its date ("Nov 24th, 2026", serif 30px) with room below its text (today
-    the most) and a hairline between days; headings inside a day are 15px
-    sans section labels. An empty day is a single faint bullet, ready for
-    text. Opening Journals writes nothing; today's file is created from the
-    journal template on the first click.
-  - a shared Space (a team Space, or a local Space published to Cloud) opens
-    on **Home**: *Waiting for review* (your unsent draft, open Agent
-    changes, member submissions) and *Recently edited* pages, as hairline
-    rows. Journals stays in the navigation when the module is on.
-  - While a local Space's settings or Cloud link load, the start page and
-    its navigation row wait instead of guessing.
+- **No Wiki entry.** The page tree already reaches every page. Every Space
+  opens on **Home**, never on its first file (user decision 2026-11-24).
+  Home is small on purpose:
+  - one quiet line of what needs you: tasks due or overdue, cards to
+    review today, changes waiting for review (your unsent draft counts in a
+    shared Space). Only non-zero counts show; with nothing to do the line is
+    gone. Each count opens its view.
+  - **today's journal**, written in place (when the Journal module is on);
+  - **Recently edited** pages as hairline rows (local Spaces; a Cloud Space
+    in the browser cannot list edit times).
+- **Journals**, the next entry when the Journal module is on, is the full
+  stream, as in Logseq: scrolled with the wheel, today first, earlier days
+  loading below (seven at a time; only days that have a note, plus today).
+  Each day sits under its date ("Nov 24th, 2026", serif 30px) with room
+  below its text (today the most) and a hairline between days; headings
+  inside a day are 15px sans section labels. An empty day is a single faint
+  bullet, ready for text. Opening Home or Journals writes nothing; today's
+  file is created from the journal template on the first click.
 - **Click to edit**, as in Logseq; there is no Edit button. A single click
   in a page or journal day opens the editor with the caret where you
   clicked (matched through the text, `lib/click-to-edit.ts`). Links,

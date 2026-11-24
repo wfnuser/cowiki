@@ -83,15 +83,17 @@ const todayEntry = (page: Page) => page.getByRole('region', { name: todayLabel }
 // An empty day is one bullet ready for text, as in Logseq.
 const emptyDay = (page: Page) => todayEntry(page).getByRole('button', { name: 'Write in this day' });
 
-test('a personal Space opens on Journals; today is written where you click and survives disabling', async ({ page }) => {
+const homeButton = (page: Page) => page.getByRole('button', { name: 'Home', exact: true });
+
+test('a Space opens on Home with today to write in; Journals holds the earlier days', async ({ page }) => {
   const state = await desktop(page);
   state.files.set('Daily/2026-10-30', '# 2026-10-30\n\nAn earlier day\n');
   await page.goto(origin);
-  await expect(journalsButton(page)).toHaveAttribute('aria-current', 'page');
+  await expect(homeButton(page)).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('button', { name: 'Wiki', exact: true })).toHaveCount(0);
-  // Today first, earlier days below; opening Journals writes nothing.
+  // Home shows today only; opening it writes nothing.
   await expect(emptyDay(page)).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Friday, October 30, 2026' })).toContainText('An earlier day');
+  await expect(page.getByRole('region', { name: 'Friday, October 30, 2026' })).toHaveCount(0);
   expect(state.creates).toEqual([]);
 
   await emptyDay(page).click();
@@ -105,7 +107,10 @@ test('a personal Space opens on Journals; today is written where you click and s
   expect(state.creates).toEqual([today]);
   expect(state.files.get(today)).toBe('# 2026-11-01\n\nFrom my template 2026-11-01 and more');
 
-  // Clicking an earlier day edits that day in place.
+  // Journals is the stream: today first, earlier days below, each edited in place.
+  await journalsButton(page).click();
+  await expect(journalsButton(page)).toHaveAttribute('aria-current', 'page');
+  await expect(todayEntry(page)).toContainText('From my template 2026-11-01 and more');
   await page.getByText('An earlier day').click();
   await expect(page.locator('.cm-content')).toHaveText('An earlier day');
   await page.keyboard.press('Escape');
@@ -117,7 +122,7 @@ test('a personal Space opens on Journals; today is written where you click and s
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(journalsButton(page)).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Home', exact: true })).toBeVisible();
+  await expect(homeButton(page)).toBeVisible();
   expect(state.config().features.modules.later).toBe(false);
   expect(state.config().features.nextPlugin).toEqual(unknownSettings);
   expect(state.files.get(today)).toBe(savedBody);
@@ -127,7 +132,7 @@ test('a personal Space opens on Journals; today is written where you click and s
   await expect(page.getByRole('button', { name: 'Flashcards', exact: true })).toBeVisible();
 });
 
-test('a deep link opens its page; the root opens Journals without writing a note', async ({ page }) => {
+test('a deep link opens its page; the root opens Home without writing a note', async ({ page }) => {
   const state = await desktop(page);
   await page.goto(origin + '/personal/Welcome');
   await expect(page.locator('article')).toContainText('Welcome');
@@ -167,12 +172,13 @@ test('a disabled Space never offers Journals while its settings are still loadin
   try {
     await page.goto(origin);
     await reading.promise;
-    // The start page waits for the Space's settings instead of guessing.
+    // Home opens at once; module entries wait for the Space's settings.
+    await expect(homeButton(page)).toHaveAttribute('aria-current', 'page');
     await expect(page.getByRole('button', { name: 'Tasks', exact: true })).toHaveCount(0);
     await expect(journalsButton(page)).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Home', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Write in this day' })).toHaveCount(0);
   } finally { gate.resolve(); }
-  await expect(page.getByRole('button', { name: 'Home', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(homeButton(page)).toHaveAttribute('aria-current', 'page');
   await expect(journalsButton(page)).toHaveCount(0);
   await openModulesSettings(page);
   await expect(page.getByRole('checkbox', { name: /Daily journal|Daily Notes/i })).not.toBeChecked();

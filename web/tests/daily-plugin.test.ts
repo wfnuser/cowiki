@@ -315,7 +315,7 @@ test('saving only a local preference does not materialize Space defaults or rewr
     write: async () => { assert.fail('unchanged Space settings must not be rewritten'); } }, structuredClone(base), base);
 });
 
-test('the real sidebar renders contributed commands and Journals instead of a Wiki or Today entry', async () => {
+test('the real sidebar renders contributed commands, Home and Journals instead of a Wiki or Today entry', async () => {
   const { createServer } = await import('vite');
   const { fileURLToPath } = await import('node:url');
   const React = await import('react');
@@ -326,15 +326,11 @@ test('the real sidebar renders contributed commands and Journals instead of a Wi
     const props = { workspace: { id: 'a', slug: 'a', name: 'A' }, activeTab: 'wiki', pages: [], sources: [],
       isPersonal: true, modules: ['journal'], onCollapse: () => {} };
     const withoutContribution = renderToStaticMarkup(React.createElement(SpacePanel, props));
-    assert.doesNotMatch(withoutContribution, />Today<|>Wiki</);
+    assert.doesNotMatch(withoutContribution, />Today<|>Wiki<|>Journals</);
     assert.match(withoutContribution, />Home</);
-    const personal = renderToStaticMarkup(React.createElement(SpacePanel, { ...props, home: 'journals' }));
-    assert.match(personal, />Journals</);
-    assert.doesNotMatch(personal, />Home</);
-    const shared = renderToStaticMarkup(React.createElement(SpacePanel, { ...props, home: 'overview', journals: true }));
-    assert.match(shared, />Home<[\s\S]*>Journals</);
-    const deciding = renderToStaticMarkup(React.createElement(SpacePanel, { ...props, home: null }));
-    assert.doesNotMatch(deciding, />Home<|>Journals</);
+    // Every Space opens on Home; Journals follows it while the module is on.
+    const journals = renderToStaticMarkup(React.createElement(SpacePanel, { ...props, journals: true }));
+    assert.match(journals, />Home<[\s\S]*>Journals</);
     const contributed = renderToStaticMarkup(React.createElement(SpacePanel, { ...props,
       pluginActions: [{ id: 'example:open', label: 'Example action', icon: 'file' }], onPluginAction: () => {} }));
     assert.match(contributed, />Example action</);

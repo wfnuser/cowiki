@@ -162,6 +162,7 @@ test('a journal day is written in place without moving', async ({ page }) => {
   const day = '---\ntype: Journal\n---\n\n# Monday, November 23, 2026\n\n## Plan\n- Alpha item\n- Bravo item\n\n## Notes\nCharlie note\nDelta line\n';
   await setup(page, BODY, [['Daily/2026-11-23', day], ['Daily/2026-11-20', '# 2026-11-20\n\nEcho earlier day\n']]);
   await page.goto(origin);
+  await page.getByRole('button', { name: 'Journals', exact: true }).click();
   const yesterday = page.getByRole('region', { name: 'Monday, November 23, 2026' });
   await expect(yesterday.getByRole('heading', { name: 'Nov 23rd, 2026' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Tuesday, November 24, 2026' }).getByRole('button', { name: 'Write in this day' })).toBeVisible();

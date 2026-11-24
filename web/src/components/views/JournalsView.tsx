@@ -75,7 +75,7 @@ export function JournalsView({ config, paths, now = () => new Date(), ...day }: 
   );
 }
 
-type DayProps = Omit<JournalsViewProps, 'config' | 'paths' | 'now'> & { entry: JournalEntry; today: boolean };
+export type JournalDayProps = Omit<JournalsViewProps, 'config' | 'paths' | 'now'> & { entry: JournalEntry; today: boolean };
 
 interface EditSession {
   head: string;
@@ -83,9 +83,10 @@ interface EditSession {
   cursor: number;
 }
 
-function JournalDay({
+/** One day of the journal, read and written in place (Journals, and Home's today). */
+export function JournalDay({
   entry, today, read, write, createToday, onOpenPage, onWikilink, loadAsset, getPageSlugs,
-}: DayProps) {
+}: JournalDayProps) {
   // undefined while loading; null when today's file does not exist yet.
   const [body, setBody] = useState<string | null | undefined>(entry.missing ? null : undefined);
   const [session, setSession] = useState<EditSession | null>(null);
