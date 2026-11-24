@@ -80,6 +80,10 @@ The frozen selection favored an erroneous alert or edit, a missed finding, and d
 
 ## Limitations
 
+**After the registered evaluation closed.** Qiyu checked the 30-case label-audit sample and found no label problems. A product trace located two evidence-handling defects: the packet could omit named revision sources, and the citation could omit the adjacent withdrawal notice. Fix `ef9f93a` addresses both. A separate post-hoc rules run scored 0/7 retired and 0/6 revision findings. Each cache-only model arm matched 2/2 replayable retired findings (5 unavailable) and 0/5 replayable revision findings (1 unavailable). All 13 candidate assertions were reworded, and the history guard still depends on deterministic entailment. The registered counts and confidence intervals above remain final. [Post-hoc trace and coverage](held-out/POSTHOC_FIX.md)
+
+**Limitations recorded at freeze.**
+
 - Rules caught 0/24 findings in the paraphrased-contradiction cases. Each M2 model arm caught 23/24, and single-pass caught 20/24. All five methods scored 0/7 exact retired-claim findings and 0/6 exact revision-regression findings. This test provides no affirmative detection evidence for the retired-claim guard on CPython.
 - A paired two-line inference can be diagnosed as two plausible one-line findings and score an exact recall of zero for that finding. The percentile and queue cases below the results tables illustrate this mismatch. The reported scores retain the registered span requirement.
 - The benchmark uses constructed edits to two public documentation corpora. Only CPython is held out. Sixteen document families offer limited precision, particularly for rare issue codes. Percentile intervals can be zero-width or undefined in sparse strata. Multiple per-type intervals are descriptive.
