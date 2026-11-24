@@ -239,7 +239,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
                 <kbd className="rounded border border-on-accent/40 px-1 text-caption font-normal">Space</kbd>
               </button>
               <button type="button" onClick={advance} className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-small text-text-secondary transition-colors hover:bg-bg-hover">
-                Skip <kbd className="rounded border border-border px-1 text-caption text-text-tertiary">n</kbd>
+                Skip <kbd className="rounded border border-border px-1 text-caption text-text-tertiary">N</kbd>
               </button>
             </>
           ) : SCORES.map((item) => (
@@ -247,10 +247,14 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
               key={item.score}
               type="button"
               onClick={() => rate(item.score)}
+              title={`${item.label} (${item.keys[0].toUpperCase()})`}
               className="flex min-w-28 flex-col items-center gap-0.5 rounded-lg border border-border bg-panel px-3 py-2 text-small font-medium text-text transition-colors hover:border-border-hover hover:bg-bg-hover"
             >
-              {item.label}
-              <span className="text-caption font-normal text-text-tertiary">{intervals[item.score]} · {item.keys[0]}</span>
+              <span className="flex items-center gap-1.5">
+                {item.label}
+                <kbd className="rounded border border-border px-1 text-caption font-normal text-text-faint">{item.keys[0].toUpperCase()}</kbd>
+              </span>
+              <span className="text-meta font-normal tabular-nums text-text-tertiary">{intervals[item.score]}</span>
             </button>
           ))}
         </div>

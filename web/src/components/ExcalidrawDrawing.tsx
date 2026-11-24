@@ -341,10 +341,10 @@ export function ExcalidrawReader({ title, body }: { title: string; body: string 
 
 const toolButton: React.CSSProperties = {
   marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 9px',
-  border: `1px solid ${C.line}`, borderRadius: 7, background: C.panel, color: C.ink2, fontSize: 12, cursor: 'pointer',
+  border: `1px solid ${C.line}`, borderRadius: 6, background: C.panel, color: C.ink2, fontSize: 12, cursor: 'pointer',
 };
 
 const notice: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 160, padding: 16,
-  border: `1px dashed ${C.line}`, borderRadius: 11, color: C.muted, fontSize: 13,
+  border: `1px dashed ${C.line}`, borderRadius: 12, color: C.muted, fontSize: 13,
 };

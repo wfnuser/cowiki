@@ -292,7 +292,7 @@ function ActionButton({
         alignItems: 'center',
         gap: 6,
         border: subtle ? `1px solid ${C.line}` : 'none',
-        borderRadius: 7,
+        borderRadius: 6,
         padding: '8px 11px',
         background: subtle ? C.panel : C.ink,
         color: subtle ? C.muted : C.onAccent,

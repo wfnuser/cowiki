@@ -231,7 +231,7 @@ function SpaceTile({
           {active && (
             <div style={{
               position: 'absolute', left: -11, top: '50%', transform: 'translateY(-50%)',
-              width: 3, height: 20, borderRadius: 3, background: C.ink2,
+              width: 3, height: 20, borderRadius: 4, background: C.ink2,
             }} />
           )}
           <button

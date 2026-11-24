@@ -15,6 +15,7 @@ import {
   spaceMonogramColor,
   terminalTheme,
 } from '../src/lib/design.ts';
+import { cn } from '../src/lib/utils.ts';
 
 const css = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
 const srcDir = fileURLToPath(new URL('../src/', import.meta.url));
@@ -313,4 +314,26 @@ test('transitions name what they animate', () => {
   const all = sourceFiles().filter(({ source }) => /transition-all\b|transition: ?['"]all\b/.test(source)).map(({ rel }) => rel);
   assert.deepEqual(all, []);
   assert.doesNotMatch(css, /transition: ?all\b/);
+});
+
+test('corners use the radius scale', () => {
+  // DESIGN_SYSTEM.md, "Radius": 4 chips · 6 rows and controls · 8 menus and
+  // panels · 10 cards · 12 dialogs and tiles · 999 pills; 20 only for the
+  // welcome screen's 68px mark.
+  const scale = new Set([0, 2, 4, 6, 8, 10, 12, 20, 999]);
+  const off: string[] = [];
+  for (const { rel, source } of sourceFiles()) {
+    for (const match of source.matchAll(/borderRadius: ?(\d+)\b(?!%|px)/g)) {
+      if (!scale.has(Number(match[1]))) off.push(`${rel}: borderRadius ${match[1]}`);
+    }
+  }
+  assert.deepEqual(off, []);
+});
+
+test('cn() keeps a type-scale size next to a text colour', () => {
+  // tailwind-merge must know text-meta is a size, not a colour.
+  assert.equal(cn('text-meta', 'text-text-tertiary'), 'text-meta text-text-tertiary');
+  assert.equal(cn('h-7 text-meta', 'text-text-tertiary hover:text-text'), 'h-7 text-meta text-text-tertiary hover:text-text');
+  assert.equal(cn('text-small', 'text-body'), 'text-body');
+  assert.equal(cn('text-text', 'text-red'), 'text-red');
 });

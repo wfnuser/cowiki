@@ -60,7 +60,7 @@ export const radii = {
   md: 8,
   lg: 10,
   xl: 12,
-  tile: 13,
+  tile: 12,
   full: 999,
 } as const;
 

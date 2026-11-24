@@ -102,7 +102,7 @@ function CommentThread({
 const smallBtn: React.CSSProperties = {
   background: 'none', border: 'none', cursor: 'pointer',
   fontSize: 11, color: C.muted, display: 'flex', alignItems: 'center', gap: 3,
-  padding: '2px 4px', borderRadius: 3,
+  padding: '2px 4px', borderRadius: 4,
 };
 
 /* ── New comment composer (appears when clicking line gutter) ── */

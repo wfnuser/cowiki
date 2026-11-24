@@ -314,6 +314,15 @@ audit found fifteen sizes (10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 14.5,
 | `text-lead` | 16px | Dialog titles, the search field, a flashcard face |
 | `text-title` | 22px | View titles (`.view-title`) |
 
+`cn()` (`lib/utils.ts`) teaches tailwind-merge these names; without that it
+reads `text-meta` as a colour and drops it beside `text-text-tertiary`.
+
+### Radius
+
+4 chips and keys · 6 rows, buttons, inputs · 8 menus, popovers, panels,
+diff files · 10 cards · 12 dialogs and Space tiles · 999 pills. (20 only for
+the welcome screen's large mark.) Inline `borderRadius` values are checked.
+
 Larger sizes are display type (journal dates 30px, page titles 36px, the
 welcome screen) and use the serif. Page and journal text uses the
 `--doc-*` tokens, not this scale. Line height comes from the element

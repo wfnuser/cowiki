@@ -42,7 +42,7 @@ function Avatar({ id, name, size = 24 }: { id: string; name: string; size?: numb
 }
 
 const ghostBtn: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 8px', borderRadius: 7,
+  display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 8px', borderRadius: 6,
   border: 'none', background: 'transparent', color: C.muted, fontSize: 13, fontWeight: 550, cursor: 'pointer',
 };
 
@@ -306,7 +306,7 @@ function CommentsSession({ store, pageSlug, source, articleRef, openPanel = fals
       {enabled && pending && !composing && (
         <div style={{
           position: 'fixed', zIndex: 60, top: pending.y - 46, left: pending.x - 52,
-          display: 'flex', alignItems: 'center', background: C.ink, borderRadius: 9, padding: 4,
+          display: 'flex', alignItems: 'center', background: C.ink, borderRadius: 8, padding: 4,
           boxShadow: shadows.comment,
         }}>
           <button onMouseDown={(e) => { e.preventDefault(); startComment(); }} style={{
@@ -367,7 +367,7 @@ function makeBlock(tag: string) {
       <span
         onClick={(e) => { e.stopPropagation(); ctx!.focusLine(line!); }}
         style={{
-          cursor: 'pointer', borderRadius: 3, padding: '1px 1px',
+          cursor: 'pointer', borderRadius: 4, padding: '1px 1px',
           background: `color-mix(in srgb, ${C.accent} ${hl.active ? 16 : 7}%, transparent)`,
           boxShadow: hl.active
             ? `inset 0 -2px 0 ${C.accent}`
@@ -615,7 +615,7 @@ function Composer({
       )}
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
         <Avatar id={meId} name={meName} size={22} />
-        <div style={{ flex: 1, position: 'relative', border: `1.5px solid ${C.accent}`, borderRadius: 9, background: C.panel }}>
+        <div style={{ flex: 1, position: 'relative', border: `1.5px solid ${C.accent}`, borderRadius: 8, background: C.panel }}>
           <textarea ref={ref} value={value} placeholder={placeholder} rows={2} autoFocus={autoFocus} disabled={sending}
             onChange={(e) => sync(e.target.value, e.target.selectionStart)}
             style={{ width: '100%', border: 'none', outline: 'none', resize: 'none', padding: '8px 10px', fontSize: 13, lineHeight: 1.5, color: C.ink, fontFamily: fonts.sans, boxSizing: 'border-box', background: 'transparent' }} />
@@ -624,7 +624,7 @@ function Composer({
             <div style={{ flex: 1 }} />
             <button onClick={onCancel} disabled={sending} style={{ ...ghostBtn, padding: '5px 9px' }}>Cancel</button>
             <button onClick={() => void submit()} disabled={!value.trim() || sending}
-              style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 7, border: 'none', background: value.trim() ? C.accent : C.line, color: value.trim() ? C.onAccent : C.faint, fontSize: 13, fontWeight: 600, cursor: value.trim() ? 'pointer' : 'default' }}>
+              style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 6, border: 'none', background: value.trim() ? C.accent : C.line, color: value.trim() ? C.onAccent : C.faint, fontSize: 13, fontWeight: 600, cursor: value.trim() ? 'pointer' : 'default' }}>
               {sending ? 'Sending…' : primaryLabel}
             </button>
           </div>

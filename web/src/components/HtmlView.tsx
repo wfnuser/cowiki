@@ -67,7 +67,7 @@ function ModeButton({
       onClick={onClick}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 8px',
-        border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+        border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600,
         background: active ? C.accentSoft : 'transparent', color: active ? C.accent : C.faint,
       }}
     >

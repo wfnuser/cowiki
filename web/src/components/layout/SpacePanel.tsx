@@ -578,7 +578,7 @@ function CollapseButton({ onClick }: { onClick: () => void }) {
       aria-label="Collapse sidebar"
       title="Collapse sidebar"
       style={{
-        width: 28, height: 28, padding: 0, border: 'none', borderRadius: 7,
+        width: 28, height: 28, padding: 0, border: 'none', borderRadius: 6,
         background: 'transparent', color: C.faint, cursor: 'pointer', flexShrink: 0,
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       }}

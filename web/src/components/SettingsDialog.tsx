@@ -554,7 +554,7 @@ export function SettingsDialog({
         </section>
         <section className="settings-section">
           <h3 className="settings-heading">Default Agent</h3>
-          <p className="-mt-1.5 mb-2.5 text-small text-text-tertiary">New sessions start with it. The Agent you use last becomes the default.</p>
+          <p className="-mt-1.5 mb-2.5 text-small text-text-tertiary">New sessions start with it; the last one you use becomes the default.</p>
           <div className="grid grid-cols-2 gap-1.5">
             {SUPPORTED_AGENTS.map((agent) => {
               const selected = defaultAgent === agent;
@@ -584,7 +584,7 @@ export function SettingsDialog({
             {space && <PluginSettings plugins={space.plugins} features={space.features} preferences={preferences} onFeatures={() => {}} onPreferences={onPreferencesChange} part="preferences" />}
             <SettingSwitch
               label="Save checkpoints automatically"
-              description="After 5 minutes without changes, and when CoWiki quits. Kept in History; never committed or shared."
+              description="After 5 quiet minutes and when CoWiki quits. Kept in History on this computer."
               checked={preferences.autoCheckpoint}
               onChange={(autoCheckpoint) => onPreferencesChange({ ...preferences, autoCheckpoint })}
             />

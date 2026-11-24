@@ -300,7 +300,7 @@ export const PageEditor = forwardRef<PageEditorHandle, {
 
       {externalConflict && <div style={{
         position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 12,
-        display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 9,
+        display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8,
         background: C.panel, border: `1px solid ${C.redSoft}`, boxShadow: shadows.overlay,
         font: `500 12px ${fonts.sans}`, color: C.ink2,
       }}>

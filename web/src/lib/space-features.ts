@@ -11,12 +11,12 @@ export const MODULES: Array<{ id: Exclude<ModuleId, 'journal'>; label: string; d
   {
     id: 'tasks',
     label: 'Tasks',
-    description: 'Gather checkbox tasks from every page into Today, This week and Upcoming.',
+    description: 'Checkboxes from every page, sorted by day.',
   },
   {
     id: 'flashcards',
     label: 'Flashcards',
-    description: 'Review bullets tagged #card with spaced repetition. Review history stays on this device.',
+    description: 'List items tagged #card, reviewed like Anki. Progress stays on this device.',
   },
 ];
 

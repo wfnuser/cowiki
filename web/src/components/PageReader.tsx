@@ -141,7 +141,7 @@ const readOnlyBannerStyle: React.CSSProperties = {
   marginBottom: 24,
   padding: '10px 14px',
   border: `1px solid ${C.line}`,
-  borderRadius: 9,
+  borderRadius: 8,
   background: C.sidebar,
   color: C.ink2,
   fontSize: 13,

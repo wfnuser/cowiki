@@ -1644,7 +1644,7 @@ export function MainLayout() {
                     onClick={() => setSidebarLayout((current) => ({ ...current, collapsed: false }))}
                     style={{
                       width: 28, height: 28, padding: 0, marginRight: 4,
-                      border: 'none', borderRadius: 7, background: 'transparent',
+                      border: 'none', borderRadius: 6, background: 'transparent',
                       color: C.faint, cursor: 'pointer', flexShrink: 0,
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     }}
@@ -2517,7 +2517,7 @@ function LocalSpaceEmptyState({
           onClick={onOpenFolder}
           disabled={creating}
           style={{
-            minWidth: 220, height: 58, padding: '0 24px', border: 'none', borderRadius: 14,
+            minWidth: 220, height: 58, padding: '0 24px', border: 'none', borderRadius: 12,
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 18,
             background: C.accent, color: C.onAccent, fontSize: 16, fontWeight: 700,
             cursor: creating ? 'default' : 'pointer', opacity: creating ? 0.7 : 1,

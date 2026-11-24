@@ -165,7 +165,7 @@ const triggerStyle: React.CSSProperties = {
   gap: 7,
   padding: '0 8px',
   border: 'none',
-  borderRadius: 7,
+  borderRadius: 6,
   color: C.ink2,
   fontSize: 13,
   fontWeight: 500,

@@ -3,7 +3,7 @@ import { ensureDatePage } from '../lib/date-page.ts';
 import { journalPagePath } from '../lib/journal.ts';
 
 export const dailyNotesPlugin: BuiltinPlugin = {
-  id: 'journal', label: 'Daily journal', description: 'Journals: today first, earlier days as you scroll.',
+  id: 'journal', label: 'Daily journal', description: 'One page a day; today first, earlier days as you scroll.',
   enabled: (features) => features.modules.journal,
   setEnabled: (features, enabled) => ({ ...features, modules: { ...features.modules, journal: enabled } }),
   actions: [{ id: 'today', label: 'Today', icon: 'calendar', run: async ({ pages, features, now }) => {

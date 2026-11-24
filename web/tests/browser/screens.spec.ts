@@ -180,5 +180,6 @@ for (const scheme of ['light', 'dark'] as const) {
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: /Draft/ }).first().click(); await shot('17-status-menu');
     await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Agent', exact: true }).click(); await shot('18-agent');
   });
 }
