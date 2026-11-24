@@ -413,6 +413,13 @@ impl LocalEngine {
         result
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "Review UI integration will call this staging entry point"
+        )
+    )]
     pub fn stage_governance_as_new_change(
         &self,
         gate: &crate::agent_execution_gate::AgentExecutionGate,
