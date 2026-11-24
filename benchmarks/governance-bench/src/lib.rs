@@ -305,3 +305,5 @@ pub fn semantic_findings(issues: &[cowiki_knowledge::governance::Issue]) -> Vec<
         })
         .collect()
 }
+
+pub mod evaluation;

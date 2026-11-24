@@ -74,3 +74,49 @@ fn record_and_replay_one_real_http_exchange() {
     provider.model = "other".into();
     assert!(provider.request(&p, Task::SinglePass).is_err());
 }
+
+#[test]
+fn failed_attempt_is_charged_once_and_replayed_offline() {
+    let data = load_dataset(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pilot"),
+        "dev",
+    )
+    .unwrap();
+    let case = &data.cases[0];
+    let packet = evidence_packet(&data.families[&case.family], case).unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let socket = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut provider = RemoteVerifier {
+        endpoint: format!("http://{}", socket.local_addr().unwrap()),
+        model: "mock".into(),
+        api_key: None,
+        cache_dir: cache.path().into(),
+        mode: CacheMode::Record,
+    };
+    let worker = std::thread::spawn(move || {
+        let (mut s, _) = socket.accept().unwrap();
+        s.write_all(
+            b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        )
+        .unwrap()
+    });
+    let mut attempt = Attempt::default();
+    assert!(provider
+        .request_accounted(&packet, Task::Verify, &mut attempt)
+        .is_err());
+    worker.join().unwrap();
+    assert_eq!((attempt.usage.calls, attempt.usage.http_calls), (1, 1));
+    assert!(attempt.usage.estimated);
+    provider.mode = CacheMode::Replay;
+    assert!(provider
+        .request_accounted(&packet, Task::Verify, &mut attempt)
+        .is_err());
+    assert_eq!(
+        (
+            attempt.usage.calls,
+            attempt.usage.http_calls,
+            attempt.usage.cache_hits
+        ),
+        (1, 0, 1)
+    );
+}

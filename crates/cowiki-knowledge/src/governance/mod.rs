@@ -83,7 +83,12 @@ fn claims(path: &str, text: &str) -> Result<Vec<Claim>, String> {
         let start = offset;
         offset += raw.len();
         let value = raw.trim();
-        if value.is_empty() || code.iter().any(|r| r.start < offset && start < r.end) {
+        if value.is_empty()
+            || code.iter().any(|r| {
+                r.start <= start + raw.len() - raw.trim_start().len()
+                    && r.end >= start + raw.trim_end().len()
+            })
+        {
             continue;
         }
         if value.starts_with('#') {
@@ -238,3 +243,5 @@ mod repair;
 pub use repair::*;
 #[cfg(feature = "remote-verifier")]
 pub mod remote;
+
+pub mod protocol;

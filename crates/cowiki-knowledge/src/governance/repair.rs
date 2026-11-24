@@ -136,6 +136,9 @@ pub fn maintain(
         scratch.input.candidate = next;
         scratch.changed = changed_claims(&scratch.input)?;
         proposals.push(proposal);
+        if !detector.allows_scratch_recheck() {
+            break;
+        }
         issues = interpret(&scratch, &detector.classify(&scratch)?)?;
     }
     Ok(MaintenanceResult {

@@ -28,3 +28,17 @@ A separate authoring session received the taxonomy, schema, labeling requirement
 Reviewers inspect the separate stratified audit sheet. Developers may inspect dev cases. Verify a held-out delivery from its directory with `sha256sum -c SHA256SUMS`. Freeze the method configuration before the single scored held-out run. Keep original data immutable and version any later human adjudication separately.
 
 The independently authored split has 64 development edits in eight CMake command families (29 valid) and 160 held-out edits in sixteen CPython module families (77 valid, 48.1%). The 30-case reviewer export is kept outside the checkout. The full authoring data card and held-out provenance are for reviewers and post-freeze analysis. The SHA-256 of the held-out `SHA256SUMS` is `d5ff4e3c358355c2bceb4c26ff8812081eaeb1f63b741b8c719b4deda3db9397`.
+
+## Course comparisons
+
+| Verifier | Course arm |
+|---|---|
+| `none` | Accept the candidate verbatim. |
+| `single-pass` | Ask the model once for findings and a repair. |
+| `rules` | M2 with deterministic classification and bounded scratch repair. |
+| `remote` | M2 with a batched model classification and local proposal validation. |
+| `both` | Full M2. Queue findings from either detector and withhold patches on disputed claims. |
+
+For model arms, enable `--features remote-verifier` and set `COWIKI_VERIFIER_URL` (full chat-completions URL), `COWIKI_VERIFIER_MODEL` (pin the deployment revision), `COWIKI_VERIFIER_CACHE_DIR` and, for authenticated servers, `COWIKI_VERIFIER_API_KEY`. Use `--cache record` to record misses, or `--cache replay` to require disk records. Both successes and terminal provider failures replay without HTTP. Remote and both share the same verification request. A replay counts the original logical call and reports zero physical calls. A transport failure without provider usage conservatively charges the reserved budget and marks the estimate.
+
+All methods receive one immutable, label-blind packet per case. Source retrieval reserves 800 active and 400 retired retrieval tokens. The common packing step alternates active and retired evidence, ranks within those sets by word overlap, and admits up to 12 judgment pairs. It reserves the longer system prompt and uses a conservative upper bound of one token per UTF-8 byte plus chat framing. The per-case ceiling is one call, 4,096 total tokens, 768 completion tokens. An oversized mandatory input yields a pre-dispatch failure. Rows include the packet digest, unresolved findings, timing, usage and errors. The program still writes scored outcomes on method failure and exits unsuccessfully. The issue-code table uses one-to-one exact code and two-sided span matching. Repair success uses the listed acceptable full texts. Unlisted but defensible wording requires independent human adjudication. A primary challenge stratum owns each case's cost.

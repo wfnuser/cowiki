@@ -21,6 +21,10 @@ pub struct Verdict {
 }
 
 pub trait ConflictDetector {
+    /// Remote verification consumes the shared call allowance on its first batch.
+    fn allows_scratch_recheck(&self) -> bool {
+        true
+    }
     fn classify(&self, bundle: &EvidenceBundle) -> Result<Vec<Verdict>, String>;
 }
 
@@ -167,7 +171,7 @@ pub fn historical_context(text: &str) -> bool {
         .any(|p| text.starts_with(p))
 }
 
-pub fn rule_relation(candidate: &str, evidence: &str) -> Relation {
+fn sentence_relation(candidate: &str, evidence: &str) -> Relation {
     if historical_context(candidate) {
         return Relation::ScopeDifference;
     }
@@ -199,6 +203,60 @@ pub fn rule_relation(candidate: &str, evidence: &str) -> Relation {
         Relation::Entailment
     } else {
         Relation::Insufficient
+    }
+}
+
+// Split only at sentence boundaries. A decimal, a version number or an
+// identifier containing punctuation must remain a single claim.
+fn sentences(text: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    for (i, ch) in text.char_indices() {
+        let end = i + ch.len_utf8();
+        if matches!(ch, '.' | '!' | '?') && text[end..].starts_with(char::is_whitespace) {
+            parts.push(text[start..end].trim());
+            start = end;
+        }
+    }
+    if !text[start..].trim().is_empty() {
+        parts.push(text[start..].trim())
+    }
+    parts
+}
+
+pub fn rule_relation(candidate: &str, evidence: &str) -> Relation {
+    if historical_context(candidate) {
+        return Relation::ScopeDifference;
+    }
+    let direct = sentence_relation(candidate, evidence);
+    if matches!(
+        direct,
+        Relation::Entailment | Relation::Contradiction | Relation::ScopeDifference
+    ) {
+        return direct;
+    }
+    let source = sentences(evidence);
+    let parts = sentences(candidate);
+    if parts.len() == 1 && source.len() == 1 {
+        return direct;
+    }
+    let mut all_entailed = !parts.is_empty();
+    for claim in parts {
+        let relations = source
+            .iter()
+            .map(|s| sentence_relation(claim, s))
+            .collect::<Vec<_>>();
+        if relations.contains(&Relation::Contradiction)
+            && !relations.contains(&Relation::Entailment)
+        {
+            return Relation::Contradiction;
+        }
+        all_entailed &= relations.contains(&Relation::Entailment);
+    }
+    if all_entailed {
+        Relation::Entailment
+    } else {
+        direct
     }
 }
 
@@ -340,12 +398,15 @@ pub fn interpret(bundle: &EvidenceBundle, verdicts: &[Verdict]) -> Result<Vec<Is
             {
                 continue;
             }
-            if let Some(withdrawn) = prior.iter().find(|p| p.text.eq_ignore_ascii_case(&c.text)) {
+            if prior
+                .iter()
+                .any(|p| rule_relation(&c.text, &p.text) == Relation::Entailment)
+            {
                 issues.insert(Issue {
                     severity: Severity::Warning,
                     code: "revision_regression".into(),
                     location: c.location.clone(),
-                    evidence: Some(withdrawn.location.clone()),
+                    evidence: Some(e.claim.location.clone()),
                     message: "Restores a claim replaced by a source-backed correction.".into(),
                 });
             }
