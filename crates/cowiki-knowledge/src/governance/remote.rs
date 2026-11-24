@@ -19,6 +19,50 @@ pub enum CacheMode {
     Replay,
 }
 
+/// Provider accounting can include session overhead. The evidence packet stays
+/// identical across arms regardless of these accounting and transport limits.
+#[derive(Debug, Clone, Copy)]
+pub struct RequestLimits {
+    pub total_tokens: u64,
+    pub output_tokens: u64,
+    pub timeout_secs: u64,
+}
+
+impl Default for RequestLimits {
+    fn default() -> Self {
+        Self {
+            total_tokens: TOKEN_LIMIT,
+            output_tokens: OUTPUT_LIMIT,
+            timeout_secs: 30,
+        }
+    }
+}
+
+impl RequestLimits {
+    fn from_env() -> Result<Self, String> {
+        fn setting(name: &str, default: u64, max: u64) -> Result<u64, String> {
+            match env::var(name) {
+                Err(env::VarError::NotPresent) => Ok(default),
+                Ok(s) => s
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|v| (1..=max).contains(v))
+                    .ok_or_else(|| format!("{name} must be between 1 and {max}")),
+                Err(_) => Err(format!("invalid {name}")),
+            }
+        }
+        let limits = Self {
+            total_tokens: setting("COWIKI_VERIFIER_TOTAL_TOKENS", TOKEN_LIMIT, 1_000_000)?,
+            output_tokens: setting("COWIKI_VERIFIER_OUTPUT_TOKENS", OUTPUT_LIMIT, 128_000)?,
+            timeout_secs: setting("COWIKI_VERIFIER_TIMEOUT_SECS", 30, 600)?,
+        };
+        if limits.output_tokens >= limits.total_tokens {
+            return Err("output budget must be smaller than total budget".into());
+        }
+        Ok(limits)
+    }
+}
+
 #[derive(Clone)]
 pub struct RemoteVerifier {
     pub endpoint: String,
@@ -26,6 +70,7 @@ pub struct RemoteVerifier {
     pub api_key: Option<String>,
     pub cache_dir: PathBuf,
     pub mode: CacheMode,
+    pub limits: RequestLimits,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -168,6 +213,7 @@ impl RemoteVerifier {
                 .filter(|s| !s.is_empty()),
             cache_dir: PathBuf::from(required("COWIKI_VERIFIER_CACHE_DIR")?),
             mode,
+            limits: RequestLimits::from_env()?,
         })
     }
     pub fn request(&self, packet: &EvidenceBundle, task: Task) -> Result<Response, String> {
@@ -184,10 +230,12 @@ impl RemoteVerifier {
         let system = prompt(task);
         // A conservative bound for byte-based BPE models, including chat framing.
         let reserved = admission(packet);
-        if reserved + OUTPUT_LIMIT > TOKEN_LIMIT {
+        if reserved + OUTPUT_LIMIT > TOKEN_LIMIT
+            || reserved + self.limits.output_tokens > self.limits.total_tokens
+        {
             return Err("packet exceeds equal per-case token budget before dispatch".into());
         }
-        let request = json!({"model":self.model,"temperature":0,"max_tokens":OUTPUT_LIMIT,"stream":false,
+        let request = json!({"model":self.model,"temperature":0,"max_tokens":self.limits.output_tokens,"stream":false,
             "response_format":{"type":"json_object"},"messages":[{"role":"system","content":system},{"role":"user","content":user}]});
         let key = digest(&json!(["cowiki-governance/1", &self.endpoint, &request]).to_string());
         let file = self.cache_dir.join(format!("{key}.json"));
@@ -203,12 +251,9 @@ impl RemoteVerifier {
             {
                 fs::create_dir_all(&self.cache_dir).map_err(|e| e.to_string())?;
                 let started = Instant::now();
-                let record = match self
-                    .fetch(request, &key, reserved, &mut attempt.usage)
-                    .and_then(|rec| {
-                        validate(&rec, packet, task, &key)?;
-                        Ok(rec)
-                    }) {
+                // Keep the actual provider response, including over-budget answers.
+                // Replays reapply the caller's acceptance budget without a new call.
+                let record = match self.fetch(request, &key, reserved, &mut attempt.usage) {
                     Ok(rec) => Cached::Success(rec),
                     Err(reason) => {
                         attempt.usage.original_latency_ms = started.elapsed().as_millis() as u64;
@@ -249,19 +294,20 @@ impl RemoteVerifier {
                 return Err(reason);
             }
         };
-        validate(&record, packet, task, &key)?;
+        attempt.usage = Usage {
+            calls: 1,
+            http_calls: u64::from(!hit),
+            cache_hits: u64::from(hit),
+            prompt_tokens: record.prompt_tokens,
+            completion_tokens: record.completion_tokens,
+            estimated: record.estimated,
+            original_latency_ms: record.latency_ms,
+        };
+        validate(&record, packet, task, &key, self.limits)?;
         Ok(Response {
             key,
             answer: record.answer,
-            usage: Usage {
-                calls: 1,
-                http_calls: u64::from(!hit),
-                cache_hits: u64::from(hit),
-                prompt_tokens: record.prompt_tokens,
-                completion_tokens: record.completion_tokens,
-                estimated: record.estimated,
-                original_latency_ms: record.latency_ms,
-            },
+            usage: attempt.usage.clone(),
         })
     }
 
@@ -274,7 +320,7 @@ impl RemoteVerifier {
     ) -> Result<Record, String> {
         let start = Instant::now();
         let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(self.limits.timeout_secs))
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| e.to_string())?;
@@ -287,7 +333,7 @@ impl RemoteVerifier {
         // Until a response supplies usage, reserve the full unknown cost.
         usage.estimated = true;
         usage.prompt_tokens = reserved;
-        usage.completion_tokens = OUTPUT_LIMIT;
+        usage.completion_tokens = self.limits.output_tokens;
         let http = call
             .send()
             .map_err(|e| format!("verifier transport failure: {e}"))?;
@@ -305,7 +351,7 @@ impl RemoteVerifier {
         let input = parsed["usage"]["prompt_tokens"].as_u64();
         let output = parsed["usage"]["completion_tokens"].as_u64();
         usage.prompt_tokens = input.unwrap_or(reserved);
-        usage.completion_tokens = output.unwrap_or(OUTPUT_LIMIT);
+        usage.completion_tokens = output.unwrap_or(self.limits.output_tokens);
         usage.estimated = input.is_none() || output.is_none();
         let choice = &parsed["choices"][0];
         if choice["finish_reason"] == "length" {
@@ -321,20 +367,26 @@ impl RemoteVerifier {
             model: parsed["model"].as_str().unwrap_or(&self.model).into(),
             fingerprint: parsed["system_fingerprint"].as_str().map(str::to_owned),
             prompt_tokens: input.unwrap_or(reserved),
-            completion_tokens: output.unwrap_or(OUTPUT_LIMIT),
+            completion_tokens: output.unwrap_or(self.limits.output_tokens),
             estimated: input.is_none() || output.is_none(),
             latency_ms: start.elapsed().as_millis() as u64,
             answer,
         })
     }
 }
-fn validate(record: &Record, p: &EvidenceBundle, task: Task, key: &str) -> Result<(), String> {
+fn validate(
+    record: &Record,
+    p: &EvidenceBundle,
+    task: Task,
+    key: &str,
+    limits: RequestLimits,
+) -> Result<(), String> {
     if key != record.key
-        || record.completion_tokens > OUTPUT_LIMIT
+        || record.completion_tokens > limits.output_tokens
         || record
             .prompt_tokens
             .saturating_add(record.completion_tokens)
-            > TOKEN_LIMIT
+            > limits.total_tokens
     {
         return Err("verifier identity or budget mismatch".into());
     }

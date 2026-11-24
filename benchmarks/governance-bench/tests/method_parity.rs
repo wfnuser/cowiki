@@ -84,6 +84,7 @@ fn same_packet_equal_caps_cited_disagreement_and_single_call_replay() {
             api_key: None,
             cache_dir: cache.path().into(),
             mode: CacheMode::Record,
+            limits: RequestLimits::default(),
         }),
     };
     for mode in [
