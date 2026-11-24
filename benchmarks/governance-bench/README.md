@@ -4,11 +4,11 @@ The benchmark measures candidate edits against immutable evidence and earlier re
 
 ## Reproduce the offline development comparison
 
-Run these commands in Bash on the course machine. A fresh machine needs Rust 1.100.0 and the dependencies in the committed Cargo.lock. The fetch step can use the registry. All subsequent build, test and scoring commands work with Cargo offline and require no provider credentials.
+Run these commands in Bash from the repository root with Rust 1.100.0, rustfmt and Clippy. On a fresh checkout, the fetch step populates the dependency cache from the committed lockfile. The remaining commands run offline.
 
 ```bash
-cd /data/zhongqiyu/AIAA5032_cowiki_m2/cowiki
-source /data/zhongqiyu/AIAA5032_cowiki_m2/env.sh
+output_dir=target/governance-bench
+mkdir -p "$output_dir"
 G=benchmarks/governance-bench/Cargo.toml
 cargo fetch --locked --manifest-path "$G"  # Only for a cold dependency cache
 cargo fmt --all --manifest-path "$G" -- --check
@@ -16,14 +16,14 @@ cargo clippy --offline --locked --manifest-path "$G" --all-targets --all-feature
 cargo test --offline --locked --manifest-path "$G" --all-features
 for mode in none rules; do
   cargo run --offline --release --locked --manifest-path "$G" -- \
-    --split dev --verifier "$mode" --baseline --out "/tmp/m2-dev-$mode-reference.json"
-  cmp "/tmp/m2-dev-$mode-reference.json" "benchmarks/governance-bench/results/dev-$mode.json"
+    --split dev --verifier "$mode" --baseline --out "$output_dir/m2-dev-$mode-reference.json"
+  cmp "$output_dir/m2-dev-$mode-reference.json" "benchmarks/governance-bench/results/dev-$mode.json"
   cargo run --offline --release --locked --manifest-path "$G" -- \
-    --split dev --verifier "$mode" --out "/tmp/m2-dev-$mode-timed.json"
+    --split dev --verifier "$mode" --out "$output_dir/m2-dev-$mode-timed.json"
 done
 for slice in tune validation; do
   cargo run --offline --release --locked --manifest-path "$G" -- \
-    --split dev --dev-slice "$slice" --verifier rules --out "/tmp/m2-dev-$slice.json"
+    --split dev --dev-slice "$slice" --verifier rules --out "$output_dir/m2-dev-$slice.json"
 done
 ```
 
@@ -47,9 +47,9 @@ The test harness reads those fixtures independently of either evaluation split. 
 
 A separate authoring session received the taxonomy, schema, labeling requirements and pinned upstream sources. It had no access to the CoWiki repository, detector, prompts, fixture cases or earlier session history. The released CPython documentation supplies the held-out families. CMake reference documentation supplies the development families. `data/upstream/sources.json` records the upstream URL, Git tag and SHA-256 for each input file. Upstream license texts and copyright notices accompany the adapted data in the same directory.
 
-Reviewers inspect the separate stratified audit sheet. Developers may inspect dev cases. Verify a held-out delivery from its directory with `sha256sum -c SHA256SUMS`. Freeze the method configuration before the single scored held-out run. Keep original data immutable and version any later human adjudication separately.
+Developers may inspect dev cases. Verify a held-out delivery from its directory with `sha256sum -c SHA256SUMS`. Freeze the method configuration before the single scored held-out run. Keep the original data immutable and version subsequent label changes separately.
 
-The independently authored split has 64 development edits in eight CMake command families (29 valid) and 160 held-out edits in sixteen CPython module families (77 valid, 48.1%). The 30-case reviewer export is kept outside the checkout. The full authoring data card and held-out provenance are for reviewers and post-freeze analysis. The SHA-256 of the held-out `SHA256SUMS` is `d5ff4e3c358355c2bceb4c26ff8812081eaeb1f63b741b8c719b4deda3db9397`.
+The independently authored split has 64 development edits in eight CMake command families (29 valid) and 160 held-out edits in sixteen CPython module families (77 valid, 48.1%). The full authoring data card and held-out provenance are for reviewers and post-freeze analysis. The SHA-256 of the held-out `SHA256SUMS` is `d5ff4e3c358355c2bceb4c26ff8812081eaeb1f63b741b8c719b4deda3db9397`.
 
 ## Course comparisons
 
@@ -76,7 +76,7 @@ Export the four configuration variables named above in the shell. The binary rea
 ```bash
 for mode in single-pass remote both; do
   cargo run --offline --release --locked --features remote-verifier --manifest-path "$G" -- \
-    --split dev --dev-slice pilot --verifier "$mode" --cache record --out "/tmp/m2-pilot-$mode.json"
+    --split dev --dev-slice pilot --verifier "$mode" --cache record --out "$output_dir/m2-pilot-$mode.json"
 done
 ```
 
@@ -85,13 +85,13 @@ Before the full run, inspect each pilot's `cost` object for logical and HTTP cal
 ```bash
 for mode in single-pass remote both; do
   cargo run --offline --release --locked --features remote-verifier --manifest-path "$G" -- \
-    --split dev --verifier "$mode" --cache record --out "/tmp/m2-dev-$mode.json"
+    --split dev --verifier "$mode" --cache record --out "$output_dir/m2-dev-$mode.json"
 done
 ```
 
-Use `--cache replay` in the same commands to reproduce recorded judgments without contacting a provider. Keep the 30-case label review independent. The single held-out evaluation requires Qiyu’s go-ahead after configuration freeze.
+Use `--cache replay` in the same commands to reproduce recorded judgments without contacting a provider. The final held-out tables and run metadata are archived in [the registered results](results/issue-169/held-out/TABLES.md).
 
-All methods receive one immutable, label-blind packet per case. Source retrieval reserves 800 active and 400 retired retrieval tokens. The common packing step alternates active and retired evidence, ranks within those sets by word overlap, and admits up to 12 judgment pairs. It reserves the longer system prompt and uses a conservative upper bound of one token per UTF-8 byte plus chat framing. The default per-case limits are one call, 4,096 total tokens and 768 completion tokens. A provider with additional session overhead can use `COWIKI_VERIFIER_TOTAL_TOKENS` and `COWIKI_VERIFIER_OUTPUT_TOKENS` for the shared model-arm limits. A revision that names a verified or retired source can reserve space for it when ordinary packing would drop it. To fit the same cap, wire history may reference identical base frontmatter while retaining the original revision body, ID and source path. The registered evaluation used the earlier packing policy recorded in its freeze. `COWIKI_VERIFIER_TIMEOUT_SECS` defaults to 30. Changing only the total ceiling permits rescoring stored provider outputs under that ceiling with zero HTTP calls. A change to the requested output limit changes the request and its cache key. An oversized mandatory input yields a pre-dispatch failure. Rows include the packet digest, unresolved findings, timing, usage and errors. The program still writes scored outcomes on method failure and exits unsuccessfully. The issue-code table uses one-to-one exact code and two-sided span matching. Repair success uses the listed acceptable full texts. Unlisted but defensible wording requires independent human adjudication. A primary challenge stratum owns each case's cost.
+All methods receive one immutable, label-blind packet per case. Source retrieval reserves 800 active and 400 retired retrieval tokens. The common packing step alternates active and retired evidence, ranks within those sets by word overlap, and admits up to 12 judgment pairs. It reserves the longer system prompt and uses a conservative upper bound of one token per UTF-8 byte plus chat framing. The default per-case limits are one call, 4,096 total tokens and 768 completion tokens. A provider with additional session overhead can use `COWIKI_VERIFIER_TOTAL_TOKENS` and `COWIKI_VERIFIER_OUTPUT_TOKENS` for the shared model-arm limits. A revision that names a verified or retired source can reserve space for it when ordinary packing would drop it. To fit the same cap, wire history may reference identical base frontmatter while retaining the original revision body, ID and source path. The registered evaluation used the earlier packing policy recorded in its freeze. `COWIKI_VERIFIER_TIMEOUT_SECS` defaults to 30. Changing only the total ceiling permits rescoring stored provider outputs under that ceiling with zero HTTP calls. A change to the requested output limit changes the request and its cache key. An oversized mandatory input yields a pre-dispatch failure. Rows include the packet digest, unresolved findings, timing, usage and errors. The program still writes scored outcomes on method failure and exits unsuccessfully. The issue-code table uses one-to-one exact code and two-sided span matching. Repair success uses the listed acceptable full texts. A primary challenge stratum owns each case's cost.
 
 The structural rules compare audit reports from private base and candidate snapshots, canceling pre-existing findings. The shared packet includes the link inventory and original redirect metadata needed to interpret local references. All model arms can return cited structural findings. The production hygiene check takes the OKF `generated` flag as authoritative. Cases using a custom document type named “generated” on its own remain visible in the scoring denominator. For stale dates, the validator cites the candidate's date and the explicit run date. A gold label that requires a separate calendar-page citation can score as a miss under exact matching.
 

@@ -1,6 +1,6 @@
 # Regression guard diagnostic
 
-**Post-hoc, after seeing held-out; not the registered result.** The registered reports at `f14b3b3` are final. This diagnostic uses the product fix at `ef9f93a`. Qiyu checked the 30-case label-audit sample and found no label problems. [Registered tables](TABLES.md) · [Registered report](../REPORT_NOTES.md)
+**Post-hoc, after seeing held-out; not the registered result.** The registered reports at `f14b3b3` are final. This diagnostic uses the product fix at `ef9f93a`. [Registered tables](TABLES.md) · [Registered report](../REPORT_NOTES.md)
 
 ## Root cause
 
