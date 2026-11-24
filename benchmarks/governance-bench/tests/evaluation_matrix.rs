@@ -60,3 +60,22 @@ fn development_slices_are_disjoint_families_and_pilot_is_bounded() {
     assert!(tf.is_disjoint(&vf));
     assert_eq!(ids("pilot").0, 16);
 }
+
+#[test]
+fn checked_in_offline_references_match_each_case() {
+    let tmp = tempfile::tempdir().unwrap();
+    for mode in ["none", "rules"] {
+        let generated = tmp.path().join(mode);
+        let status = Command::new(env!("CARGO_BIN_EXE_cowiki-governance-bench"))
+            .args(["--split", "dev", "--verifier", mode, "--baseline", "--out"])
+            .arg(&generated)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let published =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("results/dev-{mode}.json"));
+        let expected = std::fs::read(published).unwrap();
+        let observed = std::fs::read(generated).unwrap();
+        assert!(observed == expected, "{mode}: development baseline differs");
+    }
+}

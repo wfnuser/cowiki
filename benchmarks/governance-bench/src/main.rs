@@ -12,16 +12,40 @@ use std::{
     time::Instant,
 };
 
+/// Measured wall time belongs in the full report. CI compares deterministic
+/// cost counts and every per-case finding, patch outcome and final document.
+fn cost_report(cost: &Cost, baseline: bool) -> serde_json::Value {
+    let mut value = json!(cost);
+    if baseline {
+        if let Some(fields) = value.as_object_mut() {
+            for key in [
+                "lookup_ns",
+                "verifier_ns",
+                "repair_and_check_ns",
+                "elapsed_ns",
+            ] {
+                fields.remove(key);
+            }
+        }
+    }
+    value
+}
+
 fn run() -> Result<(), String> {
     let mut split = String::from("dev");
     let mut out = None;
+    let mut baseline = false;
     let mut verifier = String::from("rules");
     let mut dev_slice = None;
     let mut cache = String::from("record");
     let mut args = env::args().skip(1);
     while let Some(flag) = args.next() {
+        if flag == "--baseline" {
+            baseline = true;
+            continue;
+        }
         if flag == "--help" {
-            println!("cowiki-governance-bench --split dev|held-out --verifier none|rules|single-pass|remote|both [--dev-slice tune|validation|pilot] [--cache record|replay] [--out FILE]");
+            println!("cowiki-governance-bench --split dev|held-out --verifier none|rules|single-pass|remote|both [--dev-slice tune|validation|pilot] [--cache record|replay] [--out FILE] [--baseline]");
             return Ok(());
         }
         let val = args
@@ -37,6 +61,9 @@ fn run() -> Result<(), String> {
         }
     }
     let mode: Mode = verifier.parse()?;
+    if baseline && (split != "dev" || dev_slice.is_some() || mode.uses_model()) {
+        return Err("--baseline requires full dev and an offline method (none or rules)".into());
+    }
     #[cfg(feature = "remote-verifier")]
     let runner = Runner {
         provider: if mode.uses_model() {
@@ -169,6 +196,14 @@ fn run() -> Result<(), String> {
         for Finding { code, .. } in remaining {
             by_code.entry(code.clone()).or_default().fn_ += 1;
         }
+        if baseline {
+            let maintenance = serde_json::to_string(&result).map_err(|e| e.to_string())?;
+            rows.push(json!({"id":case.id,"family":case.family,"primary_type":label.primary_type,
+                "packet_hash":hash,"findings":findings,"maintenance_hash":digest(&maintenance),
+                "final_text_hash":digest(final_text),"retrieval_calls":packet.retrieval_calls,
+                "retrieval_tokens":packet.retrieval_tokens,"semantic_gold":semantic.len(),"gold_evidence_retrieved":retrieved}));
+            continue;
+        }
         rows.push(json!({"id":case.id,"family":case.family,"primary_type":label.primary_type,"final_text":final_text,
             "findings":findings,"outcome":outcome,"packet_hash":hash,"retrieval_calls":packet.retrieval_calls,
             "retrieval_tokens":packet.retrieval_tokens,"changed_claims":packet.changed.len(),"evidence_claims":packet.evidence.len(),
@@ -176,13 +211,18 @@ fn run() -> Result<(), String> {
     }
     let groups: BTreeMap<_, _> = by_type
         .into_iter()
-        .map(|(ty, (counts, cost))| (ty, json!({"metrics":counts.metrics(),"cost":cost})))
+        .map(|(ty, (counts, cost))| {
+            (
+                ty,
+                json!({"metrics":counts.metrics(),"cost":cost_report(&cost,baseline)}),
+            )
+        })
         .collect();
     let codes:BTreeMap<_,_>=by_code.into_iter().map(|(code,c)|{
         let m=c.metrics();
         (code,json!({"tp":c.tp,"fp":c.fp,"fn":c.fn_,"precision":m["precision"],"recall":m["recall"],"f1":m["f1"]}))
     }).collect();
-    let report = json!({"schema_version":2,"split":split,"verifier":verifier,"dev_slice":dev_slice,"total":total.metrics(),"cost":cost,
+    let report = json!({"schema_version":2,"split":split,"verifier":verifier,"dev_slice":dev_slice,"baseline":baseline,"total":total.metrics(),"cost":cost_report(&cost,baseline),
         "by_type":groups,"detection_by_code":codes,"cases":rows});
     let text = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
     if let Some(path) = out {

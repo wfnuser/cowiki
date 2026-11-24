@@ -2,12 +2,34 @@
 
 The benchmark measures candidate edits against immutable evidence and earlier revisions. The no-maintenance method accepts the complete candidate verbatim. It has no model calls and makes no repairs. Each run reports the initial detection counts, final state and cost for each case, plus metrics by case type. Undefined ratios serialize as JSON null.
 
-From the CoWiki repository on the course machine:
+## Reproduce the offline development comparison
+
+Run these commands in Bash on the course machine. A fresh machine needs Rust 1.100.0 and the dependencies in the committed Cargo.lock. The fetch step can use the registry. All subsequent build, test and scoring commands work with Cargo offline and require no provider credentials.
 
 ```bash
+cd /data/zhongqiyu/AIAA5032_cowiki_m2/cowiki
 source /data/zhongqiyu/AIAA5032_cowiki_m2/env.sh
-cargo run --release --locked --manifest-path benchmarks/governance-bench/Cargo.toml -- --split dev --verifier none --out /tmp/m2-none.json
+G=benchmarks/governance-bench/Cargo.toml
+cargo fetch --locked --manifest-path "$G"  # Only for a cold dependency cache
+cargo fmt --all --manifest-path "$G" -- --check
+cargo clippy --offline --locked --manifest-path "$G" --all-targets --all-features -- -D warnings
+cargo test --offline --locked --manifest-path "$G" --all-features
+for mode in none rules; do
+  cargo run --offline --release --locked --manifest-path "$G" -- \
+    --split dev --verifier "$mode" --baseline --out "/tmp/m2-dev-$mode-reference.json"
+  cmp "/tmp/m2-dev-$mode-reference.json" "benchmarks/governance-bench/results/dev-$mode.json"
+  cargo run --offline --release --locked --manifest-path "$G" -- \
+    --split dev --verifier "$mode" --out "/tmp/m2-dev-$mode-timed.json"
+done
+for slice in tune validation; do
+  cargo run --offline --release --locked --manifest-path "$G" -- \
+    --split dev --dev-slice "$slice" --verifier rules --out "/tmp/m2-dev-$slice.json"
+done
 ```
+
+The checked-in [no-maintenance](results/dev-none.json) and [rules](results/dev-rules.json) references contain the 64 packet hashes, cited findings, hashes of proposal outcomes and final text, aggregate metrics and deterministic cost counts. The timed reports retain complete outcomes and machine-dependent timings. The `governance-bench` CI job reproduces both references byte for byte. The all-features tests exercise the provider protocol using a loopback server.
+
+The six-family tuning slice has 48 edits. The two-family internal validation slice has 16. The validation families have the two lowest SHA-256 hashes of UTF-8 `issue169-dev-validation-v1/<family-id>`. This partition was fixed before tuning in this round. Validation aggregates were first inspected after selecting the rules. Earlier development rounds used all eight families.
 
 ## Data and labels
 
@@ -40,6 +62,28 @@ The independently authored split has 64 development edits in eight CMake command
 | `both` | Full M2. Queue findings from either detector and withhold patches on disputed claims. |
 
 For model arms, enable `--features remote-verifier` and set `COWIKI_VERIFIER_URL` (full chat-completions URL), `COWIKI_VERIFIER_MODEL` (pin the deployment revision), `COWIKI_VERIFIER_CACHE_DIR` and, for authenticated servers, `COWIKI_VERIFIER_API_KEY`. Use `--cache record` to record misses, or `--cache replay` to require disk records. Both successes and terminal provider failures replay without HTTP. Remote and both share the same verification request. A replay counts the original logical call and reports zero physical calls. A transport failure without provider usage conservatively charges the reserved budget and marks the estimate.
+
+### Model arms on development data
+
+Export the four configuration variables named above in the shell. The binary reads the environment directly. Use a private cache directory and a pinned model for all three arms. Run the same two cases per CMake family in each pilot. Cargo's offline switch controls dependency resolution. A cache miss in record mode still calls the configured provider.
+
+```bash
+for mode in single-pass remote both; do
+  cargo run --offline --release --locked --features remote-verifier --manifest-path "$G" -- \
+    --split dev --dev-slice pilot --verifier "$mode" --cache record --out "/tmp/m2-pilot-$mode.json"
+done
+```
+
+Before the full run, inspect each pilot's `cost` object for logical and HTTP calls, cache hits, prompt and completion tokens, estimated cases, failures and elapsed time. For the 64-case dev budget, multiply each arm’s 16-case logical usage by four and report the per-case ceiling separately. Distinguish cached logical usage from incremental provider charges. Use the same inputs, per-case limits and cache configuration in the full comparison.
+
+```bash
+for mode in single-pass remote both; do
+  cargo run --offline --release --locked --features remote-verifier --manifest-path "$G" -- \
+    --split dev --verifier "$mode" --cache record --out "/tmp/m2-dev-$mode.json"
+done
+```
+
+Use `--cache replay` in the same commands to reproduce recorded judgments without contacting a provider. Keep the 30-case label review independent. The single held-out evaluation requires Qiyu’s go-ahead after configuration freeze.
 
 All methods receive one immutable, label-blind packet per case. Source retrieval reserves 800 active and 400 retired retrieval tokens. The common packing step alternates active and retired evidence, ranks within those sets by word overlap, and admits up to 12 judgment pairs. It reserves the longer system prompt and uses a conservative upper bound of one token per UTF-8 byte plus chat framing. The per-case ceiling is one call, 4,096 total tokens, 768 completion tokens. An oversized mandatory input yields a pre-dispatch failure. Rows include the packet digest, unresolved findings, timing, usage and errors. The program still writes scored outcomes on method failure and exits unsuccessfully. The issue-code table uses one-to-one exact code and two-sided span matching. Repair success uses the listed acceptable full texts. Unlisted but defensible wording requires independent human adjudication. A primary challenge stratum owns each case's cost.
 
