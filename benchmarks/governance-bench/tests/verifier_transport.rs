@@ -7,6 +7,24 @@ use std::{
     path::Path,
 };
 
+fn read_request(socket: &std::net::TcpStream) -> serde_json::Value {
+    let mut reader = BufReader::new(socket);
+    let mut length = 0;
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        if line == "\r\n" {
+            break;
+        }
+        if let Some(n) = line.to_lowercase().strip_prefix("content-length: ") {
+            length = n.trim().parse().unwrap();
+        }
+    }
+    let mut body = vec![0; length];
+    reader.read_exact(&mut body).unwrap();
+    serde_json::from_slice(&body).unwrap()
+}
+
 fn mock_completion(input: u64, output: u64) -> (String, std::thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = format!(
@@ -15,21 +33,7 @@ fn mock_completion(input: u64, output: u64) -> (String, std::thread::JoinHandle<
     );
     let server = std::thread::spawn(move || {
         let (mut socket, _) = listener.accept().unwrap();
-        let mut reader = BufReader::new(&socket);
-        let mut length = 0;
-        loop {
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-            if line == "\r\n" {
-                break;
-            }
-            if let Some(n) = line.to_lowercase().strip_prefix("content-length: ") {
-                length = n.trim().parse().unwrap();
-            }
-        }
-        let mut body = vec![0; length];
-        reader.read_exact(&mut body).unwrap();
-        let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let request = read_request(&socket);
         assert_eq!(request["max_tokens"], 768);
         let response=serde_json::json!({"model":"fixture","choices":[{"message":{"content":"{\"judgments\":[],\"findings\":[],\"edits\":[]}"}}],"usage":{"prompt_tokens":input,"completion_tokens":output}}).to_string();
         write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",response.len(),response).unwrap();
@@ -102,6 +106,7 @@ fn failed_attempt_is_charged_once_and_replayed_offline() {
     };
     let worker = std::thread::spawn(move || {
         let (mut s, _) = socket.accept().unwrap();
+        read_request(&s);
         s.write_all(
             b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         )
@@ -190,6 +195,7 @@ fn provider_quota_interrupts_without_committing_a_terminal_cache_record() {
     };
     let server = std::thread::spawn(move || {
         let (mut socket, _) = listener.accept().unwrap();
+        read_request(&socket);
         socket
             .write_all(
                 b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",

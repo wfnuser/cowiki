@@ -111,6 +111,51 @@ fn claims(path: &str, text: &str) -> Result<Vec<Claim>, String> {
     Ok(claims)
 }
 
+fn withdrawal_notice(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let predicate = ["this rule was ", "this policy was ", "this claim was "]
+        .iter()
+        .find_map(|prefix| lower.strip_prefix(prefix))
+        .unwrap_or(&lower);
+    let end = predicate
+        .find(|c: char| !c.is_ascii_alphabetic())
+        .unwrap_or(predicate.len());
+    let (verb, rest) = predicate.split_at(end);
+    matches!(
+        verb,
+        "retired" | "withdrawn" | "superseded" | "retracted" | "replaced"
+    ) && (rest.is_empty()
+        || rest.starts_with(['.', ':', ';', '—'])
+        || matches!(
+            rest.split_whitespace().next(),
+            Some("by" | "on" | "in" | "at" | "as" | "with" | "effective" | "because")
+        ))
+}
+
+/// Keep the assertion text separate for classification. On a retired page, a
+/// directly attached withdrawal notice also belongs in the reviewer's citation.
+fn source_claims(path: &str, text: &str, retired: bool) -> Result<Vec<Claim>, String> {
+    let mut result = claims(path, text)?;
+    if retired {
+        let lines: Vec<_> = text.lines().collect();
+        for i in 1..result.len() {
+            let (prior, rest) = result.split_at_mut(i);
+            let previous = &mut prior[i - 1];
+            let next = &rest[0];
+            if withdrawal_notice(&next.text)
+                && previous.heading == next.heading
+                && next.location.first <= previous.location.last + 2
+                && lines[previous.location.last..next.location.first - 1]
+                    .iter()
+                    .all(|s| s.trim().is_empty())
+            {
+                previous.location.last = next.location.last;
+            }
+        }
+    }
+    Ok(result)
+}
+
 pub fn changed_claims(input: &GovernanceInput) -> Result<Vec<Claim>, String> {
     let before = okf::parse_metadata(&input.base);
     let after = okf::parse_metadata(&input.candidate);
@@ -201,7 +246,7 @@ impl EvidenceLookup for SnapshotIndex<'_> {
                     if meta.is_retired() != retired {
                         return Err(format!("stale evidence index for {}", item.page_path));
                     }
-                    for claim in claims(&item.page_path, &text)? {
+                    for claim in source_claims(&item.page_path, &text, retired)? {
                         let at = claim.location.first;
                         if at < first
                             || at > last
