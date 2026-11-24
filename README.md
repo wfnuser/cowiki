@@ -74,6 +74,8 @@ editor, use normal Git tools, or leave CoWiki without exporting anything.
 
 CoWiki aligns Spaces with [Open Knowledge Format v0.1](docs/okf-v0.1.md) and
 preserves frontmatter fields it does not understand.
+Pages use Obsidian's Markdown syntax and read Logseq's tasks, flashcards
+and properties; [docs/syntax.md](docs/syntax.md) lists what is supported.
 
 ## Local-first, collaboration-ready
 
