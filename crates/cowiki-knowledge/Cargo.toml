@@ -8,6 +8,7 @@ license = "Apache-2.0"
 [features]
 default = []
 remote-embeddings = ["dep:reqwest"]
+remote-verifier = ["dep:reqwest"]
 
 [dependencies]
 libc = "0.2"

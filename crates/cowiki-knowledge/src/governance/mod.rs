@@ -236,3 +236,5 @@ mod conflict;
 pub use conflict::*;
 mod repair;
 pub use repair::*;
+#[cfg(feature = "remote-verifier")]
+pub mod remote;
