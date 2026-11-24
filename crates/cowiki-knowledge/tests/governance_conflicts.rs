@@ -103,6 +103,7 @@ fn a_later_cited_verified_decision_can_reinstate_a_rule() {
         as_of: "2026-11-23".into(),
         changed: vec![cited("note.md", text)],
         evidence: vec![old, decision],
+        links: Default::default(),
         retrieval_calls: 2,
         retrieval_tokens: 10,
     };

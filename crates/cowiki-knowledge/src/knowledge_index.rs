@@ -2633,17 +2633,38 @@ pub fn extract_links_with_anchors(
     body: &str,
     source_path: &str,
 ) -> Vec<(String, Option<String>, LinkKind)> {
-    let mut links: Vec<(String, Option<String>, LinkKind)> = Vec::new();
-    let excluded = code_ranges(body);
-    let wikilinks = extract_wikilinks_with_anchors(body, &excluded);
-    for (_, target, anchor) in &wikilinks {
+    let mut links = Vec::new();
+    for occurrence in link_occurrences(body, source_path) {
         if !links
             .iter()
-            .any(|(existing, _, kind)| existing == target && *kind == LinkKind::Wiki)
+            .any(|(target, _, kind)| target == &occurrence.target && *kind == occurrence.kind)
         {
-            links.push((target.clone(), anchor.clone(), LinkKind::Wiki));
+            links.push((occurrence.target, occurrence.anchor, occurrence.kind));
         }
     }
+    links
+}
+
+/// Original Markdown body byte range for one parsed internal link.
+pub struct LinkOccurrence {
+    pub range: Range<usize>,
+    pub target: String,
+    pub anchor: Option<String>,
+    pub kind: LinkKind,
+}
+
+pub fn link_occurrences(body: &str, source_path: &str) -> Vec<LinkOccurrence> {
+    let excluded = code_ranges(body);
+    let wikilinks = extract_wikilinks_with_anchors(body, &excluded);
+    let mut links: Vec<_> = wikilinks
+        .iter()
+        .map(|(range, target, anchor)| LinkOccurrence {
+            range: range.clone(),
+            target: target.clone(),
+            anchor: anchor.clone(),
+            kind: LinkKind::Wiki,
+        })
+        .collect();
 
     let mut code_block_depth = 0;
     for (event, range) in Parser::new_ext(body, Options::all()).into_offset_iter() {
@@ -2658,11 +2679,12 @@ pub fn extract_links_with_anchors(
             {
                 if let Some(target) = resolve_markdown_target(source_path, dest_url.as_ref()) {
                     let anchor = extract_link_anchor(dest_url.as_ref());
-                    if !links.iter().any(|(existing, _, kind)| {
-                        existing == &target && *kind == LinkKind::Markdown
-                    }) {
-                        links.push((target, anchor, LinkKind::Markdown));
-                    }
+                    links.push(LinkOccurrence {
+                        range,
+                        target,
+                        anchor,
+                        kind: LinkKind::Markdown,
+                    });
                 }
             }
             _ => {}

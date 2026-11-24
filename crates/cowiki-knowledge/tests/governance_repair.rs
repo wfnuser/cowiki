@@ -32,6 +32,7 @@ fn packet(candidate: &str, supported: &str) -> EvidenceBundle {
         changed,
         evidence: vec![evidence],
         as_of: "2026-11-23".into(),
+        links: Default::default(),
         retrieval_calls: 2,
         retrieval_tokens: 30,
     }

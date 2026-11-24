@@ -251,9 +251,25 @@ pub fn evidence_packet(
     family: &Family,
     case: &Case,
 ) -> Result<cowiki_knowledge::governance::EvidenceBundle, String> {
+    Ok(prepare_case(family, case, false)?.0)
+}
+
+/// Audit the edit on disposable snapshots only for arms that include symbolic
+/// checks. Both snapshots share the immutable family pages and the same date.
+pub fn prepare_case(
+    family: &Family,
+    case: &Case,
+    check_structure: bool,
+) -> Result<
+    (
+        cowiki_knowledge::governance::EvidenceBundle,
+        Vec<cowiki_knowledge::governance::Issue>,
+    ),
+    String,
+> {
     use cowiki_knowledge::{
         embeddings::LocalHashProjectionEmbedder,
-        governance::{EvidenceLookup, GovernanceInput, SnapshotIndex},
+        governance::{audit_space, introduced, EvidenceLookup, GovernanceInput, SnapshotIndex},
         knowledge_index, okf,
     };
     let space = tempfile::tempdir().map_err(|e| e.to_string())?;
@@ -270,7 +286,7 @@ pub fn evidence_packet(
     let embedder = LocalHashProjectionEmbedder::default();
     knowledge_index::initialize(&mut db)?;
     knowledge_index::rebuild_space_with_embedder(&mut db, "base", space.path(), &embedder)?;
-    SnapshotIndex {
+    let packet = SnapshotIndex {
         connection: &db,
         space_id: "base",
         root: space.path(),
@@ -285,7 +301,35 @@ pub fn evidence_packet(
             history: case.history.clone(),
         },
         "2026-11-23",
-    )
+    )?;
+    let mut findings = Vec::new();
+    if check_structure {
+        let before = audit_space(space.path(), &db, "base", &packet.as_of)?;
+        let (_, file) = okf::safe_resolve_under_space(space.path(), &case.path)?;
+        fs::create_dir_all(file.parent().ok_or("invalid candidate path")?)
+            .map_err(|e| e.to_string())?;
+        fs::write(file, &case.candidate).map_err(|e| e.to_string())?;
+        knowledge_index::rebuild_space_with_embedder(
+            &mut db,
+            "candidate",
+            space.path(),
+            &embedder,
+        )?;
+        let after = audit_space(space.path(), &db, "candidate", &packet.as_of)?;
+        findings = introduced(&before, &after, &case.path);
+        findings.retain(|i| {
+            matches!(
+                i.code.as_str(),
+                "broken_link"
+                    | "inbound_redirect"
+                    | "broken_redirect"
+                    | "redirect_cycle"
+                    | "missing_generated_sources"
+                    | "expired_stale_after"
+            )
+        });
+    }
+    Ok((packet, findings))
 }
 
 pub fn semantic_findings(issues: &[cowiki_knowledge::governance::Issue]) -> Vec<Finding> {

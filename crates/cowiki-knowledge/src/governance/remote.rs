@@ -43,7 +43,77 @@ pub struct ModelEdit {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct StructuralFinding {
+    pub code: String,
+    pub line: usize,
+    pub source: String,
+    pub source_line: usize,
+}
+
+fn structural_findings(
+    p: &EvidenceBundle,
+    answer: &ModelAnswer,
+) -> Result<Vec<super::Issue>, String> {
+    use super::{Citation, Issue, Severity};
+    let n = p.input.candidate.lines().count();
+    let snapshot = digest(&p.input.candidate);
+    answer
+        .structural
+        .iter()
+        .map(|f| {
+            if !matches!(
+                f.code.as_str(),
+                "broken_link"
+                    | "inbound_redirect"
+                    | "broken_redirect"
+                    | "redirect_cycle"
+                    | "missing_generated_sources"
+                    | "expired_stale_after"
+            ) || f.line == 0
+                || f.line > n
+                || f.source_line == 0
+            {
+                return Err("invalid structural model finding".into());
+            }
+            let proof = if f.source == p.input.path && f.source_line <= n {
+                Some(&snapshot)
+            } else {
+                p.links
+                    .values()
+                    .find(|r| {
+                        r.target.as_deref() == Some(&f.source)
+                            && r.redirect
+                                .as_ref()
+                                .is_some_and(|(line, _)| *line == f.source_line)
+                    })
+                    .and_then(|r| r.snapshot.as_ref())
+            }
+            .ok_or("structural evidence outside packet")?;
+            Ok(Issue {
+                code: f.code.clone(),
+                severity: Severity::Warning,
+                message: "Model structural finding.".into(),
+                location: Citation {
+                    path: p.input.path.clone(),
+                    snapshot: snapshot.clone(),
+                    first: f.line,
+                    last: f.line,
+                },
+                evidence: Some(Citation {
+                    path: f.source.clone(),
+                    snapshot: proof.clone(),
+                    first: f.source_line,
+                    last: f.source_line,
+                }),
+            })
+        })
+        .collect()
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModelAnswer {
+    #[serde(default)]
+    pub structural: Vec<StructuralFinding>,
     pub judgments: Vec<Verdict>,
     pub findings: Vec<ModelFinding>,
     pub edits: Vec<ModelEdit>,
@@ -299,6 +369,7 @@ fn validate(record: &Record, p: &EvidenceBundle, task: Task, key: &str) -> Resul
             return Err("invalid model finding".into());
         }
     }
+    structural_findings(p, a)?;
     model_patch(p, &a.edits)?;
     Ok(())
 }
@@ -359,7 +430,7 @@ pub fn single_pass(
     response: &Response,
 ) -> Result<super::MaintenanceResult, String> {
     use super::{Issue, MaintenanceResult, RepairProposal, Severity};
-    let findings: Vec<_> = response
+    let mut findings: Vec<_> = response
         .answer
         .findings
         .iter()
@@ -390,6 +461,7 @@ pub fn single_pass(
             })
         })
         .collect::<Result<_, String>>()?;
+    findings.extend(structural_findings(packet, &response.answer)?);
     let patch = model_patch(packet, &response.answer.edits)?;
     let final_text = patch.preview(&packet.input.path, &packet.input.candidate)?;
     let proposals = if patch.edits.is_empty() {
@@ -420,7 +492,8 @@ pub fn verified_maintenance(
     combine: bool,
 ) -> Result<super::MaintenanceResult, String> {
     use super::{interpret, propose_claim_repairs, MaintenanceResult, RuleConflictDetector};
-    let model = interpret(packet, &response.answer.judgments)?;
+    let mut model = interpret(packet, &response.answer.judgments)?;
+    model.extend(structural_findings(packet, &response.answer)?);
     let mut initial: BTreeSet<_> = model.iter().cloned().collect();
     let mut eligible = initial.clone();
     let mut disputed = BTreeSet::new();

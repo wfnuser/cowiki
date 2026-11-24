@@ -1,6 +1,6 @@
 use cowiki_governance_bench::{
     evaluation::{Cost, Mode, Runner},
-    evidence_packet, load_dataset, semantic_findings, Counts, Finding,
+    load_dataset, prepare_case, semantic_findings, Counts, Finding,
 };
 use cowiki_knowledge::governance::{digest, protocol};
 use serde_json::json;
@@ -63,10 +63,33 @@ fn run() -> Result<(), String> {
     let mut rows = Vec::new();
     for case in &dataset.cases {
         let start = Instant::now();
-        let packet = protocol::pack(evidence_packet(&dataset.families[&case.family], case)?);
+        let (packet, structural) = prepare_case(
+            &dataset.families[&case.family],
+            case,
+            matches!(mode, Mode::Rules | Mode::Both),
+        )?;
+        let packet = protocol::pack(packet);
         let lookup_ns = start.elapsed().as_nanos() as u64;
         let hash = digest(&serde_json::to_string(&packet).map_err(|e| e.to_string())?);
-        let outcome = runner.run(mode, &packet);
+        let mut outcome = runner.run(mode, &packet);
+        if let Some(r) = outcome.maintenance.as_mut() {
+            for mut item in structural {
+                let same = |i: &cowiki_knowledge::governance::Issue| {
+                    i.code == item.code
+                        && i.location == item.location
+                        && i.evidence == item.evidence
+                };
+                if !r.initial.iter().any(same) {
+                    if mode == Mode::Both {
+                        item.message.push_str(" Structural detectors disagree.")
+                    }
+                    r.initial.push(item.clone());
+                    r.unresolved.push(item);
+                }
+            }
+            r.initial.sort();
+            r.unresolved.sort();
+        }
         let elapsed = start.elapsed().as_nanos() as u64;
         let result = outcome.maintenance.as_ref();
         let final_text = result.map_or(&case.candidate, |r| &r.final_text);

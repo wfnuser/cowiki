@@ -64,6 +64,8 @@ pub struct EvidenceBundle {
     pub evidence: Vec<Evidence>,
     pub retrieval_calls: usize,
     pub retrieval_tokens: usize,
+    #[serde(default)]
+    pub links: BTreeMap<String, LinkRecord>,
 }
 
 pub fn digest(text: &str) -> String {
@@ -226,7 +228,9 @@ impl EvidenceLookup for SnapshotIndex<'_> {
                 }
             }
         }
+        let links = link_inventory(self.root, &input)?;
         Ok(EvidenceBundle {
+            links,
             input,
             as_of: as_of.into(),
             changed,
@@ -244,4 +248,6 @@ pub use repair::*;
 #[cfg(feature = "remote-verifier")]
 pub mod remote;
 
+mod audit;
 pub mod protocol;
+pub use audit::*;
