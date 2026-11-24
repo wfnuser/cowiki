@@ -115,6 +115,10 @@ fn run() -> Result<(), String> {
                 &packet.as_of,
             )
         });
+        #[cfg(feature = "remote-verifier")]
+        if outcome.error.as_deref() == Some(cowiki_knowledge::governance::remote::PROVIDER_PAUSED) {
+            return Err("quota pause; resume the unfinished arm from its response cache".into());
+        }
         if let Some(r) = outcome.maintenance.as_mut() {
             for check in &r.repair_checks {
                 *repair_checks

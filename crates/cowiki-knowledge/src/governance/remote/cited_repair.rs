@@ -20,6 +20,7 @@ pub struct CitedRepair {
     pub support: usize,
     pub before: String,
     pub after: String,
+    pub evidence_quote: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -300,6 +301,12 @@ impl Validation<'_> {
         {
             return Err("protected_span");
         }
+        if r.evidence_quote.trim().is_empty() || !s.claim.text.contains(&r.evidence_quote) {
+            return Err("quote_outside_source");
+        }
+        if !r.after.contains(&r.evidence_quote) {
+            return Err("quote_outside_replacement");
+        }
         let mut repaired = line.to_owned();
         repaired.replace_range(edit.start..edit.end, &edit.after);
         let base = claims(&p.input.path, &p.input.base).map_err(|_| "preimage_digest")?;
@@ -423,6 +430,7 @@ pub(super) fn apply(
                             evidence,
                             support: evidence,
                             before: edit.before,
+                            evidence_quote: edit.after.clone(),
                             after: edit.after,
                         },
                     ));

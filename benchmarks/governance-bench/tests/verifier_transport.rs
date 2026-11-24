@@ -171,3 +171,39 @@ fn provider_overhead_is_charged_and_can_be_rescored_without_http() {
     );
     assert_eq!(replay.usage.prompt_tokens, 12345);
 }
+
+#[test]
+fn provider_quota_interrupts_without_committing_a_terminal_cache_record() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pilot");
+    let data = load_dataset(&fixtures, "dev").unwrap();
+    let case = &data.cases[0];
+    let packet = evidence_packet(&data.families[&case.family], case).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let verifier = RemoteVerifier {
+        endpoint: format!("http://{}", listener.local_addr().unwrap()),
+        model: "test".into(),
+        api_key: None,
+        cache_dir: cache.path().into(),
+        mode: CacheMode::Record,
+        limits: RequestLimits::default(),
+    };
+    let server = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket
+            .write_all(
+                b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+    });
+    let mut attempt = Attempt::default();
+    assert_eq!(
+        verifier
+            .request_accounted(&packet, Task::SinglePass, &mut attempt)
+            .err()
+            .as_deref(),
+        Some(PROVIDER_PAUSED)
+    );
+    server.join().unwrap();
+    assert_eq!(std::fs::read_dir(cache.path()).unwrap().count(), 0);
+}

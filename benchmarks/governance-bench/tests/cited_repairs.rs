@@ -41,7 +41,7 @@ fn packet(old: &str, source: &str) -> EvidenceBundle {
     }
 }
 fn repair(before: &str, after: &str) -> Value {
-    json!({"candidate":0,"evidence":0,"support":0,"before":before,"after":after})
+    json!({"candidate":0,"evidence":0,"support":0,"before":before,"after":after,"evidence_quote":after})
 }
 fn response(p: &EvidenceBundle, repairs: Value) -> Response {
     Response {
@@ -105,13 +105,13 @@ fn rejected_attachment_never_erases_the_finding_or_falls_back_to_a_rule_repair()
     let p = packet("The quota is 8 jobs.", "The quota is 4 jobs.");
     for (attempt, reason) in [
         (repair("unseen", "4"), "preimage_span"),
-        (repair("8", "6"), "unsupported_replacement"),
+        (repair("8", "6"), "quote_outside_source"),
         (
             repair("8", "4\nchange another line"),
             "outside_finding_span",
         ),
         (
-            json!({"candidate":0,"evidence":0,"support":99,"before":"8","after":"4"}),
+            json!({"candidate":0,"evidence":0,"support":99,"before":"8","after":"4","evidence_quote":"4"}),
             "support_citation",
         ),
         (json!({"candidate":0,"before":"8"}), "malformed_repair"),
@@ -198,7 +198,7 @@ fn retired_assertion_requires_an_active_linked_correction() {
     p.evidence.push(active);
     let mut r = response(
         &p,
-        json!([{"candidate":0,"evidence":0,"support":1,"before":"8","after":"4"}]),
+        json!([{"candidate":0,"evidence":0,"support":1,"before":"8","after":"4","evidence_quote":"4"}]),
     );
     r.answer.judgments[0].relation = Relation::Entailment;
     assert_eq!(run(&p, &r, false).repair_checks[0].outcome, "accepted");
@@ -207,4 +207,20 @@ fn retired_assertion_requires_an_active_linked_correction() {
         run(&p, &r, false).repair_checks[0].outcome,
         "unrelated_source"
     );
+}
+
+#[test]
+fn verbatim_quote_is_required_in_both_the_original_authority_and_replacement() {
+    let p = packet("The quota is 8 jobs.", "The quota is 4 jobs.");
+    for (quote, reason) in [
+        ("four", "quote_outside_source"),
+        ("jobs", "quote_outside_replacement"),
+        ("", "quote_outside_source"),
+    ] {
+        let mut edit = repair("8", "4");
+        edit["evidence_quote"] = json!(quote);
+        let out = run(&p, &response(&p, json!([edit])), false);
+        assert_eq!(out.repair_checks[0].outcome, reason);
+        assert_eq!(out.unresolved, out.initial);
+    }
 }

@@ -202,6 +202,25 @@ pub struct Response {
     pub key: String,
 }
 
+/// Exact wire instructions and response format. The evaluation freeze hashes
+/// these values before running a new corpus.
+pub fn request_contract(task: Task) -> Result<(String, Value), String> {
+    let mut system = prompt(task);
+    let format = if task == Task::Verify {
+        system.push_str(" For a new contradiction or regression, propose at most one minimal repair per changed claim. Link candidate/evidence to the judgment and support to the applicable active verified source. before must occur exactly once within the candidate line. Copy the restoring qualifier, value, or complete sentence verbatim from the cited support line into evidence_quote. after must contain that exact quote and restore the whole assertion, including scope, conditions, and polarity. Prefer the source's own wording for the corrected assertion. Preserve unrelated content. Omit the repair if a minimal quoted correction is unavailable.");
+        let schema: Value = serde_json::from_str(include_str!("verifier-reply.schema.json"))
+            .map_err(|e| e.to_string())?;
+        json!({"type":"json_schema","json_schema":{"name":"m2_quoted_repair_v2","strict":true,"schema":schema}})
+    } else {
+        json!({"type":"json_object"})
+    };
+    Ok((system, format))
+}
+
+/// A paused provider is an interrupted experiment. Caching a quota error as a
+/// terminal answer would preclude continuing the same request after reset.
+pub const PROVIDER_PAUSED: &str = "verifier provider quota paused";
+
 impl RemoteVerifier {
     pub fn from_env(mode: CacheMode) -> Result<Self, String> {
         let required = |name: &str| {
@@ -232,15 +251,7 @@ impl RemoteVerifier {
     ) -> Result<Response, String> {
         *attempt = Attempt::default();
         let user = model_input(packet).to_string();
-        let mut system = prompt(task);
-        let format = if task == Task::Verify {
-            system.push_str(" For a newly introduced contradiction or regression, also propose one minimal repair per changed claim if supported. In repairs link candidate/evidence to its judgment, and support to the active verified evidence entry justifying the correction. before is an exact unique substring within the cited candidate line, after its replacement. Preserve unaffected content and use the original base wording when it is supported. Otherwise omit the repair.");
-            let schema: Value = serde_json::from_str(include_str!("verifier-reply.schema.json"))
-                .map_err(|e| e.to_string())?;
-            json!({"type":"json_schema","json_schema":{"name":"m2_cited_repair_v1","strict":true,"schema":schema}})
-        } else {
-            json!({"type":"json_object"})
-        };
+        let (system, format) = request_contract(task)?;
         // Keep the paired content admission identical to single-pass. The
         // provider's measured total, including the reply schema and harness,
         // is checked before any judgment or proposal can be consumed.
@@ -270,6 +281,7 @@ impl RemoteVerifier {
                 // Replays reapply the caller's acceptance budget without a new call.
                 let record = match self.fetch(request, &key, reserved, &mut attempt.usage) {
                     Ok(rec) => Cached::Success(rec),
+                    Err(reason) if reason == PROVIDER_PAUSED => return Err(reason),
                     Err(reason) => {
                         attempt.usage.original_latency_ms = started.elapsed().as_millis() as u64;
                         Cached::Failure {
@@ -353,6 +365,9 @@ impl RemoteVerifier {
         let http = call
             .send()
             .map_err(|e| format!("verifier transport failure: {e}"))?;
+        if http.status().as_u16() == 429 {
+            return Err(PROVIDER_PAUSED.into());
+        }
         if !http.status().is_success() {
             return Err(format!("verifier HTTP {}", http.status()));
         }
