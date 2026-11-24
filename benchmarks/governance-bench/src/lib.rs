@@ -92,7 +92,7 @@ pub fn load_dataset(root: &Path, split: &str) -> Result<Dataset, String> {
     }
     let mut families = BTreeMap::new();
     let mut source_owners = BTreeMap::new();
-    for family in records::<Family>(&root.join("families.jsonl"))? {
+    for family in records::<Family>(&root.join(split).join("families.jsonl"))? {
         if !matches!(family.split.as_str(), "dev" | "held-out")
             || family.source_paths.is_empty()
             || family.pages.is_empty()
@@ -111,6 +111,9 @@ pub fn load_dataset(root: &Path, split: &str) -> Result<Dataset, String> {
         if families.insert(family.id.clone(), family).is_some() {
             return Err("duplicate family id".into());
         }
+    }
+    if families.values().any(|family| family.split != split) {
+        return Err("family manifest contains an entry from another split".into());
     }
     let cases: Vec<Case> = records(&root.join(split).join("cases.jsonl"))?;
     let mut gold = BTreeMap::new();
@@ -146,10 +149,23 @@ pub fn load_dataset(root: &Path, split: &str) -> Result<Dataset, String> {
                 return Err(format!("{}: citation outside candidate", case.id));
             }
             validate_span(&issue.candidate, &case.candidate)?;
-            let text = family
-                .pages
-                .get(&issue.evidence.path)
-                .ok_or_else(|| format!("{}: unknown evidence path", case.id))?;
+            let structural = matches!(
+                issue.code.as_str(),
+                "broken_link"
+                    | "inbound_redirect"
+                    | "broken_redirect"
+                    | "redirect_cycle"
+                    | "missing_generated_sources"
+                    | "expired_stale_after"
+            );
+            let text = if structural && issue.evidence.path == case.path {
+                &case.candidate
+            } else {
+                family
+                    .pages
+                    .get(&issue.evidence.path)
+                    .ok_or_else(|| format!("{}: unknown evidence path", case.id))?
+            };
             validate_span(&issue.evidence, text)?;
         }
         if label.protected.iter().any(|s| {
@@ -168,7 +184,6 @@ pub fn load_dataset(root: &Path, split: &str) -> Result<Dataset, String> {
     if ids.is_empty() || ids.len() != gold.len() {
         return Err("empty split or unmatched gold".into());
     }
-    families.retain(|_, family| family.split == split);
     Ok(Dataset {
         families,
         cases,

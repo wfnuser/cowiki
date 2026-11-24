@@ -1,0 +1,4 @@
+# Keep sealed examples out of routine developer diffs. Hash their original UTF-8 bytes.
+data/held-out/*.jsonl -diff -text
+# Preserve the bytes of upstream legal notices.
+data/upstream/** -text -whitespace

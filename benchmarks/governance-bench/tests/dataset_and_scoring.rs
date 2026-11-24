@@ -3,7 +3,11 @@ use std::path::Path;
 
 #[test]
 fn pilot_baseline_matches_hand_counts() {
-    let data = load_dataset(&Path::new(env!("CARGO_MANIFEST_DIR")).join("data"), "dev").unwrap();
+    let data = load_dataset(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pilot"),
+        "dev",
+    )
+    .unwrap();
     let mut counts = Counts::default();
     for case in &data.cases {
         counts.observe(case, &data.gold[&case.id], &[], &case.candidate);
@@ -17,7 +21,11 @@ fn pilot_baseline_matches_hand_counts() {
 
 #[test]
 fn duplicate_detections_do_not_erase_misses_and_a_flag_is_not_a_repair() {
-    let data = load_dataset(&Path::new(env!("CARGO_MANIFEST_DIR")).join("data"), "dev").unwrap();
+    let data = load_dataset(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pilot"),
+        "dev",
+    )
+    .unwrap();
     let case = data
         .cases
         .iter()
@@ -43,7 +51,11 @@ fn duplicate_detections_do_not_erase_misses_and_a_flag_is_not_a_repair() {
 
 #[test]
 fn a_corrected_value_does_not_excuse_loss_of_a_valid_edit() {
-    let data = load_dataset(&Path::new(env!("CARGO_MANIFEST_DIR")).join("data"), "dev").unwrap();
+    let data = load_dataset(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pilot"),
+        "dev",
+    )
+    .unwrap();
     let case = data
         .cases
         .iter()
@@ -63,17 +75,32 @@ fn unknown_split_is_rejected_before_reading_inputs() {
 #[test]
 fn a_source_cannot_be_registered_again_in_another_split() {
     let temp = tempfile::tempdir().unwrap();
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("data/families.jsonl");
+    let manifest =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pilot/dev/families.jsonl");
     let text = std::fs::read_to_string(manifest).unwrap();
     let mut duplicate: serde_json::Value =
         serde_json::from_str(text.lines().next().unwrap()).unwrap();
     duplicate["id"] = "another-family".into();
     duplicate["split"] = "held-out".into();
+    std::fs::create_dir(temp.path().join("dev")).unwrap();
     std::fs::write(
-        temp.path().join("families.jsonl"),
+        temp.path().join("dev/families.jsonl"),
         format!("{text}{duplicate}\n"),
     )
     .unwrap();
     let error = load_dataset(temp.path(), "dev").err().unwrap();
     assert!(error.contains("shared by families"), "{error}");
+}
+
+#[test]
+fn dev_load_requires_only_dev_records() {
+    let temp = tempfile::tempdir().unwrap();
+    let dest = temp.path().join("dev");
+    std::fs::create_dir(&dest).unwrap();
+    let pilot = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pilot/dev");
+    for file in ["cases.jsonl", "families.jsonl", "gold.jsonl"] {
+        std::fs::copy(pilot.join(file), dest.join(file)).unwrap();
+    }
+    // The locked split is deliberately absent from this checkout.
+    assert_eq!(load_dataset(temp.path(), "dev").unwrap().cases.len(), 24);
 }

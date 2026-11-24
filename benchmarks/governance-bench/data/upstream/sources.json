@@ -1,0 +1,762 @@
+[
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/pathlib.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/pathlib.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/pathlib.rst",
+    "sha256": "0f1ebced565c87765e2b49f758f9e6ae249a569b78f5c3a3415cb897d7d63efa",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/tempfile.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/tempfile.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/tempfile.rst",
+    "sha256": "89ecb24e8a4025b79f8263017b3fe13dcb69a1e4155bd41fbe422588634b7668",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/zipfile.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/zipfile.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/zipfile.rst",
+    "sha256": "5721b7674340178a75902b601cb8ba2dcc0b21874a8daa53d341ad67d8362a75",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/tarfile.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/tarfile.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/tarfile.rst",
+    "sha256": "20135c15b7257796719e011fe4fb15b2244e9d90dba5dda3cc6e654025149d12",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/csv.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/csv.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/csv.rst",
+    "sha256": "b693e76b094d7b4cd63f3b5747a54761deb24acd307581378899870493a3095f",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/sqlite3.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/sqlite3.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/sqlite3.rst",
+    "sha256": "e8b5ca9a44cf6992c4c243af7fcad9f73d268a308c751c3c815de3e7434cfed7",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/random.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/random.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/random.rst",
+    "sha256": "c6fcbd48ba5ece262d93a108c2ace8f46f217596780877dd2b07b1168a235665",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/statistics.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/statistics.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/statistics.rst",
+    "sha256": "63d70a5cae3c47a3dcfbacfe76bfa0fc9e778b29a4ecb26fd9bc085793503f08",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/fractions.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/fractions.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/fractions.rst",
+    "sha256": "60f7e3a619af49add4bfb5af7f44b5a2b67d74126652a6cd26537bc9443ee8dd",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/enum.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/enum.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/enum.rst",
+    "sha256": "c47ba1e5da29b012b56cadcfed96c114765c40ce8706e687fe4ddf30cbf58eff",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/itertools.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/itertools.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/itertools.rst",
+    "sha256": "af28ea580d8f4da127f0fdd9827338d7992b13d3697dfd7b43a8d1553bb5928b",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/functools.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/functools.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/functools.rst",
+    "sha256": "14ce15bc0b656c401bb5232ba1ff7a8201d20fc2c519ac38dfcad777a7e46341",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/re.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/re.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/re.rst",
+    "sha256": "18b3124be8a6394d578f9b63771443fcc44053bb49a965f6703393ed618df2f0",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/inspect.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/inspect.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/inspect.rst",
+    "sha256": "578f1a1829b51b78c92a1d3afb131a3d391fc02b2ff85937198306adec895137",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/dataclasses.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/dataclasses.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/dataclasses.rst",
+    "sha256": "0a6411b5c89b52e1f9e0d594a3000fae8c12b7905017f9bdbbdb68635e01e2f3",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/queue.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/queue.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/queue.rst",
+    "sha256": "2350d8d05b157fda7244bcdd1b724a8e1188fbd2026d0215457c43417b1e2153",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/shutil.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/shutil.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/shutil.rst",
+    "sha256": "8a297152f60fbc2d816be6eaacd09bfc3e5225703c3727aea2602fda0fc0a26f",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/glob.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/glob.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/glob.rst",
+    "sha256": "8e9dfe18127dea10a78609ff80056a17b91d440dafeddc31bc3990581c3acb41",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/contextlib.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/contextlib.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/contextlib.rst",
+    "sha256": "a4752dcc77d0a54dcc5eaf1f9edf314965d8582caa94fa0b519c0ca813cbdc1c",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/unittest.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/unittest.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/unittest.rst",
+    "sha256": "d618d96a3b90779ec7754cacbb936a3b3ebb2a34c7dcc950f3dc69882a34e426",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/argparse.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/argparse.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/argparse.rst",
+    "sha256": "27a89a5d54e27de503e7ce9412c8f7fccb0694ae92cdb63c02cf2df277b6f6c1",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/library/typing.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/library/typing.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/library/typing.rst",
+    "sha256": "0ab96211fd28c4dc82f4983c22b4f747ba9389fe477d5f0c61d3e2eb0d7ab99c",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "LICENSE",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/LICENSE",
+    "local": "held-out/cpython/v3.10.0/LICENSE",
+    "sha256": "d0285b61e1a8e420c7deb95836738a5d4a0d26463138b17601f5971212684c4b",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/license.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/license.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/license.rst",
+    "sha256": "b5dc0b90ace1e54ffe21e0aebf4874a46d2823ec880fac1b0d9ed7bb061b81c9",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.10.0",
+    "path": "Doc/copyright.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.10.0/Doc/copyright.rst",
+    "local": "held-out/cpython/v3.10.0/Doc/copyright.rst",
+    "sha256": "c3e06d9a0f7f4ce7bb72638fad64aa1e599e77716b8d26e2ab9c6e81ff28006a",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/pathlib.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/pathlib.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/pathlib.rst",
+    "sha256": "c1d6793810ecd9a20d75030ce5489cd94151a1b71063b3052e4ae529351eda4c",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/tempfile.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/tempfile.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/tempfile.rst",
+    "sha256": "487aeabf01be281fd1e2534b326c33cca4d9fab4db1c04d32e58439c9f6346bc",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/zipfile.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/zipfile.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/zipfile.rst",
+    "sha256": "dd4e9b0f0ffff8ef8d6296ad5f744782e18ff4bf34424f23d12046a072dcdc41",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/tarfile.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/tarfile.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/tarfile.rst",
+    "sha256": "2a5d77804c99adf74c86c6504e82cad8bd5fbad1961c43f08f640d3e02fbaad3",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/csv.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/csv.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/csv.rst",
+    "sha256": "855994acbf3d91832e7e9206ef1d37f5dbaa8e7a2a30237e737e58071098dd8b",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/sqlite3.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/sqlite3.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/sqlite3.rst",
+    "sha256": "47ad881a6484d4eb0dd1cc8231f68675edbfe4d31c65596221113c3bc1060520",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/random.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/random.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/random.rst",
+    "sha256": "0e4555270dce6c17843880236a1a52dc59348bb5ea03633c41e479b50ce96ce1",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/statistics.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/statistics.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/statistics.rst",
+    "sha256": "97a7ce318597d6cb9a7f8bfc1f123cd70077249bef13e21e58e1334a72902bbb",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/fractions.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/fractions.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/fractions.rst",
+    "sha256": "a6e8b83e86e04f821549eb5ac9b1829dd88f8ba5528bd3e9345462e7724b2574",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/enum.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/enum.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/enum.rst",
+    "sha256": "ecd67b943a2728c589fab5934159a7da63be57fdb68d17df3fef1b59a6339945",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/itertools.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/itertools.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/itertools.rst",
+    "sha256": "4daebb6755c23ae2a6791f508028836f2b5c2589287cc954c17dc498a9dc2eeb",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/functools.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/functools.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/functools.rst",
+    "sha256": "a3f0dffd4973d3c0902107dbb67ead54af934a1d43ba5552e590c69f233f817a",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/re.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/re.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/re.rst",
+    "sha256": "b078d803d7c50ffde3013c3adf8eb59935cfa71b2a80e08db08f0dd81bfd31d1",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/inspect.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/inspect.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/inspect.rst",
+    "sha256": "2bf0d638cc500c99895af2a09448b8ef4c3c04dbaf4d1a290b71508e0121454a",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/dataclasses.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/dataclasses.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/dataclasses.rst",
+    "sha256": "4939498e58fbf1d346e8d89a1d44d1264d818a9648eb2714e3762ec0e9a77c23",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/queue.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/queue.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/queue.rst",
+    "sha256": "b5079e5d58c36582f7cce6154785a0c2e614b1b598e33e787d14bf2cc95138c0",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/shutil.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/shutil.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/shutil.rst",
+    "sha256": "7f0d1c281740ad600937f8060c0914fcd68397c370d09bf660b1cf93bf6d1994",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/glob.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/glob.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/glob.rst",
+    "sha256": "23c3a12fa5c93775f3fba24241acb8456a75ac4d90f47efd707c9758c19585a7",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/contextlib.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/contextlib.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/contextlib.rst",
+    "sha256": "52d24a482b0b2c2f36a0436ff515278f8ccf53325d4b3812b15b8b9960ed50bd",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/unittest.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/unittest.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/unittest.rst",
+    "sha256": "c582c777f4605bf749cd3cddd21a24cdbeab592c8995135d0cc38b7c51f106bf",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/argparse.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/argparse.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/argparse.rst",
+    "sha256": "22eb1672835ccebdac1088f1a3ff6da60386a80ea2bf228586cec598bbca6f02",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/library/typing.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/library/typing.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/library/typing.rst",
+    "sha256": "50501a38524f1095732f96201aa958eaa40faacd6b7950350a2185b42f0af9d9",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "LICENSE",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/LICENSE",
+    "local": "held-out/cpython/v3.13.0/LICENSE",
+    "sha256": "78b12c3a81360b357002334f0e70ea0e92eebf7a9b358805c03c48484945f3bb",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/license.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/license.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/license.rst",
+    "sha256": "fde6c4707ae1b5a637285ca44162602bd94fa388a6f6157f1e4aceac113b8bde",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "held-out",
+    "project": "python/cpython",
+    "release": "v3.13.0",
+    "path": "Doc/copyright.rst",
+    "url": "https://raw.githubusercontent.com/python/cpython/v3.13.0/Doc/copyright.rst",
+    "local": "held-out/cpython/v3.13.0/Doc/copyright.rst",
+    "sha256": "2f455e3bd119869bf01369ab852d87d11c9e67e5351a7ebc64ab2c0af344aff6",
+    "license": "PSF License Agreement and notices in LICENSE"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.20.0",
+    "path": "Help/command/file.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.20.0/Help/command/file.rst",
+    "local": "dev/CMake/v3.20.0/Help/command/file.rst",
+    "sha256": "2ea43e5c886a38f1b8b821a16eae4615eb886c6b5d325fbc4da99f01e30bed06",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.20.0",
+    "path": "Help/command/string.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.20.0/Help/command/string.rst",
+    "local": "dev/CMake/v3.20.0/Help/command/string.rst",
+    "sha256": "4326e373e0a059c8282fbae9a36e1675268e30f26d48a2988a2802de17286187",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.20.0",
+    "path": "Help/command/list.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.20.0/Help/command/list.rst",
+    "local": "dev/CMake/v3.20.0/Help/command/list.rst",
+    "sha256": "82e97ee176fdd1c8f3c6e781c78b0b0d19a645f73c77bbd49aa7547ead39adaf",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.20.0",
+    "path": "Help/command/cmake_path.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.20.0/Help/command/cmake_path.rst",
+    "local": "dev/CMake/v3.20.0/Help/command/cmake_path.rst",
+    "sha256": "357c4767223b909d71162948d615ad8b86ac8904cfeac1e633c6f6255e528213",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.20.0",
+    "path": "Help/command/cmake_language.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.20.0/Help/command/cmake_language.rst",
+    "local": "dev/CMake/v3.20.0/Help/command/cmake_language.rst",
+    "sha256": "7288d6f5981bcc8c5d7469a5ec983e0ccd3dd092e0507e1aba3884a8e116604e",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.20.0",
+    "path": "Help/command/find_package.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.20.0/Help/command/find_package.rst",
+    "local": "dev/CMake/v3.20.0/Help/command/find_package.rst",
+    "sha256": "5ecbbd6c46926ba2a6f3f373d1ef74fb49e96f46a1203735c1f5d95be0e23e35",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.20.0",
+    "path": "Help/command/install.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.20.0/Help/command/install.rst",
+    "local": "dev/CMake/v3.20.0/Help/command/install.rst",
+    "sha256": "8acf8014699815665090f4eecd97a0e7e422e73f6b9e35a2b7e8a6709cbfa51a",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.20.0",
+    "path": "Help/command/target_sources.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.20.0/Help/command/target_sources.rst",
+    "local": "dev/CMake/v3.20.0/Help/command/target_sources.rst",
+    "sha256": "45602187399a55b1118cd84de071e315e3c4b9b1ebff930c11654fd5e4e385dd",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.20.0",
+    "path": "Help/command/add_custom_command.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.20.0/Help/command/add_custom_command.rst",
+    "local": "dev/CMake/v3.20.0/Help/command/add_custom_command.rst",
+    "sha256": "310c8dd4b22482bb7f65d37af75cfb86e0c9f1e18c6f9f9f03897bc7a45eab81",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.20.0",
+    "path": "Help/command/execute_process.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.20.0/Help/command/execute_process.rst",
+    "local": "dev/CMake/v3.20.0/Help/command/execute_process.rst",
+    "sha256": "662c84a6b3664734d737c7903dc644eaf60b10905ecd9a1457b5ebf8f75f27bc",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.20.0",
+    "path": "Help/command/add_library.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.20.0/Help/command/add_library.rst",
+    "local": "dev/CMake/v3.20.0/Help/command/add_library.rst",
+    "sha256": "f40e534791f4af00bf6da3b2391e034d9402ff034d3fe147cc99f9774b8d5447",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.20.0",
+    "path": "Help/command/cmake_parse_arguments.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.20.0/Help/command/cmake_parse_arguments.rst",
+    "local": "dev/CMake/v3.20.0/Help/command/cmake_parse_arguments.rst",
+    "sha256": "8bbeec08135abc3d458e2368f006a51c5f5342a4e3bb5abcd91f7765e5251f50",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.20.0",
+    "path": "Copyright.txt",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.20.0/Copyright.txt",
+    "local": "dev/CMake/v3.20.0/Copyright.txt",
+    "sha256": "f1a4326266aada65b307dac05161a9d02d3dba4fb08b50cb26e3c24cc8a86e97",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.28.0",
+    "path": "Help/command/file.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.28.0/Help/command/file.rst",
+    "local": "dev/CMake/v3.28.0/Help/command/file.rst",
+    "sha256": "ca899b87357b3ffd4df345ee7a6add6039e863a5d066e6afd663640994d9acdf",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.28.0",
+    "path": "Help/command/string.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.28.0/Help/command/string.rst",
+    "local": "dev/CMake/v3.28.0/Help/command/string.rst",
+    "sha256": "1c2d8c5725a81c93d6135891a9c7ea90932b0fb42438fb4d64be8533766ea1b7",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.28.0",
+    "path": "Help/command/list.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.28.0/Help/command/list.rst",
+    "local": "dev/CMake/v3.28.0/Help/command/list.rst",
+    "sha256": "bba2d94ec6c0ca0fcbde74a5d56dfbc3f8e1fd324a86e742fd6119cace0b79b0",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.28.0",
+    "path": "Help/command/cmake_path.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.28.0/Help/command/cmake_path.rst",
+    "local": "dev/CMake/v3.28.0/Help/command/cmake_path.rst",
+    "sha256": "59edcea14cf69b6b1a057d3085a78a33ffbdec685a3c5161aa3d6b3150d3b784",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.28.0",
+    "path": "Help/command/cmake_language.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.28.0/Help/command/cmake_language.rst",
+    "local": "dev/CMake/v3.28.0/Help/command/cmake_language.rst",
+    "sha256": "9ed6c3e2d0ed4b6305f8cedc694cfc2855e8d4d91cbc0636707c69f9cfa99e96",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.28.0",
+    "path": "Help/command/find_package.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.28.0/Help/command/find_package.rst",
+    "local": "dev/CMake/v3.28.0/Help/command/find_package.rst",
+    "sha256": "621b599292d0e93045c9d0b208e65c1271495499173cd1c9e1e14b7cfc3d767c",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.28.0",
+    "path": "Help/command/install.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.28.0/Help/command/install.rst",
+    "local": "dev/CMake/v3.28.0/Help/command/install.rst",
+    "sha256": "af51af3ce35c87af8e54599194cc381d3763b42cdf13f6a483b96860865d3779",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.28.0",
+    "path": "Help/command/target_sources.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.28.0/Help/command/target_sources.rst",
+    "local": "dev/CMake/v3.28.0/Help/command/target_sources.rst",
+    "sha256": "fe10935a57f0b75304866bc7392379f52321d9e540d883f75d358419931cadf5",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.28.0",
+    "path": "Help/command/add_custom_command.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.28.0/Help/command/add_custom_command.rst",
+    "local": "dev/CMake/v3.28.0/Help/command/add_custom_command.rst",
+    "sha256": "2d25a94dc5f2f65d22914a6218bfc451271092fef1b302dc0e0c3e89fcd0904b",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.28.0",
+    "path": "Help/command/execute_process.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.28.0/Help/command/execute_process.rst",
+    "local": "dev/CMake/v3.28.0/Help/command/execute_process.rst",
+    "sha256": "be7934cedfe9e6060b694add4065c2d35beb486fa7115db269efac4d83b3e6d8",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.28.0",
+    "path": "Help/command/add_library.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.28.0/Help/command/add_library.rst",
+    "local": "dev/CMake/v3.28.0/Help/command/add_library.rst",
+    "sha256": "8aff7279c0bcd516c411ae374a8956af88695a41515d0da4ff4000d046b14d82",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.28.0",
+    "path": "Help/command/cmake_parse_arguments.rst",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.28.0/Help/command/cmake_parse_arguments.rst",
+    "local": "dev/CMake/v3.28.0/Help/command/cmake_parse_arguments.rst",
+    "sha256": "3e6abf66a5382df59024775a1172a75c2c2525fe736139c776532a9ea274f61d",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  },
+  {
+    "split": "dev",
+    "project": "Kitware/CMake",
+    "release": "v3.28.0",
+    "path": "Copyright.txt",
+    "url": "https://raw.githubusercontent.com/Kitware/CMake/v3.28.0/Copyright.txt",
+    "local": "dev/CMake/v3.28.0/Copyright.txt",
+    "sha256": "4a01ccf2dc580ba570d02bc015bbe0ec92f1f318717aae9540ba841ba7946756",
+    "license": "BSD 3-Clause and notices in Copyright.txt"
+  }
+]

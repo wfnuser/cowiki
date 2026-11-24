@@ -9,7 +9,11 @@ use std::{
 
 #[test]
 fn record_and_replay_one_real_http_exchange() {
-    let data = load_dataset(&Path::new(env!("CARGO_MANIFEST_DIR")).join("data"), "dev").unwrap();
+    let data = load_dataset(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pilot"),
+        "dev",
+    )
+    .unwrap();
     let case = &data.cases[0];
     let p = evidence_packet(&data.families[&case.family], case).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
