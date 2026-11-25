@@ -207,16 +207,20 @@ test('a narrow panel fits and its toggle moves into the panel, taking no top bar
   await desktop(page, { panelWidth: 320 });
   await page.goto(origin + '/personal/Welcome');
   await expect(page.locator('article')).toContainText('Welcome');
-  const topBarButtons = () => page.locator('.app-header-actions button').count();
-  const before = await topBarButtons();
+  // Retrying assertions, not one-off counts: the top bar's buttons can settle
+  // after the page text on a slow runner.
+  const topBar = page.locator('.app-header-actions').getByRole('button');
+  // Space status, comments and the Agent toggle.
+  await expect(topBar).toHaveCount(3);
+  await expect(page.locator('.app-header-actions').getByRole('button', { name: 'Agent', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Agent', exact: true }).click();
   const panel = page.locator('aside[aria-label="Agent"]');
   await expect(panel.getByRole('textbox', { name: 'Message agent' })).toBeVisible();
   await expect(panel.getByText(/Codex 0\.166\.0 is ready/)).toBeVisible();
   await shot(page, 'new-task-320');
-  // Opened and closed from the same corner: the top bar loses its toggle.
-  expect(await topBarButtons()).toBe(before - 1);
+  // Opened and closed from the same corner: the top bar loses its toggle and gains nothing.
   await expect(page.getByRole('button', { name: 'Agent', exact: true })).toHaveCount(0);
+  await expect(topBar).toHaveCount(2);
   await panel.getByRole('button', { name: 'Close agent panel' }).click();
   await expect(page.getByRole('button', { name: 'Agent', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Agent', exact: true }).click();
