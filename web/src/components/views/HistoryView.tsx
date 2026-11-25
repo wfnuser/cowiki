@@ -14,7 +14,6 @@ import {
   canCreateCheckpoint,
   checkpointTime,
   defaultCheckpointName,
-  draftChangeLabel,
 } from '@/lib/history';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/I18nContext';
@@ -114,7 +113,11 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
                   <span aria-hidden className="history-dot is-draft" />
                   <span className="view-row-title">
                     {t('Current Draft')}
-                    <span className="view-row-detail">{draftChangeLabel(spaceHistory.currentDraft.changedFiles)}</span>
+                    <span className="view-row-detail">
+                      {spaceHistory.currentDraft.changedFiles === 0
+                        ? t('No changes')
+                        : t(spaceHistory.currentDraft.changedFiles === 1 ? '{count} file changed' : '{count} files changed', { count: spaceHistory.currentDraft.changedFiles })}
+                    </span>
                   </span>
                 </li>
                 {spaceHistory.checkpoints.map((checkpoint) => {
@@ -123,7 +126,7 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
                   return (
                     <li key={checkpoint.id}>
                       <span aria-hidden className={cn('history-dot', named && 'is-named')} />
-                      <span className={cn('view-row-title', named ? 'text-text' : 'text-text-secondary')}>{checkpoint.name}</span>
+                      <span className={cn('view-row-title', named ? 'text-text' : 'text-text-secondary')}>{named ? checkpoint.name : t('Auto checkpoint')}</span>
                       <time
                         dateTime={created.toISOString()}
                         title={created.toLocaleString(intl, { dateStyle: 'full', timeStyle: 'short' })}

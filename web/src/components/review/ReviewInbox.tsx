@@ -65,6 +65,7 @@ export function ReviewInboxRow({
   title: string;
   trailing?: React.ReactNode;
 }) {
+  const { t } = useI18n();
   return (
     <li>
       <button type="button" onClick={onOpen} className="view-row group">
@@ -78,7 +79,7 @@ export function ReviewInboxRow({
         )}
         {files != null && additions != null && deletions != null && (
           <span className="view-row-meta">
-            {files} {files === 1 ? 'file' : 'files'}
+            {t(files === 1 ? '{count} file' : '{count} files', { count: files })}
             <span className={cn('ml-2', additions ? 'text-green' : 'text-text-faint')}>+{additions}</span>
             <span className={cn('ml-1', deletions ? 'text-red' : 'text-text-faint')}>−{deletions}</span>
           </span>

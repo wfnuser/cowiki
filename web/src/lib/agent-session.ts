@@ -147,15 +147,18 @@ export function sessionGroups(sessions: readonly AgentSnapshot[], now = Date.now
 }
 
 /** "now", "5m", "3h", "Tue", "12 Nov": short, for a list column. */
-export function shortAgo(at: number, now = Date.now()): string {
+export function shortAgo(at: number, now = Date.now(), locales?: string): string {
   const minutes = Math.floor((now - at) / 60_000);
-  if (minutes < 1) return 'now';
-  if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
+  // English keeps its compact "5m" / "2h"; other languages say it their way ("5分钟前").
+  const english = !locales || locales.startsWith('en');
+  const relative = english ? null : new Intl.RelativeTimeFormat(locales, { numeric: 'auto', style: 'short' });
+  if (minutes < 1) return relative ? relative.format(0, 'second') : 'now';
+  if (minutes < 60) return relative ? relative.format(-minutes, 'minute') : `${minutes}m`;
+  if (hours < 24) return relative ? relative.format(-hours, 'hour') : `${hours}h`;
   const date = new Date(at);
-  if (now - at < 7 * 86_400_000) return date.toLocaleDateString(undefined, { weekday: 'short' });
-  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  if (now - at < 7 * 86_400_000) return date.toLocaleDateString(locales, { weekday: 'short' });
+  return date.toLocaleDateString(locales, { day: 'numeric', month: 'short' });
 }
 
 export type LoginEvent = { agent: AgentKind; status: 'completed' | 'failed' | 'cancelled'; message: string | null };

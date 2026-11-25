@@ -60,3 +60,15 @@ test('a diff hunk is labelled by the lines it shows', () => {
   assert.equal(hunkLabel('@@ -8 +9 @@ ## Notes'), 'Line 9 · ## Notes');
   assert.equal(hunkLabel('not a hunk'), 'not a hunk');
 });
+
+test('checkpoint times and short ages read naturally in Chinese', async () => {
+  const { shortAgo } = await import('../src/lib/agent-session.ts');
+  const now = new Date(2026, 10, 24, 15, 0);
+  assert.equal(checkpointTime(new Date(2026, 10, 23, 14, 0), now, 'zh-CN'), '昨天 14:00');
+  assert.equal(checkpointTime(new Date(2026, 10, 22, 7, 26), now, 'zh-CN'), '11月22日 7:26');
+  assert.equal(shortAgo(now.getTime() - 5 * 60_000, now.getTime(), 'zh-CN'), '5分钟前');
+  assert.equal(shortAgo(now.getTime() - 2 * 3_600_000, now.getTime(), 'zh-CN'), '2小时前');
+  // English keeps its compact form.
+  assert.equal(shortAgo(now.getTime() - 5 * 60_000, now.getTime(), 'en-US'), '5m');
+  assert.equal(checkpointTime(new Date(2026, 10, 23, 14, 0), now, 'en-US'), 'Yesterday, 2:00 PM');
+});

@@ -111,6 +111,10 @@ test('Settings switches instantly between English and Simplified Chinese and per
   await expect(page.getByRole('heading', { name: '闪卡' })).toBeVisible();
   await expect(page.getByRole('button', { name: '全部学习 · 1' })).toBeVisible();
 
+  // Journal days are dated the Chinese way, not "Nov 25th, 2026".
+  await page.getByRole('button', { name: '日记', exact: true }).click();
+  await expect(page.locator('.journal-day-title').first()).toHaveText(/^\d{4}年\d{1,2}月\d{1,2}日$/);
+
   // Persists across reload.
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
