@@ -73,8 +73,9 @@ Notifications, Review details, Cloud pages) is built the same way, with
   centered sentence (`ViewEmpty`).
 - **History** is a timeline: the Current Draft (an accent ring) on top, then
   checkpoints newest first on one line of dots; named checkpoints are ink,
-  automatic ones muted. *Create checkpoint* sits in the title row and
-  appears only when the Draft has changes.
+  automatic ones muted. *Save snapshot* sits in the title row and appears
+  only when the Draft has changes (recording a snapshot without moving the
+  branch; committing to the branch is *Commit draft* in Reviews).
 - Views are left-aligned in the content area (`36px 56px` padding) with a
   `min(860px, 100%)` column; a wide board may use `min(1040px, 100%)`.
 - **Tasks** tabs (Today, This week, Upcoming, No date) each read as a list

@@ -97,7 +97,7 @@ export function SpaceStatusMenu({
             />
             <VersionItem
               label="main"
-              meta="Latest checkpoint · read-only"
+              meta="Latest commit · read-only"
               color={C.purple}
               selected={selection.kind === 'upstream'}
               onSelect={() => onSelect({ kind: 'upstream' })}

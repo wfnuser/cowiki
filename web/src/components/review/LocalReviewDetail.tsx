@@ -31,7 +31,8 @@ export function LocalReviewDetail({
   const [draftDiffs, setDraftDiffs] = useState<FileDiff[] | null>(null);
   const [change, setChange] = useState<AgentChange | null>(null);
   const [loading, setLoading] = useState(true);
-  const [pending, setPending] = useState<'checkpoint' | 'merge' | 'discard' | null>(null);
+  const [pending, setPending] = useState<'commit' | 'merge' | 'discard' | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
@@ -55,7 +56,7 @@ export function LocalReviewDetail({
   }, [target, workspaceSlug]);
 
   useEffect(() => {
-    const task = window.setTimeout(() => { void reload(); }, 0);
+    const task = window.setTimeout(() => { setNotice(null); void reload(); }, 0);
     return () => window.clearTimeout(task);
   }, [reload]);
 
@@ -67,11 +68,14 @@ export function LocalReviewDetail({
     if (pending) return;
     setPending(action);
     setError(null);
+    setNotice(null);
     try {
       const result = await operation();
       await reload();
       onReviewsChanged?.();
-      if (action === 'merge') {
+      if (action === 'commit') {
+        setNotice('Draft committed.');
+      } else if (action === 'merge') {
         const merge = agentMergeResult(
           (result as AgentChange).status === 'needsResolution' ? 'needsResolution' : 'merged',
         );
@@ -95,9 +99,10 @@ export function LocalReviewDetail({
     <Button
       size="sm"
       disabled={!draftDiffs.length || pending != null}
-      onClick={() => run('checkpoint', () => keepLocalWorkingDiff(workspaceSlug, draftDiffs))}
+      title="Commit these changes to the current branch"
+      onClick={() => run('commit', () => keepLocalWorkingDiff(workspaceSlug, draftDiffs))}
     >
-      {pending === 'checkpoint' ? 'Creating…' : 'Create checkpoint'}
+      {pending === 'commit' ? 'Committing…' : 'Commit draft'}
     </Button>
   ) : !loading && target.kind === 'local-agent' && change && activeChange ? (
     <>
@@ -132,7 +137,7 @@ export function LocalReviewDetail({
         actions={actions}
         description={(
           <span className="flex items-center gap-2">
-            {target.kind === 'local-draft' ? 'Compared with the latest checkpoint' : `Agent change · ${target.changeId.slice(0, 8)}`}
+            {target.kind === 'local-draft' ? 'Compared with the last commit' : `Agent change · ${target.changeId.slice(0, 8)}`}
             {target.kind === 'local-agent' && change && (
               <span className={change.status === 'needsResolution' ? 'font-medium text-red' : 'text-text-tertiary'}>· {statusLabel(change.status)}</span>
             )}
@@ -141,6 +146,7 @@ export function LocalReviewDetail({
       />
 
       {error && <InlineFeedback className="mb-4" title="Could not update this Review" description={error} />}
+      {notice && <InlineFeedback className="mb-4" tone="neutral" compact title={notice} />}
       {loading || diffs == null ? (
         <ViewEmpty>Loading changes…</ViewEmpty>
       ) : diffs.length ? (

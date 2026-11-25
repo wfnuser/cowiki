@@ -27,6 +27,7 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
   const [spaceHistory, setSpaceHistory] = useState<SpaceHistory | null>(null);
   const [loading, setLoading] = useState(local);
   const [creating, setCreating] = useState(false);
+  const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const checkpointReady = canCreateCheckpoint(spaceHistory?.currentDraft.changedFiles);
 
@@ -34,6 +35,7 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
     if (!local) return;
     setLoading(true);
     setError('');
+    setNotice('');
     try {
       setSpaceHistory(await getSpaceHistory(workspaceSlug));
     } catch (caught) {
@@ -48,14 +50,16 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
     return () => window.clearTimeout(task);
   }, [refresh]);
 
-  const createCheckpoint = async () => {
+  const saveSnapshot = async () => {
     setCreating(true);
     setError('');
+    setNotice('');
     try {
       await createLocalCheckpoint(workspaceSlug, defaultCheckpointName());
       setSpaceHistory(await getSpaceHistory(workspaceSlug));
+      setNotice('Snapshot saved.');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not create checkpoint');
+      setError(caught instanceof Error ? caught.message : 'Could not save snapshot');
     } finally {
       setCreating(false);
     }
@@ -67,13 +71,13 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
       type="button"
       size="sm"
       variant="ghost"
-      onClick={() => { void createCheckpoint(); }}
+      onClick={() => { void saveSnapshot(); }}
       disabled={creating || loading}
-      title="Record the current Draft as a named snapshot"
+      title="Save the current Draft as a named snapshot in History"
       className="text-text-secondary hover:text-text"
     >
       {creating ? <LoaderCircle size={14} className="animate-spin" /> : <BookmarkPlus size={14} />}
-      {creating ? 'Creating…' : 'Create checkpoint'}
+      {creating ? 'Saving…' : 'Save snapshot'}
     </Button>
   );
   const now = new Date();
@@ -93,6 +97,10 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
               description={error}
               action={<button type="button" onClick={() => { void refresh(); }} className="text-meta font-semibold text-red">Retry</button>}
             />
+          )}
+
+          {notice && (
+            <InlineFeedback className="mb-4" tone="neutral" compact title={notice} />
           )}
 
           {loading && !spaceHistory ? (
