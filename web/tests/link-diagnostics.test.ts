@@ -55,7 +55,7 @@ test('the local-only Broken links view refreshes on demand and window focus with
   assert.match(mainLayout, /<LinksView/);
   assert.doesNotMatch(linksView, /setInterval/);
   assert.match(linksView, /addEventListener\('focus'/);
-  assert.match(linksView, /label="Refresh"/);
+  assert.match(linksView, /label=(?:"Refresh"|\{t\('Refresh'\)\})/);
   assert.doesNotMatch(linksView, /A live|live, read-only/i);
   assert.match(linksView, /listBrokenLinks/);
   assert.doesNotMatch(linksView, /writePage|onSave|Auto Save/);

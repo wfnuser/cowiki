@@ -17,6 +17,7 @@ import {
   draftChangeLabel,
 } from '@/lib/history';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/lib/I18nContext';
 
 interface HistoryViewProps {
   workspaceSlug: string;
@@ -24,6 +25,7 @@ interface HistoryViewProps {
 }
 
 export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
+  const { t, intl } = useI18n();
   const [spaceHistory, setSpaceHistory] = useState<SpaceHistory | null>(null);
   const [loading, setLoading] = useState(local);
   const [creating, setCreating] = useState(false);
@@ -57,7 +59,7 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
     try {
       await createLocalCheckpoint(workspaceSlug, defaultCheckpointName());
       setSpaceHistory(await getSpaceHistory(workspaceSlug));
-      setNotice('Snapshot saved.');
+      setNotice(t('Snapshot saved.'));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not save snapshot');
     } finally {
@@ -73,29 +75,29 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
       variant="ghost"
       onClick={() => { void saveSnapshot(); }}
       disabled={creating || loading}
-      title="Save the current Draft as a named snapshot in History"
+      title={t('Save the current Draft as a named snapshot in History')}
       className="text-text-secondary hover:text-text"
     >
       {creating ? <LoaderCircle size={14} className="animate-spin" /> : <BookmarkPlus size={14} />}
-      {creating ? 'Saving…' : 'Save snapshot'}
+      {creating ? t('Saving…') : t('Save snapshot')}
     </Button>
   );
   const now = new Date();
 
   return (
     <section style={{ width: 'min(860px, 100%)' }}>
-      <ViewHeader title="History" actions={checkpointButton || undefined} />
+      <ViewHeader title={t('History')} actions={checkpointButton || undefined} />
 
       {!local ? (
-        <InlineFeedback tone="neutral" compact title="History is kept for local Spaces only." />
+        <InlineFeedback tone="neutral" compact title={t('History is kept for local Spaces only.')} />
       ) : (
         <>
           {error && (
             <InlineFeedback
               className="mb-4"
-              title="Could not update history"
+              title={t('Could not update history')}
               description={error}
-              action={<button type="button" onClick={() => { void refresh(); }} className="text-meta font-semibold text-red">Retry</button>}
+              action={<button type="button" onClick={() => { void refresh(); }} className="text-meta font-semibold text-red">{t('Retry')}</button>}
             />
           )}
 
@@ -104,14 +106,14 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
           )}
 
           {loading && !spaceHistory ? (
-            <ViewEmpty><LoaderCircle size={15} className="animate-spin" /> Loading…</ViewEmpty>
+            <ViewEmpty><LoaderCircle size={15} className="animate-spin" /> {t('Loading…')}</ViewEmpty>
           ) : spaceHistory && (
             <>
-              <ol aria-label="History" className="history-timeline">
+              <ol aria-label={t('History')} className="history-timeline">
                 <li>
                   <span aria-hidden className="history-dot is-draft" />
                   <span className="view-row-title">
-                    Current Draft
+                    {t('Current Draft')}
                     <span className="view-row-detail">{draftChangeLabel(spaceHistory.currentDraft.changedFiles)}</span>
                   </span>
                 </li>
@@ -124,17 +126,17 @@ export function HistoryView({ workspaceSlug, local }: HistoryViewProps) {
                       <span className={cn('view-row-title', named ? 'text-text' : 'text-text-secondary')}>{checkpoint.name}</span>
                       <time
                         dateTime={created.toISOString()}
-                        title={created.toLocaleString([], { dateStyle: 'full', timeStyle: 'short' })}
+                        title={created.toLocaleString(intl, { dateStyle: 'full', timeStyle: 'short' })}
                         className="view-row-meta"
                       >
-                        {checkpointTime(created, now)}
+                        {checkpointTime(created, now, intl)}
                       </time>
                     </li>
                   );
                 })}
               </ol>
               {spaceHistory.checkpoints.length === 0 && (
-                <p className="m-0 pl-[21px] text-small text-text-tertiary">No checkpoints yet.</p>
+                <p className="m-0 pl-[21px] text-small text-text-tertiary">{t('No checkpoints yet.')}</p>
               )}
             </>
           )}

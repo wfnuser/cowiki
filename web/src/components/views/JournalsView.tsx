@@ -20,6 +20,7 @@ import {
 } from '@/lib/journal';
 import { obsidianToReaderMarkdown, renderedLineOffset } from '@/lib/obsidian-markdown';
 import { applyTaskToggle } from '@/lib/tasks';
+import { useI18n } from '@/lib/I18nContext';
 import { remarkSoftBreaks } from '@/lib/remark-soft-breaks';
 
 const COMPONENTS = withObsidianReader({});
@@ -96,6 +97,7 @@ interface EditSession {
 export function JournalDay({
   entry, today, read, write, createToday, onOpenPage, onWikilink, loadAsset, getPageSlugs,
 }: JournalDayProps) {
+  const { t } = useI18n();
   // undefined while loading; null when today's file does not exist yet.
   const [body, setBody] = useState<string | null | undefined>(entry.missing ? null : undefined);
   const [session, setSession] = useState<EditSession | null>(null);
@@ -257,7 +259,7 @@ export function JournalDay({
             </ObsidianReaderContext.Provider>
           ) : (
             // Like Logseq: an empty day is one bullet, ready for text.
-            <div className="journal-day-empty" role="button" tabIndex={0} aria-label="Write in this day"
+            <div className="journal-day-empty" role="button" tabIndex={0} aria-label={t('Write in this day')}
               onClick={(event) => { event.stopPropagation(); void startEdit(null); }}
               onKeyDown={(event) => { if (event.key === 'Enter') void startEdit(null); }} />
           )}

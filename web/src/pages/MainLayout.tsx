@@ -58,6 +58,7 @@ import { CloudNotificationsPage } from '../cloud/CloudNotificationsPage';
 import { notificationUnreadCount } from '../api';
 import { CommentsProvider, CommentsPanel, CommentsHeaderToggle, commentMarkdownComponents } from '../components/PageCommentsLayer';
 import { C } from '@/lib/design';
+import { useI18n } from '@/lib/I18nContext';
 import { apiOrigin, isDesktopClient } from '@/runtime';
 import { normalizeCloudSession } from '@/cloud/session';
 import { CloudSpaceDialog } from '@/components/cloud/CloudSpaceDialog';
@@ -193,6 +194,7 @@ function mergePageTrees(main: PageMeta[], draft: PageMeta[]): PageMeta[] {
 }
 
 export function MainLayout() {
+  const { t } = useI18n();
   const [auth, setAuth] = useState(() => getCurrentAuth());
   const desktop = isDesktopClient();
   const navigate = useNavigate();
@@ -1643,9 +1645,9 @@ export function MainLayout() {
       ? agentPageDiff?.new_content === null
       : false;
   const readonlyVersionLabel = versionSelection.kind === 'upstream'
-    ? 'Viewing upstream “main”'
+    ? t('Viewing upstream “main”')
     : versionSelection.kind === 'agent'
-      ? `Viewing ${selectedAgentChange?.title ?? 'Agent Change'} changes`
+      ? t('Viewing {title} changes', { title: selectedAgentChange?.title ?? t('Agent change') })
       : '';
 
   if (desktop && workspacesLoaded && workspaces.length === 0) {
@@ -1797,8 +1799,8 @@ export function MainLayout() {
                 {sidebarLayout.collapsed && (
                   <button
                     type="button"
-                    aria-label="Expand sidebar"
-                    title="Expand sidebar"
+                    aria-label={t('Expand sidebar')}
+                    title={t('Expand sidebar')}
                     onClick={() => setSidebarLayout((current) => ({ ...current, collapsed: false }))}
                     style={{
                       width: 28, height: 28, padding: 0, marginRight: 4,
@@ -1826,7 +1828,7 @@ export function MainLayout() {
                 {showJournals && (
                   <>
                     <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>Journals</span>
+                    <span style={{ color: C.ink }}>{t('Journals')}</span>
                   </>
                 )}
                 {activeView?.kind === 'page' && activeView.content && (
@@ -1848,19 +1850,19 @@ export function MainLayout() {
                 {activeView?.kind === 'review-list' && (
                   <>
                     <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>Reviews</span>
+                    <span style={{ color: C.ink }}>{t('Reviews')}</span>
                   </>
                 )}
                 {activeView?.kind === 'review-detail' && (
                   <>
                     <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>Reviews</span>
+                    <span style={{ color: C.ink }}>{t('Reviews')}</span>
                     <span style={{ color: C.faint }}>/</span>
                     <span style={{ color: C.ink }}>
                       {activeView.target.kind === 'local-draft'
-                        ? 'Current Draft'
+                        ? t('Current Draft')
                         : activeView.target.kind === 'local-agent'
-                          ? `Agent #${activeView.target.changeId.slice(0, 6)}`
+                          ? `${t('Agent')} #${activeView.target.changeId.slice(0, 6)}`
                           : `#${activeView.target.submissionId.slice(0, 6)}`}
                     </span>
                   </>
@@ -1868,35 +1870,35 @@ export function MainLayout() {
                 {activeView?.kind === 'members' && (
                   <>
                     <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>Members</span>
+                    <span style={{ color: C.ink }}>{t('Members')}</span>
                   </>
                 )}
                 {activeView?.kind === 'history' && (
                   <>
                     <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>History</span>
+                    <span style={{ color: C.ink }}>{t('History')}</span>
                   </>
                 )}
                 {activeView?.kind === 'links' && (
                   <>
                     <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>Broken links</span>
+                    <span style={{ color: C.ink }}>{t('Broken links')}</span>
                   </>
                 )}
                 {activeView?.kind === 'tasks' && (
                   <>
                     <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>Tasks</span>
+                    <span style={{ color: C.ink }}>{t('Tasks')}</span>
                   </>
                 )}
                 {activeView?.kind === 'flashcards' && (
                   <>
                     <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>Flashcards</span>
+                    <span style={{ color: C.ink }}>{t('Flashcards')}</span>
                   </>
                 )}
                 {activeView?.kind === 'notifications' && (
-                  <span style={{ color: C.ink }}>Notifications</span>
+                  <span style={{ color: C.ink }}>{t('Notifications')}</span>
                 )}
               </ContentBreadcrumb>
 
@@ -1936,8 +1938,8 @@ export function MainLayout() {
                 {editingPage && canEditInline && commentStore && (
                   <button
                     type="button"
-                    aria-label="Comments"
-                    title="Back to reading and show comments"
+                    aria-label={t('Comments')}
+                    title={t('Back to reading and show comments')}
                     onClick={() => { void handleDoneEditing({ openComments: true }); }}
                     className="hover:bg-bg-hover"
                     style={{ ...headerBtnStyle, width: 30, height: 28, justifyContent: 'center', padding: 0, color: C.ink2, background: undefined }}
@@ -1950,7 +1952,7 @@ export function MainLayout() {
                 {desktop && activeWorkspace?.localPath && !agentPanelOpen && (
                   <button
                     type="button"
-                    aria-label="Agent"
+                    aria-label={t('Agent')}
                     onClick={() => setAgentPanelOpen(true)}
                     className="hover:bg-bg-hover"
                     style={{
@@ -1958,7 +1960,7 @@ export function MainLayout() {
                       width: 28, height: 28, justifyContent: 'center', padding: 0, marginRight: -18,
                       color: C.muted, background: undefined,
                     }}
-                    title="Open the Agent sidebar"
+                    title={t('Open the Agent sidebar')}
                   >
                     <PanelRight size={16} />
                   </button>
@@ -2122,7 +2124,7 @@ export function MainLayout() {
                       padding: '2px 10px', fontSize: 11, borderRadius: 12,
                       background: C.blueSoft, color: C.blue, fontWeight: 500,
                     }}>
-                      Source File
+                      {t('Source File')}
                     </span>
                     {activeSourceUrl && (
                       <Button
@@ -2132,7 +2134,7 @@ export function MainLayout() {
                         onClick={() => { void openExternalUrl(activeSourceUrl); }}
                       >
                         <ExternalLink className="size-4" />
-                        View original
+                        {t('View original')}
                       </Button>
                     )}
                   </div>
@@ -2226,7 +2228,7 @@ export function MainLayout() {
                     readOnlyLabel={versionSelection.kind !== 'working' ? readonlyVersionLabel : undefined}
                     readOnlyDotColor={versionSelection.kind === 'upstream' ? C.purple : C.blue}
                     missingMessage={viewedPageMissing
-                      ? 'This page does not exist in the selected version.'
+                      ? t('This page does not exist in the selected version.')
                       : undefined}
                     aside={<CommentsPanel />}
                     onEditAt={canEditInline ? (click, top) => {
@@ -2369,20 +2371,20 @@ export function MainLayout() {
       {/* New page */}
       <Dialog open={!!showNewPage} onOpenChange={(open) => !open && setShowNewPage(null)}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>New Page</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('New Page')}</DialogTitle></DialogHeader>
           <form onSubmit={handleCreatePage} className="space-y-4 mt-2">
             <div>
-              <label className="mb-1.5 block text-sm text-text-secondary">Title</label>
-              <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Meeting Notes" autoFocus />
+              <label className="mb-1.5 block text-sm text-text-secondary">{t('Title')}</label>
+              <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={t('e.g. Meeting Notes')} autoFocus />
             </div>
             <div>
-              <label htmlFor="new-page-template" className="mb-1.5 block text-sm text-text-secondary">Template</label>
+              <label htmlFor="new-page-template" className="mb-1.5 block text-sm text-text-secondary">{t('Template')}</label>
               <Select value={newPageTemplate || 'blank'} onValueChange={(value) => setNewPageTemplate(value === 'blank' ? '' : value)}>
                 <SelectTrigger id="new-page-template" className="h-9 w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="blank">Blank page</SelectItem>
+                  <SelectItem value="blank">{t('Blank page')}</SelectItem>
                   {newPageTemplates.map((path) => (
                     <SelectItem key={path} value={`page:${path}`}>{path.replace(/\.md$/i, '')}</SelectItem>
                   ))}
@@ -2395,8 +2397,8 @@ export function MainLayout() {
               )}
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" type="button" onClick={() => setShowNewPage(null)}>Cancel</Button>
-              <Button type="submit" disabled={!newName.trim()}>Create</Button>
+              <Button variant="outline" type="button" onClick={() => setShowNewPage(null)}>{t('Cancel')}</Button>
+              <Button type="submit" disabled={!newName.trim()}>{t('Create')}</Button>
             </div>
           </form>
         </DialogContent>
@@ -2405,15 +2407,15 @@ export function MainLayout() {
       {/* Rename workspace */}
       <Dialog open={!!showRename} onOpenChange={(open) => !open && setShowRename(null)}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Rename Space</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('Rename Space')}</DialogTitle></DialogHeader>
           <form onSubmit={handleRename} className="space-y-4 mt-2">
             <div>
-              <label className="mb-1.5 block text-sm text-text-secondary">Name</label>
+              <label className="mb-1.5 block text-sm text-text-secondary">{t('Name')}</label>
               <Input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} autoFocus />
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" type="button" onClick={() => setShowRename(null)}>Cancel</Button>
-              <Button type="submit" disabled={!renameValue.trim()}>Rename</Button>
+              <Button variant="outline" type="button" onClick={() => setShowRename(null)}>{t('Cancel')}</Button>
+              <Button type="submit" disabled={!renameValue.trim()}>{t('Rename')}</Button>
             </div>
           </form>
         </DialogContent>
@@ -2422,15 +2424,15 @@ export function MainLayout() {
       {/* New folder */}
       <Dialog open={!!showNewFolder} onOpenChange={(open) => !open && setShowNewFolder(null)}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>New Folder</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('New Folder')}</DialogTitle></DialogHeader>
           <form onSubmit={handleCreateFolder} className="space-y-4 mt-2">
             <div>
-              <label className="mb-1.5 block text-sm text-text-secondary">Name</label>
-              <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Research, Projects" autoFocus />
+              <label className="mb-1.5 block text-sm text-text-secondary">{t('Name')}</label>
+              <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={t('e.g. Research, Projects')} autoFocus />
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" type="button" onClick={() => setShowNewFolder(null)}>Cancel</Button>
-              <Button type="submit" disabled={!newName.trim()}>Create</Button>
+              <Button variant="outline" type="button" onClick={() => setShowNewFolder(null)}>{t('Cancel')}</Button>
+              <Button type="submit" disabled={!newName.trim()}>{t('Create')}</Button>
             </div>
           </form>
         </DialogContent>
@@ -2476,7 +2478,7 @@ export function MainLayout() {
       {/* Rename page/folder */}
       <Dialog open={pathOp?.kind === 'rename'} onOpenChange={(open) => !open && setPathOp(null)}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Rename {pathOp?.isFolder ? 'Folder' : 'Page'}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{pathOp?.isFolder ? t('Rename Folder') : t('Rename Page')}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-2">
             <Input
               value={pathOp?.kind === 'rename' ? pathOp.value : ''}
@@ -2488,8 +2490,8 @@ export function MainLayout() {
               Renames the {pathOp?.isFolder ? 'folder path' : 'page slug'} in your draft; links to the old name will need updating.
             </p>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setPathOp(null)}>Cancel</Button>
-              <Button onClick={handlePathOp}>Rename</Button>
+              <Button variant="outline" onClick={() => setPathOp(null)}>{t('Cancel')}</Button>
+              <Button onClick={handlePathOp}>{t('Rename')}</Button>
             </div>
           </div>
         </DialogContent>
@@ -2498,7 +2500,7 @@ export function MainLayout() {
       {/* Delete page/folder confirm */}
       <Dialog open={pathOp?.kind === 'delete'} onOpenChange={(open) => !open && setPathOp(null)}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Delete {pathOp?.isFolder ? 'Folder' : 'Page'}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{pathOp?.isFolder ? t('Delete Folder') : t('Delete Page')}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-2">
             <p className="text-sm text-text-secondary">
               Delete <strong>{pathOp?.title}</strong>
@@ -2508,8 +2510,8 @@ export function MainLayout() {
                 : ' The change lands on the shared wiki when your submission is merged.'}
             </p>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setPathOp(null)}>Cancel</Button>
-              <Button variant="destructive" onClick={handlePathOp}>Delete</Button>
+              <Button variant="outline" onClick={() => setPathOp(null)}>{t('Cancel')}</Button>
+              <Button variant="destructive" onClick={handlePathOp}>{t('Delete')}</Button>
             </div>
           </div>
         </DialogContent>
@@ -2754,6 +2756,7 @@ function isMissingLocalPageError(error: unknown): boolean {
 
 // ── Discover View ──
 function DiscoverView() {
+  const { t } = useI18n();
   const [spaces, setSpaces] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState<string | null>(null);
@@ -2774,14 +2777,14 @@ function DiscoverView() {
 
   return (
     <>
-      <h1 className="view-title mb-1">Discover</h1>
-      <p style={{ color: C.muted, fontSize: 13, marginBottom: 32 }}>Public knowledge spaces you can browse and join.</p>
+      <h1 className="view-title mb-1">{t('Discover')}</h1>
+      <p style={{ color: C.muted, fontSize: 13, marginBottom: 32 }}>{t('Public knowledge spaces you can browse and join.')}</p>
       {loading ? (
-        <div style={{ padding: '32px 0', textAlign: 'center', color: C.muted, fontSize: 13 }}>Loading...</div>
+        <div style={{ padding: '32px 0', textAlign: 'center', color: C.muted, fontSize: 13 }}>{t('Loading…')}</div>
       ) : spaces.length === 0 ? (
         <div style={{ padding: '48px 0', textAlign: 'center' }}>
           <Compass size={24} style={{ margin: '0 auto 12px', display: 'block', color: C.faint }} />
-          <p style={{ color: C.muted, fontSize: 13 }}>No public spaces yet.</p>
+          <p style={{ color: C.muted, fontSize: 13 }}>{t('No public spaces yet.')}</p>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -2812,7 +2815,7 @@ function DiscoverView() {
                   opacity: joining === ws.slug ? 0.4 : 1,
                 }}
               >
-                {joining === ws.slug ? 'Joining...' : 'Join'}
+                {joining === ws.slug ? t('Joining...') : t('Join')}
               </button>
             </div>
           ))}

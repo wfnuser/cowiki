@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { InlineFeedback } from '@/components/ui/inline-feedback';
 import { ViewEmpty, ViewHeader } from '@/components/ui/view-header';
+import { useI18n } from '@/lib/I18nContext';
 import { DiffView } from './DiffView';
 import { agentMergeResult, type LocalReviewSelection } from './local-review-model';
 
@@ -28,6 +29,7 @@ export function LocalReviewDetail({
   onReviewsChanged?: () => void;
   onContinueAgent?: (change: AgentChange) => void;
 }) {
+  const { t, tl } = useI18n();
   const [draftDiffs, setDraftDiffs] = useState<FileDiff[] | null>(null);
   const [change, setChange] = useState<AgentChange | null>(null);
   const [loading, setLoading] = useState(true);
@@ -74,7 +76,7 @@ export function LocalReviewDetail({
       await reload();
       onReviewsChanged?.();
       if (action === 'commit') {
-        setNotice('Draft committed.');
+        setNotice(t('Draft committed.'));
       } else if (action === 'merge') {
         const merge = agentMergeResult(
           (result as AgentChange).status === 'needsResolution' ? 'needsResolution' : 'merged',
@@ -92,17 +94,17 @@ export function LocalReviewDetail({
   };
 
   const diffs = target.kind === 'local-draft' ? draftDiffs : change?.diffs;
-  const title = target.kind === 'local-draft' ? 'Current Draft' : (change?.title || 'Agent Change');
+  const title = target.kind === 'local-draft' ? t('Current Draft') : (change?.title || t('Agent change'));
   const activeChange = change?.status === 'open' || change?.status === 'needsResolution';
 
   const actions = !loading && !error && target.kind === 'local-draft' && draftDiffs ? (
     <Button
       size="sm"
       disabled={!draftDiffs.length || pending != null}
-      title="Commit these changes to the current branch"
+      title={t('Commit these changes to the current branch')}
       onClick={() => run('commit', () => keepLocalWorkingDiff(workspaceSlug, draftDiffs))}
     >
-      {pending === 'commit' ? 'Committing…' : 'Commit draft'}
+      {pending === 'commit' ? t('Committing…') : t('Commit draft')}
     </Button>
   ) : !loading && target.kind === 'local-agent' && change && activeChange ? (
     <>
@@ -112,11 +114,11 @@ export function LocalReviewDetail({
         disabled={pending != null}
         onClick={() => run('discard', () => discardLocalAgentChange(workspaceSlug, change.id))}
       >
-        {pending === 'discard' ? 'Discarding…' : 'Discard'}
+        {pending === 'discard' ? t('Discarding…') : t('Discard')}
       </Button>
       {onContinueAgent && (
         <Button size="sm" variant="outline" disabled={pending != null} onClick={() => onContinueAgent(change)}>
-          Continue with Agent
+          {t('Continue with Agent')}
         </Button>
       )}
       <Button
@@ -124,7 +126,7 @@ export function LocalReviewDetail({
         disabled={pending != null}
         onClick={() => run('merge', () => mergeLocalAgentChange(workspaceSlug, change.id), true)}
       >
-        {pending === 'merge' ? 'Merging…' : 'Merge into Draft'}
+        {pending === 'merge' ? t('Merging…') : t('Merge into Draft')}
       </Button>
     </>
   ) : undefined;
@@ -137,22 +139,22 @@ export function LocalReviewDetail({
         actions={actions}
         description={(
           <span className="flex items-center gap-2">
-            {target.kind === 'local-draft' ? 'Compared with the last commit' : `Agent change · ${target.changeId.slice(0, 8)}`}
+            {target.kind === 'local-draft' ? t('Compared with the last commit') : `${t('Agent change')} · ${target.changeId.slice(0, 8)}`}
             {target.kind === 'local-agent' && change && (
-              <span className={change.status === 'needsResolution' ? 'font-medium text-red' : 'text-text-tertiary'}>· {statusLabel(change.status)}</span>
+              <span className={change.status === 'needsResolution' ? 'font-medium text-red' : 'text-text-tertiary'}>· {tl(statusLabel(change.status))}</span>
             )}
           </span>
         )}
       />
 
-      {error && <InlineFeedback className="mb-4" title="Could not update this Review" description={error} />}
+      {error && <InlineFeedback className="mb-4" title={t('Could not update this Review')} description={error} />}
       {notice && <InlineFeedback className="mb-4" tone="neutral" compact title={notice} />}
       {loading || diffs == null ? (
-        <ViewEmpty>Loading changes…</ViewEmpty>
+        <ViewEmpty>{t('Loading changes…')}</ViewEmpty>
       ) : diffs.length ? (
         <DiffView diffs={diffs} />
       ) : (
-        <ViewEmpty>No file changes.</ViewEmpty>
+        <ViewEmpty>{t('No file changes.')}</ViewEmpty>
       )}
     </section>
   );

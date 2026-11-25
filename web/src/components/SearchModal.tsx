@@ -4,6 +4,7 @@ import { FileText, Search, Sparkles, CornerDownLeft, X } from 'lucide-react';
 import { searchWorkspace, type SearchResponse } from '../api';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { C } from '@/lib/design';
+import { useI18n } from '@/lib/I18nContext';
 import { isDesktopClient } from '@/runtime';
 import { conceptIdFromPath, conceptPath, isSearchableConceptPath } from '@/lib/okf-pages';
 
@@ -57,6 +58,7 @@ export function SearchModal({
   onClose: () => void;
   onSelectPage: (slug: string, path?: string) => void;
 }) {
+  const { t } = useI18n();
   const [q, setQ] = useState('');
   const [kw, setKw] = useState<SearchResponse['keyword'] | null>(null);
   const [sem, setSem] = useState<SearchResponse['semantic'] | null>(null);
@@ -185,10 +187,10 @@ export function SearchModal({
           and open animation so the palette keeps its exact previous layout. */}
       <DialogContent
         showCloseButton={false}
-        aria-label="Search"
+        aria-label={t('Search')}
         className="flex max-h-[60vh] w-[min(620px,92vw)] max-w-[min(620px,92vw)] flex-col gap-0 overflow-hidden p-0 data-[state=closed]:animate-none data-[state=open]:animate-none sm:max-w-[min(620px,92vw)]"
       >
-        <DialogTitle className="sr-only">Search</DialogTitle>
+        <DialogTitle className="sr-only">{t('Search')}</DialogTitle>
         {/* Input row */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px',
@@ -200,7 +202,7 @@ export function SearchModal({
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder={`Search in ${workspaceName}…`}
+            placeholder={t('Search in {name}…', { name: workspaceName })}
             style={{
               flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
               fontSize: 16, color: C.ink, fontFamily: 'inherit',
@@ -209,7 +211,7 @@ export function SearchModal({
           {q && (
             <button
               onClick={() => { setQ(''); inputRef.current?.focus(); }}
-              aria-label="Clear search"
+              aria-label={t('Clear search')}
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 width: 22, height: 22, borderRadius: 6, flexShrink: 0,
@@ -226,18 +228,18 @@ export function SearchModal({
         {/* Results — fixed minimum height so the panel never collapses to a sliver */}
         <div ref={listRef} style={{ flex: 1, minHeight: 200, overflowY: 'auto', paddingBottom: 6 }}>
           {!q.trim() ? (
-            <Empty>Search pages by title or content in this space</Empty>
+            <Empty>{t('Search pages by title or content in this space')}</Empty>
           ) : rows.length === 0 && (kwLoading || semLoading) ? (
-            <Empty>Searching…</Empty>
+            <Empty>{t('Searching…')}</Empty>
           ) : rows.length === 0 ? (
-            <Empty>No results for “{q}”</Empty>
+            <Empty>{t('No results for “{query}”', { query: q })}</Empty>
           ) : (
             <>
               {rows.length > 0 && rows[0].kind === 'keyword' &&
-                sectionLabel(<FileText size={11} />, 'Pages')}
+                sectionLabel(<FileText size={11} />, t('Pages'))}
               {rows.map((row, i) => (
                 <div key={`${row.kind}-${row.slug}`}>
-                  {i === semStart && sectionLabel(<Sparkles size={11} />, 'Semantic')}
+                  {i === semStart && sectionLabel(<Sparkles size={11} />, t('Semantic'))}
                   <div
                     data-row={i}
                     onMouseEnter={() => setSel(i)}
@@ -262,7 +264,7 @@ export function SearchModal({
                         </span>
                         {row.kind === 'semantic' && (row.source === 'draft' || row.source === 'graph' || row.source === 'vector') && (
                           <span style={{ fontSize: 12, fontWeight: 400, color: C.faint, flexShrink: 0 }}>
-                            {row.source === 'graph' ? 'linked' : row.source === 'vector' ? 'related' : row.source}
+                            {row.source === 'graph' ? t('linked') : row.source === 'vector' ? t('related') : row.source}
                           </span>
                         )}
                       </div>
@@ -285,8 +287,8 @@ export function SearchModal({
               ))}
               {semLoading && semStart === -1 && (
                 <>
-                  {sectionLabel(<Sparkles size={11} />, 'Semantic')}
-                  <div style={{ padding: '4px 18px 8px', fontSize: 13, color: C.faint }}>Searching…</div>
+                  {sectionLabel(<Sparkles size={11} />, t('Semantic'))}
+                  <div style={{ padding: '4px 18px 8px', fontSize: 13, color: C.faint }}>{t('Searching…')}</div>
                 </>
               )}
             </>
@@ -299,9 +301,9 @@ export function SearchModal({
           borderTop: `1px solid ${C.lineSoft}`, background: C.bg,
           fontSize: 12, color: C.faint,
         }}>
-          <span><Kbd>↑</Kbd><Kbd>↓</Kbd> select</span>
-          <span><Kbd>↵</Kbd> open</span>
-          <span><Kbd>esc</Kbd> close</span>
+          <span><Kbd>↑</Kbd><Kbd>↓</Kbd> {t('select')}</span>
+          <span><Kbd>↵</Kbd> {t('open')}</span>
+          <span><Kbd>esc</Kbd> {t('close')}</span>
         </div>
       </DialogContent>
     </Dialog>

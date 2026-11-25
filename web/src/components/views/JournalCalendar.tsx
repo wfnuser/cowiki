@@ -3,6 +3,7 @@ import { CalendarDays } from 'lucide-react';
 import { Popover as PopoverPrimitive } from 'radix-ui';
 
 import { MonthCalendar } from '@/components/ui/date-picker';
+import { useI18n } from '@/lib/I18nContext';
 
 function monthOf(key: string): Date {
   const [year, month] = key.split('-').map(Number);
@@ -20,6 +21,7 @@ export function JournalCalendar({ days, today, onGoTo }: {
   today: string;
   onGoTo: (key: string) => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [month, setMonth] = useState(() => monthOf(today));
   return (
@@ -30,8 +32,8 @@ export function JournalCalendar({ days, today, onGoTo }: {
       <PopoverPrimitive.Trigger asChild>
         <button
           type="button"
-          aria-label="Go to a day"
-          title="Go to a day"
+          aria-label={t('Go to a day')}
+          title={t('Go to a day')}
           className="flex size-7 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text"
         >
           <CalendarDays size={16} />
@@ -41,7 +43,7 @@ export function JournalCalendar({ days, today, onGoTo }: {
         <PopoverPrimitive.Content
           align="end"
           sideOffset={6}
-          aria-label="Journal calendar"
+          aria-label={t('Journal calendar')}
           className="z-[200] w-60 rounded-lg border border-border bg-panel p-2 text-text shadow-[var(--shadow-popover)]"
         >
           <MonthCalendar

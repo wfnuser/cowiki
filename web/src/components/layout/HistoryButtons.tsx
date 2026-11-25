@@ -1,4 +1,5 @@
 import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { useI18n } from '@/lib/I18nContext';
 
 interface HistoryButtonsProps {
   canGoBack: boolean;
@@ -9,12 +10,13 @@ interface HistoryButtonsProps {
 
 /** Back and forward at the top bar's left, as in Notion; faint while there is nowhere to go. */
 export function HistoryButtons({ canGoBack, canGoForward, onBack, onForward }: HistoryButtonsProps) {
+  const { t } = useI18n();
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, marginRight: 6, flexShrink: 0 }}>
-      <HistoryButton label="Back" shortcut="⌘[" disabled={!canGoBack} onClick={onBack}>
+      <HistoryButton label={t('Back')} shortcut="⌘[" disabled={!canGoBack} onClick={onBack}>
         <ArrowLeft size={16} />
       </HistoryButton>
-      <HistoryButton label="Forward" shortcut="⌘]" disabled={!canGoForward} onClick={onForward}>
+      <HistoryButton label={t('Forward')} shortcut="⌘]" disabled={!canGoForward} onClick={onForward}>
         <ArrowRight size={16} />
       </HistoryButton>
     </span>

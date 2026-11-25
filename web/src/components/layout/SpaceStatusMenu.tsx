@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { C } from '@/lib/design';
+import { useI18n } from '@/lib/I18nContext';
 import type { WorkspaceContextStatus } from '@/lib/workspace-context';
 
 export type VersionSelection =
@@ -44,22 +45,23 @@ export function SpaceStatusMenu({
   cloudAction,
   versions = true,
 }: SpaceStatusMenuProps) {
+  const { t, tl } = useI18n();
   const selectedAgent = selection.kind === 'agent'
     ? agentChanges.find((change) => change.id === selection.changeId)
     : undefined;
   const label = selection.kind === 'working'
-    ? 'Draft'
+    ? t('Draft')
     : selection.kind === 'upstream'
       ? 'main'
-      : selectedAgent?.title ?? 'Agent change';
+      : selectedAgent?.title ?? t('Agent change');
   const Place = context.kind === 'local' ? HardDrive : Cloud;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          aria-label={`${label} · ${context.label}`}
-          title={context.detail}
+          aria-label={`${label} · ${tl(context.label)}`}
+          title={tl(context.detail)}
           style={triggerStyle}
           className="hover:bg-bg-hover data-[state=open]:bg-bg-hover"
         >
@@ -77,8 +79,8 @@ export function SpaceStatusMenu({
         <div className="flex gap-2.5 px-2 pb-2 pt-1.5">
           <Place size={14} className="mt-0.5 shrink-0 text-text-tertiary" />
           <span className="min-w-0">
-            <span className="block text-small font-medium text-text">{context.label}</span>
-            <span className="block text-meta leading-4 text-text-tertiary">{context.detail}</span>
+            <span className="block text-small font-medium text-text">{tl(context.label)}</span>
+            <span className="block text-meta leading-4 text-text-tertiary">{tl(context.detail)}</span>
           </span>
         </div>
 
@@ -86,18 +88,18 @@ export function SpaceStatusMenu({
           <>
             <DropdownMenuSeparator className="my-1" />
             <DropdownMenuLabel className="px-2 pb-1 pt-1.5 text-meta font-medium text-text-tertiary">
-              Version
+              {t('Version')}
             </DropdownMenuLabel>
             <VersionItem
-              label="Current Draft"
-              meta="Your working copy"
+              label={t('Current Draft')}
+              meta={t('Your working copy')}
               color={C.accent}
               selected={selection.kind === 'working'}
               onSelect={() => onSelect({ kind: 'working' })}
             />
             <VersionItem
               label="main"
-              meta="Latest commit · read-only"
+              meta={t('Latest commit · read-only')}
               color={C.purple}
               selected={selection.kind === 'upstream'}
               onSelect={() => onSelect({ kind: 'upstream' })}
@@ -106,7 +108,7 @@ export function SpaceStatusMenu({
               <VersionItem
                 key={change.id}
                 label={change.title}
-                meta={`Agent change · ${change.diffs.length} ${change.diffs.length === 1 ? 'file' : 'files'}`}
+                meta={`${t('Agent change')} · ${change.diffs.length} ${change.diffs.length === 1 ? 'file' : 'files'}`}
                 color={C.blue}
                 selected={selection.kind === 'agent' && selection.changeId === change.id}
                 onSelect={() => onSelect({ kind: 'agent', changeId: change.id })}
@@ -114,7 +116,7 @@ export function SpaceStatusMenu({
             ))}
             <DropdownMenuItem onSelect={onSeeReviews} className="text-small text-text-secondary">
               <Rows3 />
-              See all in Reviews
+              {t('See all in Reviews')}
             </DropdownMenuItem>
           </>
         )}
@@ -124,7 +126,7 @@ export function SpaceStatusMenu({
             <DropdownMenuSeparator className="my-1" />
             <DropdownMenuItem onSelect={cloudAction.onSelect} className="text-small text-text-secondary">
               <Cloud />
-              {cloudAction.label}
+              {tl(cloudAction.label)}
             </DropdownMenuItem>
           </>
         )}

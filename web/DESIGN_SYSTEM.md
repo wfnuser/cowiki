@@ -214,8 +214,8 @@ one muted line, then *Continue with GitHub* (ink) and *Continue locally*
   lives and its Cloud action, modules, templates; then one page per module
   with options, e.g. Journal) is stored in the Space and shared with its
   members, so its changes are saved together from a bar that appears once
-  something changed. **App** (General: appearance, default Agent, history
-  checkpoints; Account; API Keys) is only you, on this computer, and
+  something changed. **App** (General: appearance, language, default Agent,
+  history checkpoints; Account; API Keys) is only you, on this computer, and
   applies at once. The **Settings** gear at the foot of the sidebar opens
   the Space's group; *Settings* in the avatar menu opens the app's. The
   Space name at the top of the sidebar is a plain title, not a menu.

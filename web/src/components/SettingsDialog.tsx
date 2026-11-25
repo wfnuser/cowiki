@@ -20,6 +20,8 @@ import {
   type DefaultAgent,
 } from '../lib/client-settings';
 import { agentDefinition, SUPPORTED_AGENTS } from '../lib/agents';
+import { LOCALE_CHOICES } from '../lib/i18n';
+import { useI18n } from '../lib/I18nContext';
 import { loadTheme, setThemePreference, THEME_CHOICES, type ThemePreference } from '../lib/theme';
 
 /** The open Space's settings, stored in the Space and shared with its members. */
@@ -139,6 +141,7 @@ function CreateKeyDialog({
   onOpenChange: (open: boolean) => void;
   onCreated: () => void;
 }) {
+  const { t } = useI18n();
   const [step, setStep] = useState<'name' | 'reveal'>('name');
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
@@ -162,7 +165,7 @@ function CreateKeyDialog({
   const handleCreate = async () => {
     const trimmed = name.trim();
     if (!trimmed) {
-      setError('Name is required.');
+      setError(t('Name is required.'));
       return;
     }
     setCreating(true);
@@ -195,20 +198,20 @@ function CreateKeyDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create API Key</DialogTitle>
+          <DialogTitle>{t('Create API Key')}</DialogTitle>
         </DialogHeader>
 
         {step === 'name' && (
           <div className="space-y-4">
             <div>
               <label htmlFor="key-name" className="text-sm font-medium">
-                Key name
+                {t('Key name')}
               </label>
               <input
                 id="key-name"
                 type="text"
                 className="mt-1.5 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring"
-                placeholder="e.g. CLI, CI/CD, Web"
+                placeholder={t('e.g. CLI, CI/CD, Web')}
                 value={name}
                 onChange={(e) => { setName(e.target.value); setError(null); }}
                 onKeyDown={(e) => isSubmitEnter(e) && handleCreate()}
@@ -220,16 +223,16 @@ function CreateKeyDialog({
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-                Cancel
+                {t('Cancel')}
               </Button>
               <Button size="sm" onClick={handleCreate} disabled={creating}>
                 {creating ? (
                   <>
                     <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                    Creating...
+                    {t('Creating...')}
                   </>
                 ) : (
-                  'Create'
+                  t('Create')
                 )}
               </Button>
             </div>
@@ -246,7 +249,7 @@ function CreateKeyDialog({
             <div className="relative overflow-hidden rounded-lg border border-border bg-bg-secondary p-4">
               <div className="relative space-y-3">
                 <p className="text-xs font-medium text-muted-foreground">
-                  Your API Key — copy it now!
+                  {t('Your API Key — copy it now!')}
                 </p>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 select-all break-all rounded bg-background/80 px-3 py-2 font-mono text-sm backdrop-blur-sm">
@@ -273,12 +276,12 @@ function CreateKeyDialog({
                 </div>
                 <div className="flex items-start gap-1.5 text-xs text-amber">
                   <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                  <span>This key will not be shown again. Store it somewhere safe.</span>
+                  <span>{t('This key will not be shown again. Store it somewhere safe.')}</span>
                 </div>
               </div>
             </div>
             <div className="flex justify-end">
-              <Button size="sm" onClick={() => onOpenChange(false)}>Done</Button>
+              <Button size="sm" onClick={() => onOpenChange(false)}>{t('Done')}</Button>
             </div>
           </motion.div>
         )}
@@ -302,11 +305,12 @@ function RevokeConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>Revoke API Key</DialogTitle>
+          <DialogTitle>{t('Revoke API Key')}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
@@ -314,12 +318,12 @@ function RevokeConfirmDialog({
             This action cannot be undone.
           </p>
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={onCancel} disabled={revoking}>Cancel</Button>
+            <Button variant="ghost" size="sm" onClick={onCancel} disabled={revoking}>{t('Cancel')}</Button>
             <Button variant="destructive" size="sm" onClick={onConfirm} disabled={revoking}>
               {revoking ? (
-                <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Revoking...</>
+                <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />{t('Revoking...')}</>
               ) : (
-                'Revoke'
+                t('Revoke')
               )}
             </Button>
           </div>
@@ -352,6 +356,7 @@ export function SettingsDialog({
   onDefaultAgentChange,
   onConnectCloud,
 }: SettingsDialogProps) {
+  const { locale, setLocale, t, tl } = useI18n();
   const availableTabs = settingsTabs({ clientMode, cloudConnected });
   const pluginPages = (space?.plugins ?? []).filter((plugin) => plugin.settings?.fields.length);
   const firstPage: Page = group === 'space' && space ? 'space-general' : availableTabs.includes('client') ? 'app-general' : 'account';
@@ -462,44 +467,44 @@ export function SettingsDialog({
     </button>
   );
   const pluginPage = page.startsWith('space-plugin:') ? pluginPages.find((plugin) => `space-plugin:${plugin.id}` === page) : undefined;
-  const title = page === 'space-general' ? 'General'
-    : pluginPage ? pluginPage.settings!.title
-    : page === 'app-general' ? 'General'
-    : page === 'account' ? 'Account' : 'API Keys';
+  const title = page === 'space-general' ? t('General')
+    : pluginPage ? tl(pluginPage.settings!.title)
+    : page === 'app-general' ? t('General')
+    : page === 'account' ? t('Account') : t('API Keys');
   const onSpacePage = page.startsWith('space-');
 
   let body: ReactNode = null;
   if (onSpacePage && space && draft) {
     body = (
       <>
-        {!space.ready && <p role="status" className="pb-2 pt-1 text-small text-text-tertiary">{space.configurationError || 'Loading Space settings…'}</p>}
+        {!space.ready && <p role="status" className="pb-2 pt-1 text-small text-text-tertiary">{space.configurationError || t('Loading Space settings…')}</p>}
         <fieldset disabled={!space.ready || saving || reloading} style={{ border: 0, padding: 0, margin: 0, display: 'contents' }}>
           {page === 'space-general' ? (
             <>
               <section className="settings-section is-first">
-                <h3 className="settings-heading">Space</h3>
+                <h3 className="settings-heading">{t('Space')}</h3>
                 <div className="flex items-center gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-small text-text">{space.name}</p>
-                    <p className="truncate text-meta text-text-tertiary">{space.place.label}{space.place.detail ? ` · ${space.place.detail}` : ''}</p>
+                    <p className="truncate text-meta text-text-tertiary">{tl(space.place.label)}{space.place.detail ? ` · ${tl(space.place.detail)}` : ''}</p>
                   </div>
                   {space.place.action && (
                     <Button size="sm" variant="outline" onClick={() => { onOpenChange(false); space.place.action!.onSelect(); }}>
-                      {space.place.action.label}
+                      {tl(space.place.action.label)}
                     </Button>
                   )}
                 </div>
               </section>
               <section className="settings-section">
-                <h3 className="settings-heading mb-0">Modules</h3>
-                <p className="mb-1 text-meta leading-[1.5] text-text-tertiary">Turning a module off only hides it; your notes stay.</p>
+                <h3 className="settings-heading mb-0">{t('Modules')}</h3>
+                <p className="mb-1 text-meta leading-[1.5] text-text-tertiary">{t('Turning a module off only hides it; your notes stay.')}</p>
                 <div>
                   <PluginSettings plugins={space.plugins} features={draft} preferences={preferences} onFeatures={setDraft} onPreferences={onPreferencesChange} part="toggles" />
                   {MODULES.filter((module) => !space.plugins.some((plugin) => plugin.id === module.id)).map((module) => (
                     <SettingSwitch
                       key={module.id}
-                      label={module.label}
-                      description={module.description}
+                      label={tl(module.label)}
+                      description={tl(module.description)}
                       checked={draft.modules[module.id]}
                       onChange={(enabled) => setModule(module.id, enabled)}
                     />
@@ -507,9 +512,9 @@ export function SettingsDialog({
                 </div>
               </section>
               <section className="settings-section">
-                <h3 className="settings-heading">Templates</h3>
+                <h3 className="settings-heading">{t('Templates')}</h3>
                 <div className="grid grid-cols-[112px_minmax(0,1fr)] items-center gap-x-3">
-                  <label htmlFor="templates-folder" className="text-small text-text-secondary">Folder</label>
+                  <label htmlFor="templates-folder" className="text-small text-text-secondary">{t('Folder')}</label>
                   <input
                     id="templates-folder"
                     className={settingsInputClass}
@@ -519,7 +524,7 @@ export function SettingsDialog({
                   />
                 </div>
                 <p className="mt-2.5 text-meta leading-[1.55] text-text-tertiary">
-                  Pages in this folder are offered when you create a page. They support <code className="font-mono">{'{{title}}'}</code>, <code className="font-mono">{'{{date}}'}</code> and <code className="font-mono">{'{{time}}'}</code>.
+                  {t('Pages in this folder are offered when you create a page. They support {{title}}, {{date}} and {{time}}.')}
                 </p>
               </section>
             </>
@@ -533,8 +538,8 @@ export function SettingsDialog({
     body = (
       <>
         <section className="settings-section is-first">
-          <h3 className="settings-heading">Appearance</h3>
-          <div className="grid grid-cols-3 gap-0.5 rounded-lg bg-bg-secondary p-0.5 ring-1 ring-inset ring-border-soft" role="radiogroup" aria-label="Appearance">
+          <h3 className="settings-heading">{t('Appearance')}</h3>
+          <div className="grid grid-cols-3 gap-0.5 rounded-lg bg-bg-secondary p-0.5 ring-1 ring-inset ring-border-soft" role="radiogroup" aria-label={t('Appearance')}>
             {THEME_CHOICES.map(([value, label]) => (
               <button
                 key={value}
@@ -548,14 +553,35 @@ export function SettingsDialog({
                     : 'text-text-tertiary hover:text-text-secondary'
                 }`}
               >
+                {tl(label)}
+              </button>
+            ))}
+          </div>
+        </section>
+        <section className="settings-section">
+          <h3 className="settings-heading">{t('Language')}</h3>
+          <div className="grid grid-cols-2 gap-0.5 rounded-lg bg-bg-secondary p-0.5 ring-1 ring-inset ring-border-soft" role="radiogroup" aria-label={t('Language')}>
+            {LOCALE_CHOICES.map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={locale === value}
+                onClick={() => setLocale(value)}
+                className={`h-7 rounded-md px-2 text-small transition-colors ${
+                  locale === value
+                    ? 'bg-panel font-medium text-text shadow-[var(--shadow-chip)] ring-1 ring-border'
+                    : 'text-text-tertiary hover:text-text-secondary'
+                }`}
+              >
                 {label}
               </button>
             ))}
           </div>
         </section>
         <section className="settings-section">
-          <h3 className="settings-heading">Default Agent</h3>
-          <p className="-mt-1.5 mb-2.5 text-small text-text-tertiary">New sessions start with it; the last one you use becomes the default.</p>
+          <h3 className="settings-heading">{t('Default Agent')}</h3>
+          <p className="-mt-1.5 mb-2.5 text-small text-text-tertiary">{t('New sessions start with it; the last one you use becomes the default.')}</p>
           <div className="grid grid-cols-2 gap-1.5">
             {SUPPORTED_AGENTS.map((agent) => {
               const selected = defaultAgent === agent;
@@ -580,12 +606,12 @@ export function SettingsDialog({
           </div>
         </section>
         <section className="settings-section">
-          <h3 className="settings-heading mb-0">History</h3>
+          <h3 className="settings-heading mb-0">{t('History')}</h3>
           <div>
             {space && <PluginSettings plugins={space.plugins} features={space.features} preferences={preferences} onFeatures={() => {}} onPreferences={onPreferencesChange} part="preferences" />}
             <SettingSwitch
-              label="Save checkpoints automatically"
-              description="After 5 quiet minutes and when CoWiki quits. Kept in History on this computer."
+              label={t('Save checkpoints automatically')}
+              description={t('After 5 quiet minutes and when CoWiki quits. Kept in History on this computer.')}
               checked={preferences.autoCheckpoint}
               onChange={(autoCheckpoint) => onPreferencesChange({ ...preferences, autoCheckpoint })}
             />
@@ -597,11 +623,11 @@ export function SettingsDialog({
     body = cloudConnected && auth ? (
       <div className="space-y-3 pt-1">
         <div>
-          <label className="text-xs font-medium text-muted-foreground">Name</label>
+          <label className="text-xs font-medium text-muted-foreground">{t('Name')}</label>
           <p className="text-sm">{auth.name}</p>
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground">User ID</label>
+          <label className="text-xs font-medium text-muted-foreground">{t('User ID')}</label>
           <p className="font-mono text-xs text-muted-foreground">{auth.id}</p>
         </div>
       </div>
@@ -610,9 +636,9 @@ export function SettingsDialog({
         <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft">
           <Cloud className="h-5 w-5 text-accent" />
         </div>
-        <p className="text-sm font-medium">Connect to CoWiki Cloud</p>
+        <p className="text-sm font-medium">{t('Connect to CoWiki Cloud')}</p>
         <p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">
-          Keep local Spaces account-free. Sign in only when you want to publish or join a shared Space.
+          {t('Keep local Spaces account-free. Sign in only when you want to publish or join a shared Space.')}
         </p>
         <Button
           className="mt-4 bg-accent text-on-accent hover:bg-accent-hover"
@@ -621,7 +647,7 @@ export function SettingsDialog({
             onConnectCloud();
           }}
         >
-          Sign up / Sign in
+          {t('Sign up / Sign in')}
         </Button>
       </div>
     );
@@ -630,13 +656,13 @@ export function SettingsDialog({
       <div className="flex flex-col">
         <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-amber/30 bg-amber-soft px-3.5 py-2.5 text-sm text-amber-ink">
           <Shield className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>API keys are only shown once upon creation. Copy and store them securely.</span>
+          <span>{t('API keys are only shown once upon creation. Copy and store them securely.')}</span>
         </div>
         <div className="mb-4 flex items-center justify-between">
-          <h4 className="text-sm font-medium">Your API Keys</h4>
+          <h4 className="text-sm font-medium">{t('Your API Keys')}</h4>
           <Button size="sm" className="gap-1.5" onClick={() => setShowCreate(true)}>
             <Plus className="h-3.5 w-3.5" />
-            New Key
+            {t('New Key')}
           </Button>
         </div>
         {loading && (
@@ -648,7 +674,7 @@ export function SettingsDialog({
         {!loading && error && (
           <div className="flex flex-col items-center gap-2 rounded-lg border border-red/20 bg-red-soft py-6 text-center">
             <p className="text-sm text-red">{error}</p>
-            <Button variant="outline" size="sm" onClick={fetchKeys}>Retry</Button>
+            <Button variant="outline" size="sm" onClick={fetchKeys}>{t('Retry')}</Button>
           </div>
         )}
         {!loading && !error && keys.length === 0 && (
@@ -656,8 +682,8 @@ export function SettingsDialog({
             <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
               <Key className="h-5 w-5 text-muted-foreground" />
             </div>
-            <p className="text-sm font-medium text-foreground">No API keys yet</p>
-            <p className="mt-1 text-xs text-muted-foreground">Create your first API key to get started.</p>
+            <p className="text-sm font-medium text-foreground">{t('No API keys yet')}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t('Create your first API key to get started.')}</p>
           </div>
         )}
         {!loading && !error && keys.length > 0 && (
@@ -685,20 +711,20 @@ export function SettingsDialog({
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="top-1/2 flex h-[min(620px,calc(100vh-3rem))] -translate-y-1/2 flex-row gap-0 overflow-hidden p-0 sm:max-w-[800px]">
-          <nav aria-label="Settings" className="flex w-[196px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border-soft bg-bg-secondary px-2 py-4">
-            <DialogTitle className="px-2.5 pb-3 text-small font-semibold text-text">Settings</DialogTitle>
+          <nav aria-label={t('Settings')} className="flex w-[196px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border-soft bg-bg-secondary px-2 py-4">
+            <DialogTitle className="px-2.5 pb-3 text-small font-semibold text-text">{t('Settings')}</DialogTitle>
             {space && (
               <>
                 <p className="truncate px-2.5 pb-1 text-meta font-medium text-text-tertiary" title={space.name}>{space.name}</p>
-                {navItem('space-general', 'General')}
-                {pluginPages.map((plugin) => navItem(`space-plugin:${plugin.id}`, plugin.settings!.title))}
+                {navItem('space-general', t('General'))}
+                {pluginPages.map((plugin) => navItem(`space-plugin:${plugin.id}`, tl(plugin.settings!.title)))}
                 <div className="h-4" />
               </>
             )}
-            <p className="px-2.5 pb-1 text-meta font-medium text-text-tertiary">App</p>
-            {availableTabs.includes('client') && navItem('app-general', 'General')}
-            {navItem('account', 'Account')}
-            {availableTabs.includes('keys') && navItem('keys', 'API Keys')}
+            <p className="px-2.5 pb-1 text-meta font-medium text-text-tertiary">{t('App')}</p>
+            {availableTabs.includes('client') && navItem('app-general', t('General'))}
+            {navItem('account', t('Account'))}
+            {availableTabs.includes('keys') && navItem('keys', t('API Keys'))}
           </nav>
 
           <div className="flex min-w-0 flex-1 flex-col">
@@ -706,8 +732,8 @@ export function SettingsDialog({
               <h2 className="text-lead font-semibold leading-6 text-text">{title}</h2>
               <DialogDescription className="text-meta leading-[1.5] text-text-tertiary">
                 {onSpacePage && space
-                  ? <>Applies to everyone in <span className="font-medium text-text-secondary">{space.name}</span>.</>
-                  : 'Only for you, on this computer.'}
+                  ? t('Applies to everyone in {name}.', { name: space.name })
+                  : t('Only for you, on this computer.')}
               </DialogDescription>
             </DialogHeader>
             <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-4">{body}</div>
@@ -715,10 +741,10 @@ export function SettingsDialog({
               <div className="flex shrink-0 items-center gap-2 border-t border-border-soft bg-panel px-7 py-3">
                 {spaceError
                   ? <p role="alert" className="min-w-0 flex-1 truncate text-small text-red" title={spaceError}>{spaceError}</p>
-                  : <span className="min-w-0 flex-1 truncate text-small text-text-tertiary">{dirty ? (onSpacePage ? 'Unsaved changes' : `Unsaved changes in ${space.name}`) : ''}</span>}
-                {(space.configurationError || spaceError) && <Button size="sm" variant="outline" onClick={() => { void reloadSpace(); }} disabled={saving || reloading}>{reloading ? 'Reloading…' : 'Reload settings'}</Button>}
-                {dirty && <Button size="sm" variant="outline" onClick={() => setDraft(space.features)} disabled={saving || reloading}>Discard</Button>}
-                {dirty && <Button size="sm" onClick={() => { void saveSpace(); }} disabled={saving || reloading || !space.ready}>{saving ? 'Saving…' : 'Save'}</Button>}
+                  : <span className="min-w-0 flex-1 truncate text-small text-text-tertiary">{dirty ? (onSpacePage ? t('Unsaved changes') : t('Unsaved changes in {name}', { name: space.name })) : ''}</span>}
+                {(space.configurationError || spaceError) && <Button size="sm" variant="outline" onClick={() => { void reloadSpace(); }} disabled={saving || reloading}>{reloading ? t('Reloading…') : t('Reload settings')}</Button>}
+                {dirty && <Button size="sm" variant="outline" onClick={() => setDraft(space.features)} disabled={saving || reloading}>{t('Discard')}</Button>}
+                {dirty && <Button size="sm" onClick={() => { void saveSpace(); }} disabled={saving || reloading || !space.ready}>{saving ? t('Saving…') : t('Save')}</Button>}
               </div>
             )}
           </div>

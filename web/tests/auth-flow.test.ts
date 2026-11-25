@@ -148,7 +148,7 @@ test('desktop sign in follows the local-first shell design', () => {
   assert.doesNotMatch(loginPage, /Signing in does not upload a local Space/);
   assert.doesNotMatch(loginPage, /人与 AI 共建的知识空间/);
   assert.match(spaceRail, /Not signed in/);
-  assert.match(spaceRail, />\s*Sign in\s*</);
+  assert.match(spaceRail, />\s*(?:\{t\(')?Sign in(?:'\)\})?\s*</);
 });
 
 test('desktop OAuth errors explain timeout, cancellation and failures clearly', () => {

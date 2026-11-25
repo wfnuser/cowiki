@@ -63,8 +63,8 @@ test('source ingestion uses a direct accessible plus action beside Sources', () 
     .split('{/* Section 1: Sources */}')[1]
     .split('{/* OKF concepts form one arbitrary bundle-relative hierarchy. */}')[0];
   assert.doesNotMatch(headerActions, /Add Source/);
-  assert.match(sourcesSection, /aria-label="Add Source"/);
-  assert.match(sourcesSection, /title="Add Source"/);
+  assert.match(sourcesSection, /aria-label=(?:"Add Source"|\{t\('Add Source'\)\})/);
+  assert.match(sourcesSection, /title=(?:"Add Source"|\{t\('Add Source'\)\})/);
   assert.match(sourcesSection, /onClick=\{onShowIngest\}/);
   assert.match(sourcesSection, /<Plus size=\{13\}/);
   assert.doesNotMatch(sourcesSection, /DropdownMenu|MoreHorizontal/);
@@ -80,7 +80,7 @@ test('the desktop header merges version and Cloud state into one quiet menu', ()
   assert.match(mainLayout, /<SpaceStatusMenu/);
   assert.doesNotMatch(mainLayout, /WorkspaceContextBadge|VersionSwitcher/);
   // Sentence case inside the menu; the words live there, not in the bar.
-  assert.match(statusMenu, />\s*Version\s*</);
+  assert.match(statusMenu, />\s*(?:\{t\(')?Version(?:'\)\})?\s*</);
   assert.match(statusMenu, /See all in Reviews/);
   assert.doesNotMatch(statusMenu, /WORKING|UPSTREAM|AGENT CHANGES|CHECKPOINTS|Discarded|Merged/);
   assert.match(statusMenu, /<ChevronDown[^>]*aria-hidden[^>]*\/>/);
