@@ -150,6 +150,13 @@ Notifications, Review details, Cloud pages) is built the same way, with
   `> ` under the caret; a heading's `## ` appears in the left margin while
   the caret is on it; code fences show only while the caret is in the
   block. A single newline is a line break in both, as in Obsidian.
+- **Top bar, left:** back and forward arrows (desktop), as in Notion, then
+  the breadcrumb. Every page, journal, tool view and Space you open is one
+  step (`lib/view-history.ts`); a renamed page keeps its steps and a deleted
+  one leaves them. ⌘[ and ⌘] outside text (the editor uses them to indent),
+  ⌘⌥← and ⌘⌥→ everywhere (Obsidian), and the mouse's side buttons. An arrow
+  with nowhere to go stays in place, faint. In the browser the browser's own
+  history does this.
 - **Top bar, right to left:** the Agent toggle in the corner, comments, the
   Space status. The Agent sidebar opens from the top bar's right corner and
   closes from the same corner of its own header (`PanelRight` both ways), so

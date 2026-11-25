@@ -66,6 +66,11 @@ import { HtmlFileReader } from '../components/HtmlFileReader';
 import { ExcalidrawReader } from '../components/ExcalidrawDrawing';
 import { isExcalidrawPage } from '../lib/excalidraw';
 import { showsRoute, viewForRoute } from '../lib/route-view';
+import {
+  EMPTY_HISTORY, canGoBack, canGoForward, entryKey, forgetPath, forgetSpace, historyShortcut, movePath, step, visit,
+  type HistoryEntry, type HistoryView as HistoryStep,
+} from '../lib/view-history';
+import { HistoryButtons } from '../components/layout/HistoryButtons';
 import { isHtmlPath } from '../lib/okf-pages';
 import { chooseLocalSpaceDirectory, localSpaceIdentityFromPath } from '@/local-space';
 import {
@@ -212,6 +217,7 @@ export function MainLayout() {
   const externalConflictNotified = useRef(false);
   const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<NavTab>('wiki');
+  const [viewHistory, setViewHistory] = useState(EMPTY_HISTORY);
   const [spaceFeatures, setSpaceFeatures] = useState<Record<string, SpaceFeatures>>({});
   const [featureLoadErrors, setFeatureLoadErrors] = useState<Record<string, string>>({});
   const [preferences, setPreferences] = useState<PersonalPreferences>(safePreferences);
@@ -661,13 +667,17 @@ export function MainLayout() {
   };
 
   // Switch workspace via rail
-  const handleSelectWorkspace = async (ws: Workspace) => {
-    if (activeWorkspace?.id === ws.id) return;
-    // Invalidate a pending plugin operation immediately, not after React paints.
+  // Invalidate a pending plugin operation immediately, not after React paints.
+  const enterPluginSpace = (ws: Workspace) => {
     pluginSnapshot.current = { ...pluginSnapshot.current,
       space: { id: ws.id, local: desktop && !!ws.localPath }, activation: spaceActivation(ws.id),
       readiness: featureLoadErrors[ws.id] ? 'failed' : spaceFeatures[ws.id] ? 'ready' : 'pending',
       features: spaceFeatures[ws.id] ?? null };
+  };
+
+  const handleSelectWorkspace = async (ws: Workspace) => {
+    if (activeWorkspace?.id === ws.id) return;
+    enterPluginSpace(ws);
     setActiveWorkspace(ws);
     setEditingPage(false);
     setActiveTab('home');
@@ -750,6 +760,114 @@ export function MainLayout() {
     const task = window.setTimeout(() => syncViewWithRoute(location.pathname), 0);
     return () => window.clearTimeout(task);
   }, [location.key, location.pathname, navigationType]);
+
+  // Back and forward (desktop): every view you open is one step. The browser
+  // keeps its own history on the web, so this is only the desktop app's.
+  const historyEntry: HistoryEntry | null = (() => {
+    if (!desktop || !activeWorkspace || !activeView) return null;
+    const workspaceSlug = activeWorkspace.slug;
+    switch (activeView.kind) {
+      case 'page': return { workspaceSlug, view: { kind: 'page', path: activeView.path ?? conceptPath(activeView.slug) } };
+      case 'source': return { workspaceSlug, view: { kind: 'source', filename: activeView.filename } };
+      case 'review-detail': return { workspaceSlug, view: { kind: 'review-detail', target: activeView.target } };
+      case 'notifications': return null;
+      default: return { workspaceSlug, view: { kind: activeView.kind } };
+    }
+  })();
+  const historyKey = historyEntry ? entryKey(historyEntry) : null;
+  const recordHistory = useEffectEvent(() => {
+    // Arriving where back or forward pointed matches the current entry, so it adds nothing.
+    if (historyEntry) setViewHistory((history) => visit(history, historyEntry));
+  });
+  useEffect(() => { recordHistory(); }, [historyKey]);
+
+  const openHistoryView = (ws: Workspace, view: HistoryStep) => {
+    if (activeWorkspace?.id !== ws.id) enterPluginSpace(ws);
+    if (view.kind === 'page') {
+      void selectPage(ws, conceptIdFromPath(view.path), view.path);
+      return;
+    }
+    if (view.kind === 'source') {
+      void selectSource(ws, view.filename);
+      return;
+    }
+    if (activeWorkspace?.id !== ws.id) {
+      setActiveWorkspace(ws);
+      if (!spacePages[ws.id]) void loadSpacePages(ws);
+      if (!spaceSources[ws.id]) void loadSpaceSources(ws);
+    }
+    setEditingPage(false);
+    const owner = auth?.name || 'user';
+    switch (view.kind) {
+      case 'review-list':
+        setActiveTab('reviews');
+        setActiveView({ kind: 'review-list', workspaceSlug: ws.slug });
+        navigate(reviewRoute(owner, ws.slug), { replace: true });
+        break;
+      case 'review-detail':
+        setActiveTab('reviews');
+        setActiveView({ kind: 'review-detail', workspaceSlug: ws.slug, target: view.target });
+        navigate(reviewRoute(owner, ws.slug, view.target), { replace: true });
+        break;
+      case 'members':
+      case 'history':
+        setActiveTab(view.kind);
+        setActiveView({ kind: view.kind, workspaceSlug: ws.slug });
+        navigate(`/${owner}/${ws.slug}/${view.kind}`, { replace: true });
+        break;
+      default:
+        setActiveTab(view.kind);
+        setActiveView({ kind: view.kind, workspaceSlug: ws.slug });
+        navigate('/', { replace: true });
+    }
+  };
+
+  const goThroughHistory = (delta: -1 | 1) => {
+    let history = viewHistory;
+    for (;;) {
+      const next = step(history, delta);
+      if (!next) {
+        if (history !== viewHistory) setViewHistory(history);
+        return;
+      }
+      const ws = workspaces.find((workspace) => workspace.slug === next.entry.workspaceSlug);
+      if (!ws) {
+        // That Space was removed since: skip its steps.
+        history = forgetSpace(history, next.entry.workspaceSlug);
+        continue;
+      }
+      setViewHistory(next.history);
+      openHistoryView(ws, next.entry.view);
+      return;
+    }
+  };
+
+  const onHistoryKey = useEffectEvent((event: KeyboardEvent) => {
+    if (event.defaultPrevented || event.isComposing) return;
+    const target = event.target instanceof Element ? event.target : null;
+    const inText = !!target?.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], .cm-editor');
+    const delta = historyShortcut(event, inText);
+    if (delta === null) return;
+    event.preventDefault();
+    goThroughHistory(delta);
+  });
+  // The mouse's side buttons, as in a browser.
+  const onHistoryMouse = useEffectEvent((event: MouseEvent) => {
+    if (event.button !== 3 && event.button !== 4) return;
+    event.preventDefault();
+    goThroughHistory(event.button === 3 ? -1 : 1);
+  });
+  useEffect(() => {
+    if (!desktop) return;
+    const key = (event: KeyboardEvent) => onHistoryKey(event);
+    const mouse = (event: MouseEvent) => onHistoryMouse(event);
+    window.addEventListener('keydown', key);
+    window.addEventListener('mouseup', mouse);
+    return () => {
+      window.removeEventListener('keydown', key);
+      window.removeEventListener('mouseup', mouse);
+    };
+  }, [desktop]);
 
   // Create workspace
   const handleChooseLocalFolder = useCallback(async () => {
@@ -1273,6 +1391,7 @@ export function MainLayout() {
         const to = parent ? `${parent}/${renamed}` : renamed;
         if (to === pathOp.path) { setPathOp(null); return; }
         const updatedLinks = await renamePath(ws.slug, userBranch, pathOp.path, to);
+        setViewHistory((history) => movePath(history, ws.slug, pathOp.path, to));
         setMessage({
           text: updatedLinks
             ? `Renamed in your draft and updated links in ${updatedLinks} ${updatedLinks === 1 ? 'page' : 'pages'}.`
@@ -1281,6 +1400,7 @@ export function MainLayout() {
         });
       } else {
         await deletePath(ws.slug, userBranch, pathOp.path);
+        setViewHistory((history) => forgetPath(history, ws.slug, pathOp.path));
         setMessage({ text: `Deleted ${pathOp.isFolder ? 'folder' : 'page'} from your draft.`, type: 'success' });
       }
       setPathOp(null);
@@ -1659,6 +1779,14 @@ export function MainLayout() {
                     <PanelLeft size={16} />
                   </button>
                 )}
+                {desktop && activeWorkspace && (
+                  <HistoryButtons
+                    canGoBack={canGoBack(viewHistory)}
+                    canGoForward={canGoForward(viewHistory)}
+                    onBack={() => goThroughHistory(-1)}
+                    onForward={() => goThroughHistory(1)}
+                  />
+                )}
                 {activeWorkspace && (
                   <span style={{ color: C.ink2 }}>{activeWorkspace.name}</span>
                 )}
@@ -1998,6 +2126,8 @@ export function MainLayout() {
                     }}
                     onExternalDeleted={() => {
                       externalConflictNotified.current = false;
+                      const deleted = activeView.path ?? conceptPath(activeView.slug);
+                      if (activeWorkspace) setViewHistory((history) => forgetPath(history, activeWorkspace.slug, deleted));
                       setEditingPage(false);
                       setActiveView(null);
                       navigate('/', { replace: true });
