@@ -1,11 +1,18 @@
 import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view';
 import type { DecorationSet, ViewUpdate } from '@codemirror/view';
-import { EditorSelection, EditorState, Facet } from '@codemirror/state';
+import { EditorSelection, EditorState, Facet, StateField } from '@codemirror/state';
 import type { Range } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import type { SyntaxNode } from '@lezer/common';
 
 import { CALLOUT_LINE, calloutOf } from '@/lib/callouts';
+import {
+  parseGfmTable,
+  tableCellOffset,
+  tokenizeCell,
+  type InlineToken,
+  type ParsedTable,
+} from './gfmTable';
 
 /** Editor-level callbacks the host app provides (wikilink navigation). */
 export interface LivePreviewConfig {
@@ -104,6 +111,150 @@ class ImageWidget extends WidgetType {
     return img;
   }
   eq(other: ImageWidget) { return other.src === this.src && other.alt === this.alt; }
+}
+
+function appendInlineTokens(parent: HTMLElement, tokens: InlineToken[]) {
+  for (const token of tokens) {
+    switch (token.kind) {
+      case 'text':
+        parent.appendChild(document.createTextNode(token.text));
+        break;
+      case 'code': {
+        const code = document.createElement('code');
+        code.textContent = token.text;
+        parent.appendChild(code);
+        break;
+      }
+      case 'strong': {
+        const strong = document.createElement('strong');
+        appendInlineTokens(strong, token.children);
+        parent.appendChild(strong);
+        break;
+      }
+      case 'em': {
+        const em = document.createElement('em');
+        appendInlineTokens(em, token.children);
+        parent.appendChild(em);
+        break;
+      }
+      case 'del': {
+        const del = document.createElement('del');
+        appendInlineTokens(del, token.children);
+        parent.appendChild(del);
+        break;
+      }
+      case 'wikilink': {
+        const a = document.createElement('a');
+        a.className = 'wikilink cm-lp-wikilink';
+        a.dataset.lpWikilink = token.target;
+        a.textContent = token.label;
+        parent.appendChild(a);
+        break;
+      }
+      case 'link': {
+        const a = document.createElement('a');
+        a.className = 'cm-lp-link';
+        if (/^https?:\/\//i.test(token.href)) {
+          a.href = token.href;
+          a.dataset.lpHref = token.href;
+        }
+        a.textContent = token.label;
+        parent.appendChild(a);
+        break;
+      }
+    }
+  }
+}
+
+/** Rendered GFM table when the caret is outside the table; clicking a cell reveals source there. */
+class TableWidget extends WidgetType {
+  raw: string;
+  parsed: ParsedTable;
+  tight: boolean;
+  constructor(raw: string, parsed: ParsedTable, tight: boolean) {
+    super();
+    this.raw = raw;
+    this.parsed = parsed;
+    this.tight = tight;
+  }
+  toDOM(view: EditorView) {
+    const wrap = document.createElement('div');
+    wrap.className = this.tight ? 'cm-lp-table-widget prose cm-lp-tight' : 'cm-lp-table-widget prose';
+
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    this.parsed.headers.forEach((cell, col) => {
+      const th = document.createElement('th');
+      th.dataset.tableSection = 'head';
+      th.dataset.tableRow = '0';
+      th.dataset.tableCol = String(col);
+      const align = this.parsed.alignments[col];
+      if (align) th.style.textAlign = align;
+      appendInlineTokens(th, tokenizeCell(cell));
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    if (this.parsed.rows.length > 0) {
+      const tbody = document.createElement('tbody');
+      this.parsed.rows.forEach((row, rowIndex) => {
+        const tr = document.createElement('tr');
+        row.forEach((cell, col) => {
+          const td = document.createElement('td');
+          td.dataset.tableSection = 'body';
+          td.dataset.tableRow = String(rowIndex);
+          td.dataset.tableCol = String(col);
+          const align = this.parsed.alignments[col];
+          if (align) td.style.textAlign = align;
+          appendInlineTokens(td, tokenizeCell(cell));
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+    }
+
+    wrap.appendChild(table);
+    wrap.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) return;
+      const target = event.target as HTMLElement | null;
+      const link = target?.closest('.cm-lp-link[data-lp-href]') as HTMLElement | null;
+      if (link) {
+        event.preventDefault();
+        event.stopPropagation();
+        const href = link.getAttribute('data-lp-href')!;
+        if (/^https?:\/\//i.test(href)) window.open(href, '_blank', 'noopener');
+        return;
+      }
+      const wiki = target?.closest('.cm-lp-wikilink[data-lp-wikilink]') as HTMLElement | null;
+      if (wiki) {
+        event.preventDefault();
+        event.stopPropagation();
+        view.state.facet(livePreviewConfig).onWikilink?.(wiki.getAttribute('data-lp-wikilink')!);
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const basePos = view.posAtDOM(wrap);
+      const cell = target?.closest('th, td') as HTMLElement | null;
+      const rel = cell
+        ? tableCellOffset(
+          this.raw,
+          cell.dataset.tableSection === 'head' ? 'head' : 'body',
+          Number(cell.dataset.tableRow ?? 0),
+          Number(cell.dataset.tableCol ?? 0),
+        )
+        : 0;
+      const anchor = Math.max(0, Math.min(basePos + rel, view.state.doc.length));
+      view.focus();
+      view.dispatch({ selection: { anchor } });
+    });
+    return wrap;
+  }
+  eq(other: TableWidget) { return other.raw === this.raw && other.tight === this.tight; }
+  ignoreEvent() { return true; }
 }
 
 // ── Decoration builder ───────────────────────────────────────────────
@@ -398,6 +549,56 @@ function buildDecorations(view: EditorView): Built {
 
   return { decorations: Decoration.set(decos, true), atomic: Decoration.set(atomic, true) };
 }
+
+/**
+ * Block-level replace decorations for GFM tables must come from a StateField
+ * (CodeMirror forbids multi-line replacements from a ViewPlugin). While the
+ * caret stays outside a table, it renders identically to `.prose table`.
+ */
+function buildTableDecorations(state: EditorState): DecorationSet {
+  const doc = state.doc;
+  const tree = syntaxTree(state);
+  const decos: Range<Decoration>[] = [];
+  const revealLine = (from: number, to: number) => {
+    const start = doc.lineAt(from).from;
+    const end = doc.lineAt(Math.min(to, doc.length)).to;
+    return state.selection.ranges.some((r) => r.from <= end && r.to >= start);
+  };
+
+  let previous: SyntaxNode | null = null;
+  for (let block = tree.topNode.firstChild; block; block = block.nextSibling) {
+    if (block.name === 'Table') {
+      const lineFrom = doc.lineAt(block.from).from;
+      const lineTo = doc.lineAt(Math.min(block.to, doc.length)).to;
+      if (!revealLine(block.from, block.to)) {
+        const tight = previous !== null && doc.lineAt(block.from).number === doc.lineAt(previous.to).number + 1;
+        const raw = state.sliceDoc(lineFrom, lineTo);
+        const parsed = parseGfmTable(raw);
+        if (parsed) {
+          decos.push(Decoration.replace({
+            widget: new TableWidget(raw, parsed, tight),
+            block: true,
+          }).range(lineFrom, lineTo));
+        }
+      }
+    }
+    previous = block;
+  }
+  return Decoration.set(decos, true);
+}
+
+export const livePreviewTables = StateField.define<DecorationSet>({
+  create(state) {
+    return buildTableDecorations(state);
+  },
+  update(value, tr) {
+    if (tr.docChanged || tr.selection || syntaxTree(tr.state) !== syntaxTree(tr.startState)) {
+      return buildTableDecorations(tr.state);
+    }
+    return value;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
 
 // ── Click handling ───────────────────────────────────────────────────
 

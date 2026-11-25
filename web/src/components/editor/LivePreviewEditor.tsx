@@ -7,7 +7,7 @@ import { markdown, markdownLanguage, markdownKeymap } from '@codemirror/lang-mar
 import { languages } from '@codemirror/language-data';
 import { autocompletion, completionStatus } from '@codemirror/autocomplete';
 import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete';
-import { caretAfterMarkup, livePreview, livePreviewConfig } from './livePreview';
+import { caretAfterMarkup, livePreview, livePreviewConfig, livePreviewTables } from './livePreview';
 import { WikiLink, Frontmatter } from './markdownExtensions';
 import { editorTheme, editorHighlighting } from './theme';
 
@@ -116,6 +116,7 @@ export const LivePreviewEditor = forwardRef<LivePreviewEditorHandle, LivePreview
           }),
           editorTheme,
           editorHighlighting,
+          livePreviewTables,
           livePreview,
           caretAfterMarkup,
           livePreviewConfig.of({

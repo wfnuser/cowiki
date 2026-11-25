@@ -13,6 +13,7 @@ import {
 import { APP_HEADER_HEIGHT, C, colorForSpaceId, shadows } from '@/lib/design';
 import { conceptIdFromPath, visiblePageTree } from '@/lib/okf-pages';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/lib/I18nContext';
 import type { ModuleId } from '@/lib/space-features';
 import type { PluginAction } from '@/plugins/host';
 
@@ -84,6 +85,7 @@ export function SpacePanel({
   showHistory = true,
   journals = false,
 }: SpacePanelProps) {
+  const { t, tl } = useI18n();
   const [searchOpen, setSearchOpen] = useState(false);
   const hasWorkspace = !!workspace;
   useEffect(() => {
@@ -106,7 +108,7 @@ export function SpacePanel({
           borderBottom: `1px solid ${C.line}`,
           height: APP_HEADER_HEIGHT, minHeight: APP_HEADER_HEIGHT,
         }}>
-          <span style={{ flex: 1 }}>Select a space</span>
+          <span style={{ flex: 1 }}>{t('Select a space')}</span>
           <CollapseButton onClick={onCollapse} />
         </div>
       </aside>
@@ -160,7 +162,7 @@ export function SpacePanel({
               )}
             >
               <span className={cn('flex shrink-0', active ? 'text-accent' : 'text-text-tertiary')}>{n.icon}</span>
-              <span style={{ flex: 1 }}>{n.label}</span>
+              <span style={{ flex: 1 }}>{tl(n.label)}</span>
               {n.badge != null && n.badge > 0 && (
                 <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-bg-active px-1.5 text-caption font-semibold tabular-nums text-text-secondary">
                   {n.badge}
@@ -185,7 +187,7 @@ export function SpacePanel({
             }}
           >
             <Search size={13} style={{ flexShrink: 0 }} />
-            <span style={{ flex: 1 }}>Search…</span>
+            <span style={{ flex: 1 }}>{t('Search…')}</span>
             <span style={{ fontSize: 12, color: C.faint, opacity: 0.75, letterSpacing: '0.04em' }}>
               ⌘ K
             </span>
@@ -195,9 +197,9 @@ export function SpacePanel({
         {/* Section 1: Sources */}
         {!readOnly && (
           <ContentSection
-            title="Sources"
+            title={t('Sources')}
             items={sources}
-            emptyText="No sources yet"
+            emptyText={t('No sources yet')}
             renderItem={(s) => (
               <SourceEntry
                 key={s.filename}
@@ -209,8 +211,8 @@ export function SpacePanel({
             menuItems={
               <button
                 type="button"
-                aria-label="Add Source"
-                title="Add Source"
+                aria-label={t('Add Source')}
+                title={t('Add Source')}
                 onClick={onShowIngest}
                 style={{
                   background: 'none', border: 'none', cursor: 'pointer', padding: 2,
@@ -225,10 +227,10 @@ export function SpacePanel({
 
         {/* OKF concepts form one arbitrary bundle-relative hierarchy. */}
         <ContentSection
-          title="Knowledge"
+          title={t('Knowledge')}
           defaultExpanded
           items={visiblePageTree(pages)}
-          emptyText="No pages yet"
+          emptyText={t('No pages yet')}
           renderItem={(p) => (
             <PageTreeItem
               key={`${p.kind}:${p.path}`}
@@ -246,7 +248,7 @@ export function SpacePanel({
           menuItems={!readOnly ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button type="button" aria-label="Add page or folder" title="Add page or folder" style={{
+                <button type="button" aria-label={t('Add page or folder')} title={t('Add page or folder')} style={{
                   background: 'none', border: 'none', cursor: 'pointer', padding: 2, borderRadius: 4,
                   color: C.faint, display: 'flex',
                 }} onClick={(e) => e.stopPropagation()}>
@@ -254,8 +256,8 @@ export function SpacePanel({
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-40">
-                <DropdownMenuItem onClick={onNewPage}><FileText size={14} className="mr-2" /> New Page</DropdownMenuItem>
-                <DropdownMenuItem onClick={onNewFolder}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
+                <DropdownMenuItem onClick={onNewPage}><FileText size={14} className="mr-2" /> {t('New Page')}</DropdownMenuItem>
+                <DropdownMenuItem onClick={onNewFolder}><FolderPlus size={14} className="mr-2" /> {t('New Folder')}</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           ) : undefined}
@@ -270,7 +272,7 @@ export function SpacePanel({
             className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[5px] text-left text-body text-text-nav transition-colors hover:bg-bg-hover hover:text-text"
           >
             <span className="flex shrink-0 text-text-tertiary"><Settings size={16} /></span>
-            Settings
+            {t('Settings')}
           </button>
         </div>
       )}
@@ -425,6 +427,7 @@ function PageTreeItem({
   onDeletePath: (path: string, isFolder: boolean, title: string) => void;
   readOnly: boolean;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const pl = depth * 14;
   const isActive = activePage === conceptIdFromPath(page.path);
@@ -470,11 +473,11 @@ function PageTreeItem({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuItem onClick={() => onAddPageInFolder(folderPath)}><FileText size={14} className="mr-2" /> New Page</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onAddFolderInFolder(folderPath)}><FolderPlus size={14} className="mr-2" /> New Folder</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onRenamePath(folderPath, true, title)}><Pencil size={14} className="mr-2" /> Rename</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onAddPageInFolder(folderPath)}><FileText size={14} className="mr-2" /> {t('New Page')}</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onAddFolderInFolder(folderPath)}><FolderPlus size={14} className="mr-2" /> {t('New Folder')}</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onRenamePath(folderPath, true, title)}><Pencil size={14} className="mr-2" /> {t('Rename')}</DropdownMenuItem>
               <DropdownMenuItem onClick={() => onDeletePath(folderPath, true, title)} className="text-red focus:text-red">
-                <Trash2 size={14} className="mr-2" /> Delete folder
+                <Trash2 size={14} className="mr-2" /> {t('Delete folder')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>}
@@ -532,9 +535,9 @@ function PageTreeItem({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-40">
-          <DropdownMenuItem onClick={() => onRenamePath(pagePath, false, title)}><Pencil size={14} className="mr-2" /> Rename</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onRenamePath(pagePath, false, title)}><Pencil size={14} className="mr-2" /> {t('Rename')}</DropdownMenuItem>
           <DropdownMenuItem onClick={() => onDeletePath(pagePath, false, title)} className="text-red focus:text-red">
-            <Trash2 size={14} className="mr-2" /> Delete
+            <Trash2 size={14} className="mr-2" /> {t('Delete')}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>}
@@ -562,12 +565,13 @@ function SpaceTile({ name, color }: { name: string; color: string }) {
 }
 
 function CollapseButton({ onClick }: { onClick: () => void }) {
+  const { t } = useI18n();
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-label="Collapse sidebar"
-      title="Collapse sidebar"
+      aria-label={t('Collapse sidebar')}
+      title={t('Collapse sidebar')}
       style={{
         width: 28, height: 28, padding: 0, border: 'none', borderRadius: 6,
         background: 'transparent', color: C.faint, cursor: 'pointer', flexShrink: 0,

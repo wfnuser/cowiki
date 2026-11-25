@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, type Ref, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, type Ref, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { C } from '@/lib/design';
@@ -7,7 +7,6 @@ import { PageLineage, PageLineagePanel, type LoadLineageSource } from './PageLin
 import { useReaderLineagePanel } from './PageCommentsLayer';
 import type { PageLineage as PageLineageModel } from '@/lib/page-lineage';
 import { withHtmlMarkdownComponents } from './HtmlView';
-import { useMemo } from 'react';
 import { renderedClick, type RenderedClick } from '@/lib/click-to-edit';
 import { remarkSoftBreaks } from '@/lib/remark-soft-breaks';
 
@@ -39,6 +38,8 @@ interface PageReaderProps {
   onEditAt?: (click: RenderedClick | null, top: number) => void;
   /** Scroll position to open at, e.g. where the editor was when editing stopped. */
   initialScrollTop?: number;
+  /** 1-based line inside `body` to scroll to and briefly highlight (e.g. jumping from Tasks). */
+  targetLine?: { line: number; seq: number };
 }
 
 export function PageReader({
@@ -57,6 +58,7 @@ export function PageReader({
   loadSource,
   onEditAt,
   initialScrollTop,
+  targetLine,
 }: PageReaderProps) {
   const column = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -65,6 +67,30 @@ export function PageReader({
     // Only where the page opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const targetLineNum = targetLine?.line;
+  const targetSeq = targetLine?.seq;
+  useEffect(() => {
+    if (targetLineNum === undefined || !column.current) return;
+    const nodes = [...column.current.querySelectorAll<HTMLElement>('[data-source-line]')];
+    if (nodes.length === 0) return;
+    const exact = nodes.find((el) => Number(el.dataset.sourceLine) === targetLineNum);
+    const containing = exact ?? nodes.find((el) => {
+      const start = Number(el.dataset.sourceLine);
+      const end = Number(el.dataset.endLine ?? start);
+      return start <= targetLineNum && targetLineNum <= end;
+    });
+    const chosen = containing ?? nodes.reduce((best, el) => (
+      Math.abs(Number(el.dataset.sourceLine) - targetLineNum)
+        < Math.abs(Number(best.dataset.sourceLine) - targetLineNum) ? el : best
+    ));
+    chosen.scrollIntoView({ block: 'center' });
+    chosen.classList.add('reader-target-line');
+    const timer = window.setTimeout(() => chosen.classList.remove('reader-target-line'), 1600);
+    return () => {
+      window.clearTimeout(timer);
+      chosen.classList.remove('reader-target-line');
+    };
+  }, [targetLineNum, targetSeq, body]);
   const [lineageOpen, setLineageOpen] = useReaderLineagePanel();
   const lineageId = useId();
   const lineageTrigger = useRef<HTMLButtonElement>(null);

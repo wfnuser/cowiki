@@ -8,6 +8,7 @@ import {
   type FileDiff,
 } from '@/api';
 import { shortAgo } from '@/lib/agent-session';
+import { useI18n } from '@/lib/I18nContext';
 import { ReviewInbox, ReviewInboxRow } from './ReviewInbox';
 import {
   localReviewSelectionForRow,
@@ -26,6 +27,7 @@ export function LocalReviewInbox({
   refreshKey,
   onOpen,
 }: LocalReviewInboxProps) {
+  const { t, tl } = useI18n();
   const [draftDiffs, setDraftDiffs] = useState<FileDiff[] | null>(null);
   const [changes, setChanges] = useState<AgentChange[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,8 +60,8 @@ export function LocalReviewInbox({
             return (
               <ReviewInboxRow
                 key={row.id}
-                title="Current Draft"
-                status={draftDiffs.length ? undefined : 'No changes'}
+                title={t('Current Draft')}
+                status={draftDiffs.length ? undefined : t('No changes')}
                 files={draftDiffs.length || undefined}
                 additions={sum(draftDiffs, 'additions')}
                 deletions={sum(draftDiffs, 'deletions')}
@@ -70,12 +72,13 @@ export function LocalReviewInbox({
             );
           }
           const change = row.change;
+          const status = statusLabel(change.status);
           return (
             <ReviewInboxRow
               key={row.id}
               title={change.title}
               subtitle={shortAgo(change.createdAt * 1000)}
-              status={statusLabel(change.status)}
+              status={status ? tl(status) : undefined}
               statusTone={change.status === 'needsResolution' ? 'danger' : 'muted'}
               files={change.diffs.length}
               additions={sum(change.diffs, 'additions')}

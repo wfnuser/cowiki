@@ -2,6 +2,7 @@ import { ChevronRight } from 'lucide-react';
 
 import { InlineFeedback } from '@/components/ui/inline-feedback';
 import { ViewEmpty, ViewHeader } from '@/components/ui/view-header';
+import { useI18n } from '@/lib/I18nContext';
 import { cn } from '@/lib/utils';
 
 export function ReviewInbox({
@@ -19,17 +20,18 @@ export function ReviewInbox({
   error?: string | null;
   loading?: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <section style={{ width: 'min(860px, 100%)' }}>
-      <ViewHeader title="Reviews" description={description} actions={action} />
+      <ViewHeader title={t('Reviews')} description={description} actions={action} />
 
-      {error && <InlineFeedback className="mb-4" title="Could not load Reviews" description={error} />}
+      {error && <InlineFeedback className="mb-4" title={t('Could not load Reviews')} description={error} />}
       {loading ? (
-        <ViewEmpty>Loading…</ViewEmpty>
+        <ViewEmpty>{t('Loading…')}</ViewEmpty>
       ) : children ? (
-        <ul aria-label="Reviews" className="view-list">{children}</ul>
+        <ul aria-label={t('Reviews')} className="view-list">{children}</ul>
       ) : (
-        <ViewEmpty>{empty ?? 'No reviews yet.'}</ViewEmpty>
+        <ViewEmpty>{empty ?? t('No reviews yet.')}</ViewEmpty>
       )}
     </section>
   );

@@ -115,8 +115,11 @@ export const editorTheme = EditorView.theme({
     lineHeight: '1.6',
   },
 
-  // Tables stay source-mode; mono keeps the pipes aligned
+  // Tables render as `.prose table` while the caret is elsewhere; source mode
+  // uses monospace to keep the pipes aligned while editing the table.
   '.cm-lp-table': { fontFamily: fonts.mono, fontSize: '0.85em', lineHeight: '1.6' },
+  '.cm-lp-table-widget': { display: 'block', margin: '0', cursor: 'text' },
+  '.cm-lp-table-widget table': { margin: '0' },
 
   // List markers fill one --doc-indent, like the reader's (see .prose li).
   '.cm-lp-bullet': {

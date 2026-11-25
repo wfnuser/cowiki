@@ -334,5 +334,7 @@ test('the local Review inbox stays a list and renders diffs only in detail', () 
 
   assert.equal(inbox.includes("from './DiffView'"), false);
   assert.match(detail, /<DiffView diffs=\{diffs\}/);
-  assert.match(detail, /Create checkpoint/);
+  assert.match(detail, /Commit draft/);
+  assert.match(detail, /Draft committed\./);
+  assert.doesNotMatch(detail, /Create checkpoint/);
 });

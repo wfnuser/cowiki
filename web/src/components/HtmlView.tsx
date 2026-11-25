@@ -3,6 +3,7 @@ import { Code2, Eye } from 'lucide-react';
 import type { Components } from 'react-markdown';
 import { C, fonts } from '../lib/design';
 import { isHtmlCodeLanguage, sandboxedHtmlDocument } from '../lib/html-view';
+import { HighlightedCode } from './HighlightedCode';
 
 type CodeProps = ComponentPropsWithoutRef<'code'> & {
   node?: unknown;
@@ -77,11 +78,10 @@ function ModeButton({
 }
 
 function HtmlAwareCode({ className, children, node, ...props }: CodeProps) {
-  void node;
   if (isHtmlCodeLanguage(className)) {
     return <HtmlView source={String(children).replace(/\n$/, '')} />;
   }
-  return <code className={className} {...props}>{children}</code>;
+  return <HighlightedCode className={className} node={node} {...props}>{children}</HighlightedCode>;
 }
 
 function HtmlAwarePre({ children, node, ...props }: PreProps) {
