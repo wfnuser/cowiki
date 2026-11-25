@@ -292,9 +292,14 @@ test('the settings dialog stays inside a short window with its actions visible',
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('heading', { name: 'General', exact: true })).toBeInViewport({ ratio: 1 });
-  // Space changes are saved together, from a bar that appears once something changed.
+  // Space changes are saved together, from a bar that appears once something changed,
+  // and stays reachable even after switching to an App settings tab.
   await dialog.getByRole('checkbox', { name: /Daily journal/ }).uncheck();
   await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeInViewport({ ratio: 1 });
+  await dialog.getByRole('button', { name: 'General', exact: true }).last().click();
+  await expect(dialog.getByText('Unsaved changes in Personal')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'General', exact: true }).first().click();
   const box = (await dialog.boundingBox())!;
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.y + box.height).toBeLessThanOrEqual(600);

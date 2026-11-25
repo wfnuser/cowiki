@@ -208,6 +208,13 @@ export function AgentPanel({
   const [draftAgent, setDraftAgent] = useState<AgentKind>(defaultAgent);
   const [draftMode, setDraftMode] = useState<AgentMode>('live');
   const [draftModel, setDraftModel] = useState<string | null>(() => agentModels?.[defaultAgent] ?? null);
+  const lastDefaultAgent = useRef<AgentKind>(defaultAgent);
+  useEffect(() => {
+    if (lastDefaultAgent.current === defaultAgent) return;
+    lastDefaultAgent.current = defaultAgent;
+    setDraftAgent(defaultAgent);
+    setDraftModel(agentModels?.[defaultAgent] ?? null);
+  }, [agentModels, defaultAgent]);
   const [showHistory, setShowHistory] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [busyAction, setBusyAction] = useState(false);
@@ -430,7 +437,9 @@ export function AgentPanel({
               <DropdownMenuItem onSelect={() => onOpenChanges(active.changeId!)}><GitCompare /> View changes</DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => void readiness.check(draftAgent, true)}><RefreshCw /> Check {agentName(draftAgent)} again</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void readiness.check(active?.provider ?? draftAgent, true)}>
+              <RefreshCw /> Check {agentName(active?.provider ?? draftAgent)} again
+            </DropdownMenuItem>
             {active && (
               <DropdownMenuItem disabled={activeBusy} onSelect={removeActive}><Trash2 /> Remove from history</DropdownMenuItem>
             )}
@@ -469,6 +478,7 @@ export function AgentPanel({
             ))}
           </div>
           <AgentComposer
+            key={active.sessionId}
             placeholder={`Ask ${agentName(active.provider)}…`}
             disabledReason={active.closed ? 'This Agent Change is closed. Start a new session to keep working.' : null}
             busy={activeBusy || busyAction}
@@ -575,6 +585,7 @@ export function AgentPanel({
             </div>
           </div>
           <AgentComposer
+            key="new"
             placeholder={`Ask ${agentName(draftAgent)} to work in this Space…`}
             disabledReason={draftState.readiness && draftState.readiness.status !== 'available'
               ? `${agentName(draftAgent)} is not ready`

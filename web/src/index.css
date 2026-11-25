@@ -395,6 +395,7 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 
 /* Flashcard decks, as in Anki: a tree with New and Due columns. */
 .deck-head { display: flex; align-items: center; padding: 0 10px 6px 26px; color: var(--color-text-tertiary); font-size: 12px; }
+.deck-head.is-flat { padding-left: 4px; }
 .deck-row { display: flex; align-items: center; border-top: 1px solid var(--color-border-soft); }
 ul[aria-label="Decks"] > li:first-child > .deck-row { border-top: 0; }
 .deck-row-toggle { display: inline-flex; width: 22px; height: 22px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 5px; color: var(--color-text-faint); }

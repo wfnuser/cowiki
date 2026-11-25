@@ -822,7 +822,7 @@ export function MainLayout() {
     }
   };
 
-  const goThroughHistory = (delta: -1 | 1) => {
+  const stepHistory = (delta: -1 | 1) => {
     let history = viewHistory;
     for (;;) {
       const next = step(history, delta);
@@ -840,6 +840,17 @@ export function MainLayout() {
       openHistoryView(ws, next.entry.view);
       return;
     }
+  };
+
+  const goThroughHistory = (delta: -1 | 1) => {
+    if (editingPage && pageEditorRef.current) {
+      void (async () => {
+        if (!(await pageEditorRef.current?.flush())) return;
+        stepHistory(delta);
+      })();
+      return;
+    }
+    stepHistory(delta);
   };
 
   const onHistoryKey = useEffectEvent((event: KeyboardEvent) => {
@@ -1437,18 +1448,21 @@ export function MainLayout() {
     loadSpacePages(ws);
   };
 
-  // Leave edit mode; pull the saved page back so the read view is fresh.
-  const handleDoneEditing = async () => {
+  // Leave edit mode; flush any pending save first, then pull the saved page so the read view is fresh.
+  const handleDoneEditing = async (options?: { openComments?: boolean }): Promise<boolean> => {
+    if (pageEditorRef.current && !(await pageEditorRef.current.flush())) return false;
     if (activeView?.kind === 'page') {
       setReaderScroll({ path: activeView.path ?? '', top: pageEditorRef.current?.scrollTop() ?? 0 });
     }
+    if (options?.openComments) setCommentsAfterEdit(true);
     setEditingPage(false);
-    if (!activeWorkspace || activeView?.kind !== 'page') return;
+    if (!activeWorkspace || activeView?.kind !== 'page') return true;
     try {
       const page = await getPage(activeView.slug, userBranch, activeWorkspace.slug, 'wiki');
       persistedPageBody.current = page.body;
       setActiveView((prev) => (prev?.kind === 'page' ? { ...prev, content: page } : prev));
     } catch { /* keep the stale view */ }
+    return true;
   };
 
   const editingPageSlug = activeView?.kind === 'page' ? activeView.slug : null;
@@ -1538,10 +1552,12 @@ export function MainLayout() {
     async (path: string) => (await getPage(conceptIdFromPath(path), userBranch, journalSpaceSlug, 'wiki')).body,
     [journalSpaceSlug, userBranch],
   );
+  const [homeRefreshTick, setHomeRefreshTick] = useState(0);
   const writeJournal = useCallback(
-    (path: string, body: string, expected: string) => (
-      writePage(conceptIdFromPath(path), body, userBranch, journalSpaceSlug, 'wiki', expected)
-    ),
+    async (path: string, body: string, expected: string) => {
+      await writePage(conceptIdFromPath(path), body, userBranch, journalSpaceSlug, 'wiki', expected);
+      setHomeRefreshTick((tick) => tick + 1);
+    },
     [journalSpaceSlug, userBranch],
   );
   const [recent, setRecent] = useState<{ spaceSlug: string; pages: RecentPage[] } | null>(null);
@@ -1553,7 +1569,7 @@ export function MainLayout() {
       .then((pages) => { if (live) setRecent({ spaceSlug: journalSpaceSlug, pages }); })
       .catch(() => { if (live) setRecent({ spaceSlug: journalSpaceSlug, pages: [] }); });
     return () => { live = false; };
-  }, [showOverview, activeLocal, journalSpaceSlug, pagesVersion, reviewRefreshKey]);
+  }, [showOverview, activeLocal, journalSpaceSlug, pagesVersion, reviewRefreshKey, homeRefreshTick]);
   const [homeCounts, setHomeCounts] = useState<HomeCounts & { spaceSlug: string } | null>(null);
   const countTasks = activeFeaturesReady && activeFeatures.modules.tasks;
   const countCards = activeFeaturesReady && activeFeatures.modules.flashcards;
@@ -1565,7 +1581,7 @@ export function MainLayout() {
       .then((counts) => { if (live) setHomeCounts({ spaceSlug: journalSpaceSlug, ...counts }); })
       .catch(() => { if (live) setHomeCounts(null); });
     return () => { live = false; };
-  }, [showOverview, activeLocal, journalSpaceSlug, activeFeaturesReady, journalConfig, countTasks, countCards, pagesVersion]);
+  }, [showOverview, activeLocal, journalSpaceSlug, activeFeaturesReady, journalConfig, countTasks, countCards, pagesVersion, homeRefreshTick]);
   const counts = homeCounts?.spaceSlug === journalSpaceSlug ? homeCounts : null;
   const changesToReview = (desktop && activeWorkspace?.localPath
     ? openAgentChanges.length + (sharedSpace && activeWorkingDiffs.length > 0 ? 1 : 0)
@@ -1876,8 +1892,10 @@ export function MainLayout() {
                     agentChanges={openAgentChanges}
                     selection={versionSelection}
                     onSelect={(selection) => {
-                      if (editingPage) void handleDoneEditing();
-                      setVersionSelection(selection);
+                      void (async () => {
+                        if (editingPage && !(await handleDoneEditing())) return;
+                        setVersionSelection(selection);
+                      })();
                     }}
                     onSeeReviews={() => handleTabChange('reviews')}
                     versions={!isHtmlPage}
@@ -1895,7 +1913,7 @@ export function MainLayout() {
                     type="button"
                     aria-label="Comments"
                     title="Back to reading and show comments"
-                    onClick={() => { setCommentsAfterEdit(true); void handleDoneEditing(); }}
+                    onClick={() => { void handleDoneEditing({ openComments: true }); }}
                     className="hover:bg-bg-hover"
                     style={{ ...headerBtnStyle, width: 30, height: 28, justifyContent: 'center', padding: 0, color: C.ink2, background: undefined }}
                   >
@@ -2113,8 +2131,8 @@ export function MainLayout() {
                     ref={pageEditorRef}
                     key={activeView.path ?? activeView.slug}
                     initialBody={activeView.content.body}
-                    initialCursor={editStart && editStart.path === activeView.path ? editStart.cursor : undefined}
-                    initialCursorTop={editStart && editStart.path === activeView.path ? editStart.top : undefined}
+                    initialCursor={editStart && editStart.path === (activeView.path ?? '') ? editStart.cursor : undefined}
+                    initialCursorTop={editStart && editStart.path === (activeView.path ?? '') ? editStart.top : undefined}
                     onSave={handleSavePage}
                     onExternalReload={(fullBody) => {
                       persistedPageBody.current = fullBody;

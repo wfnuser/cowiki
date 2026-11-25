@@ -90,7 +90,7 @@ test('a Space opens on Home, not on its first file, and pages edit where clicked
   assert.match(mainLayout, /const showOverview = !!activeWorkspace && onStartPage;/);
   assert.match(mainLayout, /<JournalDay[\s\S]*entry=\{todayEntry\}/);
   assert.match(mainLayout, /onEditAt=\{canEditInline \?/);
-  assert.match(mainLayout, /initialCursor=\{editStart && editStart\.path === activeView\.path/);
+  assert.match(mainLayout, /initialCursor=\{editStart && editStart\.path === \(activeView\.path \?\? ''\)/);
 });
 
 test('Home shows only what needs you, today and recent pages', async () => {

@@ -94,7 +94,7 @@ export function JournalDay({
   const saved = useRef('');
   const latest = useRef('');
   const timer = useRef<number | null>(null);
-  const saving = useRef(false);
+  const inFlight = useRef<Promise<boolean> | null>(null);
   const editing = useRef(false);
   const editor = useRef<LivePreviewEditorHandle>(null);
   useEffect(() => { editing.current = !!session; }, [session]);
@@ -110,22 +110,31 @@ export function JournalDay({
 
   const flush = useCallback(async (): Promise<boolean> => {
     if (timer.current !== null) { window.clearTimeout(timer.current); timer.current = null; }
-    if (saving.current) return false;
-    saving.current = true;
-    try {
-      while (latest.current !== saved.current) {
-        const next = latest.current;
-        await write(entry.path, next, saved.current);
-        saved.current = next;
-      }
-      setError('');
-      return true;
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not save');
-      return false;
-    } finally {
-      saving.current = false;
+    while (inFlight.current) {
+      const ok = await inFlight.current;
+      if (!ok) return false;
+      if (latest.current === saved.current) return true;
     }
+    if (latest.current === saved.current) return true;
+    const run = async (): Promise<boolean> => {
+      try {
+        while (latest.current !== saved.current) {
+          const next = latest.current;
+          await write(entry.path, next, saved.current);
+          saved.current = next;
+        }
+        setError('');
+        return true;
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'Could not save');
+        return false;
+      }
+    };
+    const work = run().finally(() => {
+      if (inFlight.current === work) inFlight.current = null;
+    });
+    inFlight.current = work;
+    return work;
   }, [entry.path, write]);
 
   // Leaving the journal never drops typing.
