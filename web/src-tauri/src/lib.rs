@@ -845,7 +845,11 @@ pub fn run() {
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
                     .title("CoWiki")
                     .inner_size(1280.0, 860.0)
-                    .min_inner_size(980.0, 680.0);
+                    .min_inner_size(980.0, 680.0)
+                    // Tauri's native file-drop handler claims every drag over the
+                    // webview, so HTML drag and drop (the Tasks board) never sees
+                    // dragover or drop. CoWiki does not use Tauri's drop events.
+                    .disable_drag_drop_handler();
             #[cfg(target_os = "macos")]
             let window_builder = window_builder
                 .title_bar_style(tauri::TitleBarStyle::Overlay)
