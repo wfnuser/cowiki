@@ -8,15 +8,22 @@ interface HistoryButtonsProps {
   onForward: () => void;
 }
 
+function historyModifier(): '⌘' | 'Ctrl+' {
+  if (typeof navigator === 'undefined') return '⌘';
+  const platform = `${navigator.platform ?? ''} ${navigator.userAgent ?? ''}`;
+  return /Mac|iPhone|iPad|iPod/i.test(platform) ? '⌘' : 'Ctrl+';
+}
+
 /** Back and forward at the top bar's left, as in Notion; faint while there is nowhere to go. */
 export function HistoryButtons({ canGoBack, canGoForward, onBack, onForward }: HistoryButtonsProps) {
   const { t } = useI18n();
+  const mod = historyModifier();
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, marginRight: 6, flexShrink: 0 }}>
-      <HistoryButton label={t('Back')} shortcut="⌘[" disabled={!canGoBack} onClick={onBack}>
+      <HistoryButton label={t('Back')} shortcut={`${mod}[`} disabled={!canGoBack} onClick={onBack}>
         <ArrowLeft size={16} />
       </HistoryButton>
-      <HistoryButton label={t('Forward')} shortcut="⌘]" disabled={!canGoForward} onClick={onForward}>
+      <HistoryButton label={t('Forward')} shortcut={`${mod}]`} disabled={!canGoForward} onClick={onForward}>
         <ArrowRight size={16} />
       </HistoryButton>
     </span>

@@ -87,3 +87,91 @@ test('back and forward step through pages, views and shortcuts', async ({ page }
   await expect(crumb).not.toContainText('Welcome');
   await expect(back).toBeDisabled();
 });
+
+test('slow page responses never overwrite a newer navigation and Reviews waits for edit flush', async ({ page }) => {
+  const space = { name: 'My Space', slug: 'personal', id: 'personal', visibility: 'private', role: 'owner', localPath: '/Users/me/cowiki/personal' };
+  const store = new Map<string, string>([
+    ['Alpha', '---\ntype: Note\ntitle: Alpha\n---\n\n# Alpha\n\nAlpha body unique.\n'],
+    ['Beta', '---\ntype: Note\ntitle: Beta\n---\n\n# Beta\n\nBeta body slow.\n'],
+    ['Gamma', '---\ntype: Note\ntitle: Gamma\n---\n\n# Gamma\n\nGamma body third.\n'],
+  ]);
+  const meta = (slug: string) => ({ slug, path: slug + '.md', title: slug, summary: '', branch: 'main', kind: 'page', children: [] });
+  let slowBeta = false;
+  const writes: string[] = [];
+  let diffSeenAfterWrite = false;
+
+  await page.route('**/*', (route) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
+  await page.exposeFunction('fixtureInvoke', async (cmd: string, args: Record<string, unknown>) => {
+    switch (cmd) {
+      case 'local_list_spaces': return [space];
+      case 'local_list_pages': return Array.from(store.keys(), meta);
+      case 'local_get_page': {
+        const slug = String(args.pageSlug);
+        if (slug === 'Beta' && slowBeta) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        return { ...meta(slug), body: store.get(slug) ?? '' };
+      }
+      case 'local_write_page': {
+        const slug = String(args.pageSlug);
+        const content = String(args.content ?? '');
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        store.set(slug, content);
+        writes.push(content);
+        return null;
+      }
+      case 'local_working_diff':
+        if (writes.some((text) => text.includes('flushed before review'))) diffSeenAfterWrite = true;
+        return [];
+      case 'local_list_agent_changes':
+      case 'local_list_sources':
+      case 'local_list_backlinks':
+      case 'local_list_task_sources':
+      case 'local_list_card_sources':
+      case 'local_recent_pages':
+      case 'local_list_broken_links':
+        return [];
+      case 'local_read_space_config': return { features: { modules: { journal: true, tasks: true, flashcards: true }, journal: { format: 'YYYY-MM-DD', folder: 'journal', template: null } } };
+      case 'local_list_page_comments': return { comments: [], snapshots: [] };
+      case 'cloud_get_status': return { state: 'unlinked', conflicts: [], message: '', pullRequest: null, committed: false, cloudSpaceId: null, cloudBaseUrl: null };
+      default: return null;
+    }
+  });
+  await page.addInitScript(() => {
+    Object.assign(window, { __TAURI_INTERNALS__: { invoke: (cmd: string, args: unknown) => Reflect.get(window, 'fixtureInvoke')(cmd, args) } });
+    localStorage.setItem('cowiki.personal.preferences', JSON.stringify({ autoCheckpoint: false }));
+  });
+
+  await page.goto(origin);
+  await page.getByText('Alpha', { exact: true }).first().click();
+  await expect(page.getByText('Alpha body unique.')).toBeVisible();
+  await page.getByText('Beta', { exact: true }).first().click();
+  await expect(page.getByText('Beta body slow.')).toBeVisible();
+  await page.getByText('Gamma', { exact: true }).first().click();
+  await expect(page.getByText('Gamma body third.')).toBeVisible();
+
+  // Make Beta's IPC resolve AFTER Alpha, then double-click Back rapidly (Gamma -> Beta -> Alpha).
+  slowBeta = true;
+  const back = page.getByRole('button', { name: 'Back', exact: true });
+  await back.click();
+  await back.click();
+  await expect(page.getByText('Alpha body unique.')).toBeVisible();
+  // Wait past Beta's delayed IPC and verify Beta did NOT overwrite Alpha.
+  await page.waitForTimeout(350);
+  await expect(page.getByText('Alpha body unique.')).toBeVisible();
+  await expect(page.getByText('Beta body slow.')).toHaveCount(0);
+
+  // Click to edit Alpha, type unsaved text, and immediately click Reviews.
+  await page.getByText('Alpha body unique.').click();
+  await expect(page.locator('.cm-content')).toBeVisible();
+  await page.keyboard.type(' flushed before review');
+  await page.getByRole('button', { name: /^Reviews\s*\d*$/ }).first().click();
+  await expect(page.locator('.app-breadcrumb')).toContainText('Reviews');
+  expect(writes.some((text) => text.includes('flushed before review'))).toBe(true);
+  expect(diffSeenAfterWrite).toBe(true);
+
+  // Returning to Alpha should open in reading mode (editingPage was cleared on Reviews tab).
+  await page.getByText('Alpha', { exact: true }).first().click();
+  await expect(page.locator('.cm-content')).toHaveCount(0);
+  await expect(page.getByText(/Alpha body unique\./)).toBeVisible();
+});

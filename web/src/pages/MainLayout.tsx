@@ -217,11 +217,15 @@ export function MainLayout() {
   }, [auth]);
   const articleRef = useRef<HTMLElement>(null);
   const pageEditorRef = useRef<PageEditorHandle>(null);
+  const pageRequestSeq = useRef(0);
+  const sourceRequestSeq = useRef(0);
   const persistedPageBody = useRef<string | null>(null);
   const externalConflictNotified = useRef(false);
   const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<NavTab>('wiki');
   const [viewHistory, setViewHistory] = useState(EMPTY_HISTORY);
+  const viewHistoryRef = useRef(viewHistory);
+  useEffect(() => { viewHistoryRef.current = viewHistory; }, [viewHistory]);
   const [spaceFeatures, setSpaceFeatures] = useState<Record<string, SpaceFeatures>>({});
   const [featureLoadErrors, setFeatureLoadErrors] = useState<Record<string, string>>({});
   const [preferences, setPreferences] = useState<PersonalPreferences>(safePreferences);
@@ -656,8 +660,21 @@ export function MainLayout() {
     return () => { cancelled = true; };
   }, [activeWorkspace?.localPath, activeWorkspace?.slug, desktop, reviewRefreshKey]);
 
+  // Flush pending page edits before navigating away; returns false if a conflict
+  // or save failure kept the editor open.
+  const flushBeforeLeave = useCallback(async (): Promise<boolean> => {
+    if (editingPage && pageEditorRef.current) {
+      if (!(await pageEditorRef.current.flush())) return false;
+    }
+    setEditingPage(false);
+    return true;
+  }, [editingPage]);
+
   // Select a source file
   const selectSource = async (ws: Workspace, filename: string) => {
+    if (!(await flushBeforeLeave())) return;
+    pageRequestSeq.current += 1;
+    const requestSeq = ++sourceRequestSeq.current;
     setActiveWorkspace(ws);
     setActiveTab('wiki');
     setActiveView({ kind: 'source', filename, content: null });
@@ -666,9 +683,11 @@ export function MainLayout() {
       if (!content) {
         content = await getSource(ws.slug, filename, 'main');
       }
-      setActiveView(prev => prev?.kind === 'source' ? { ...prev, content } : prev);
+      if (sourceRequestSeq.current !== requestSeq) return;
+      setActiveView(prev => prev?.kind === 'source' && prev.filename === filename ? { ...prev, content } : prev);
     } catch {
-      setActiveView(prev => prev?.kind === 'source' ? { ...prev, content: null } : prev);
+      if (sourceRequestSeq.current !== requestSeq) return;
+      setActiveView(prev => prev?.kind === 'source' && prev.filename === filename ? { ...prev, content: null } : prev);
     }
   };
 
@@ -683,9 +702,11 @@ export function MainLayout() {
 
   const handleSelectWorkspace = async (ws: Workspace) => {
     if (activeWorkspace?.id === ws.id) return;
+    if (!(await flushBeforeLeave())) return;
+    pageRequestSeq.current += 1;
+    sourceRequestSeq.current += 1;
     enterPluginSpace(ws);
     setActiveWorkspace(ws);
-    setEditingPage(false);
     setActiveTab('home');
     setActiveView({ kind: 'home', workspaceSlug: ws.slug });
     navigate('/', { replace: true });
@@ -699,9 +720,12 @@ export function MainLayout() {
     const conceptId = path ? conceptIdFromPath(path) : conceptIdFromPath(slug);
     const repoPath = path ? conceptPath(conceptIdFromPath(path)) : conceptPath(conceptId);
     if (isReservedDocument(repoPath)) return;
+    if (!(await flushBeforeLeave()) || !isCurrent()) return;
+    sourceRequestSeq.current += 1;
+    const requestSeq = ++pageRequestSeq.current;
+    const stillCurrent = () => pageRequestSeq.current === requestSeq && isCurrent();
     setActiveWorkspace(ws);
     setActiveTab('wiki');
-    setEditingPage(false);
     setCommentsAfterEdit(false);
     setReaderScroll(null);
     setReaderTargetLine(null);
@@ -710,9 +734,17 @@ export function MainLayout() {
     setActiveView({ kind: 'page', slug: conceptId, path: repoPath, content: null });
     if (updateUrl) navigate(pageRoute(ws.slug, conceptId), { replace: true });
     const setContent = (content: PageFull | null) => {
-      if (!isCurrent()) return;
+      if (!stillCurrent()) return;
       persistedPageBody.current = content?.body ?? null;
-      setActiveView(prev => prev?.kind === 'page' ? { ...prev, content } : prev);
+      setActiveView((prev) => (
+        prev?.kind === 'page' && prev.path === repoPath ? { ...prev, content } : prev
+      ));
+    };
+    const handleMissing = () => {
+      if (!stillCurrent()) return;
+      setContent(null);
+      setViewHistory((history) => forgetPath(history, ws.slug, repoPath));
+      setMessage({ text: `Page "${conceptId}" not found`, type: 'error' });
     };
 
     if (ws.visibility === 'private') {
@@ -720,23 +752,19 @@ export function MainLayout() {
         const page = await getPage(conceptId, userBranch, ws.slug, 'wiki');
         setContent(page);
       } catch {
-        if (!isCurrent()) return;
-        setContent(null);
-        setMessage({ text: `Page "${conceptId}" not found`, type: 'error' });
+        handleMissing();
       }
     } else {
       try {
         const page = await getPage(conceptId, userBranch, ws.slug, 'wiki');
         setContent(page);
       } catch {
-        if (!isCurrent()) return;
+        if (!stillCurrent()) return;
         try {
           const page = await getPage(conceptId, 'main', ws.slug, 'wiki');
           setContent(page);
         } catch {
-          if (!isCurrent()) return;
-          setContent(null);
-          setMessage({ text: `Page "${conceptId}" not found`, type: 'error' });
+          handleMissing();
         }
       }
     }
@@ -798,6 +826,8 @@ export function MainLayout() {
       void selectSource(ws, view.filename);
       return;
     }
+    pageRequestSeq.current += 1;
+    sourceRequestSeq.current += 1;
     if (activeWorkspace?.id !== ws.id) {
       setActiveWorkspace(ws);
       if (!spacePages[ws.id]) void loadSpacePages(ws);
@@ -839,18 +869,22 @@ export function MainLayout() {
     return true;
   };
 
+  // Read the latest viewHistory via ref so stepping after an async flush never
+  // acts on a stale pre-await closure.
   const stepHistory = (delta: -1 | 1) => {
     // Skip steps that can no longer be shown: a removed Space, a module turned off.
-    const history = forgetWhere(viewHistory, (entry) => {
+    const history = forgetWhere(viewHistoryRef.current, (entry) => {
       const ws = workspaces.find((workspace) => workspace.slug === entry.workspaceSlug);
       return !ws || !historyViewAvailable(ws, entry.view);
     });
     const next = step(history, delta);
     const ws = next && workspaces.find((workspace) => workspace.slug === next.entry.workspaceSlug);
     if (!next || !ws) {
+      viewHistoryRef.current = history;
       setViewHistory(history);
       return;
     }
+    viewHistoryRef.current = next.history;
     setViewHistory(next.history);
     openHistoryView(ws, next.entry.view);
   };
@@ -858,7 +892,7 @@ export function MainLayout() {
   const goThroughHistory = (delta: -1 | 1) => {
     if (editingPage && pageEditorRef.current) {
       void (async () => {
-        if (!(await pageEditorRef.current?.flush())) return;
+        if (!(await flushBeforeLeave())) return;
         stepHistory(delta);
       })();
       return;
@@ -1256,50 +1290,75 @@ export function MainLayout() {
   // Tab navigation
   const handleTabChange = (tab: NavTab) => {
     if (!activeWorkspace) return;
-    setActiveTab(tab);
-    const owner = auth?.name || 'user';
-    switch (tab) {
-      case 'home':
-      case 'journals':
-        setEditingPage(false);
-        setJournalJump(null);
-        setActiveView({ kind: tab, workspaceSlug: activeWorkspace.slug });
-        navigate('/', { replace: true });
-        break;
-      case 'reviews':
-        setActiveView({ kind: 'review-list', workspaceSlug: activeWorkspace.slug });
-        navigate(reviewRoute(owner, activeWorkspace.slug));
-        break;
-      case 'members':
-        setActiveView({ kind: 'members', workspaceSlug: activeWorkspace.slug });
-        navigate(`/${owner}/${activeWorkspace.slug}/members`);
-        break;
-      case 'history':
-        setActiveView({ kind: 'history', workspaceSlug: activeWorkspace.slug });
-        navigate(`/${owner}/${activeWorkspace.slug}/history`);
-        break;
-      case 'links':
-        setActiveView({ kind: 'links', workspaceSlug: activeWorkspace.slug });
-        navigate('/', { replace: true });
-        break;
-      case 'flashcards':
-        setEditingPage(false);
-        setActiveView({ kind: 'flashcards', workspaceSlug: activeWorkspace.slug });
-        navigate('/', { replace: true });
-        break;
-      case 'tasks':
-        setEditingPage(false);
-        setActiveView({ kind: 'tasks', workspaceSlug: activeWorkspace.slug });
-        navigate('/', { replace: true });
-        break;
+    const ws = activeWorkspace;
+    const apply = () => {
+      pageRequestSeq.current += 1;
+      sourceRequestSeq.current += 1;
+      setEditingPage(false);
+      setActiveTab(tab);
+      const owner = auth?.name || 'user';
+      switch (tab) {
+        case 'home':
+        case 'journals':
+          setJournalJump(null);
+          setActiveView({ kind: tab, workspaceSlug: ws.slug });
+          navigate('/', { replace: true });
+          break;
+        case 'reviews':
+          setActiveView({ kind: 'review-list', workspaceSlug: ws.slug });
+          navigate(reviewRoute(owner, ws.slug));
+          break;
+        case 'members':
+          setActiveView({ kind: 'members', workspaceSlug: ws.slug });
+          navigate(`/${owner}/${ws.slug}/members`);
+          break;
+        case 'history':
+          setActiveView({ kind: 'history', workspaceSlug: ws.slug });
+          navigate(`/${owner}/${ws.slug}/history`);
+          break;
+        case 'links':
+          setActiveView({ kind: 'links', workspaceSlug: ws.slug });
+          navigate('/', { replace: true });
+          break;
+        case 'flashcards':
+          setActiveView({ kind: 'flashcards', workspaceSlug: ws.slug });
+          navigate('/', { replace: true });
+          break;
+        case 'tasks':
+          setActiveView({ kind: 'tasks', workspaceSlug: ws.slug });
+          navigate('/', { replace: true });
+          break;
+      }
+    };
+    if (editingPage && pageEditorRef.current) {
+      void (async () => {
+        if (!(await flushBeforeLeave())) return;
+        apply();
+      })();
+      return;
     }
+    apply();
   };
 
   const openReviewDetail = (target: ReviewTarget) => {
     if (!activeWorkspace) return;
-    const owner = auth?.name || 'user';
-    setActiveView({ kind: 'review-detail', workspaceSlug: activeWorkspace.slug, target });
-    navigate(reviewRoute(owner, activeWorkspace.slug, target));
+    const ws = activeWorkspace;
+    const apply = () => {
+      pageRequestSeq.current += 1;
+      sourceRequestSeq.current += 1;
+      setEditingPage(false);
+      const owner = auth?.name || 'user';
+      setActiveView({ kind: 'review-detail', workspaceSlug: ws.slug, target });
+      navigate(reviewRoute(owner, ws.slug, target));
+    };
+    if (editingPage && pageEditorRef.current) {
+      void (async () => {
+        if (!(await flushBeforeLeave())) return;
+        apply();
+      })();
+      return;
+    }
+    apply();
   };
 
   // Deterministic local import finishes before optional Agent organization.
@@ -1333,8 +1392,10 @@ export function MainLayout() {
 
   const handleDeleteWorkspace = async () => {
     if (!showDeleteConfirm) return;
+    const deletedSlug = showDeleteConfirm.slug;
     try {
-      await deleteWorkspace(showDeleteConfirm.slug);
+      await deleteWorkspace(deletedSlug);
+      setViewHistory((history) => forgetWhere(history, (entry) => entry.workspaceSlug === deletedSlug));
       setShowDeleteConfirm(null);
       loadWorkspaces();
       setMessage({ text: 'Workspace deleted.', type: 'success' });
