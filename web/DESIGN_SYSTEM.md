@@ -85,24 +85,26 @@ Notifications, Review details, Cloud pages) is built the same way, with
   Doing / Done; its Done is what you finished today (This week: this week).
   A list of This week is grouped the same way. Saved custom views belong in
   query blocks in a page, not in this view.
-- **Flashcards** follow Anki (user decision 2026-11-24): the view is a deck
-  tree with **New** (blue) and **Due** (green) columns, zeros faint; a deck
-  opens its own screen with the same counts, **Study now** and the notes
-  its cards live in. Decks come from tags: the card's own tags besides
-  `#card` (`#Japanese/N2` is a sub-deck), else the page's `tags`, else its
-  folder, else *Unsorted*. "Study all" appears in the title row only when
-  something is due; with nothing to study the view says *All done for
-  today.* — never a disabled button.
-- **Studying** is a focus screen, so unlike other views it is a centred
-  `min(640px, 100%)` column: the deck and *New*/*Review n* (blue/green) on
-  the left, "n left" and quiet icon tools (open note, skip, suspend, reset,
-  end) on the right, a 2px progress line, then one paper card
-  (`.study-card`: 12px radius, `--shadow-card`). The question is content:
-  serif 22px, centred in the card. *Show answer* reveals the answer below a
-  short rule without moving the card's frame; the answer reads like a page
-  (16px). Below the card one wide button, then three equal ratings in the
-  same place, each a coloured dot (red, amber, green), the label, the next
-  interval, and its key in the corner.
+- **Flashcards** follow Anki (user decision 2026-11-24): a hairline summary
+  band at the top holds **New** (blue), **Due** (green), and **Total** counts
+  next to the primary **Study all** CTA (or *All done for today.* when caught
+  up — never a disabled button), above a deck tree with **New** and **Due**
+  columns and a hover-revealed quick-study action on each deck. Opening a
+  deck shows the same hairline summary band with **Study now** and the notes
+  its cards live in (folder prefix muted). Decks come from tags: the card's
+  own tags besides `#card` (`#Japanese/N2` is a sub-deck), else the page's
+  `tags`, else its folder, else *Unsorted*.
+- **Studying** is a centred focus column (`min(640px, 100%)`): the deck and
+  *New*/*Review n* dot on the left, "n left" and quiet icon tools (open note,
+  skip, suspend, reset, end) on the right, an accent progress track, then one
+  tactile paper card (`.study-card`: 12px radius, `--shadow-card`, with a
+  subtle stacked-card edge underneath while more cards remain). The question
+  is content (serif 22px, centred); revealing opens a softly tinted lower
+  answer pane separated by a hairline without moving the frame (single-bullet
+  answers centre cleanly without a lone dot). Below the card sits one warm-ink
+  *Show answer* button, replaced on reveal by three balanced semantic rating
+  buttons (red, amber, green hover wash, dot, label, next interval and inline
+  key hint).
 - **Scrolling areas keep room for the scrollbar** (`.scroll-pane`), so a
   list growing past the window never narrows the column.
 
