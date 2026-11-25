@@ -285,6 +285,105 @@ fn probe_directory() -> PathBuf {
         .unwrap_or_else(std::env::temp_dir)
 }
 
+/// An empty directory for ephemeral ACP `session/new` probes so an agent never
+/// scans dotfiles in `$HOME`.
+fn probe_session_directory() -> PathBuf {
+    let dir = std::env::temp_dir().join("cowiki-agent-probe");
+    if std::fs::create_dir_all(&dir).is_ok() {
+        dir.canonicalize().unwrap_or(dir)
+    } else {
+        probe_directory()
+    }
+}
+
+pub(crate) fn probe_acp_rpc(
+    agent: AgentKind,
+    name: &str,
+    rpc: &RpcProcess,
+    environment: &[(String, String)],
+    probe_cwd: &Path,
+    base: NativeReadiness,
+) -> NativeReadiness {
+    let initialized = match rpc
+        .request("initialize", acp::initialize_params(), PROBE_TIMEOUT)
+        .map_err(|error| error.to_string())
+        .and_then(|value| {
+            acp::check_initialize(&value)?;
+            Ok(value)
+        }) {
+        Ok(value) => value,
+        Err(error) => {
+            return NativeReadiness {
+                status: NativeStatus::Incompatible,
+                message: Some(format!(
+                    "{name} did not answer the Agent Client Protocol handshake"
+                )),
+                detail: Some(error),
+                ..base
+            };
+        }
+    };
+    let can_sign_in = initialized
+        .get("authMethods")
+        .and_then(Value::as_array)
+        .is_some_and(|methods| !methods.is_empty());
+    let mut signed_out = agent == AgentKind::Grok && !grok_signed_in(environment);
+    let mut models = acp::listed_models(&initialized);
+    let mut account = acp::account_label(&initialized);
+    // Standard ACP v1 agents (Antigravity CLI, OpenCode, Hermes) report their
+    // available models and auth status on `session/new` rather than `initialize`.
+    if !signed_out && models.is_empty() {
+        let cwd = probe_cwd.to_string_lossy().into_owned();
+        match rpc.request(
+            "session/new",
+            json!({"cwd": cwd, "mcpServers": []}),
+            PROBE_TIMEOUT,
+        ) {
+            Ok(session) => {
+                models = acp::listed_models(&session);
+                account = account.or_else(|| acp::account_label(&session));
+                if initialized
+                    .pointer("/agentCapabilities/sessionCapabilities/close")
+                    .is_some()
+                {
+                    if let Some(session_id) = session.get("sessionId").and_then(Value::as_str) {
+                        let _ = rpc.request(
+                            "session/close",
+                            json!({"sessionId": session_id}),
+                            Duration::from_secs(3),
+                        );
+                    }
+                }
+            }
+            Err(error) if acp::is_auth_required(&error) => {
+                signed_out = true;
+            }
+            Err(_) => {}
+        }
+    }
+    NativeReadiness {
+        status: if signed_out {
+            NativeStatus::SignedOut
+        } else {
+            NativeStatus::Available
+        },
+        account,
+        message: signed_out.then(|| format!("{name} is installed but not signed in")),
+        can_sign_in,
+        models: models
+            .into_iter()
+            .map(|(id, name, description, is_default)| ModelOption {
+                id,
+                name,
+                description,
+                is_default,
+                resolved: None,
+            })
+            .collect(),
+        ..base
+    }
+}
+
 fn spawn_quiet(
     label: &str,
     program: &Path,
@@ -479,49 +578,10 @@ pub fn probe(agent: AgentKind) -> NativeReadiness {
                     };
                 }
             };
-            let result = rpc.request("initialize", acp::initialize_params(), PROBE_TIMEOUT);
+            let probe_cwd = probe_session_directory();
+            let readiness = probe_acp_rpc(agent, name, &rpc, &environment, &probe_cwd, base);
             let _ = rpc.shutdown(Duration::from_millis(800));
-            match result.map_err(|error| error.to_string()).and_then(|value| {
-                acp::check_initialize(&value)?;
-                Ok(value)
-            }) {
-                Ok(initialized) => {
-                    let can_sign_in = initialized
-                        .get("authMethods")
-                        .and_then(Value::as_array)
-                        .is_some_and(|methods| !methods.is_empty());
-                    let signed_out = agent == AgentKind::Grok && !grok_signed_in(&environment);
-                    NativeReadiness {
-                        status: if signed_out {
-                            NativeStatus::SignedOut
-                        } else {
-                            NativeStatus::Available
-                        },
-                        message: signed_out
-                            .then(|| format!("{name} is installed but not signed in")),
-                        can_sign_in,
-                        models: acp::listed_models(&initialized)
-                            .into_iter()
-                            .map(|(id, name, description, is_default)| ModelOption {
-                                id,
-                                name,
-                                description,
-                                is_default,
-                                resolved: None,
-                            })
-                            .collect(),
-                        ..base
-                    }
-                }
-                Err(error) => NativeReadiness {
-                    status: NativeStatus::Incompatible,
-                    message: Some(format!(
-                        "{name} did not answer the Agent Client Protocol handshake"
-                    )),
-                    detail: Some(error),
-                    ..base
-                },
-            }
+            readiness
         }
         "claude-stream-json" => {
             let Some(status) = claude_auth_status(&executable, &environment) else {

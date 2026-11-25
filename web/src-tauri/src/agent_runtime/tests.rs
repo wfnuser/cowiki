@@ -435,6 +435,26 @@ fn listed_models_come_only_from_the_agent() {
     }}}));
     assert_eq!(grok.len(), 2);
     assert!(grok[1].3 && !grok[0].3, "the current model is the default");
+
+    let standard_acp = super::acp::listed_models(&serde_json::json!({
+        "models": {
+            "currentModelId": "gemini-4-neon-high",
+            "availableModels": [
+                {"modelId": "gemini-4-neon-high", "name": "Gemini 4 Neon (High)"},
+                {"modelId": "gemini-3.8-flash-low", "name": "Gemini 3.8 Flash (Low)"},
+            ],
+        },
+        "_meta": {"antigravity": {"tier": {"name": "Google AI Ultra"}}},
+    }));
+    assert_eq!(standard_acp.len(), 2);
+    assert!(standard_acp[0].3 && !standard_acp[1].3);
+    assert_eq!(
+        super::acp::account_label(&serde_json::json!({
+            "_meta": {"antigravity": {"tier": {"name": "Google AI Ultra"}}}
+        }))
+        .as_deref(),
+        Some("Google AI Ultra")
+    );
     assert!(
         codex_models(&serde_json::json!({})).is_empty()
             && claude_models(&serde_json::json!({})).is_empty()
@@ -850,25 +870,163 @@ fn sessions_are_bound_to_their_space_and_change() {
         create(AgentMode::Background, None).is_err(),
         "background without a Change"
     );
-    assert!(
-        harness
-            .runtime
-            .create_session(CreateSession {
-                space_slug: harness.space.clone(),
-                mode: AgentMode::Live,
-                change_id: None,
-                agent: AgentKind::Antigravity,
-                title: None,
-                model: None,
-            })
-            .is_err(),
-        "no native protocol"
+    for agent in [
+        AgentKind::Codex,
+        AgentKind::Claude,
+        AgentKind::Antigravity,
+        AgentKind::Grok,
+        AgentKind::OpenCode,
+        AgentKind::Hermes,
+    ] {
+        assert!(
+            super::registry::native_protocol(agent).is_some(),
+            "{agent:?} should have a native protocol"
+        );
+    }
+    assert_eq!(
+        super::acp::launch_args(AgentKind::Antigravity),
+        Some((vec!["acp", "--sandbox"], vec![]))
     );
     assert!(harness
         .runtime
         .list_sessions(&other_space.slug)
         .unwrap()
         .is_empty());
+}
+
+#[test]
+fn antigravity_acp_attaches_instructions_and_extracts_command_line_approvals() {
+    let harness = Harness::new("antigravity");
+    let id = harness.create(AgentKind::Antigravity, AgentMode::Live, None);
+    harness.runtime.send(&id, "touch").unwrap();
+    let waiting = harness.wait(&id, "an approval", |snapshot| {
+        snapshot.status == AgentStatus::Waiting
+    });
+    assert_eq!(waiting.model.as_deref(), Some("gemini-4-neon-high"));
+    assert_eq!(
+        waiting.approvals[0].command.as_deref(),
+        Some("touch notes.md")
+    );
+    harness
+        .runtime
+        .answer_approval(&id, &waiting.approvals[0].id, true)
+        .unwrap();
+    let done = harness.wait(&id, "the Antigravity turn", |snapshot| {
+        snapshot.status == AgentStatus::Idle
+    });
+    assert!(assistant_text(&done).contains("from ACP"));
+    let session_new = &harness.sent("session/new")[0]["params"];
+    let appended = session_new
+        .pointer("/_meta/antigravity/systemPrompt/append")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert!(
+        appended.contains("Markdown files are the source of truth"),
+        "expected CoWiki instructions in _meta.antigravity.systemPrompt.append: {session_new}"
+    );
+}
+
+#[test]
+fn hermes_acp_receives_ephemeral_system_prompt() {
+    let harness = Harness::new("normal");
+    let id = harness.create(AgentKind::Hermes, AgentMode::Live, None);
+    harness.runtime.send(&id, "hi").unwrap();
+    harness.wait(&id, "the Hermes turn", |snapshot| {
+        snapshot.status == AgentStatus::Idle && assistant_text(snapshot).contains("from ACP")
+    });
+    let env_entries = harness.sent("_test/hermes_env");
+    assert_eq!(env_entries.len(), 1);
+    assert!(env_entries[0]["prompt"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("Markdown files are the source of truth"));
+}
+
+#[test]
+fn acp_probe_discovers_session_models_closes_probe_session_and_detects_signed_out() {
+    use super::auth::{probe_acp_rpc, NativeReadiness, NativeStatus};
+    use super::rpc::{Framing, LaunchSpec, RpcProcess};
+
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures");
+    let spawn_fake = |scenario: &str, log_path: &Path| {
+        let mut env = std::env::vars().collect::<Vec<_>>();
+        env.push(("FAKE_LOG".into(), log_path.to_string_lossy().into_owned()));
+        let spec = LaunchSpec {
+            program: node(),
+            args: vec![
+                fixtures
+                    .join("fake-acp-agent.mjs")
+                    .to_string_lossy()
+                    .into_owned(),
+                scenario.to_string(),
+            ],
+            cwd: log_path.parent().unwrap().to_path_buf(),
+            env,
+        };
+        RpcProcess::spawn(
+            "Fake ACP",
+            &spec,
+            Framing::JsonRpc2,
+            Arc::new(|_| {}),
+            Box::new(|_| {}),
+        )
+        .unwrap()
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    let probe_cwd = temp.path().to_path_buf();
+    let log_ok = temp.path().join("probe-ok.log");
+    let rpc = spawn_fake("antigravity", &log_ok);
+    let base = NativeReadiness {
+        agent: AgentKind::Antigravity,
+        status: NativeStatus::Available,
+        protocol: Some("acp"),
+        version: Some("1.5.14".into()),
+        account: None,
+        message: None,
+        detail: None,
+        can_sign_in: false,
+        models: Vec::new(),
+    };
+    let ok = probe_acp_rpc(
+        AgentKind::Antigravity,
+        "Antigravity CLI",
+        &rpc,
+        &[],
+        &probe_cwd,
+        base.clone(),
+    );
+    let _ = rpc.shutdown(Duration::from_millis(500));
+    assert_eq!(ok.status, NativeStatus::Available);
+    assert_eq!(ok.account.as_deref(), Some("Google AI Ultra"));
+    assert!(ok.can_sign_in);
+    assert_eq!(ok.models.len(), 2);
+    assert_eq!(ok.models[0].id, "gemini-4-neon-high");
+    assert!(ok.models[0].is_default);
+    let log_text = std::fs::read_to_string(&log_ok).unwrap_or_default();
+    assert!(
+        log_text.contains("\"session/close\""),
+        "probe should close its temporary ACP session: {log_text}"
+    );
+
+    let log_auth = temp.path().join("probe-auth.log");
+    let rpc_auth = spawn_fake("antigravity-signed-out", &log_auth);
+    let signed_out = probe_acp_rpc(
+        AgentKind::Antigravity,
+        "Antigravity CLI",
+        &rpc_auth,
+        &[],
+        &probe_cwd,
+        base,
+    );
+    let _ = rpc_auth.shutdown(Duration::from_millis(500));
+    assert_eq!(signed_out.status, NativeStatus::SignedOut);
+    assert!(signed_out.can_sign_in);
+    assert!(signed_out
+        .message
+        .as_deref()
+        .unwrap_or_default()
+        .contains("not signed in"));
 }
 
 #[test]
@@ -1730,7 +1888,12 @@ fn real_claude_round_trip() {
 #[test]
 #[ignore]
 fn real_probes_list_their_models() {
-    for agent in [AgentKind::Codex, AgentKind::Claude, AgentKind::Grok] {
+    for agent in [
+        AgentKind::Codex,
+        AgentKind::Claude,
+        AgentKind::Antigravity,
+        AgentKind::Grok,
+    ] {
         let readiness = super::auth::probe(agent);
         println!(
             "{agent:?}: {:?} {:?}",

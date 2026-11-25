@@ -4,8 +4,9 @@
 //! only receives typed snapshots (`agent:event`) and calls the commands in
 //! [`commands`]. Providers: Codex (`codex app-server`), Claude Code (its
 //! own stream-json control protocol, the one the Claude Agent SDK uses), and
-//! Agent Client Protocol agents: Grok (`grok agent stdio`) and others the
-//! probe confirms.
+//! Agent Client Protocol agents: Antigravity CLI (`agy acp --sandbox`),
+//! Grok (`grok agent stdio`), OpenCode (`opencode acp`), and Hermes Agent
+//! (`hermes acp`).
 
 pub mod acp;
 pub mod auth;
@@ -37,12 +38,9 @@ pub fn open_with_protocol(
     match config.agent {
         AgentKind::Codex => codex::open(config, resume, sink),
         AgentKind::Claude => claude::open(config, resume, sink),
-        AgentKind::Grok | AgentKind::OpenCode | AgentKind::Hermes => {
+        AgentKind::Grok | AgentKind::Antigravity | AgentKind::OpenCode | AgentKind::Hermes => {
             acp::open(config, resume, sink)
         }
-        AgentKind::Antigravity => Err(OpenError::Incompatible(
-            "Antigravity CLI has no structured protocol CoWiki can drive yet".into(),
-        )),
     }
 }
 

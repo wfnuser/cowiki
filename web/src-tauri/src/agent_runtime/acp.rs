@@ -1,6 +1,7 @@
-//! Agent Client Protocol (ACP v1) adapter over stdio. Used for Grok
-//! (`grok agent stdio`, checked against Grok Build 1.0.67) and for other
-//! agents whose ACP entry point the readiness probe confirms at runtime.
+//! Agent Client Protocol (ACP v1) adapter over stdio. Used for Antigravity
+//! CLI (`agy acp --sandbox`, checked against 1.5.14), Grok (`grok agent stdio`,
+//! checked against Grok Build 1.0.67), OpenCode (`opencode acp`), and Hermes
+//! Agent (`hermes acp`).
 
 use super::contract::{AgentApproval, ApprovalKind, ToolKind, ToolStatus};
 use super::permissions::acp_option;
@@ -38,6 +39,9 @@ pub fn launch_args(agent: AgentKind) -> Option<AcpLaunch> {
                 ("GROK_DEFAULT_PERMISSION_MODE", "default"),
             ],
         )),
+        // Antigravity CLI runs its ACP stdio server with terminal sandbox
+        // restrictions enabled and defaults to the asking `default` mode.
+        AgentKind::Antigravity => Some((vec!["acp", "--sandbox"], vec![])),
         AgentKind::OpenCode => Some((vec!["acp"], vec![])),
         AgentKind::Hermes => Some((vec!["acp"], vec![])),
         _ => None,
@@ -119,6 +123,15 @@ pub fn open(
         env.iter()
             .map(|(key, value)| (key.to_string(), value.to_string())),
     );
+    if config.agent == AgentKind::Hermes && !config.instructions.trim().is_empty() {
+        launch
+            .env
+            .retain(|(key, _)| key != crate::terminal::HERMES_EPHEMERAL_SYSTEM_PROMPT_ENV);
+        launch.env.push((
+            crate::terminal::HERMES_EPHEMERAL_SYSTEM_PROMPT_ENV.to_string(),
+            config.instructions.clone(),
+        ));
+    }
     let weak: Weak<AcpProvider> = Arc::downgrade(&provider);
     let on_incoming = Arc::new(move |incoming: Incoming| {
         if let Some(provider) = weak.upgrade() {
@@ -176,6 +189,21 @@ fn handshake(
     let signed_out = |error: &RpcError| {
         is_auth_required(error).then(|| OpenError::SignedOut(format!("{label} is not signed in")))
     };
+    let append_system_prompt = initialized
+        .pointer("/agentCapabilities/_meta/antigravity/systemPrompt/append")
+        .and_then(Value::as_bool)
+        == Some(true)
+        && !config.instructions.trim().is_empty();
+    let attach_instructions = |params: &mut Value| {
+        if append_system_prompt {
+            if let Some(object) = params.as_object_mut() {
+                object.insert(
+                    "_meta".to_string(),
+                    json!({"antigravity": {"systemPrompt": {"append": config.instructions}}}),
+                );
+            }
+        }
+    };
     let session_id = match resume {
         Some(session_id) => {
             let resumable = initialized
@@ -185,8 +213,9 @@ fn handshake(
                 .pointer("/agentCapabilities/loadSession")
                 .and_then(Value::as_bool)
                 == Some(true);
-            let params =
+            let mut params =
                 json!({"sessionId": session_id, "cwd": cwd, "mcpServers": mcp_servers(config)});
+            attach_instructions(&mut params);
             let method = if resumable {
                 "session/resume"
             } else if loadable {
@@ -218,12 +247,10 @@ fn handshake(
             (session_id, current_model(&result))
         }
         None => {
+            let mut params = json!({"cwd": cwd, "mcpServers": mcp_servers(config)});
+            attach_instructions(&mut params);
             let result = rpc
-                .request(
-                    "session/new",
-                    json!({"cwd": cwd, "mcpServers": mcp_servers(config)}),
-                    SESSION_TIMEOUT,
-                )
+                .request("session/new", params, SESSION_TIMEOUT)
                 .map_err(|error| {
                     signed_out(&error).unwrap_or_else(|| OpenError::Failed(error.to_string()))
                 })?;
@@ -275,10 +302,13 @@ fn set_session_model(rpc: &RpcProcess, session_id: &str, model: &str) -> Result<
     .map_err(|error| error.to_string())
 }
 
-/// The models an ACP agent offers before a session exists (Grok's
-/// `initialize`), as (id, name, description, is current).
-pub fn listed_models(initialized: &Value) -> Vec<(String, String, Option<String>, bool)> {
-    let state = initialized.pointer("/_meta/modelState");
+/// The models an ACP agent reports on `session/new` (`models`, standard ACP)
+/// or on `initialize` (`_meta.modelState`, Grok), as
+/// `(id, name, description, is_current)`.
+pub fn listed_models(response: &Value) -> Vec<(String, String, Option<String>, bool)> {
+    let state = response
+        .pointer("/models")
+        .or_else(|| response.pointer("/_meta/modelState"));
     let current = state
         .and_then(|state| state.get("currentModelId"))
         .and_then(Value::as_str);
@@ -305,6 +335,19 @@ pub fn listed_models(initialized: &Value) -> Vec<(String, String, Option<String>
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Optional human-readable account/tier label from an ACP handshake or session
+/// response (e.g. Antigravity's `_meta.antigravity.tier.name`).
+pub fn account_label(response: &Value) -> Option<String> {
+    response
+        .pointer("/_meta/antigravity/tier/name")
+        .or_else(|| response.pointer("/_meta/account/email"))
+        .or_else(|| response.pointer("/_meta/account/name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 /// Session modes that run tools without asking.
@@ -418,7 +461,11 @@ fn content_text(content: &Value) -> String {
 
 fn raw_command(raw: Option<&Value>) -> Option<String> {
     let raw = raw?;
-    match raw.get("command") {
+    match raw
+        .get("command")
+        .or_else(|| raw.get("CommandLine"))
+        .or_else(|| raw.get("cmd"))
+    {
         Some(Value::String(command)) => Some(command.clone()),
         Some(Value::Array(parts)) => Some(
             parts

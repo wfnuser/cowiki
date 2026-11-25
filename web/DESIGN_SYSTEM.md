@@ -228,7 +228,7 @@ one muted line, then *Continue with GitHub* (ink) and *Continue locally*
 - The composer footer names the Agent, its model and where it works. The
   model is a quiet menu of **only the models the Agent itself listed** in
   its handshake (Codex `model/list`, Claude Code `initialize`, ACP
-  `modelState`); CoWiki never adds its own list. A change applies from the
+  `modelState` / `session/new`); CoWiki never adds its own list. A change applies from the
   next message, and new sessions start with the Agent and model used last.
 
 ## Form controls
