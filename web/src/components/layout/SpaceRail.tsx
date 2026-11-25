@@ -59,9 +59,9 @@ export function SpaceRail<T extends SpaceRailItem>({
   titlebarInset = true,
   createLabel = 'Add a Space',
 }: SpaceRailProps<T>) {
-  // macOS 26 draws 14pt traffic lights at x 9–69; the desktop rail is wide
-  // enough to give them the same 9px on both sides.
-  const width = titlebarInset ? 78 : 68;
+  // macOS 26 draws 14pt traffic lights at x 9–69. The desktop rail (its 1px
+  // border included) leaves 9px on both sides and centres them over the logo.
+  const width = titlebarInset ? 79 : 68;
   return (
     <aside style={{
       width, minWidth: width, height: '100vh',
