@@ -125,7 +125,13 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
     try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(all)); } catch { /* the choice lasts this session */ }
     return all;
   });
-  const today = dateKey(new Date());
+  const todayDate = new Date();
+  const today = dateKey(todayDate);
+  const tomorrow = dateKey(addDays(todayDate, 1));
+  const selectFilter = (next: Filter) => {
+    setFilter(next);
+    setDraftDue(next === 'upcoming' ? tomorrow : '');
+  };
   const refresh = () => setReloadKey((key) => key + 1);
 
   // Reload whenever the Space, journal settings or reload key change; a
@@ -203,9 +209,10 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
     if (!draft.trim() || adding) return;
     setAdding(true);
     try {
-      await onAddTask(newTaskLine(draft, draftDue || null));
+      const due = draftDue || (filter === 'upcoming' ? tomorrow : null);
+      await onAddTask(newTaskLine(draft, due));
       setDraft('');
-      setDraftDue('');
+      setDraftDue(filter === 'upcoming' ? tomorrow : '');
       refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -333,11 +340,11 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
         className="mb-4"
       />
 
-      <ViewTabs label="Task lists" tabs={tabs.map(([id, label]) => ({ id, label, count: counts[id] }))} value={filter} onChange={setFilter} />
+      <ViewTabs label="Task lists" tabs={tabs.map(([id, label]) => ({ id, label, count: counts[id] }))} value={filter} onChange={selectFilter} />
 
       {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
 
-      {filter !== 'week' && filter !== 'done' && (
+      {(filter === 'today' || filter === 'upcoming') && (
         <form onSubmit={add} className="group -mx-2 mb-3 flex items-center gap-2.5 rounded-md px-2 py-1 transition-colors focus-within:bg-bg-hover/60 hover:bg-bg-hover/60">
           <Plus className="size-[15px] shrink-0 text-text-faint" aria-hidden />
           <input

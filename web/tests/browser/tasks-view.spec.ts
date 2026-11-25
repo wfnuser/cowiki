@@ -19,15 +19,32 @@ const TASKS = `---\ntype: Note\ntitle: Plan\n---\n\n# Plan\n\n- [ ] Write the re
 
 async function desktop(page: Page) {
   const space = { name: 'My Space', slug: 'personal', id: 'personal', visibility: 'private', role: 'owner', localPath: '/Users/me/cowiki/personal' };
+  const files = new Map<string, string>([['Plan.md', TASKS]]);
   await page.clock.setFixedTime(new Date(2026, 10, 24, 15, 0));
   await page.route('**/*', (route) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
-  await page.exposeFunction('fixtureInvoke', async (cmd: string) => {
+  await page.exposeFunction('fixtureInvoke', async (cmd: string, args?: { pageSlug?: string; content?: string }) => {
     switch (cmd) {
       case 'local_list_spaces': return [space];
-      case 'local_list_pages': return [{ slug: 'Plan', path: 'Plan.md', title: 'Plan', summary: '', branch: 'main', kind: 'page', children: [] }];
+      case 'local_list_pages': return [...files.keys()].map((path) => {
+        const slug = path.replace(/\.md$/i, '');
+        return { slug, path, title: slug.split('/').at(-1) ?? slug, summary: '', branch: 'main', kind: 'page', children: [] };
+      });
+      case 'local_get_page': {
+        const path = `${args?.pageSlug ?? ''}.md`;
+        const body = files.get(path);
+        if (body === undefined) throw new Error('No such file or directory (os error 2)');
+        return { slug: args?.pageSlug ?? '', path, title: path, summary: '', branch: 'main', kind: 'page', children: [], body };
+      }
+      case 'local_write_page': {
+        const path = `${args?.pageSlug ?? ''}.md`;
+        files.set(path, args?.content ?? '');
+        return null;
+      }
       case 'local_read_space_config': return { features: { modules: { journal: true, tasks: true, flashcards: true }, journal: { format: 'YYYY-MM-DD', folder: 'journal', template: null } } };
-      case 'local_list_task_sources': return [{ path: 'Plan.md', content: TASKS }];
+      case 'local_list_task_sources': return [...files.entries()].map(([path, content]) => ({ path, content }));
       case 'local_list_card_sources': case 'local_recent_pages': case 'local_list_sources': case 'local_list_backlinks': return [];
+      case 'local_list_page_comments': return { comments: [], snapshots: [] };
+      case 'local_working_diff': case 'local_list_agent_changes': return [];
       case 'cloud_get_status': return { state: 'unlinked', conflicts: [], message: '', pullRequest: null, committed: false, cloudSpaceId: null, cloudBaseUrl: null };
       default: return null;
     }
@@ -98,4 +115,23 @@ test('every tab switches between list and board, and remembers it', async ({ pag
   await page.getByRole('button', { name: /^Tasks\s*\d*$/ }).first().click();
   await expect(page.getByRole('list', { name: 'To do' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Board', exact: true })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('adding a task on Upcoming defaults to tomorrow and appears in Upcoming', async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 700 });
+  await desktop(page);
+  await page.goto(origin);
+  await page.getByRole('button', { name: /^Tasks\s*\d*$/ }).first().click();
+
+  await page.getByRole('tab', { name: /^Upcoming/ }).click();
+  await expect(page.getByRole('button', { name: 'Due date' })).toContainText('Tomorrow');
+  await page.getByRole('textbox', { name: 'New task' }).fill('Book flight');
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(page.getByText('Book flight')).toBeVisible();
+  // Next quick-add in Upcoming keeps defaulting to Tomorrow.
+  await expect(page.getByRole('button', { name: 'Due date' })).toContainText('Tomorrow');
+
+  // No date hides Today-journal quick add until an undated inbox destination is decided.
+  await page.getByRole('tab', { name: /^No date/ }).click();
+  await expect(page.getByRole('textbox', { name: 'New task' })).toHaveCount(0);
 });
