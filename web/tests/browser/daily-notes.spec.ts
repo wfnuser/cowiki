@@ -29,18 +29,31 @@ interface FixtureOptions {
   beforePage?: (space: string, slug: string) => Promise<void>;
   disabled?: boolean;
   secondSpace?: boolean;
+  allModules?: boolean;
 }
 async function desktop(page: Page, options: FixtureOptions = {}) {
   const files = new Map([['Welcome', '# Welcome\n'], ['Template', '# {{title}}\n\nFrom my template {{date}}']]);
   const space = { name: 'Personal', slug: 'personal', id: 'personal', visibility: 'private', role: 'owner', localPath: '/fixture/personal' };
   const work = { ...space, name: 'Work', slug: 'work', id: 'work', localPath: '/fixture/work' };
   const otherFiles = new Map([['Other', '# Other notebook\n']]);
-  let config = { features: { modules: { journal: !options.disabled, later: false }, journal: { format: 'YYYY-MM-DD', folder: 'Daily', template: 'Template.md' }, nextPlugin: unknownSettings } };
+  let config = {
+    features: {
+      modules: {
+        journal: !options.disabled,
+        ...(options.allModules ? { tasks: true, flashcards: true } : {}),
+        later: false,
+      },
+      journal: { format: 'YYYY-MM-DD', folder: 'Daily', template: 'Template.md' },
+      nextPlugin: unknownSettings,
+    },
+  };
   const creates: string[] = [];
+  const calls: Record<string, number> = {};
   const meta = (slug: string) => ({ slug, path: slug + '.md', title: slug, summary: '', branch: 'main', kind: 'page', children: [] });
   await page.clock.setFixedTime(new Date('2026-11-02T02:30:00Z'));
   await page.route('**/*', route => route.request().url().startsWith(origin) ? route.continue() : route.abort());
   await page.exposeFunction('fixtureInvoke', async (cmd: string, args: { spaceSlug: string; pageSlug: string; content: string; createOnly: boolean; expectedContent?: string; config: typeof config }) => {
+    calls[cmd] = (calls[cmd] ?? 0) + 1;
     const notes = args?.spaceSlug === 'work' ? otherFiles : files;
     switch (cmd) {
       case 'local_list_spaces': return options.secondSpace ? [space, work] : [space];
@@ -59,6 +72,12 @@ async function desktop(page: Page, options: FixtureOptions = {}) {
       case 'local_read_space_config': await options.beforeConfig?.(args.spaceSlug); return config;
       case 'local_write_space_config': config = args.config; return;
       case 'local_list_page_comments': return { comments: [], snapshots: [] };
+      case 'local_list_task_sources': case 'local_list_card_sources': case 'local_list_broken_links':
+        if (options.allModules) return [];
+        throw new Error('Unsupported fixture IPC: ' + cmd);
+      case 'local_read_card_reviews':
+        if (options.allModules) return null;
+        throw new Error('Unsupported fixture IPC: ' + cmd);
       case 'local_working_diff': case 'local_list_agent_changes': case 'local_list_sources': case 'local_list_backlinks': case 'local_recent_pages': return [];
       case 'cloud_get_status': return { state: 'unlinked', conflicts: [], message: '', pullRequest: null, committed: false, cloudSpaceId: null, cloudBaseUrl: null };
       case 'local_set_auto_checkpoint': case 'local_auto_checkpoint': return null;
@@ -75,7 +94,7 @@ async function desktop(page: Page, options: FixtureOptions = {}) {
     if (!localStorage.getItem('cowiki.personal.preferences'))
       localStorage.setItem('cowiki.personal.preferences', JSON.stringify({ autoCheckpoint: false }));
   });
-  return { files, creates, config: () => config };
+  return { files, creates, calls, config: () => config };
 }
 
 const todayLabel = 'Sunday, November 1, 2026';
@@ -307,4 +326,50 @@ test('the settings dialog stays inside a short window with its actions visible',
   // Module switches are real checkboxes in the CoWiki style, not the platform's.
   const toggle = dialog.getByRole('checkbox', { name: /Daily journal/ });
   expect(await toggle.evaluate((element) => getComputedStyle(element).appearance)).toBe('none');
+});
+
+test('Home inline journal autosave does not rescan the Space until editing ends', async ({ page }) => {
+  const state = await desktop(page, { allModules: true });
+  state.files.set(today, '# 2026-11-01\n\nMorning notes\n');
+  await page.goto(origin);
+  await expect(todayEntry(page)).toContainText('Morning notes');
+  await page.waitForFunction(() => Reflect.get(window, '__TAURI_INTERNALS__').pending === 0);
+
+  const baseline = {
+    recent: state.calls.local_recent_pages ?? 0,
+    tasks: state.calls.local_list_task_sources ?? 0,
+    cards: state.calls.local_list_card_sources ?? 0,
+    links: state.calls.local_list_broken_links ?? 0,
+  };
+  expect(baseline.tasks).toBeGreaterThan(0);
+
+  // Edit inline and let the 700ms autosave write to disk while still editing.
+  await todayEntry(page).getByText('Morning notes').click();
+  await expect(todayEntry(page).locator('.cm-content')).toBeVisible();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' and autosaved text');
+  await expect.poll(() => state.calls.local_write_page ?? 0, { timeout: 3000 }).toBe(1);
+  await page.waitForFunction(() => Reflect.get(window, '__TAURI_INTERNALS__').pending === 0);
+
+  // Autosaving must NOT trigger a full-Space rescan.
+  expect(state.calls.local_recent_pages ?? 0).toBe(baseline.recent);
+  expect(state.calls.local_list_task_sources ?? 0).toBe(baseline.tasks);
+  expect(state.calls.local_list_card_sources ?? 0).toBe(baseline.cards);
+  expect(state.calls.local_list_broken_links ?? 0).toBe(baseline.links);
+
+  // Leaving the editor refreshes Home once.
+  await page.keyboard.press('Escape');
+  await expect(todayEntry(page).locator('.cm-content')).toHaveCount(0);
+  await expect.poll(() => state.calls.local_list_task_sources ?? 0).toBe(baseline.tasks + 1);
+  expect(state.calls.local_recent_pages ?? 0).toBe(baseline.recent + 1);
+  expect(state.calls.local_list_card_sources ?? 0).toBe(baseline.cards + 1);
+  expect(state.calls.local_list_broken_links ?? 0).toBe(baseline.links + 1);
+
+  // Entering and exiting without typing does not trigger another rescan.
+  await todayEntry(page).getByText('Morning notes and autosaved text').click();
+  await expect(todayEntry(page).locator('.cm-content')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(todayEntry(page).locator('.cm-content')).toHaveCount(0);
+  await page.waitForFunction(() => Reflect.get(window, '__TAURI_INTERNALS__').pending === 0);
+  expect(state.calls.local_list_task_sources ?? 0).toBe(baseline.tasks + 1);
 });

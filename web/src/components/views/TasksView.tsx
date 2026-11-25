@@ -5,10 +5,12 @@ import { ViewHeader, ViewIconButton, ViewTabs } from '@/components/ui/view-heade
 import { DatePicker, dayLabel } from '@/components/ui/date-picker';
 import { WeekNav } from '@/components/WeekNav';
 import { listTaskSources } from '@/local-api';
-import { addDays, dateKey, journalDateFromPath, startOfIsoWeek, type JournalConfig } from '@/lib/journal';
+import { addDays, dateKey, fromDateKey, journalDateFromPath, startOfIsoWeek, type JournalConfig } from '@/lib/journal';
+import { useTodayKey } from '@/lib/useTodayKey';
 import { useI18n } from '@/lib/I18nContext';
 import { cn } from '@/lib/utils';
 import {
+  effectiveDoneDate,
   extractTasks,
   groupTasks,
   newTaskLine,
@@ -129,8 +131,8 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
     try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(all)); } catch { /* the choice lasts this session */ }
     return all;
   });
-  const todayDate = new Date();
-  const today = dateKey(todayDate);
+  const today = useTodayKey();
+  const todayDate = fromDateKey(today) ?? new Date();
   const tomorrow = dateKey(addDays(todayDate, 1));
   const selectFilter = (next: Filter) => {
     setFilter(next);
@@ -264,7 +266,11 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
             role="list"
             aria-label={colTitle}
             onDragOver={(event) => { event.preventDefault(); setDropTarget(column.status); }}
-            onDragLeave={() => setDropTarget((current) => (current === column.status ? null : current))}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setDropTarget((current) => (current === column.status ? null : current));
+              }
+            }}
             onDrop={(event) => {
               event.preventDefault();
               setDropTarget(null);
@@ -284,7 +290,7 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
             </h2>
             {items.map((task) => {
               const key = taskKey(task);
-              const day = column.status === 'done' ? task.doneDate : taskDay(task);
+              const day = column.status === 'done' ? effectiveDoneDate(task) : taskDay(task);
               return (
                 <div
                   key={key}
@@ -314,6 +320,9 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                         column.status === 'done' ? 'text-text-tertiary' : 'text-text',
                       )}
                     >
+                      {(task.priority === 'highest' || task.priority === 'high') && (
+                        <span title={`${task.priority} priority`} className="mr-1 text-red">!</span>
+                      )}
                       {readable(task.text)}
                     </button>
                     {column.status === 'todo' && (
@@ -446,8 +455,8 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                           </span>
                         </button>
                         {task.status === 'doing' && filter !== 'week' && <span className="mt-[3px] flex shrink-0 items-center gap-1 text-meta leading-4 text-blue"><span className="size-1.5 rounded-full bg-current" />{t('Doing')}</span>}
-                        {done && task.doneDate ? (
-                          <span className="mt-[3px] shrink-0 text-meta leading-4 text-text-faint">{relativeDay(task.doneDate, today, locale, t)}</span>
+                        {done && effectiveDoneDate(task) ? (
+                          <span className="mt-[3px] shrink-0 text-meta leading-4 text-text-faint">{relativeDay(effectiveDoneDate(task)!, today, locale, t)}</span>
                         ) : day && (filter !== 'today' || day !== today) && (
                           <span className={cn('mt-[3px] shrink-0 text-meta leading-4 tabular-nums', !done && day < today ? 'text-red' : 'text-text-tertiary')}>
                             {relativeDay(day, today, locale, t)}
