@@ -1645,7 +1645,6 @@ export function MainLayout() {
   const writeJournal = useCallback(
     async (path: string, body: string, expected: string) => {
       await writePage(conceptIdFromPath(path), body, userBranch, journalSpaceSlug, 'wiki', expected);
-      setHomeRefreshTick((tick) => tick + 1);
     },
     [journalSpaceSlug, userBranch],
   );
@@ -2352,6 +2351,7 @@ export function MainLayout() {
                           createToday={async () => (await ensureTodayEntry(activeWorkspace)).path}
                           onOpenPage={(path) => { void selectPage(activeWorkspace, conceptIdFromPath(path), path); }}
                           onWikilink={(target) => { void openWikilink(target); }}
+                          onFinishEdit={() => setHomeRefreshTick((tick) => tick + 1)}
                           loadAsset={canReadAssets ? loadAssetFrom : undefined}
                           getPageSlugs={() => collectSlugs(spacePages[activeWorkspace.id] || [])}
                         />

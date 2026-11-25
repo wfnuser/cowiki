@@ -171,6 +171,8 @@ export type JournalDayProps = Omit<JournalsViewProps, 'config' | 'paths' | 'now'
   entry: JournalEntry;
   today: boolean;
   onSettled?: (key: string) => void;
+  /** Called after an inline edit session closes with saved changes, or a task checkbox toggles. */
+  onFinishEdit?: () => void;
 };
 
 interface EditSession {
@@ -181,7 +183,7 @@ interface EditSession {
 
 /** One day of the journal, read and written in place (Journals, and Home's today). */
 export function JournalDay({
-  entry, today, read, write, createToday, onOpenPage, onWikilink, loadAsset, getPageSlugs, onSettled,
+  entry, today, read, write, createToday, onOpenPage, onWikilink, loadAsset, getPageSlugs, onSettled, onFinishEdit,
 }: JournalDayProps) {
   const { t } = useI18n();
   // undefined while loading; null when today's file does not exist yet.
@@ -190,6 +192,7 @@ export function JournalDay({
   const [error, setError] = useState('');
   const saved = useRef('');
   const latest = useRef('');
+  const dirtyInSession = useRef(false);
   const timer = useRef<number | null>(null);
   const inFlight = useRef<Promise<boolean> | null>(null);
   const editing = useRef(false);
@@ -256,6 +259,7 @@ export function JournalDay({
       const { head, content } = splitLeadingTitle(full);
       saved.current = full;
       latest.current = full;
+      dirtyInSession.current = false;
       const cursor = click ? sourceOffsetForClick(content, click) ?? content.length : content.length;
       setSession({ head, content, cursor });
     } catch (cause) {
@@ -265,8 +269,11 @@ export function JournalDay({
 
   const finishEdit = async () => {
     if (!session || !(await flush())) return;
+    const changed = dirtyInSession.current;
+    dirtyInSession.current = false;
     setBody(saved.current);
     setSession(null);
+    if (changed) onFinishEdit?.();
   };
 
   const toggleTask = async (renderedLine: number) => {
@@ -279,6 +286,7 @@ export function JournalDay({
       const updated = applyTaskToggle(body, { line: index, raw }, dateKey(new Date()));
       await write(entry.path, updated, body);
       setBody(updated);
+      onFinishEdit?.();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not update the task');
     }
@@ -313,6 +321,7 @@ export function JournalDay({
             initialCursor={session.cursor}
             onDocChanged={(doc) => {
               latest.current = joinLeadingTitle(session.head, doc);
+              dirtyInSession.current = true;
               if (timer.current !== null) window.clearTimeout(timer.current);
               timer.current = window.setTimeout(() => { void flush(); }, 700);
             }}
