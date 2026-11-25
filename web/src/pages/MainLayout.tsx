@@ -673,7 +673,7 @@ export function MainLayout() {
 
   // Select a source file
   const selectSource = async (ws: Workspace, filename: string) => {
-    if (!(await flushBeforeLeave())) return;
+    if (editingPage && !(await flushBeforeLeave())) return;
     pageRequestSeq.current += 1;
     const requestSeq = ++sourceRequestSeq.current;
     setActiveWorkspace(ws);
@@ -703,7 +703,7 @@ export function MainLayout() {
 
   const handleSelectWorkspace = async (ws: Workspace) => {
     if (activeWorkspace?.id === ws.id) return;
-    if (!(await flushBeforeLeave())) return;
+    if (editingPage && !(await flushBeforeLeave())) return;
     pageRequestSeq.current += 1;
     sourceRequestSeq.current += 1;
     enterPluginSpace(ws);
@@ -716,12 +716,20 @@ export function MainLayout() {
   };
 
   // Select a page
-  const selectPage = async (ws: Workspace, slug: string, path?: string, updateUrl = true, isCurrent = () => true) => {
+  const selectPage = async (
+    ws: Workspace,
+    slug: string,
+    path?: string,
+    updateUrl = true,
+    isCurrent = () => true,
+    targetLine?: number,
+  ) => {
     if (!isCurrent()) return;
     const conceptId = path ? conceptIdFromPath(path) : conceptIdFromPath(slug);
     const repoPath = path ? conceptPath(conceptIdFromPath(path)) : conceptPath(conceptId);
     if (isReservedDocument(repoPath)) return;
-    if (!(await flushBeforeLeave()) || !isCurrent()) return;
+    if (editingPage && !(await flushBeforeLeave())) return;
+    if (!isCurrent()) return;
     sourceRequestSeq.current += 1;
     const requestSeq = ++pageRequestSeq.current;
     const stillCurrent = () => pageRequestSeq.current === requestSeq && isCurrent();
@@ -729,7 +737,12 @@ export function MainLayout() {
     setActiveTab('wiki');
     setCommentsAfterEdit(false);
     setReaderScroll(null);
-    setReaderTargetLine(null);
+    if (targetLine !== undefined) {
+      readerTargetSeq.current += 1;
+      setReaderTargetLine({ path: repoPath, line: targetLine, seq: readerTargetSeq.current });
+    } else {
+      setReaderTargetLine(null);
+    }
     persistedPageBody.current = null;
     externalConflictNotified.current = false;
     setActiveView({ kind: 'page', slug: conceptId, path: repoPath, content: null });
@@ -2150,15 +2163,7 @@ export function MainLayout() {
                     workspaceSlug={activeWorkspace.slug}
                     journal={activeFeatures.journal}
                     onOpenPage={(path, line) => {
-                      void selectPage(activeWorkspace, conceptIdFromPath(path), path);
-                      if (line !== undefined) {
-                        readerTargetSeq.current += 1;
-                        setReaderTargetLine({
-                          path: conceptPath(conceptIdFromPath(path)),
-                          line,
-                          seq: readerTargetSeq.current,
-                        });
-                      }
+                      void selectPage(activeWorkspace, conceptIdFromPath(path), path, true, undefined, line);
                     }}
                     onToggleTask={toggleTaskInPage}
                     onSetTaskStatus={setTaskStatusInPage}
