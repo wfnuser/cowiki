@@ -9,7 +9,9 @@ export type HistoryView =
   | { kind: 'page'; path: string }
   | { kind: 'source'; filename: string }
   | { kind: 'review-detail'; target: ReviewTarget }
-  | { kind: 'home' | 'journals' | 'review-list' | 'members' | 'history' | 'links' | 'tasks' | 'flashcards' };
+  /** Flashcards; `deck` (`Japanese/N2`) when one deck is open, `studying` during a session. */
+  | { kind: 'flashcards'; deck?: string; studying?: true }
+  | { kind: 'home' | 'journals' | 'review-list' | 'members' | 'history' | 'links' | 'tasks' };
 
 export interface HistoryEntry {
   workspaceSlug: string;

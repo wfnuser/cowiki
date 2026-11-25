@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowUpRight, ChevronLeft, ChevronRight, CirclePause, FileText, LoaderCircle, RefreshCw, RotateCcw, SkipForward, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowUpRight, ChevronRight, CirclePause, LoaderCircle, RefreshCw, RotateCcw, SkipForward, SlidersHorizontal, X } from 'lucide-react';
 import { Popover as PopoverPrimitive } from 'radix-ui';
 
 import { withObsidianReader } from '@/components/ObsidianReader';
 import { NumberField } from '@/components/ui/number-field';
-import { ViewEmpty, ViewHeader, ViewIconButton, ViewSectionHeading } from '@/components/ui/view-header';
+import { ViewEmpty, ViewHeader, ViewIconButton } from '@/components/ui/view-header';
 import { listCardSources, readCardReviews, writeCardReviews } from '@/local-api';
 import { dateKey } from '@/lib/journal';
 import { useI18n } from '@/lib/I18nContext';
+import type { TranslationKey } from '@/lib/i18n';
 import { obsidianToReaderMarkdown } from '@/lib/obsidian-markdown';
 import { cn } from '@/lib/utils';
 import {
@@ -21,7 +22,9 @@ import {
   deckStats,
   deckTree,
   emptyReviewStore,
+  isDue,
   isNew,
+  masteryOf,
   parseReviewStore,
   previewIntervals,
   renderCloze,
@@ -30,6 +33,7 @@ import {
   setSuspended,
   type DeckNode,
   type Flashcard,
+  type Mastery,
   type ReviewStore,
   type Score,
 } from '@/lib/flashcards';
@@ -44,8 +48,35 @@ const SCORES: Array<{ score: Score; label: string; keys: string[] }> = [
 
 interface FlashcardsViewProps {
   workspaceSlug: string;
+  /** The open deck (`Japanese/N2`), or null for every deck. */
+  deck: string | null;
+  /** A study session is on screen; it is its own step in Back and Forward. */
+  studying: boolean;
+  /** Open a deck or start studying: one step in Back and Forward. */
+  onNavigate: (next: { deck: string | null; studying: boolean }) => void;
+  /** The session ended: step back to where it started. */
+  onLeaveStudy: () => void;
   onOpenSource: (path: string) => void;
 }
+
+/** A card's text on one line: clozes shown, Markdown marks dropped. */
+function plainText(value: string): string {
+  return renderCloze(value, true)
+    .replace(/!\[\[[^\]]*\]\]/g, '')
+    .replace(/\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/g, (_match, target: string, alias?: string) => alias || target)
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/(\*\*|__|==|~~|`)/g, '')
+    .replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const MASTERY_LABEL: Record<Mastery, TranslationKey> = {
+  new: 'New',
+  learning: 'Learning',
+  mastered: 'Mastered',
+  suspended: 'Suspended',
+};
 
 function CardText({ text, className }: { text: string; className: string }) {
   return (
@@ -55,8 +86,8 @@ function CardText({ text, className }: { text: string; className: string }) {
   );
 }
 
-export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewProps) {
-  const { t, tl, locale } = useI18n();
+export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyStep, onNavigate, onLeaveStudy, onOpenSource }: FlashcardsViewProps) {
+  const { t, tl, locale, intl } = useI18n();
   /** The next interval as a person says it: "Tomorrow", "4d" → "4 天". */
   const intervalText = (label: string) => {
     const match = /^(\d+(?:\.\d+)?)(d|mo|y)$/.exec(label);
@@ -72,8 +103,6 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
   const [session, setSession] = useState<Flashcard[] | null>(null);
   /** The deck being studied, for the session's top line; null for all decks. */
   const [sessionDeck, setSessionDeck] = useState<string | null>(null);
-  /** The deck whose overview is open (Anki's deck screen). */
-  const [openDeck, setOpenDeck] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [reviewed, setReviewed] = useState(0);
   /** How many cards the session started with, for its progress line. */
@@ -101,6 +130,11 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
           const adopted = adoptMovedCards(found, loaded);
           setCards(found);
           setStore(adopted);
+          const wanted = studyRef.current;
+          if (wanted.studying && !sessionRef.current) {
+            const deck = wanted.deck ? findDeck(deckTree(found), wanted.deck) : null;
+            begin(buildQueue(deck ? deck.cards : found, adopted, new Date(), dateKey(new Date())), wanted.deck);
+          }
           if (adopted !== loaded) writeCardReviews(workspaceSlug, adopted).catch(() => {});
           setNow(new Date());
           setError('');
@@ -121,13 +155,41 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
   const stats = useMemo(() => deckStats(cards, store, now), [cards, store, now]);
   const queue = useMemo(() => buildQueue(cards, store, now, today), [cards, store, now, today]);
   const tree = useMemo(() => deckTree(cards), [cards]);
-  const study = (list: Flashcard[], deck: string | null) => {
+  /** Start showing a session's cards (local state only). */
+  function begin(list: Flashcard[], deck: string | null) {
     setSession(list);
     setSessionSize(list.length);
     setSessionDeck(deck);
     setReviewed(0);
     setRevealed(false);
+  }
+  /** Start studying: the session becomes a step in Back and Forward. */
+  const study = (list: Flashcard[], deck: string | null) => {
+    begin(list, deck);
+    onNavigate({ deck, studying: true });
   };
+  const queueOf = (deck: string | null) => {
+    const node = deck ? findDeck(tree, deck) : null;
+    return node ? buildQueue(node.cards, store, now, today) : queue;
+  };
+
+  // Back or Forward moved in or out of a study step.
+  const [shownStep, setShownStep] = useState({ deck: deckPath, studying: studyStep });
+  if (shownStep.deck !== deckPath || shownStep.studying !== studyStep) {
+    setShownStep({ deck: deckPath, studying: studyStep });
+    if (!studyStep && session) {
+      setSession(null);
+      setRevealed(false);
+      setNow(new Date());
+    }
+    if (studyStep && !session && !loading) begin(queueOf(deckPath), deckPath);
+  }
+  const studyRef = useRef({ deck: deckPath, studying: studyStep });
+  const sessionRef = useRef(session);
+  useEffect(() => {
+    studyRef.current = { deck: deckPath, studying: studyStep };
+    sessionRef.current = session;
+  });
 
   const current = session?.[0] ?? null;
 
@@ -141,6 +203,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
     }
     setSession(null);
     setNow(new Date());
+    onLeaveStudy();
   };
 
   const rate = (score: Score) => {
@@ -166,6 +229,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
     setSession(null);
     setRevealed(false);
     setReloadKey((key) => key + 1);
+    onLeaveStudy();
   };
 
   const updateSetting = (key: 'newPerDay' | 'reviewsPerDay', value: string) => {
@@ -309,51 +373,79 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
     </ViewIconButton>
   );
   /** Readwise's one line: how many cards today, and one word to start. */
-  const todayLine = (list: Flashcard[], deck: string | null) => (
-    <p className="flashcards-today">
-      {list.length > 0 ? (
-        <>
-          <span>{t(list.length === 1 ? '{count} card to review today.' : '{count} cards to review today.', { count: list.length })}</span>
-          <button type="button" className="flashcards-start" onClick={() => study(list, deck)}>{t('Start')}</button>
-        </>
-      ) : (
-        <span className="text-text-tertiary">{t('All done for today.')}</span>
-      )}
-    </p>
+  const todayLine = (list: Flashcard[], deck: string | null, detail?: string) => (
+    <div className="flashcards-today">
+      <p>
+        {list.length > 0 ? (
+          <>
+            <span>{t(list.length === 1 ? '{count} card to review today.' : '{count} cards to review today.', { count: list.length })}</span>
+            <button type="button" className="flashcards-start" onClick={() => study(list, deck)}>{t('Start')}</button>
+          </>
+        ) : (
+          <span className="text-text-tertiary">{t('All done for today.')}</span>
+        )}
+      </p>
+      {detail && <p className="flashcards-today-detail">{detail}</p>}
+    </div>
   );
 
-  // Anki's deck screen: what is due in one deck, and where its cards live.
-  const deck = openDeck ? findDeck(tree, openDeck) : null;
+  /** When a card comes up next, the way a person says it. */
+  const nextReview = (card: Flashcard, mastery: Mastery) => {
+    if (mastery === 'new' || mastery === 'suspended') return '';
+    const schedule = scheduleOf(store, card);
+    if (isDue(schedule, now) || !schedule.nextSchedule) return t('Today');
+    const next = new Date(schedule.nextSchedule);
+    const day = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+    const days = Math.round((day(next) - day(now)) / 86_400_000);
+    if (days <= 0) return t('Today');
+    if (days === 1) return t('Tomorrow');
+    if (days < 30) return t('in {count} days', { count: days });
+    return next.toLocaleDateString(intl, next.getFullYear() === now.getFullYear()
+      ? { month: 'short', day: 'numeric' }
+      : { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
+  // One deck: its line for today, how well its cards are known, then the cards.
+  const deck = deckPath ? findDeck(tree, deckPath) : null;
   if (deck) {
     const list = buildQueue(deck.cards, store, now, today);
-    const byPage = new Map<string, number>();
-    for (const item of deck.cards) byPage.set(item.path, (byPage.get(item.path) ?? 0) + 1);
+    const rows = [...deck.cards]
+      .sort((left, right) => left.path.localeCompare(right.path) || left.line - right.line)
+      .map((card) => ({ card, mastery: masteryOf(store, card) }));
+    const count = (mastery: Mastery) => rows.filter((row) => row.mastery === mastery).length;
+    const suspended = count('suspended');
+    const detail = t(rows.length === 1 ? '{total} card: {new} new, {learning} learning, {mastered} mastered.' : '{total} cards: {new} new, {learning} learning, {mastered} mastered.', {
+      total: rows.length,
+      new: count('new'),
+      learning: count('learning'),
+      mastered: count('mastered'),
+    }) + (suspended > 0 ? `${locale === 'en' ? ' ' : ''}${t('{count} suspended.', { count: suspended })}` : '');
     return (
       <section style={{ width: 'min(860px, 100%)' }}>
-        <ViewHeader
-          leading={<ViewIconButton label={t('All decks')} onClick={() => setOpenDeck(null)}><ChevronLeft className="size-4" /></ViewIconButton>}
-          title={deck.path.split('/').join(' / ')}
-          actions={<>{limits}{refreshButton}</>}
-        />
+        <ViewHeader title={deck.path.split('/').join(' / ')} actions={<>{limits}{refreshButton}</>} />
         {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
-        {todayLine(list, deck.path)}
-        <ViewSectionHeading meta={byPage.size}>{t('Notes')}</ViewSectionHeading>
-        <ul className="view-list">
-          {[...byPage.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([path, count]) => {
-            const clean = path.replace(/\.md$/i, '');
-            const slash = clean.lastIndexOf('/');
-            const folder = slash >= 0 ? clean.slice(0, slash + 1) : '';
-            const name = slash >= 0 ? clean.slice(slash + 1) : clean;
+        {todayLine(list, deck.path, detail)}
+        <ul className="view-list" aria-label={t('Cards')}>
+          {rows.map(({ card, mastery }) => {
+            const back = plainText(card.back);
+            const next = nextReview(card, mastery);
             return (
-              <li key={path}>
-                <button type="button" onClick={() => onOpenSource(path)} className="view-row" title={path}>
-                  <span className="view-row-icon"><FileText size={16} /></span>
-                  <span className="view-row-title">
-                    {folder && <span className="text-text-tertiary">{folder}</span>}
-                    <span>{name}</span>
-                  </span>
-                  <span className="view-row-meta">{t(count === 1 ? '{count} card' : '{count} cards', { count })}</span>
-                </button>
+              <li key={card.id}>
+                <div className={cn('deck-line', mastery === 'suspended' && 'is-suspended has-action')}>
+                  <button type="button" className="deck-open" onClick={() => onOpenSource(card.path)} title={`${t('Open note')} · ${card.path.replace(/\.md$/i, '')}`}>
+                    <span className="deck-name">
+                      {plainText(card.front)}
+                      {back && <span className="view-row-detail">{back}</span>}
+                    </span>
+                    <span className="card-mastery" data-mastery={mastery}>{t(MASTERY_LABEL[mastery])}</span>
+                    <span className="card-next line-swap">{next}</span>
+                  </button>
+                  {mastery === 'suspended' && (
+                    <button type="button" className="line-action" onClick={() => persist(setSuspended(store, card, false))}>
+                      {t('Resume')}
+                    </button>
+                  )}
+                </div>
               </li>
             );
           })}
@@ -368,7 +460,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
     const open = !collapsed.has(node.path);
     return (
       <li key={node.path}>
-        <div className={cn('deck-line', list.length > 0 && 'has-due')}>
+        <div className={cn('deck-line', list.length > 0 && 'has-due has-action')}>
           {hasSubdecks && (
             <span className="deck-toggle-slot" style={{ marginLeft: depth * 18 }}>
               {node.children.length > 0 && (
@@ -387,12 +479,12 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
               )}
             </span>
           )}
-          <button type="button" className="deck-open" onClick={() => setOpenDeck(node.path)}>
+          <button type="button" className="deck-open" onClick={() => onNavigate({ deck: node.path, studying: false })}>
             <span className="deck-name">{node.name}</span>
-            <span className="deck-due">{list.length > 0 ? t('{count} to review', { count: list.length }) : t('Done')}</span>
+            <span className="deck-due line-swap">{list.length > 0 ? t('{count} to review', { count: list.length }) : t('Done')}</span>
           </button>
           {list.length > 0 && (
-            <button type="button" className="deck-start" aria-label={t('Study {name}', { name: node.name })} onClick={() => study(list, node.path)}>
+            <button type="button" className="line-action" aria-label={t('Study {name}', { name: node.name })} onClick={() => study(list, node.path)}>
               {t('Start')}
             </button>
           )}

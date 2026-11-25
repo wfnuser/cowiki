@@ -91,16 +91,26 @@ Notifications, Review details, Cloud pages) is built the same way, with
   word, **Start**; when nothing is due it says *All done for today.* in
   tertiary, never a disabled button. Below are the decks as plain view rows
   (a chevron for sub-decks, the name, then "n to review" or a faint *Done*);
-  no column headers and no New/Due split. Clicking a row opens the deck, which
-  repeats the same sentence and lists the notes its cards live in (folder
-  prefix muted). Hovering a deck with cards due swaps its count for **Start**
-  in the same spot, so no gutter is reserved for it. The accent appears only
-  on **Start**: no blue for new cards, no green for due ones (user: "blue and
-  orange together is a bit much"). Decks come from tags: the card's own tags
-  besides `#card` (`#Japanese/N2` is a sub-deck), else the page's `tags`,
-  else its folder, else *Unsorted*.
-- **Studying** is a centred focus column (`min(640px, 100%)`) with no colour:
-  the deck and *New*/*Review n* in plain text on the left, "n left" and quiet
+  no column headers and no New/Due split. Clicking a row opens the deck
+  (a step in the top bar's Back and Forward, shown in the breadcrumb; the
+  view has no back button of its own): the same sentence, a tertiary line of
+  how well its cards are known (*3 cards: 1 new, 1 learning, 1 mastered.*),
+  then the cards themselves, one per row: question, answer in tertiary, then
+  two fixed right-aligned columns, mastery and next review (*in 4 days*).
+  Mastery uses Anki's buckets: *New* (never answered), *Learning* (next
+  review under 21 days away, or just forgotten), *Mastered* (21 days or
+  more), *Suspended* (faint). A row opens the card's note; a suspended card
+  offers **Resume** on hover. Hovering a deck with cards due swaps its count
+  for **Start** in the same spot, so no gutter is reserved for it. The
+  accent appears only on these action words (**Start**, **Resume**): no blue
+  for new cards, no green for due ones (user: "blue and orange together is a
+  bit much"). Decks come from tags: the card's own tags besides `#card`
+  (`#Japanese/N2` is a sub-deck), else the page's `tags`, else its folder,
+  else *Unsorted*.
+- **Studying** is a centred focus column (`min(640px, 100%)`) with no colour.
+  A session is its own Back/Forward step: Back leaves it, Forward studies
+  that deck again, and finishing or ending steps back to where it started.
+  The top line has the deck and *New*/*Review n* in plain text on the left, "n left" and quiet
   icon tools (open note, skip, suspend, reset, end) on the right, a 2px
   neutral progress line, then one paper card (`.study-card`: 12px radius,
   `--shadow-card`). The question is content (serif 22px, centred); revealing

@@ -409,11 +409,14 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 /* Flashcards (DESIGN_SYSTEM.md, "Flashcards"): one sentence says how many
    cards are due today and offers one word to start; decks below are plain
    view rows. One accent only: the word that starts a session. */
-.flashcards-today { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: -8px 0 24px; color: var(--color-text); font-size: var(--text-lead); line-height: 24px; }
+.flashcards-today { margin: -8px 0 24px; }
+.flashcards-today > p:first-child { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0; color: var(--color-text); font-size: var(--text-lead); line-height: 24px; }
+.flashcards-today-detail { margin: 4px 0 0; color: var(--color-text-tertiary); font-size: var(--text-small); line-height: 20px; }
 .flashcards-start { margin: 0 -6px; padding: 0 6px; border-radius: 6px; color: var(--color-accent); font-weight: 600; cursor: pointer; transition: background-color 120ms ease; }
 .flashcards-start:hover { background: var(--color-accent-soft); }
-/* A deck row: the whole row opens the deck; while it has cards due, hovering
-   swaps its count for "Start" in the same spot, so nothing reserves a gutter. */
+/* A deck or card row: the whole row opens it. A row with one more action
+   (Start a deck, Resume a card) shows it on hover in place of its last
+   value, so no gutter is reserved for it. */
 .deck-line { position: relative; display: flex; align-items: center; border-radius: 6px; transition: background-color 120ms ease; }
 .deck-line:hover { background: var(--color-bg-hover); }
 .deck-toggle-slot { display: flex; width: 22px; flex-shrink: 0; margin-right: -6px; padding-left: 4px; box-sizing: content-box; }
@@ -423,10 +426,16 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .deck-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .deck-due { flex-shrink: 0; color: var(--color-text-tertiary); font-size: var(--text-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .deck-line:not(.has-due) .deck-due { color: var(--color-text-faint); }
-.deck-start { position: absolute; top: 50%; right: 2px; transform: translateY(-50%); padding: 2px 6px; border-radius: 5px; color: var(--color-accent); font-size: var(--text-meta); font-weight: 600; opacity: 0; cursor: pointer; transition: opacity 120ms ease, background-color 120ms ease; }
-.deck-line:hover .deck-start, .deck-start:focus-visible { opacity: 1; }
-.deck-start:hover { background: var(--color-accent-soft); }
-.deck-line.has-due:hover .deck-due, .deck-line.has-due:focus-within .deck-due { visibility: hidden; }
+/* A card's mastery and next review sit in fixed columns so they line up. */
+.card-mastery, .card-next { flex-shrink: 0; color: var(--color-text-tertiary); font-size: var(--text-meta); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.card-mastery { width: 72px; }
+.card-mastery[data-mastery="mastered"] { color: var(--color-text-secondary); }
+.card-next { width: 76px; }
+.deck-line.is-suspended .deck-name, .deck-line.is-suspended .card-mastery { color: var(--color-text-faint); }
+.line-action { position: absolute; top: 50%; right: 2px; transform: translateY(-50%); padding: 2px 6px; border-radius: 5px; color: var(--color-accent); font-size: var(--text-meta); font-weight: 600; opacity: 0; cursor: pointer; transition: opacity 120ms ease, background-color 120ms ease; }
+.deck-line:hover .line-action, .line-action:focus-visible { opacity: 1; }
+.line-action:hover { background: var(--color-accent-soft); }
+.deck-line.has-action:hover .line-swap, .deck-line.has-action:focus-within .line-swap { visibility: hidden; }
 
 /* Studying a card: a quiet progress line, one paper card, and text-only
    answers underneath. No colour: the card is the only thing to look at. */

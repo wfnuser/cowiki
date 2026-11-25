@@ -407,6 +407,23 @@ export function isNew(store: ReviewStore, card: Flashcard): boolean {
   return !state || (state.repeats < 1 && !state.lastReviewed);
 }
 
+/** Anki calls a card mature once its next review is at least this many days away. */
+export const MATURE_DAYS = 21;
+
+/**
+ * How well a card is known, in Anki's buckets: new (never answered),
+ * learning (next review under three weeks away, or just forgotten),
+ * mastered (three weeks or more), or suspended.
+ */
+export type Mastery = 'new' | 'learning' | 'mastered' | 'suspended';
+
+export function masteryOf(store: ReviewStore, card: Flashcard): Mastery {
+  const state = stateOf(store, card);
+  if (state?.suspended) return 'suspended';
+  if (isNew(store, card)) return 'new';
+  return (state?.lastInterval ?? -1) >= MATURE_DAYS ? 'mastered' : 'learning';
+}
+
 export function changedSinceReview(store: ReviewStore, card: Flashcard): boolean {
   const backHash = store.cards[card.id]?.backHash;
   return !!backHash && backHash !== card.backHash;

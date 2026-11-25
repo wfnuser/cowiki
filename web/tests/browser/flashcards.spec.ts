@@ -49,32 +49,41 @@ async function setup(page: Page, body: string, more: Array<[string, string]> = [
 }
 
 
-test('one line says what is due today; a deck studies only its cards', async ({ page }) => {
+test('one line says what is due today; a deck lists its cards and how well each is known', async ({ page }) => {
   await setup(page, '# Doc\n');
   await page.goto(origin);
   await page.getByRole('button', { name: 'Flashcards', exact: true }).click();
   const decks = page.getByRole('list', { name: 'Decks' });
+  const back = page.getByRole('button', { name: 'Back', exact: true });
   await expect(page.getByText('6 cards to review today.')).toBeVisible();
   await expect(decks.locator('.deck-open')).toHaveText(['Biology2 to review', 'Japanese3 to review', 'N22 to review', 'N51 to review', 'Unsorted1 to review']);
   await page.getByRole('button', { name: 'Collapse Japanese' }).click();
   await expect(decks.locator('.deck-open')).toHaveText(['Biology2 to review', 'Japanese3 to review', 'Unsorted1 to review']);
 
-  // The whole row opens a deck; its own line starts only its cards.
+  // The whole row opens a deck: its line for today, its mastery, then its cards.
   await page.getByRole('button', { name: /^Japanese/ }).click();
   await expect(page.getByRole('heading', { name: 'Japanese' })).toBeVisible();
-  await expect(page.getByText('Languages/Japanese')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'All decks' })).toHaveCount(0);
   await expect(page.getByText('3 cards to review today.')).toBeVisible();
+  await expect(page.getByText('3 cards: 3 new, 0 learning, 0 mastered.')).toBeVisible();
+  const cards = page.getByRole('list', { name: 'Cards' });
+  await expect(cards.locator('.deck-open')).toHaveText(['食べるto eatNew', '飲むto drinkNew', 'こんにちはhelloNew']);
+
   await page.getByRole('button', { name: 'Start', exact: true }).click();
   await expect(page.getByText('3 left')).toBeVisible();
-  await expect(page.getByText('Japanese', { exact: true })).toBeVisible();
+  await expect(page.locator('section').getByText('Japanese', { exact: true })).toBeVisible();
   await expect(page.getByRole('progressbar', { name: 'Session progress' })).toHaveAttribute('aria-valuenow', '0');
   for (let index = 0; index < 3; index += 1) {
     await page.keyboard.press('Space');
     await page.keyboard.press('r');
   }
-  // Back on the deck: all three were Japanese cards; nothing left today.
+  // The session steps back to the deck: nothing left today, every card learning.
   await expect(page.getByText('All done for today.')).toBeVisible();
-  await page.getByRole('button', { name: 'All decks' }).click();
+  await expect(page.getByText('3 cards: 0 new, 3 learning, 0 mastered.')).toBeVisible();
+  await expect(cards.locator('.deck-open').first()).toHaveText('食べるto eatLearningin 4 days');
+
+  // The top bar's Back leaves the deck; there is no second back button in the view.
+  await back.click();
   await expect(decks.locator('.deck-open')).toHaveText(['Biology2 to review', 'JapaneseDone', 'Unsorted1 to review']);
   await expect(page.getByText('3 cards to review today.')).toBeVisible();
 
@@ -90,7 +99,31 @@ test('one line says what is due today; a deck studies only its cards', async ({ 
   expect(Math.abs((before!.x + before!.width) - (after!.x + after!.width))).toBeLessThan(10);
   await start.click();
   await expect(page.getByText('2 left')).toBeVisible();
-  await expect(page.getByText('Biology', { exact: true })).toBeVisible();
+  await expect(page.locator('section').getByText('Biology', { exact: true })).toBeVisible();
+  // Back leaves the session too.
+  await back.click();
+  await expect(page.getByText('6 cards to review today.')).toHaveCount(0);
+  await expect(page.getByText('3 cards to review today.')).toBeVisible();
+  // Forward returns to studying that deck.
+  await page.getByRole('button', { name: 'Forward', exact: true }).click();
+  await expect(page.getByText('2 left')).toBeVisible();
+});
+
+test('a suspended card can be resumed from its deck', async ({ page }) => {
+  await setup(page, '# Doc\n');
+  await page.goto(origin);
+  await page.getByRole('button', { name: 'Flashcards', exact: true }).click();
+  await page.getByRole('button', { name: /^Unsorted/ }).click();
+  await page.getByRole('button', { name: 'Start', exact: true }).click();
+  await page.getByRole('button', { name: 'Suspend', exact: true }).click();
+  // The only card is suspended: the session ends back on the deck.
+  const cards = page.getByRole('list', { name: 'Cards' });
+  await expect(page.getByText('1 card: 0 new, 0 learning, 0 mastered. 1 suspended.')).toBeVisible();
+  await expect(cards.locator('.deck-open')).toHaveText(['Year Rome fell?476Suspended']);
+  await cards.locator('.deck-line').hover();
+  await page.getByRole('button', { name: 'Resume', exact: true }).click();
+  await expect(cards.locator('.deck-open')).toHaveText(['Year Rome fell?476New']);
+  await expect(page.getByText('1 card to review today.')).toBeVisible();
 });
 
 test('studying uses one accent at most: plain text answers, no coloured dots', async ({ page }) => {

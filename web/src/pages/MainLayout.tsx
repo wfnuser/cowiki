@@ -168,9 +168,15 @@ type ActiveView =
   | { kind: 'history'; workspaceSlug: string }
   | { kind: 'links'; workspaceSlug: string }
   | { kind: 'tasks'; workspaceSlug: string }
-  | { kind: 'flashcards'; workspaceSlug: string }
+  /** `deck` (`Japanese/N2`) when one deck is open; `studying` during a session. */
+  | { kind: 'flashcards'; workspaceSlug: string; deck?: string; studying?: true }
   | { kind: 'notifications' }
   | null;
+
+/** A Flashcards step for Back and Forward, with only the keys it uses (so equal steps compare equal). */
+function flashcardsStep(deck?: string | null, studying?: boolean): { kind: 'flashcards'; deck?: string; studying?: true } {
+  return { kind: 'flashcards', ...(deck ? { deck } : {}), ...(studying ? { studying: true as const } : {}) };
+}
 
 function isPersonalSpace(ws: Workspace): boolean {
   return ws.visibility === 'private' && ws.role === 'owner';
@@ -852,6 +858,7 @@ export function MainLayout() {
       case 'page': return { workspaceSlug, view: { kind: 'page', path: activeView.path ?? conceptPath(activeView.slug) } };
       case 'source': return { workspaceSlug, view: { kind: 'source', filename: activeView.filename } };
       case 'review-detail': return { workspaceSlug, view: { kind: 'review-detail', target: activeView.target } };
+      case 'flashcards': return { workspaceSlug, view: flashcardsStep(activeView.deck, activeView.studying) };
       case 'notifications': return null;
       default: return { workspaceSlug, view: { kind: activeView.kind } };
     }
@@ -909,6 +916,11 @@ export function MainLayout() {
         setActiveTab(view.kind);
         setActiveView({ kind: view.kind, workspaceSlug: ws.slug });
         navigate(`/${owner}/${ws.slug}/${view.kind}`, { replace: true });
+        break;
+      case 'flashcards':
+        setActiveTab('flashcards');
+        setActiveView({ workspaceSlug: ws.slug, ...flashcardsStep(view.deck, view.studying) });
+        navigate('/', { replace: true });
         break;
       default:
         setActiveTab(view.kind);
@@ -2028,6 +2040,12 @@ export function MainLayout() {
                   <>
                     <span style={{ color: C.faint }}>/</span>
                     <span style={{ color: C.ink }}>{t('Flashcards')}</span>
+                    {activeView.deck && (
+                      <>
+                        <span style={{ color: C.faint }}>/</span>
+                        <span style={{ color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeView.deck.split('/').join(' / ')}</span>
+                      </>
+                    )}
                   </>
                 )}
                 {activeView?.kind === 'notifications' && (
@@ -2232,6 +2250,15 @@ export function MainLayout() {
                     <FlashcardsView
                       key={activeWorkspace.slug}
                       workspaceSlug={activeWorkspace.slug}
+                      deck={activeView.deck ?? null}
+                      studying={!!activeView.studying}
+                      onNavigate={({ deck, studying }) => setActiveView({ workspaceSlug: activeWorkspace.slug, ...flashcardsStep(deck, studying) })}
+                      onLeaveStudy={() => {
+                        // A session is its own step: ending it steps back to where it started.
+                        const current = viewHistoryRef.current.entries[viewHistoryRef.current.index];
+                        if (desktop && current?.view.kind === 'flashcards' && current.view.studying) goThroughHistory(-1);
+                        else setActiveView({ workspaceSlug: activeWorkspace.slug, ...flashcardsStep(activeView.deck) });
+                      }}
                       onOpenSource={(path) => { void selectPage(activeWorkspace, conceptIdFromPath(path), path); }}
                     />
                   </ObsidianReaderContext.Provider>

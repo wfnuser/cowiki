@@ -13,6 +13,7 @@ import {
   emptyReviewStore,
   isDue,
   isNew,
+  masteryOf,
   parseCards,
   parseReviewStore,
   previewIntervals,
@@ -134,6 +135,23 @@ test('review history stays out of the note, with daily limits and suspension', (
   assert.equal(isNew(store, cards[1]), true);
   const { path, front, ...schedule } = scheduleOf(store, cards[1]) as typeof DEFAULT_SCHEDULE & { path: string; front: string };
   assert.deepEqual([path, front, schedule], ['Rust.md', cards[1].front, DEFAULT_SCHEDULE]);
+});
+
+test('mastery follows Anki: new, learning under three weeks, mastered after, suspended', () => {
+  const now = new Date('2026-11-06T00:00:00.000Z');
+  const today = '2026-11-06';
+  const cards = parseCards('Rust.md', page);
+  let store = emptyReviewStore();
+  assert.equal(masteryOf(store, cards[1]), 'new');
+  store = answerCard(store, cards[1], 5, now, today);
+  assert.equal(masteryOf(store, cards[1]), 'learning');
+  store = { ...store, cards: { ...store.cards, [cards[1].id]: { ...store.cards[cards[1].id], lastInterval: 21 } } };
+  assert.equal(masteryOf(store, cards[1]), 'mastered');
+  // Forgetting a mastered card sends it back to learning.
+  store = answerCard(store, cards[1], 1, now, today);
+  assert.equal(masteryOf(store, cards[1]), 'learning');
+  store = setSuspended(store, cards[1], true);
+  assert.equal(masteryOf(store, cards[1]), 'suspended');
 });
 
 test('editing an answer flags the card for a re-check', () => {
