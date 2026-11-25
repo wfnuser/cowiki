@@ -41,11 +41,14 @@ async function prompt(id, params) {
   if (scenario === 'fs-request') {
     await ask('fs/read_text_file', { sessionId, path: '/etc/hosts' });
   }
-  if (scenario === 'permission') {
-    update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call-1', title: 'touch notes.md', kind: 'execute', status: 'pending', rawInput: { command: 'touch notes.md' } });
+  if (scenario === 'permission' || scenario === 'antigravity') {
+    const rawInput = scenario === 'antigravity'
+      ? { CommandLine: 'touch notes.md' }
+      : { command: 'touch notes.md' };
+    update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call-1', title: 'touch notes.md', kind: 'execute', status: 'pending', rawInput });
     const answer = await ask('session/request_permission', {
       sessionId,
-      toolCall: { toolCallId: 'call-1', title: 'touch notes.md', kind: 'execute', rawInput: { command: 'touch notes.md' }, locations: [{ path: 'notes.md' }] },
+      toolCall: { toolCallId: 'call-1', title: 'touch notes.md', kind: 'execute', rawInput, locations: [{ path: 'notes.md' }] },
       options: [
         { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
         { optionId: 'once', name: 'Allow', kind: 'allow_once' },
@@ -76,6 +79,17 @@ lines.on('line', async (line) => {
   const { id, method, params = {} } = message;
   switch (method) {
     case 'initialize':
+      if (scenario === 'antigravity' || scenario === 'antigravity-signed-out') {
+        return send({ id, result: {
+          protocolVersion: 1,
+          agentCapabilities: {
+            loadSession: true,
+            sessionCapabilities: { resume: {}, close: {} },
+            _meta: { antigravity: { tier: true, systemPrompt: { append: true } } },
+          },
+          authMethods: [{ id: 'oauth-personal', name: 'Log in with Google' }],
+        } });
+      }
       return send({ id, result: {
         protocolVersion: scenario === 'old-protocol' ? 0 : 1,
         agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } },
@@ -83,13 +97,34 @@ lines.on('line', async (line) => {
         _meta: { modelState: { currentModelId: 'fake-model' } },
       } });
     case 'session/new':
-      if (scenario === 'auth') return send({ id, error: { code: -32000, message: 'Authentication required', data: 'no auth method id provided' } });
+      if (scenario === 'auth' || scenario === 'antigravity-signed-out') {
+        return send({ id, error: { code: -32000, message: 'Authentication required', data: 'no auth method id provided' } });
+      }
+      if (process.env.HERMES_EPHEMERAL_SYSTEM_PROMPT) {
+        record({ method: '_test/hermes_env', prompt: process.env.HERMES_EPHEMERAL_SYSTEM_PROMPT });
+      }
       sessions.add('acp-1');
+      if (scenario === 'antigravity') {
+        return send({ id, result: {
+          sessionId: 'acp-1',
+          modes: modes('default'),
+          models: {
+            currentModelId: 'gemini-4-neon-high',
+            availableModels: [
+              { modelId: 'gemini-4-neon-high', name: 'Gemini 4 Neon (High)' },
+              { modelId: 'gemini-3.8-flash-low', name: 'Gemini 3.8 Flash (Low)' },
+            ],
+          },
+          _meta: { antigravity: { tier: { name: 'Google AI Ultra' } } },
+        } });
+      }
       return send({ id, result: { sessionId: 'acp-1', modes: modes(scenario === 'bypass' ? 'bypassPermissions' : 'default') } });
     case 'session/resume':
       if (!sessions.has(params.sessionId)) return send({ id, error: { code: -32002, message: 'Resource not found' } });
       return send({ id, result: { modes: modes('default') } });
     case 'session/set_mode':
+    case 'session/set_model':
+    case 'session/close':
       return send({ id, result: {} });
     case 'session/prompt':
       return prompt(id, params);

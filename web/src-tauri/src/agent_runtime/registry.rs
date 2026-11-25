@@ -39,8 +39,9 @@ pub fn native_protocol(agent: AgentKind) -> Option<&'static str> {
     match agent {
         AgentKind::Codex => Some("codex-app-server"),
         AgentKind::Claude => Some("claude-stream-json"),
-        AgentKind::Grok | AgentKind::OpenCode | AgentKind::Hermes => Some("acp"),
-        AgentKind::Antigravity => None,
+        AgentKind::Grok | AgentKind::Antigravity | AgentKind::OpenCode | AgentKind::Hermes => {
+            Some("acp")
+        }
     }
 }
 
