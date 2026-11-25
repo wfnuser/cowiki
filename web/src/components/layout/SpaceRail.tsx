@@ -59,9 +59,12 @@ export function SpaceRail<T extends SpaceRailItem>({
   titlebarInset = true,
   createLabel = 'Add a Space',
 }: SpaceRailProps<T>) {
+  // macOS 26 draws 14pt traffic lights at x 9–69; the desktop rail is wide
+  // enough to give them the same 9px on both sides.
+  const width = titlebarInset ? 78 : 68;
   return (
     <aside style={{
-      width: 68, minWidth: 68, height: '100vh',
+      width, minWidth: width, height: '100vh',
       background: C.rail, borderRight: `1px solid ${C.line}`,
       display: 'flex', flexDirection: 'column', alignItems: 'center',
       // macOS traffic lights live in the overlay titlebar. Reserve their row
@@ -71,7 +74,7 @@ export function SpaceRail<T extends SpaceRailItem>({
     }}>
       {/* Logo — matches panel header height (52px) */}
       <div style={{
-        width: 68, height: 46, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width, height: 46, display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: 'default', flexShrink: 0,
       }}>
         <img className="cowiki-logo" src="/cowiki-logo.svg" alt="CoWiki" width={30} height={30} />
