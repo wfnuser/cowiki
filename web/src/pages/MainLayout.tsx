@@ -104,6 +104,7 @@ import { openExternalUrl } from '@/external-links';
 import { TasksView } from '../components/views/TasksView';
 import { FlashcardsView } from '../components/views/FlashcardsView';
 import { JournalDay, JournalsView } from '../components/views/JournalsView';
+import { JournalCalendar } from '../components/views/JournalCalendar';
 import { SpaceHome, type HomeNeed } from '../components/views/SpaceHome';
 import { loadHomeCounts, type HomeCounts } from '@/lib/home-counts';
 import { ObsidianImportDialog } from '../components/ObsidianImportDialog';
@@ -1238,6 +1239,7 @@ export function MainLayout() {
       case 'home':
       case 'journals':
         setEditingPage(false);
+        setJournalJump(null);
         setActiveView({ kind: tab, workspaceSlug: activeWorkspace.slug });
         navigate('/', { replace: true });
         break;
@@ -1581,6 +1583,11 @@ export function MainLayout() {
     () => (journalsAvailable ? journalTimeline(journalConfig, journalPaths, new Date())[0] ?? null : null),
     [journalsAvailable, journalConfig, journalPaths],
   );
+  /** Days with a journal note, for the Journals calendar. */
+  const journalDays = useMemo(() => new Set(
+    journalTimeline(journalConfig, journalPaths, new Date()).filter((entry) => !entry.missing).map((entry) => entry.key),
+  ), [journalConfig, journalPaths]);
+  const [journalJump, setJournalJump] = useState<{ key: string; nonce: number } | null>(null);
 
   // Determine active page/source for panel highlight
   const currentActivePage = activeView?.kind === 'page' ? activeView.slug : null;
@@ -1883,6 +1890,14 @@ export function MainLayout() {
                     onSeeReviews={() => handleTabChange('reviews')}
                     versions={!isHtmlPage}
                     cloudAction={spaceCloudAction}
+                  />
+                )}
+
+                {showJournals && (
+                  <JournalCalendar
+                    days={journalDays}
+                    today={dateKey(new Date())}
+                    onGoTo={(key) => setJournalJump({ key, nonce: Date.now() })}
                   />
                 )}
 
@@ -2196,6 +2211,7 @@ export function MainLayout() {
                     key={activeWorkspace.slug}
                     config={activeFeatures.journal}
                     paths={journalPaths}
+                    jumpTo={journalJump}
                     read={readJournal}
                     write={writeJournal}
                     createToday={async () => (await ensureTodayEntry(activeWorkspace)).path}

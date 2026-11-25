@@ -39,6 +39,8 @@ interface JournalsViewProps {
   loadAsset?: (fromPath: string, src: string) => Promise<string>;
   getPageSlugs?: () => string[];
   now?: () => Date;
+  /** A day picked in the Journals calendar: shown and scrolled to (a new nonce repeats it). */
+  jumpTo?: { key: string; nonce: number } | null;
 }
 
 /**
@@ -46,7 +48,7 @@ interface JournalsViewProps {
  * earlier days loading below. Every day is written in place: a click opens
  * the editor where you clicked, an empty day is a bullet waiting for text.
  */
-export function JournalsView({ config, paths, now = () => new Date(), ...day }: JournalsViewProps) {
+export function JournalsView({ config, paths, now = () => new Date(), jumpTo = null, ...day }: JournalsViewProps) {
   const today = now();
   const todayKey = dateKey(today);
   // Recomputed when the day changes or a page is added, not on every render.
@@ -54,20 +56,27 @@ export function JournalsView({ config, paths, now = () => new Date(), ...day }: 
   const entries = useMemo(() => journalTimeline(config, paths, today), [config, paths, todayKey]);
   const [shown, setShown] = useState(PAGE);
   const more = useRef<HTMLDivElement>(null);
+  // A day picked in the calendar may be further down than what has loaded.
+  const jumpIndex = jumpTo ? entries.findIndex((entry) => entry.key === jumpTo.key) : -1;
+  const visible = Math.max(shown, jumpIndex + 1);
+  useEffect(() => {
+    if (!jumpTo) return;
+    document.querySelector(`[data-journal-day="${jumpTo.key}"]`)?.scrollIntoView({ block: 'start' });
+  }, [jumpTo]);
 
   useEffect(() => {
     const target = more.current;
-    if (!target || shown >= entries.length) return;
+    if (!target || visible >= entries.length) return;
     const observer = new IntersectionObserver((seen) => {
-      if (seen.some((entry) => entry.isIntersecting)) setShown((count) => count + PAGE);
+      if (seen.some((entry) => entry.isIntersecting)) setShown(visible + PAGE);
     }, { rootMargin: '600px 0px' });
     observer.observe(target);
     return () => observer.disconnect();
-  }, [entries.length, shown]);
+  }, [entries.length, visible]);
 
   return (
     <div className="journals">
-      {entries.slice(0, shown).map((entry) => (
+      {entries.slice(0, visible).map((entry) => (
         <JournalDay key={entry.key} entry={entry} today={entry.key === todayKey} {...day} />
       ))}
       <div ref={more} aria-hidden style={{ height: 1 }} />
@@ -178,7 +187,7 @@ export function JournalDay({
   const shownText = typeof body === 'string' ? splitLeadingTitle(body).content.trim() : '';
 
   return (
-    <section className={today ? 'journal-day is-today' : 'journal-day'} aria-label={label}>
+    <section className={today ? 'journal-day is-today' : 'journal-day'} aria-label={label} data-journal-day={entry.key}>
       <h2 className="journal-day-title">
         {body === null ? title : (
           <button type="button" onClick={() => onOpenPage(entry.path)} title="Open as a page">{title}</button>

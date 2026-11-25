@@ -19,6 +19,79 @@ export function dayLabel(key: string, today: string): string {
   return date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }) })
 }
 
+/** A month of days, Monday first: the date picker's grid and the Journals
+ * calendar. `marked` days get a dot; `enabled` (when given) limits which
+ * days can be chosen. */
+export function MonthCalendar({
+  month,
+  onMonthChange,
+  today,
+  onChoose,
+  selected = "",
+  marked,
+  enabled,
+}: {
+  /** The first day of the month shown. */
+  month: Date
+  onMonthChange: (month: Date) => void
+  today: string
+  onChoose: (key: string) => void
+  selected?: string
+  marked?: ReadonlySet<string>
+  enabled?: (key: string) => boolean
+}) {
+  const gridStart = startOfIsoWeek(month)
+  const days = Array.from({ length: 42 }, (_, index) => addDays(gridStart, index))
+  return (
+    <>
+      <div className="flex items-center justify-between px-1 pb-1">
+        <span className="text-small font-medium">{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
+        <span className="flex">
+          <button type="button" aria-label="Previous month" onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="flex size-6 items-center justify-center rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text">
+            <ChevronLeft className="size-3.5" />
+          </button>
+          <button type="button" aria-label="Next month" onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="flex size-6 items-center justify-center rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text">
+            <ChevronRight className="size-3.5" />
+          </button>
+        </span>
+      </div>
+      <div className="grid grid-cols-7 text-center text-caption text-text-faint">
+        {["M", "T", "W", "T", "F", "S", "S"].map((day, index) => <span key={index} className="py-1">{day}</span>)}
+      </div>
+      <div className="grid grid-cols-7 gap-y-0.5">
+        {days.map((date) => {
+          const key = dateKey(date)
+          const outside = date.getMonth() !== month.getMonth()
+          const isSelected = key === selected
+          const allowed = enabled ? enabled(key) : true
+          return (
+            <button
+              key={key}
+              type="button"
+              aria-label={date.toDateString()}
+              aria-pressed={isSelected}
+              disabled={!allowed}
+              onClick={() => onChoose(key)}
+              className={cn(
+                "relative mx-auto flex size-7 items-center justify-center rounded-md text-meta tabular-nums transition-colors",
+                isSelected ? "bg-accent font-medium text-on-accent" : "enabled:hover:bg-bg-hover",
+                !isSelected && (outside || !allowed) && "text-text-faint",
+                !isSelected && key === today && "font-semibold text-accent",
+                !allowed && "cursor-default"
+              )}
+            >
+              {date.getDate()}
+              {marked?.has(key) && !isSelected && (
+                <span aria-hidden className="absolute bottom-0.5 left-1/2 size-1 -translate-x-1/2 rounded-full bg-text-tertiary" />
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </>
+  )
+}
+
 /** A quiet date chip with quick choices and a month grid, in place of the
  * platform's date input (DESIGN_SYSTEM.md, "Form controls"). */
 function DatePicker({
@@ -43,8 +116,6 @@ function DatePicker({
     onChange(key)
     setOpen(false)
   }
-  const gridStart = startOfIsoWeek(month)
-  const days = Array.from({ length: 42 }, (_, index) => addDays(gridStart, index))
   const quick: Array<[string, string]> = [
     ["Today", today],
     ["Tomorrow", dateKey(addDays(parse(today), 1))],
@@ -92,44 +163,7 @@ function DatePicker({
             )}
           </div>
           <div className="my-2 h-px bg-border-soft" />
-          <div className="flex items-center justify-between px-1 pb-1">
-            <span className="text-small font-medium">{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
-            <span className="flex">
-              <button type="button" aria-label="Previous month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="flex size-6 items-center justify-center rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text">
-                <ChevronLeft className="size-3.5" />
-              </button>
-              <button type="button" aria-label="Next month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="flex size-6 items-center justify-center rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text">
-                <ChevronRight className="size-3.5" />
-              </button>
-            </span>
-          </div>
-          <div className="grid grid-cols-7 text-center text-caption text-text-faint">
-            {["M", "T", "W", "T", "F", "S", "S"].map((day, index) => <span key={index} className="py-1">{day}</span>)}
-          </div>
-          <div className="grid grid-cols-7 gap-y-0.5">
-            {days.map((date) => {
-              const key = dateKey(date)
-              const outside = date.getMonth() !== month.getMonth()
-              const selected = key === value
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  aria-label={date.toDateString()}
-                  aria-pressed={selected}
-                  onClick={() => choose(key)}
-                  className={cn(
-                    "mx-auto flex size-7 items-center justify-center rounded-md text-meta tabular-nums transition-colors",
-                    selected ? "bg-accent font-medium text-on-accent" : "hover:bg-bg-hover",
-                    !selected && outside && "text-text-faint",
-                    !selected && key === today && "font-semibold text-accent"
-                  )}
-                >
-                  {date.getDate()}
-                </button>
-              )
-            })}
-          </div>
+          <MonthCalendar month={month} onMonthChange={setMonth} selected={value} today={today} onChoose={choose} />
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>

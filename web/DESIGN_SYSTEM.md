@@ -141,6 +141,11 @@ Notifications, Review details, Cloud pages) is built the same way, with
   inside a day are 15px sans section labels. An empty day is a single faint
   bullet, ready for text. Opening Home or Journals writes nothing; today's
   file is created from the journal template on the first click.
+  To reach a day, **Go to a day** (a calendar icon in the top bar, in the
+  slot comments use on a page) opens a month with a dot under every day
+  that has a note, as in Obsidian's Calendar; only those days and today can
+  be picked, and the stream loads down to the day and scrolls to it. The
+  `journal` folder stays in the page tree (user decision 2026-11-25).
 - **Click to edit**, as in Logseq; there is no Edit button. A single click
   in a page or journal day opens the editor with the caret where you
   clicked (matched through the text, `lib/click-to-edit.ts`). Links,
