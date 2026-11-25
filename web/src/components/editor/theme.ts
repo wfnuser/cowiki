@@ -36,10 +36,15 @@ export const editorTheme = EditorView.theme({
   '.cm-line': { padding: '0' },
 
   // A blank line between blocks is the reader's gap between them; a block
-  // written right under another gets the same gap above it.
-  '.cm-lp-blank': { lineHeight: 'var(--doc-gap)', fontSize: '10px' },
-  // CodeMirror's caret helpers beside hidden markup must not make a line taller.
-  '.cm-widgetBuffer': { verticalAlign: 'middle' },
+  // written right under another gets the same gap above it. Locking height
+  // keeps blank quote lines (which hold a hidden QuoteMark buffer) at exactly
+  // one --doc-gap across macOS CoreText and Linux FreeType/WebKitGTK.
+  '.cm-lp-blank': { lineHeight: 'var(--doc-gap)', height: 'var(--doc-gap)', fontSize: '8px' },
+  // CodeMirror's caret helpers beside hidden markup must not make a line taller:
+  // at 1em + vertical-align: middle, a 40px heading or 12px blank quote line
+  // expands past the font's line-height (notably in WebKit). Sitting on the
+  // baseline at cap-height keeps coordsIn() accurate without pushing the line box.
+  '.cm-widgetBuffer': { verticalAlign: 'baseline', height: '0.8em' },
   // A rule is the reader's: 24px above and below a 1px line (blank lines give 12 each).
   '.cm-lp-rule': { lineHeight: '25px' },
   '.cm-lp-tight': { paddingTop: 'var(--doc-gap)' },
@@ -75,6 +80,9 @@ export const editorTheme = EditorView.theme({
     borderLeftColor: 'color-mix(in srgb, var(--callout) 70%, transparent)',
   },
   '.cm-lp-callout-title': { display: 'inline' },
+  // Override the Blockquote syntax-highlight span (t.quote -> ink2) so the
+  // callout title takes the callout's colour, matching the reader.
+  '.cm-lp-callout-title, .cm-lp-callout-title span': { color: 'var(--callout, var(--color-text))' },
   '.cm-lp-callout-mark': { color: C.faint, fontWeight: '400' },
 
   // Fenced code blocks: the fence lines are the block's top and bottom

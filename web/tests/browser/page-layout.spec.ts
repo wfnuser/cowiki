@@ -112,10 +112,17 @@ test('clicking to edit leaves every line where it was', async ({ page }) => {
   await page.goto(origin + '/personal/Doc');
   await page.locator('article').getByText('Delta para').waitFor();
   const read = await positions(page, 'main');
+  const readCalloutColor = await page.locator('article .callout-title').evaluate((element) => getComputedStyle(element).color);
   const before = await page.getByText('Delta para').boundingBox();
   await page.getByText('Delta para').click({ position: { x: 10, y: 8 } });
   await expect(page.locator('.cm-content')).toBeVisible();
   const edit = await positions(page, 'main');
+  const editCalloutColor = await page.locator('.cm-lp-callout-title').evaluate((element) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const text = walker.nextNode();
+    return getComputedStyle(text?.parentElement ?? element).color;
+  });
+  expect(editCalloutColor).toBe(readCalloutColor);
   for (const marker of MARKERS) {
     expect(edit[marker], marker).toBeTruthy();
     expect(Math.abs(edit[marker][0] - read[marker][0]), `${marker} moved sideways`).toBeLessThan(0.6);
