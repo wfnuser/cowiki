@@ -6,6 +6,7 @@ node_modules/
 .env.*.local
 data/
 **/data/
+!benchmarks/governance-bench/data/
 web/dist/
 cowiki.conf
 
