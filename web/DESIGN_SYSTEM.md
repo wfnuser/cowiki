@@ -165,7 +165,8 @@ Notifications, Review details, Cloud pages) is built the same way, with
   bars are drawn the same way in both and never turn back into `- ` or
   `> ` under the caret; a heading's `## ` appears in the left margin while
   the caret is on it; code fences show only while the caret is in the
-  block. A single newline is a line break in both, as in Obsidian.
+  block; tables stay rendered until the caret enters them. A single newline
+  is a line break in both, as in Obsidian.
 - **Top bar, left:** back and forward arrows (desktop), as in Notion, then
   the breadcrumb. Every page, journal, tool view and Space you open is one
   step (`lib/view-history.ts`); a renamed page keeps its steps and a deleted

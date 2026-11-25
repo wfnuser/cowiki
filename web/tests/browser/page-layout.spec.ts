@@ -55,8 +55,15 @@ Sierra after rule.
 
 ### Tango h3
 Uniform \`inline code\` here.
+
+| Victor col | Yankee col |
+| --- | ---: |
+| Foxcell one | \`codecell\` |
+| Golfcell two | **boldcell** |
+
+Zulu after table.
 `;
-const MARKERS = ['Parity', 'Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel', 'wrapwordhere', 'India', 'Juliet', 'Kilo', 'Lima', 'Mike', 'November', 'Oscar', 'Papa', 'Whiskey', 'Xray', 'Quebec', 'Romeo', 'Sierra', 'Tango', 'Uniform'];
+const MARKERS = ['Parity', 'Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel', 'wrapwordhere', 'India', 'Juliet', 'Kilo', 'Lima', 'Mike', 'November', 'Oscar', 'Papa', 'Whiskey', 'Xray', 'Quebec', 'Romeo', 'Sierra', 'Tango', 'Uniform', 'Victor', 'Foxcell', 'Zulu'];
 
 async function setup(page: Page, body: string, more: Array<[string, string]> = []) {
   const space = { name: 'Personal', slug: 'personal', id: 'personal', visibility: 'private', role: 'owner', localPath: '/fixture/personal' };
@@ -154,6 +161,14 @@ test('list and heading markup never shifts the text', async ({ page }) => {
   await expect(page.locator('.cm-lp-fence-shown')).toHaveCount(0);
   await page.locator('.cm-line', { hasText: 'Quebec' }).click();
   await expect(page.locator('.cm-lp-fence-shown')).toHaveCount(2);
+  // Tables stay rendered while the caret is outside, reveal raw pipes when clicked,
+  // and render again once the caret leaves.
+  await expect(page.locator('.cm-lp-table-widget table')).toHaveCount(1);
+  await page.locator('.cm-lp-table-widget td', { hasText: 'Foxcell one' }).click();
+  await expect(page.locator('.cm-lp-table-widget')).toHaveCount(0);
+  await expect(page.locator('.cm-lp-table', { hasText: '| Foxcell one |' })).toBeVisible();
+  await page.locator('.cm-line', { hasText: 'Zulu after table.' }).click();
+  await expect(page.locator('.cm-lp-table-widget table')).toHaveCount(1);
   // Enter continues a list; Home then Backspace removes the new bullet.
   await page.locator('.cm-line', { hasText: 'Golf bullet' }).click();
   await page.keyboard.press('End');
