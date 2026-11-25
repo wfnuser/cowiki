@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowUpRight, Check, ChevronLeft, ChevronRight, FileText, LoaderCircle, PauseCircle, RefreshCw, RotateCcw, SlidersHorizontal } from 'lucide-react';
+import { ArrowUpRight, Check, ChevronLeft, ChevronRight, CirclePause, FileText, LoaderCircle, RefreshCw, RotateCcw, SkipForward, SlidersHorizontal, X } from 'lucide-react';
 import { Popover as PopoverPrimitive } from 'radix-ui';
 
 import { withObsidianReader } from '@/components/ObsidianReader';
 import { NumberField } from '@/components/ui/number-field';
 import { ViewEmpty, ViewHeader, ViewIconButton, ViewSectionHeading } from '@/components/ui/view-header';
 import { listCardSources, readCardReviews, writeCardReviews } from '@/local-api';
-import { C } from '@/lib/design';
 import { dateKey } from '@/lib/journal';
 import { obsidianToReaderMarkdown } from '@/lib/obsidian-markdown';
 import { cn } from '@/lib/utils';
@@ -36,10 +35,10 @@ import {
 
 const MARKDOWN = withObsidianReader(undefined);
 // Logseq's answers and shortcuts (f / t / r), with 1-3 as well.
-const SCORES: Array<{ score: Score; label: string; keys: string[] }> = [
-  { score: 1, label: 'Forgotten', keys: ['f', '1'] },
-  { score: 3, label: 'Took a while', keys: ['t', '2'] },
-  { score: 5, label: 'Remembered', keys: ['r', '3'] },
+const SCORES: Array<{ score: Score; label: string; keys: string[]; dot: string }> = [
+  { score: 1, label: 'Forgotten', keys: ['f', '1'], dot: 'bg-red' },
+  { score: 3, label: 'Took a while', keys: ['t', '2'], dot: 'bg-amber' },
+  { score: 5, label: 'Remembered', keys: ['r', '3'], dot: 'bg-green' },
 ];
 
 interface FlashcardsViewProps {
@@ -47,9 +46,9 @@ interface FlashcardsViewProps {
   onOpenSource: (path: string) => void;
 }
 
-function CardText({ text }: { text: string }) {
+function CardText({ text, className }: { text: string; className: string }) {
   return (
-    <div className="page-prose" style={{ fontSize: 16, lineHeight: 1.6, color: C.ink, overflowWrap: 'anywhere' }}>
+    <div className={cn('prose', className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN}>{obsidianToReaderMarkdown(text)}</ReactMarkdown>
     </div>
   );
@@ -68,6 +67,8 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
   const [openDeck, setOpenDeck] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [reviewed, setReviewed] = useState(0);
+  /** How many cards the session started with, for its progress line. */
+  const [sessionSize, setSessionSize] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const [now, setNow] = useState(() => new Date());
   const today = dateKey(now);
@@ -119,6 +120,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
   };
   const study = (list: Flashcard[], deck: string | null) => {
     setSession(list);
+    setSessionSize(list.length);
     setSessionDeck(deck);
     setReviewed(0);
     setRevealed(false);
@@ -198,65 +200,73 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
     const schedule = scheduleOf(store, current);
     const intervals = previewIntervals(schedule, store.ofMatrix);
     const fresh = isNew(store, current);
-    const quiet = 'inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-meta text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-3.5';
+    const left = session?.length ?? 0;
+    const progress = sessionSize > 0 ? (sessionSize - left) / sessionSize : 0;
+    const tool = 'inline-flex size-8 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4';
+    const key = 'rounded border border-border px-1 text-caption font-normal leading-4 text-text-faint';
+    const slab = 'rounded-[10px] border border-border bg-panel shadow-[var(--shadow-rest)] transition-colors hover:border-border-hover hover:bg-bg-hover';
     return (
-      <section style={{ width: 'min(680px, 100%)' }}>
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <span className="text-small text-text-tertiary">
-            {sessionDeck ? `${sessionDeck.split('/').join(' / ')} · ` : ''}<span className="tabular-nums">{session?.length ?? 0}</span> left · {fresh ? 'New' : `Review ${schedule.repeats + 1}`}
+      <section className="mx-auto" style={{ width: 'min(640px, 100%)' }}>
+        <div className="mb-2 flex h-8 items-center justify-between gap-3">
+          <span className="flex min-w-0 items-baseline gap-2 text-small text-text-tertiary">
+            <span className="truncate">{sessionDeck ? sessionDeck.split('/').join(' / ') : 'All decks'}</span>
+            <span className={cn('shrink-0 text-meta', fresh ? 'text-blue' : 'text-green')}>{fresh ? 'New' : `Review ${schedule.repeats + 1}`}</span>
           </span>
-          <div className="flex items-center">
-            <button type="button" onClick={() => onOpenSource(current.path)} className={quiet} title={current.path}>
-              <ArrowUpRight /> Open note
-            </button>
-            <button type="button" onClick={suspend} className={quiet} title="Stop showing this card until you resume it">
-              <PauseCircle /> Suspend
-            </button>
-            <button type="button" onClick={reset} disabled={fresh} className={quiet} title="Review this card again from the start">
-              <RotateCcw /> Reset
-            </button>
-            <button type="button" onClick={endSession} className={cn(quiet, 'text-text-secondary')}>End</button>
+          <div className="flex shrink-0 items-center gap-0.5">
+            <span className="mr-2 text-meta tabular-nums text-text-tertiary">{left} left</span>
+            <button type="button" onClick={() => onOpenSource(current.path)} className={tool} aria-label="Open note" title={`Open note · ${current.path}`}><ArrowUpRight /></button>
+            <button type="button" onClick={advance} className={tool} aria-label="Skip" title="Skip (N)"><SkipForward /></button>
+            <button type="button" onClick={suspend} className={tool} aria-label="Suspend" title="Suspend: stop showing this card until you resume it"><CirclePause /></button>
+            <button type="button" onClick={reset} disabled={fresh} className={tool} aria-label="Reset" title="Reset: review this card again from the start"><RotateCcw /></button>
+            <button type="button" onClick={endSession} className={tool} aria-label="End" title="End session"><X /></button>
           </div>
         </div>
+        <div className="mb-5 h-0.5 overflow-hidden rounded-full bg-border-soft" role="progressbar" aria-label="Session progress" aria-valuemin={0} aria-valuemax={sessionSize} aria-valuenow={sessionSize - left}>
+          <div className="h-full rounded-full bg-text-tertiary transition-[width] duration-300" style={{ width: `${progress * 100}%` }} />
+        </div>
         {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
-        <div className="min-h-56 rounded-xl border border-border bg-panel px-8 py-7 shadow-[var(--shadow-rest)]">
+        <div className="study-card">
           {changedSinceReview(store, current) && (
-            <p className="mb-3 flex items-center gap-1.5 text-meta text-amber"><span className="size-1.5 rounded-full bg-current" />The answer changed since your last review.</p>
+            <p className="mb-3 flex items-center justify-center gap-1.5 text-meta text-amber"><span className="size-1.5 rounded-full bg-current" />The answer changed since your last review.</p>
           )}
-          <CardText text={renderCloze(current.front, revealed)} />
+          <div className="study-front">
+            <CardText className="study-face" text={renderCloze(current.front, revealed)} />
+          </div>
           {revealed && current.back && (
-            <>
-              <div className="my-5 h-px bg-border-soft" />
-              <CardText text={renderCloze(current.back, true)} />
-            </>
+            <div className="study-reveal">
+              <div className="study-answer-rule" />
+              <div className="flex justify-center">
+                <CardText className="study-answer" text={renderCloze(current.back, true)} />
+              </div>
+            </div>
           )}
         </div>
-        <div className="mt-4 flex justify-center gap-2">
+        <div className="mt-4">
           {!revealed ? (
-            <>
-              <button type="button" onClick={() => setRevealed(true)} className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-small font-medium text-on-accent transition-colors hover:bg-accent-hover">
-                {current.cloze && !current.back ? 'Show clozes' : 'Show answer'}
-                <kbd className="rounded border border-on-accent/40 px-1 text-caption font-normal">Space</kbd>
-              </button>
-              <button type="button" onClick={advance} className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-small text-text-secondary transition-colors hover:bg-bg-hover">
-                Skip <kbd className="rounded border border-border px-1 text-caption text-text-tertiary">N</kbd>
-              </button>
-            </>
-          ) : SCORES.map((item) => (
-            <button
-              key={item.score}
-              type="button"
-              onClick={() => rate(item.score)}
-              title={`${item.label} (${item.keys[0].toUpperCase()})`}
-              className="flex min-w-28 flex-col items-center gap-0.5 rounded-lg border border-border bg-panel px-3 py-2 text-small font-medium text-text transition-colors hover:border-border-hover hover:bg-bg-hover"
-            >
-              <span className="flex items-center gap-1.5">
-                {item.label}
-                <kbd className="rounded border border-border px-1 text-caption font-normal text-text-faint">{item.keys[0].toUpperCase()}</kbd>
-              </span>
-              <span className="text-meta font-normal tabular-nums text-text-tertiary">{intervals[item.score]}</span>
+            <button type="button" onClick={() => setRevealed(true)} className={cn(slab, 'flex h-14 w-full items-center justify-center gap-2.5 text-body font-medium text-text')}>
+              {current.cloze && !current.back ? 'Show clozes' : 'Show answer'}
+              <kbd className={key}>Space</kbd>
             </button>
-          ))}
+          ) : (
+            <div className="study-reveal grid grid-cols-3 gap-2.5">
+              {SCORES.map((item) => (
+                <button
+                  key={item.score}
+                  type="button"
+                  onClick={() => rate(item.score)}
+                  title={`${item.label} (${item.keys[0].toUpperCase()})`}
+                  className={cn(slab, 'relative flex h-14 flex-col items-center justify-center gap-0.5')}
+                >
+                  <span className="flex items-center gap-2 text-small font-medium text-text">
+                    <span aria-hidden className={cn('size-1.5 rounded-full', item.dot)} />
+                    {item.label}
+                  </span>
+                  <span className="text-meta tabular-nums text-text-tertiary">{intervals[item.score]}</span>
+                  <kbd className={cn(key, 'absolute right-2 top-2')}>{item.keys[0].toUpperCase()}</kbd>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </section>
     );

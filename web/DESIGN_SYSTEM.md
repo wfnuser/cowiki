@@ -85,6 +85,18 @@ Notifications, Review details, Cloud pages) is built the same way, with
   folder, else *Unsorted*. "Study all" appears in the title row only when
   something is due; with nothing to study the view says *All done for
   today.* — never a disabled button.
+- **Studying** is a focus screen, so unlike other views it is a centred
+  `min(640px, 100%)` column: the deck and *New*/*Review n* (blue/green) on
+  the left, "n left" and quiet icon tools (open note, skip, suspend, reset,
+  end) on the right, a 2px progress line, then one paper card
+  (`.study-card`: 12px radius, `--shadow-card`). The question is content:
+  serif 22px, centred in the card. *Show answer* reveals the answer below a
+  short rule without moving the card's frame; the answer reads like a page
+  (16px). Below the card one wide button, then three equal ratings in the
+  same place, each a coloured dot (red, amber, green), the label, the next
+  interval, and its key in the corner.
+- **Scrolling areas keep room for the scrollbar** (`.scroll-pane`), so a
+  list growing past the window never narrows the column.
 
 - **Callouts** (`> [!tip] Title`, `lib/callouts.ts`) look the same in the
   reader and the editor: lucide's icon (drawn as a CSS mask) and a bold

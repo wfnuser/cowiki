@@ -401,6 +401,38 @@ button.deck-row-toggle:hover { background: var(--color-bg-hover); color: var(--c
 .deck-row-main:hover { background: var(--color-bg-hover); }
 .deck-count { width: 56px; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
 
+/* Studying a card (DESIGN_SYSTEM.md, "Flashcards"): one paper card in a
+   centred column. The question is content, so it is serif and large; the
+   answer reads like a page. A list or a long answer stays left-aligned in a
+   block that is itself centred. */
+.study-card {
+  display: flex;
+  flex-direction: column;
+  min-height: clamp(260px, 42vh, 420px);
+  padding: 40px 48px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 12px;
+  background: var(--color-panel);
+  box-shadow: var(--shadow-card);
+}
+.study-front { flex: 1; display: flex; align-items: center; justify-content: center; }
+.study-face, .study-answer { max-width: 34em; overflow-wrap: anywhere; color: var(--color-text); }
+.study-face {
+  font-family: var(--font-serif);
+  font-size: var(--text-title);
+  line-height: 1.45;
+  text-align: center;
+  text-wrap: balance;
+}
+.study-answer { font-size: var(--text-lead); line-height: 1.65; margin: 0 auto; }
+.study-face > :first-child, .study-answer > :first-child { margin-top: 0; }
+.study-face > :last-child, .study-answer > :last-child { margin-bottom: 0; }
+.study-face :is(ul, ol) { display: inline-block; text-align: left; }
+.study-answer-rule { width: 40px; height: 1px; margin: 28px auto; background: var(--color-border); }
+.study-reveal { animation: study-reveal 160ms ease-out; }
+@keyframes study-reveal { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .study-reveal { animation: none; } }
+
 /* A list in a view (Home, Reviews, a deck's notes): plain rows with no frame
    and no rules between them; spacing and the hover fill separate them. A row
    reaches 8px past the column on each side, so its icon lines up with the
@@ -686,3 +718,11 @@ html.dark {
 
 /* The logo's ink dot turns light on dark. */
 html.dark img.cowiki-logo { content: url("/cowiki-logo-dark.svg"); }
+
+/* A view's scrolling area always keeps room for its scrollbar, so a list
+   growing past the window (switching to Done, say) never narrows or shifts
+   the column. Our 8px scrollbar takes width even on a trackpad; Chromium
+   honours scrollbar-gutter, WebKit (the desktop app) only an always-on
+   scrollbar, whose track is transparent and shows no thumb with nothing
+   to scroll. */
+.scroll-pane { overflow-x: auto; overflow-y: scroll; scrollbar-gutter: stable; }

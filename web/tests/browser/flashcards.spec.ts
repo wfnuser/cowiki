@@ -63,7 +63,9 @@ test('decks list what is new and due; a deck studies only its cards', async ({ p
   await expect(page.getByRole('heading', { name: 'Japanese' })).toBeVisible();
   await expect(page.getByText('Languages/Japanese')).toBeVisible();
   await page.getByRole('button', { name: 'Study now' }).click();
-  await expect(page.getByText('Japanese · 3 left · New')).toBeVisible();
+  await expect(page.getByText('3 left')).toBeVisible();
+  await expect(page.getByText('Japanese', { exact: true })).toBeVisible();
+  await expect(page.getByRole('progressbar', { name: 'Session progress' })).toHaveAttribute('aria-valuenow', '0');
   for (let index = 0; index < 3; index += 1) {
     await page.keyboard.press('Space');
     await page.keyboard.press('r');

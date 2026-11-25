@@ -1411,6 +1411,7 @@ export function MainLayout() {
   const onStartPage = activeView === null || activeView.kind === 'home';
   const showJournals = !!activeWorkspace && activeView?.kind === 'journals' && journalsAvailable;
   const showOverview = !!activeWorkspace && onStartPage;
+  const mainScrolls = !!activeView && ['review-list', 'review-detail', 'members', 'history', 'links', 'notifications'].includes(activeView.kind);
   const journalPaths = useMemo(() => activeFlatPages.map((page) => page.path), [activeFlatPages]);
   const journalSpaceSlug = activeWorkspace?.slug ?? '';
   const readJournal = useCallback(
@@ -1624,7 +1625,11 @@ export function MainLayout() {
           )}
 
           {/* Main Content Area */}
-          <main style={{ flex: 1, minWidth: 0, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+          <main
+            // Lists such as History and Reviews scroll in <main>; the other views scroll in their own pane.
+            className={mainScrolls ? 'scroll-pane' : undefined}
+            style={{ flex: 1, minWidth: 0, overflow: mainScrolls ? undefined : 'auto', display: 'flex', flexDirection: 'column' }}
+          >
             <CommentsProvider
               store={commentStore}
               pageSlug={commentPageSlug}
@@ -1903,7 +1908,7 @@ export function MainLayout() {
 
               /* Link diagnostics */
               ) : activeView?.kind === 'tasks' && activeWorkspace ? (
-                <div style={{ position: 'absolute', inset: 0, overflow: 'auto', padding: '36px 56px 56px' }}>
+                <div className="scroll-pane" style={{ position: 'absolute', inset: 0, padding: '36px 56px 56px' }}>
                   <TasksView
                     workspaceSlug={activeWorkspace.slug}
                     journal={activeFeatures.journal}
@@ -1914,7 +1919,7 @@ export function MainLayout() {
                   />
                 </div>
               ) : activeView?.kind === 'flashcards' && activeWorkspace ? (
-                <div style={{ position: 'absolute', inset: 0, overflow: 'auto', padding: '36px 56px 56px' }}>
+                <div className="scroll-pane" style={{ position: 'absolute', inset: 0, padding: '36px 56px 56px' }}>
                   <ObsidianReaderContext.Provider value={readerCallbacks}>
                     <FlashcardsView
                       key={activeWorkspace.slug}
@@ -2055,7 +2060,7 @@ export function MainLayout() {
 
               /* Journals: the stream of days */
               ) : showJournals && activeWorkspace ? (
-                <div style={{ position: 'absolute', inset: 0, overflow: 'auto' }}>
+                <div className="scroll-pane" style={{ position: 'absolute', inset: 0 }}>
                   <div className="page-column">
                   <JournalsView
                     key={activeWorkspace.slug}
@@ -2074,7 +2079,7 @@ export function MainLayout() {
 
               /* Start page: Home */
               ) : showOverview && activeWorkspace ? (
-                <div style={{ position: 'absolute', inset: 0, overflow: 'auto' }}>
+                <div className="scroll-pane" style={{ position: 'absolute', inset: 0 }}>
                   <div className="page-column">
                     <SpaceHome
                       needs={homeNeeds}
