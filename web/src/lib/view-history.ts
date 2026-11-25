@@ -93,9 +93,14 @@ export function movePath(history: ViewHistory, workspaceSlug: string, from: stri
   }));
 }
 
+/** Steps that can no longer be shown (their Space removed, their module turned off) leave history. */
+export function forgetWhere(history: ViewHistory, gone: (entry: HistoryEntry) => boolean): ViewHistory {
+  return rebuild(history, history.entries.map((entry) => (gone(entry) ? null : entry)));
+}
+
 /** A Space was removed: none of its steps can be opened again. */
 export function forgetSpace(history: ViewHistory, workspaceSlug: string): ViewHistory {
-  return rebuild(history, history.entries.map((entry) => (entry.workspaceSlug === workspaceSlug ? null : entry)));
+  return forgetWhere(history, (entry) => entry.workspaceSlug === workspaceSlug);
 }
 
 /**

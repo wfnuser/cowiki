@@ -67,7 +67,7 @@ import { ExcalidrawReader } from '../components/ExcalidrawDrawing';
 import { isExcalidrawPage } from '../lib/excalidraw';
 import { showsRoute, viewForRoute } from '../lib/route-view';
 import {
-  EMPTY_HISTORY, canGoBack, canGoForward, entryKey, forgetPath, forgetSpace, historyShortcut, movePath, step, visit,
+  EMPTY_HISTORY, canGoBack, canGoForward, entryKey, forgetPath, forgetWhere, historyShortcut, movePath, step, visit,
   type HistoryEntry, type HistoryView as HistoryStep,
 } from '../lib/view-history';
 import { HistoryButtons } from '../components/layout/HistoryButtons';
@@ -823,24 +823,30 @@ export function MainLayout() {
     }
   };
 
+  /** A view whose module was turned off since cannot be shown (it would be a blank page). */
+  const historyViewAvailable = (ws: Workspace, view: HistoryStep) => {
+    const modules = spaceFeatures[ws.id]?.modules;
+    if (!modules) return true;
+    if (view.kind === 'journals') return modules.journal !== false;
+    if (view.kind === 'tasks') return modules.tasks !== false;
+    if (view.kind === 'flashcards') return modules.flashcards !== false;
+    return true;
+  };
+
   const stepHistory = (delta: -1 | 1) => {
-    let history = viewHistory;
-    for (;;) {
-      const next = step(history, delta);
-      if (!next) {
-        if (history !== viewHistory) setViewHistory(history);
-        return;
-      }
-      const ws = workspaces.find((workspace) => workspace.slug === next.entry.workspaceSlug);
-      if (!ws) {
-        // That Space was removed since: skip its steps.
-        history = forgetSpace(history, next.entry.workspaceSlug);
-        continue;
-      }
-      setViewHistory(next.history);
-      openHistoryView(ws, next.entry.view);
+    // Skip steps that can no longer be shown: a removed Space, a module turned off.
+    const history = forgetWhere(viewHistory, (entry) => {
+      const ws = workspaces.find((workspace) => workspace.slug === entry.workspaceSlug);
+      return !ws || !historyViewAvailable(ws, entry.view);
+    });
+    const next = step(history, delta);
+    const ws = next && workspaces.find((workspace) => workspace.slug === next.entry.workspaceSlug);
+    if (!next || !ws) {
+      setViewHistory(history);
       return;
     }
+    setViewHistory(next.history);
+    openHistoryView(ws, next.entry.view);
   };
 
   const goThroughHistory = (delta: -1 | 1) => {

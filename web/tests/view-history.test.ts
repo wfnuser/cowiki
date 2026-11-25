@@ -7,6 +7,7 @@ import {
   canGoForward,
   forgetPath,
   forgetSpace,
+  forgetWhere,
   historyShortcut,
   movePath,
   step,
@@ -120,4 +121,14 @@ test('shortcuts: ⌘[ ⌘] outside text, ⌘⌥← ⌘⌥→ everywhere', () => 
   assert.equal(historyShortcut(key('[', { metaKey: false }), false), null);
   assert.equal(historyShortcut(key('[', { shiftKey: true }), false), null);
   assert.equal(historyShortcut(key('[', { metaKey: false, ctrlKey: true }), false), -1);
+});
+
+test('steps that cannot be shown any more leave history', () => {
+  let history = walk(tool('home'), tool('journals'), page('a.md'), tool('journals'), tool('tasks'));
+  history = step(history, -1)!.history; // on the second Journals
+  history = forgetWhere(history, (entry) => entry.view.kind === 'journals');
+  assert.deepEqual(paths(history), ['home', 'a.md', 'tasks']);
+  // The removed step on screen hands over to the one before it.
+  assert.equal(history.index, 1);
+  assert.deepEqual(step(history, -1)?.entry, tool('home'));
 });
