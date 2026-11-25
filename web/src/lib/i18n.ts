@@ -447,6 +447,8 @@ export const ZH_CN = {
   '{count} file changed': '{count} 个文件有改动',
   '{count} files changed': '{count} 个文件有改动',
   'Auto checkpoint': '自动快照',
+  'File changes': '文件改动',
+  'Governance': '治理检查',
 } as const;
 
 export type TranslationKey = keyof typeof ZH_CN;

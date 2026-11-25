@@ -39,7 +39,7 @@
     "test:cloud-client": "node --experimental-strip-types --test tests/cloud-client.test.ts",
     "test:cloud-shell": "node --experimental-strip-types --test tests/cloud-shell.test.ts",
     "test:cloud-review-model": "node --experimental-strip-types --test tests/cloud-review-model.test.ts",
-    "test:review-preview": "node --experimental-strip-types --test tests/review-preview.test.ts",
+    "test:review-preview": "node --experimental-strip-types --test tests/review-preview.test.ts tests/governance-review.test.ts",
     "test:skill-hosting": "node --experimental-strip-types --test tests/skill-hosting.test.ts",
     "test:cloud-space-dialog": "node --experimental-strip-types --test tests/cloud-space-dialog.test.ts",
     "tauri": "tauri",

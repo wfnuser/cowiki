@@ -1,3 +1,4 @@
+import type { GovernanceReview } from './components/review/governance-model';
 import { invoke } from '@tauri-apps/api/core';
 import type {
   AgentChange,
@@ -162,6 +163,14 @@ export function probeAgent(agent: AgentKind): Promise<AgentReadiness> {
 
 export function listAgentChanges(spaceSlug: string): Promise<AgentChange[]> {
   return invoke('local_list_agent_changes', { spaceSlug });
+}
+
+export function reviewGovernance(spaceSlug: string, changeId: string | null): Promise<GovernanceReview> {
+  return invoke('local_review_governance', { spaceSlug, changeId });
+}
+
+export function stageGovernanceAsNewChange(spaceSlug: string, changeId: string | null, asOf: string, proposalIds: string[]): Promise<AgentChange | { reason: string }> {
+  return invoke('stage_governance_as_new_change', { spaceSlug, changeId, asOf, proposalIds });
 }
 
 export function mergeAgentChange(spaceSlug: string, changeId: string): Promise<AgentChange> {
