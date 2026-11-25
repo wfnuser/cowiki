@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowUpRight, Columns3, FileText, List as ListIcon, LoaderCircle, Play, Plus, RefreshCw } from 'lucide-react';
+import { ArrowUpRight, Columns3, FileText, List as ListIcon, LoaderCircle, Play, Plus, RefreshCw, Undo2 } from 'lucide-react';
 
 import { ViewHeader, ViewIconButton, ViewTabs } from '@/components/ui/view-header';
 import { DatePicker, dayLabel } from '@/components/ui/date-picker';
@@ -69,7 +69,8 @@ const COLUMNS: Array<{ status: BoardStatus; title: string }> = [
 interface TasksViewProps {
   workspaceSlug: string;
   journal: JournalConfig;
-  onOpenPage: (path: string) => void;
+  /** Open the task's page; `line` is the 0-based file line when clicking a specific task. */
+  onOpenPage: (path: string, line?: number) => void;
   /** Toggle a task in its page; resolves when the file is written. */
   onToggleTask: (task: TaskItem) => Promise<void>;
   /** Set a task's status from the board. */
@@ -301,12 +302,24 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                       aria-label={column.status === 'done' ? `Reopen ${task.text}` : `Complete ${task.text}`}
                       className="mt-[2px]"
                     />
-                    <span className={cn('min-w-0 flex-1 text-small leading-[1.45] [overflow-wrap:anywhere]', column.status === 'done' ? 'text-text-tertiary' : 'text-text')}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenPage(task.path, task.line)}
+                      className={cn(
+                        'min-w-0 flex-1 text-left text-small leading-[1.45] hover:underline hover:decoration-border-hover hover:underline-offset-2 [overflow-wrap:anywhere]',
+                        column.status === 'done' ? 'text-text-tertiary' : 'text-text',
+                      )}
+                    >
                       {readable(task.text)}
-                    </span>
+                    </button>
                     {column.status === 'todo' && (
                       <button type="button" onClick={() => { void move(task, 'doing'); }} disabled={pending.has(key)} className="rounded p-0.5 text-text-faint opacity-0 transition-opacity hover:text-text group-hover:opacity-100 focus-visible:opacity-100" aria-label={`Start ${task.text}`} title="Start">
                         <Play className="size-3" />
+                      </button>
+                    )}
+                    {column.status === 'doing' && (
+                      <button type="button" onClick={() => { void move(task, 'todo'); }} disabled={pending.has(key)} className="rounded p-0.5 text-text-faint opacity-0 transition-opacity hover:text-text group-hover:opacity-100 focus-visible:opacity-100" aria-label={`Move ${task.text} back to To do`} title="Move back to To do">
+                        <Undo2 className="size-3" />
                       </button>
                     )}
                   </div>
@@ -412,16 +425,22 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                           aria-label={done ? `Reopen ${task.text}` : `Complete ${task.text}`}
                           className="mt-[3.5px]"
                         />
-                        <span className={cn(
-                          'min-w-0 flex-1 text-body leading-[22px] [overflow-wrap:anywhere]',
-                          done ? 'text-text-tertiary' : 'text-text',
-                          task.status === 'cancelled' && 'line-through',
-                        )}>
-                          {task.priority && task.priority !== 'medium' && task.priority !== 'low' && task.priority !== 'lowest' && (
-                            <span title={`${task.priority} priority`} className="mr-1 text-red">!</span>
-                          )}
-                          {readable(task.text)}
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => onOpenPage(task.path, task.line)}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <span className={cn(
+                            'block text-body leading-[22px] hover:underline hover:decoration-border-hover hover:underline-offset-2 [overflow-wrap:anywhere]',
+                            done ? 'text-text-tertiary' : 'text-text',
+                            task.status === 'cancelled' && 'line-through',
+                          )}>
+                            {task.priority && task.priority !== 'medium' && task.priority !== 'low' && task.priority !== 'lowest' && (
+                              <span title={`${task.priority} priority`} className="mr-1 text-red">!</span>
+                            )}
+                            {readable(task.text)}
+                          </span>
+                        </button>
                         {task.status === 'doing' && filter !== 'week' && <span className="mt-[3px] flex shrink-0 items-center gap-1 text-meta leading-4 text-blue"><span className="size-1.5 rounded-full bg-current" />Doing</span>}
                         {done && task.doneDate ? (
                           <span className="mt-[3px] shrink-0 text-meta leading-4 text-text-faint">{relativeDay(task.doneDate, today)}</span>

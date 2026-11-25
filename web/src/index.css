@@ -339,6 +339,11 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 /* Click to edit (DESIGN_SYSTEM.md, "Editing"): reading text shows a text caret. */
 .page-reader-editable { cursor: text; }
 .page-reader-editable :is(a, button, input, label, summary, [role="button"]) { cursor: pointer; }
+.reader-target-line {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-radius: 4px;
+  transition: background-color 600ms ease;
+}
 
 /* Journals, as in Logseq: one stream scrolled with the wheel. Each day keeps
    some room below its text, today the most, so days read as a sequence and

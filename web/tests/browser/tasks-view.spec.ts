@@ -13,9 +13,9 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await server.close(); });
 
-// One open task today and enough finished ones to overflow the window.
+// One open task today, enough finished ones to overflow the window, and one open task far down the page.
 const done = Array.from({ length: 40 }, (_, index) => `- [x] Finished task ${index + 1} ✅ 2026-11-2${index % 4}`).join('\n');
-const TASKS = `---\ntype: Note\ntitle: Plan\n---\n\n# Plan\n\n- [ ] Write the report 📅 2026-11-24\n${done}\n`;
+const TASKS = `---\ntype: Note\ntitle: Plan\n---\n\n# Plan\n\n- [ ] Write the report 📅 2026-11-24\n${done}\n- [ ] Deep bottom task 📅 2026-11-24\n`;
 
 async function desktop(page: Page) {
   const space = { name: 'My Space', slug: 'personal', id: 'personal', visibility: 'private', role: 'owner', localPath: '/Users/me/cowiki/personal' };
@@ -134,4 +134,26 @@ test('adding a task on Upcoming defaults to tomorrow and appears in Upcoming', a
   // No date hides Today-journal quick add until an undated inbox destination is decided.
   await page.getByRole('tab', { name: /^No date/ }).click();
   await expect(page.getByRole('textbox', { name: 'New task' })).toHaveCount(0);
+});
+
+test('board cards can return from Doing to To do and task text jumps to its line', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 600 });
+  await desktop(page);
+  await page.goto(origin);
+  await page.getByRole('button', { name: /^Tasks\s*\d*$/ }).first().click();
+  await page.getByRole('button', { name: 'Board', exact: true }).click();
+
+  const todoList = page.getByRole('list', { name: 'To do' });
+  const doingList = page.getByRole('list', { name: 'Doing' });
+  await expect(todoList.getByText('Write the report')).toBeVisible();
+
+  // Start moves to Doing, and the symmetric return button moves it back to To do.
+  await todoList.getByRole('button', { name: 'Start Write the report' }).click();
+  await expect(doingList.getByText('Write the report')).toBeVisible();
+  await doingList.getByRole('button', { name: 'Move Write the report back to To do' }).click();
+  await expect(todoList.getByText('Write the report')).toBeVisible();
+
+  // Clicking a task near the bottom of a long page opens that page scrolled to that line.
+  await todoList.getByRole('button', { name: 'Deep bottom task', exact: true }).click();
+  await expect(page.locator('article').getByText('Deep bottom task')).toBeInViewport();
 });

@@ -380,6 +380,8 @@ export function MainLayout() {
   const [editStart, setEditStart] = useState<{ path: string; cursor: number; top: number } | null>(null);
   // Where the editor was scrolled when editing stopped; the reader opens there.
   const [readerScroll, setReaderScroll] = useState<{ path: string; top: number } | null>(null);
+  const [readerTargetLine, setReaderTargetLine] = useState<{ path: string; line: number; seq: number } | null>(null);
+  const readerTargetSeq = useRef(0);
   // The comments button pressed while editing: back to reading with the panel open.
   const [commentsAfterEdit, setCommentsAfterEdit] = useState(false);
   // Tree path ops (rename/delete of pages & folders on the draft branch)
@@ -699,6 +701,7 @@ export function MainLayout() {
     setEditingPage(false);
     setCommentsAfterEdit(false);
     setReaderScroll(null);
+    setReaderTargetLine(null);
     persistedPageBody.current = null;
     externalConflictNotified.current = false;
     setActiveView({ kind: 'page', slug: conceptId, path: repoPath, content: null });
@@ -2079,7 +2082,17 @@ export function MainLayout() {
                   <TasksView
                     workspaceSlug={activeWorkspace.slug}
                     journal={activeFeatures.journal}
-                    onOpenPage={(path) => { void selectPage(activeWorkspace, conceptIdFromPath(path), path); }}
+                    onOpenPage={(path, line) => {
+                      void selectPage(activeWorkspace, conceptIdFromPath(path), path);
+                      if (line !== undefined) {
+                        readerTargetSeq.current += 1;
+                        setReaderTargetLine({
+                          path: conceptPath(conceptIdFromPath(path)),
+                          line,
+                          seq: readerTargetSeq.current,
+                        });
+                      }
+                    }}
                     onToggleTask={toggleTaskInPage}
                     onSetTaskStatus={setTaskStatusInPage}
                     onAddTask={addTaskToToday}
@@ -2206,6 +2219,10 @@ export function MainLayout() {
                       editedAt: activeView.content.edited_at,
                     } : undefined}
                     initialScrollTop={readerScroll && readerScroll.path === (activeView.path ?? '') ? readerScroll.top : undefined}
+                    targetLine={readerTargetLine && readerTargetLine.path === (activeView.path ?? '') ? {
+                      line: Math.max(1, readerTargetLine.line - renderedLineOffset(viewedPageBody, renderBody(viewedPageBody)) + 1),
+                      seq: readerTargetLine.seq,
+                    } : undefined}
                     readOnlyLabel={versionSelection.kind !== 'working' ? readonlyVersionLabel : undefined}
                     readOnlyDotColor={versionSelection.kind === 'upstream' ? C.purple : C.blue}
                     missingMessage={viewedPageMissing
