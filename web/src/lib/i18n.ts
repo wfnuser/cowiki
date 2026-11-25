@@ -421,6 +421,13 @@ export const ZH_CN = {
   'Sign-in timed out before GitHub responded. Try again.': '等待 GitHub 响应超时，请重试。',
   'Could not open your browser for GitHub sign-in. Try again.': '无法打开浏览器完成 GitHub 登录，请重试。',
   'Could not sign in with GitHub. Try again.': 'GitHub 登录失败，请重试。',
+  // Counts and dates in lists and bylines
+  'Edited {date}': '编辑于 {date}',
+  '{count} file': '{count} 个文件',
+  '{count} files': '{count} 个文件',
+  '{count} file changed': '{count} 个文件有改动',
+  '{count} files changed': '{count} 个文件有改动',
+  'Auto checkpoint': '自动快照',
 } as const;
 
 export type TranslationKey = keyof typeof ZH_CN;

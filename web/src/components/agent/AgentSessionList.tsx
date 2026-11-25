@@ -1,10 +1,12 @@
 import { Bot, GitBranch, LoaderCircle } from 'lucide-react';
 
 import { isBusy, sessionGroups, shortAgo, statusLabel, type AgentSnapshot } from '@/lib/agent-session';
+import { useI18n } from '@/lib/I18nContext';
 import { cn } from '@/lib/utils';
 
 /** One row per session: what it was about, and when or what state it is in. */
 export function AgentSessionRow({ session, active, onOpen }: { session: AgentSnapshot; active?: boolean; onOpen: () => void }) {
+  const { intl } = useI18n();
   const busy = isBusy(session.status);
   const notable = busy || session.status === 'waiting' || session.status === 'failed' || session.status === 'interrupted';
   return (
@@ -27,7 +29,7 @@ export function AgentSessionRow({ session, active, onOpen }: { session: AgentSna
           {statusLabel(session)}
         </span>
       ) : (
-        <span className="shrink-0 text-caption tabular-nums text-text-faint">{shortAgo(session.updatedAt)}</span>
+        <span className="shrink-0 text-caption tabular-nums text-text-faint">{shortAgo(session.updatedAt, undefined, intl)}</span>
       )}
     </button>
   );

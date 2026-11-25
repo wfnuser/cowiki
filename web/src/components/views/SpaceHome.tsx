@@ -37,7 +37,7 @@ interface SpaceHomeProps {
  * today's journal to write in, and the pages that changed lately.
  */
 export function SpaceHome({ needs, today, recent, onOpenPage, now: fixedNow }: SpaceHomeProps) {
-  const { t, tl } = useI18n();
+  const { t, tl, intl } = useI18n();
   const [openedAt] = useState(() => Date.now());
   const now = fixedNow ?? openedAt;
   return (
@@ -74,7 +74,7 @@ export function SpaceHome({ needs, today, recent, onOpenPage, now: fixedNow }: S
                         {page.title}
                         {folder && <span className="view-row-detail">{folder}</span>}
                       </span>
-                      <span className="view-row-meta">{shortAgo(page.modifiedAt * 1000, now)}</span>
+                      <span className="view-row-meta">{shortAgo(page.modifiedAt * 1000, now, intl)}</span>
                     </button>
                   </li>
                 );

@@ -26,12 +26,18 @@ export function checkpointTime(created: Date, now = new Date(), locales?: string
   const time = created.toLocaleTimeString(locales, { hour: 'numeric', minute: '2-digit' });
   const dayOf = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
   const days = Math.round((dayOf(now) - dayOf(created)) / 86_400_000);
+  // English says "Yesterday, 4:05 PM"; other languages use their own word and no comma ("昨天 16:05").
+  const english = !locales || String(Array.isArray(locales) ? locales[0] : locales).startsWith('en');
+  const separator = english ? ', ' : ' ';
   if (days === 0) return time;
-  if (days === 1) return `Yesterday, ${time}`;
+  if (days === 1) {
+    const yesterday = english ? 'Yesterday' : new Intl.RelativeTimeFormat(locales, { numeric: 'auto' }).format(-1, 'day');
+    return `${yesterday}${separator}${time}`;
+  }
   const date = created.toLocaleDateString(locales, created.getFullYear() === now.getFullYear()
     ? { month: 'short', day: 'numeric' }
     : { month: 'short', day: 'numeric', year: 'numeric' });
-  return `${date}, ${time}`;
+  return `${date}${separator}${time}`;
 }
 
 export function canCreateCheckpoint(changedFiles: number | undefined): boolean {

@@ -185,7 +185,7 @@ interface EditSession {
 export function JournalDay({
   entry, today, read, write, createToday, onOpenPage, onWikilink, loadAsset, getPageSlugs, onSettled, onFinishEdit,
 }: JournalDayProps) {
-  const { t } = useI18n();
+  const { t, locale, intl } = useI18n();
   // undefined while loading; null when today's file does not exist yet.
   const [body, setBody] = useState<string | null | undefined>(entry.missing ? null : undefined);
   const [session, setSession] = useState<EditSession | null>(null);
@@ -292,8 +292,14 @@ export function JournalDay({
     }
   };
 
-  const label = formatDate(entry.date, 'dddd, MMMM D, YYYY');
-  const title = formatDate(entry.date, 'MMM Do, YYYY');
+  // English keeps Logseq's "Nov 24th, 2026"; other languages use their own date ("2026年11月24日").
+  const english = locale === 'en';
+  const label = english
+    ? formatDate(entry.date, 'dddd, MMMM D, YYYY')
+    : entry.date.toLocaleDateString(intl, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const title = english
+    ? formatDate(entry.date, 'MMM Do, YYYY')
+    : entry.date.toLocaleDateString(intl, { year: 'numeric', month: 'long', day: 'numeric' });
   const shownText = typeof body === 'string' ? splitLeadingTitle(body).content.trim() : '';
 
   return (

@@ -88,7 +88,7 @@ test('toggling stamps and removes the completion date', () => {
   assert.equal(done, '- [x] Pay rent 📅 2026-11-01 ✅ 2026-10-31');
   assert.equal(toggledTaskLine(done, '2026-11-02'), '- [ ] Pay rent 📅 2026-11-01');
   const logseqDone = toggledTaskLine('- TODO Call', '2026-10-31');
-  assert.equal(logseqDone, '- DONE Call ✅ 2026-10-31');
+  assert.equal(logseqDone, '- DONE Call');
   assert.equal(toggledTaskLine(logseqDone, '2026-11-02'), '- TODO Call');
   assert.equal(toggledTaskLine('- DONE Call', '2026-10-31'), '- TODO Call');
   assert.throws(() => toggledTaskLine('just text', '2026-10-31'));
@@ -147,7 +147,7 @@ test('board moves set the status on the task line', () => {
   assert.equal(taskLineWithStatus('- [x] Draft ✅ 2026-10-30', 'todo', '2026-11-01'), '- [ ] Draft');
   assert.equal(taskLineWithStatus('- [-] ~~Dropped~~', 'doing', '2026-11-01'), '- [/] Dropped');
   assert.equal(taskLineWithStatus('  - TODO Call Ana', 'doing', '2026-11-01'), '  - DOING Call Ana');
-  assert.equal(taskLineWithStatus('- DOING Call Ana', 'done', '2026-11-01'), '- DONE Call Ana ✅ 2026-11-01');
+  assert.equal(taskLineWithStatus('- DOING Call Ana', 'done', '2026-11-01'), '- DONE Call Ana');
   assert.equal(taskLineWithStatus('- DONE Call Ana ✅ 2026-10-30', 'done', '2026-11-01'), '- DONE Call Ana ✅ 2026-10-30');
   assert.equal(taskLineWithStatus('- DONE Call Ana ✅ 2026-11-01', 'todo', '2026-11-02'), '- TODO Call Ana');
   assert.throws(() => taskLineWithStatus('plain text', 'done', '2026-11-01'), /no longer a task/);

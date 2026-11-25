@@ -108,7 +108,7 @@ export function SpaceStatusMenu({
               <VersionItem
                 key={change.id}
                 label={change.title}
-                meta={`${t('Agent change')} · ${change.diffs.length} ${change.diffs.length === 1 ? 'file' : 'files'}`}
+                meta={`${t('Agent change')} · ${t(change.diffs.length === 1 ? '{count} file' : '{count} files', { count: change.diffs.length })}`}
                 color={C.blue}
                 selected={selection.kind === 'agent' && selection.changeId === change.id}
                 onSelect={() => onSelect({ kind: 'agent', changeId: change.id })}

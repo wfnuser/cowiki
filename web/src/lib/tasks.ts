@@ -208,13 +208,10 @@ export function toggledTaskLine(line: string, today: string): string {
   const logseq = LOGSEQ.exec(line);
   if (logseq) {
     const closed = logseq[2] === 'DONE' || logseq[2].startsWith('CANCEL');
-    if (closed) {
-      const reopened = logseq[3].replace(doneStamp, '');
-      return `${logseq[1]}TODO ${reopened}`.replace(/\s+$/, '');
-    }
-    const body = logseq[3].replace(/\s+$/, '');
-    const stamp = doneStamp.test(body) ? '' : ` ✅ ${today}`;
-    return `${logseq[1]}DONE ${body}${stamp}`;
+    // Logseq lines keep Logseq's syntax: only the keyword changes. A ✅ date is
+    // Obsidian Tasks' and would show as text in Logseq (docs/syntax.md).
+    if (closed) return `${logseq[1]}TODO ${logseq[3].replace(doneStamp, '')}`.replace(/\s+$/, '');
+    return `${logseq[1]}DONE ${logseq[3]}`.replace(/\s+$/, '');
   }
   throw new Error('This line is no longer a task.');
 }
@@ -246,8 +243,9 @@ function editTaskLine(content: string, task: Pick<TaskItem, 'line' | 'raw'>, edi
 export type BoardStatus = 'todo' | 'doing' | 'done';
 
 /**
- * The line with its status set: Obsidian Tasks' `[/]` for in progress, Logseq's
- * TODO / DOING / DONE keywords, and a `✅ YYYY-MM-DD` completion stamp when done.
+ * The line with its status set: Obsidian Tasks' `[/]` for in progress and a
+ * `✅ YYYY-MM-DD` stamp when done; Logseq lines change only their TODO / DOING /
+ * DONE keyword.
  */
 export function taskLineWithStatus(line: string, status: BoardStatus, today: string): string {
   const doneStamp = new RegExp(`\\s*✅\\uFE0F?\\s*${DATE}`, 'u');
@@ -263,9 +261,7 @@ export function taskLineWithStatus(line: string, status: BoardStatus, today: str
   const logseq = LOGSEQ.exec(line);
   if (logseq) {
     const body = logseq[3].replace(/\s+$/, '');
-    if (status === 'done') {
-      return `${logseq[1]}DONE ${body}${doneStamp.test(body) ? '' : ` ✅ ${today}`}`;
-    }
+    if (status === 'done') return `${logseq[1]}DONE ${body}`;
     const open = body.replace(doneStamp, '').replace(/^~~(.*)~~$/, '$1');
     return `${logseq[1]}${status === 'doing' ? 'DOING' : 'TODO'} ${open}`.replace(/\s+$/, '');
   }
@@ -276,9 +272,12 @@ export function applyTaskStatus(content: string, task: Pick<TaskItem, 'line' | '
   return editTaskLine(content, task, (line) => taskLineWithStatus(line, status, today));
 }
 
-/** Completion day for a finished task: explicit done date, else a Logseq journal task's day. */
-export function effectiveDoneDate(task: Pick<TaskItem, 'doneDate' | 'syntax' | 'journalDate'>): string | null {
-  return task.doneDate ?? (task.syntax === 'logseq' ? task.journalDate : null);
+/**
+ * Completion day for a finished task: its ✅ date, else for a Logseq task
+ * (which records none) its own day: scheduled, due, start or journal day.
+ */
+export function effectiveDoneDate(task: TaskItem): string | null {
+  return task.doneDate ?? (task.syntax === 'logseq' ? taskDay(task) : null);
 }
 
 export interface WeekBoard {
