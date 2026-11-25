@@ -52,3 +52,19 @@ test('a list growing past the window does not narrow the column', async ({ page 
   await expect(page.getByText('Finished task 40')).toBeAttached();
   expect(await width()).toBe(today);
 });
+
+test('a task checkbox sits centred on the first line of its text', async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 600 });
+  await desktop(page);
+  await page.goto(origin);
+  await page.getByRole('button', { name: /^Tasks\s*\d*$/ }).first().click();
+  const row = page.locator('li:has(input[type=checkbox])', { hasText: 'Write the report' });
+  await expect(row).toBeVisible();
+  const offset = await row.evaluate((li) => {
+    const box = li.querySelector('input')!.getBoundingClientRect();
+    const text = li.querySelector('span')!;
+    const line = parseFloat(getComputedStyle(text).lineHeight);
+    return (box.top + box.height / 2) - (text.getBoundingClientRect().top + line / 2);
+  });
+  expect(Math.abs(offset)).toBeLessThanOrEqual(0.5);
+});

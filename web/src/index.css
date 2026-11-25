@@ -197,7 +197,9 @@ input[type="checkbox"] {
   flex: 0 0 auto;
   width: 15px;
   height: 15px;
-  margin: 0;
+  /* No margin here: this rule is outside Tailwind's layers, so it would beat
+     a row's mt-[…] that centres the box on its first line. Preflight already
+     zeroes margins. */
   border: 1.5px solid var(--color-checkbox);
   border-radius: 4px;
   background: var(--color-panel) center / 12px 12px no-repeat;
