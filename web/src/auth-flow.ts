@@ -130,3 +130,15 @@ export function parseDesktopOAuthCallback(callbackUrl: string): OAuthCredential 
   if (!apiKey || !userName || !userId) return null;
   return { apiKey, userName, userId };
 }
+
+/** Turn a desktop OAuth failure into one clear sentence for the sign-in screen. */
+export function describeDesktopOAuthError(caught: unknown): string {
+  const raw = (caught instanceof Error ? caught.message : typeof caught === 'string' ? caught : '').trim();
+  if (!raw) return 'Could not sign in with GitHub. Try again.';
+  if (/timed out/i.test(raw)) return 'Sign-in timed out before GitHub responded. Try again.';
+  if (/cancel/i.test(raw)) return 'Sign-in was cancelled. Try again when ready.';
+  if (/open.*browser|browser.*open/i.test(raw)) return 'Could not open your browser for GitHub sign-in. Try again.';
+  const cleaned = raw.replace(/^Error:\s*/i, '');
+  const sentence = /[.!?]$/.test(cleaned) ? cleaned : `${cleaned}.`;
+  return `GitHub sign-in failed: ${sentence}`;
+}

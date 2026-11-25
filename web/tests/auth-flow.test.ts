@@ -7,6 +7,7 @@ import {
   buildLoopbackGithubLoginUrl,
   buildWebGithubLoginUrl,
   createWebAuthBootstrap,
+  describeDesktopOAuthError,
   parseWebOAuthFragment,
   parseDesktopOAuthCallback,
   safeAuthReturnPath,
@@ -148,4 +149,23 @@ test('desktop sign in follows the local-first shell design', () => {
   assert.doesNotMatch(loginPage, /人与 AI 共建的知识空间/);
   assert.match(spaceRail, /Not signed in/);
   assert.match(spaceRail, />\s*Sign in\s*</);
+});
+
+test('desktop OAuth errors explain timeout, cancellation and failures clearly', () => {
+  assert.equal(
+    describeDesktopOAuthError('Cloud sign-in timed out'),
+    'Sign-in timed out before GitHub responded. Try again.',
+  );
+  assert.equal(
+    describeDesktopOAuthError(new Error('User cancelled sign-in')),
+    'Sign-in was cancelled. Try again when ready.',
+  );
+  assert.equal(
+    describeDesktopOAuthError(new Error('Cloud sign-in exchange was rejected (502)')),
+    'GitHub sign-in failed: Cloud sign-in exchange was rejected (502).',
+  );
+  assert.equal(
+    describeDesktopOAuthError(''),
+    'Could not sign in with GitHub. Try again.',
+  );
 });
