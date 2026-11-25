@@ -98,6 +98,6 @@ test('the header has no Edit button and opens the Agent from the corner its side
   assert.doesNotMatch(headerActions, />\s*Edit\s*</);
   assert.doesNotMatch(headerActions, /Pencil/);
   assert.match(headerActions, /!agentPanelOpen && \(/);
-  assert.match(headerActions, /<PanelRight size=\{16\} \/>/);
+  assert.match(headerActions, /<Bot size=\{16\} \/>/);
   assert.match(agentPanel, /aria-label="Close agent panel"[^>]*>\s*<PanelRight \/>/);
 });

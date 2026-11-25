@@ -178,8 +178,8 @@ Notifications, Review details, Cloud pages) is built the same way, with
   history does this. Views add no back link of their own (a review detail
   has no "← Reviews"); only the Cloud shell, which has no top bar, keeps one.
 - **Top bar, right to left:** the Agent toggle in the corner, comments, the
-  Space status. The Agent sidebar opens from the top bar's right corner and
-  closes from the same corner of its own header (`PanelRight` both ways), so
+  Space status. The Agent sidebar opens from a Bot icon in the top bar's right
+  corner and closes from the same corner of its own header (`PanelRight`), so
   the toggle never takes space next to an open sidebar. Comments show a
   count only when there are open comments. The **Space status** is one quiet
   menu: a place icon (drive for local, cloud when linked) and the version

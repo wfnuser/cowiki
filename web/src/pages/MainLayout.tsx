@@ -2,8 +2,9 @@ import { useState, useEffect, useLayoutEffect, useEffectEvent, useCallback, useM
 import { isSubmitEnter } from '@/lib/ime';
 import { useNavigate, useLocation, useNavigationType } from 'react-router-dom';
 import {
+  Bot,
   Compass,
-  FolderOpen, PanelLeft, PanelRight, MessageSquare, HardDrive, FolderInput, Cloud, UserPlus, ChevronLeft,
+  FolderOpen, PanelLeft, MessageSquare, HardDrive, FolderInput, Cloud, UserPlus, ChevronLeft,
   ExternalLink, BookMarked,
 } from 'lucide-react';
 import {
@@ -1962,7 +1963,7 @@ export function MainLayout() {
                     }}
                     title={t('Open the Agent sidebar')}
                   >
-                    <PanelRight size={16} />
+                    <Bot size={16} />
                   </button>
                 )}
 
