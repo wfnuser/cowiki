@@ -673,15 +673,16 @@ fn codex_turn_start_timeout_stops_without_resending() {
     let harness = Harness::new("timeout");
     let id = harness.create(AgentKind::Codex, AgentMode::Live, None);
     harness.runtime.send(&id, "slow").unwrap();
-    let failed = harness.settled(&id);
+    // Stopping Codex also reports "Codex exited"; the timeout's own message
+    // lands right after it and is the one that stays.
+    let failed = harness.wait(&id, "the timeout message", |snapshot| {
+        snapshot.status == AgentStatus::Failed
+            && snapshot
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("instead of sending the task again"))
+    });
     assert_eq!(failed.status, AgentStatus::Failed);
-    {
-        let error = failed.error.clone().unwrap_or_default();
-        assert!(
-            error.contains("instead of sending the task again"),
-            "{error}"
-        );
-    }
     assert_eq!(harness.sent("turn/start").len(), 1);
     assert_eq!(harness.gate.active_starts(), 0);
 }
