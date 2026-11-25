@@ -175,3 +175,89 @@ test('slow page responses never overwrite a newer navigation and Reviews waits f
   await expect(page.locator('.cm-content')).toHaveCount(0);
   await expect(page.getByText(/Alpha body unique\./)).toBeVisible();
 });
+
+test('merged and discarded Agent Changes are dropped from Back/Forward history', async ({ page }) => {
+  const space = { name: 'My Space', slug: 'personal', id: 'personal', visibility: 'private', role: 'owner', localPath: '/Users/me/cowiki/personal' };
+  const meta = (slug: string) => ({ slug, path: slug + '.md', title: slug, summary: '', branch: 'main', kind: 'page', children: [] });
+  const changes = [
+    {
+      id: 'change-merge-1',
+      title: 'Agent merge fix',
+      status: 'open',
+      branch: 'cowiki/agent/change-merge-1',
+      worktreePath: '/tmp/wt-1',
+      createdAt: Math.floor(Date.now() / 1000) - 60,
+      diffs: [{ path: 'Welcome.md', old_content: '# Welcome\n', new_content: '# Welcome\n\nMerged.\n', hunks: [], additions: 2, deletions: 0 }],
+    },
+    {
+      id: 'change-discard-2',
+      title: 'Agent discard draft',
+      status: 'open',
+      branch: 'cowiki/agent/change-discard-2',
+      worktreePath: '/tmp/wt-2',
+      createdAt: Math.floor(Date.now() / 1000) - 120,
+      diffs: [{ path: 'Welcome.md', old_content: '# Welcome\n', new_content: '# Welcome\n\nDiscard.\n', hunks: [], additions: 2, deletions: 0 }],
+    },
+  ];
+
+  await page.route('**/*', (route) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
+  await page.exposeFunction('fixtureInvoke', async (cmd: string, args: Record<string, unknown>) => {
+    switch (cmd) {
+      case 'local_list_spaces': return [space];
+      case 'local_list_pages': return Array.from(files.keys(), meta);
+      case 'local_get_page': return { ...meta(String(args.pageSlug)), body: files.get(String(args.pageSlug)) ?? '' };
+      case 'local_read_space_config': return { features: { modules: { journal: true, tasks: true, flashcards: true }, journal: { format: 'YYYY-MM-DD', folder: 'journal', template: null } } };
+      case 'local_list_page_comments': return { comments: [], snapshots: [] };
+      case 'local_working_diff': return [];
+      case 'local_list_agent_changes': return changes.map((c) => ({ ...c }));
+      case 'local_merge_agent_change': {
+        const target = changes.find((c) => c.id === args.changeId);
+        if (target) target.status = 'merged';
+        return target ? { ...target } : null;
+      }
+      case 'local_discard_agent_change': {
+        const target = changes.find((c) => c.id === args.changeId);
+        if (target) target.status = 'discarded';
+        return target ? { ...target } : null;
+      }
+      case 'local_list_task_sources': case 'local_list_card_sources': case 'local_recent_pages':
+      case 'local_list_sources': case 'local_list_backlinks': case 'local_list_broken_links': return [];
+      case 'cloud_get_status': return { state: 'unlinked', conflicts: [], message: '', pullRequest: null, committed: false, cloudSpaceId: null, cloudBaseUrl: null };
+      default: return null;
+    }
+  });
+  await page.addInitScript(() => {
+    Object.assign(window, { __TAURI_INTERNALS__: { invoke: (cmd: string, args: unknown) => Reflect.get(window, 'fixtureInvoke')(cmd, args) } });
+    localStorage.setItem('cowiki.personal.preferences', JSON.stringify({ autoCheckpoint: false }));
+  });
+
+  await page.goto(origin);
+  const crumb = page.locator('.app-breadcrumb');
+  const back = page.getByRole('button', { name: 'Back', exact: true });
+  const forward = page.getByRole('button', { name: 'Forward', exact: true });
+
+  // Open Reviews -> open first Agent Change -> Merge into Draft.
+  await page.getByRole('button', { name: /^Reviews\s*\d*$/ }).first().click();
+  await expect(page.getByText('Agent merge fix')).toBeVisible();
+  await page.getByText('Agent merge fix').click();
+  await expect(page.getByRole('button', { name: 'Merge into Draft', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Merge into Draft', exact: true }).click();
+  await expect(page.getByText(/·\s*Merged/)).toBeVisible();
+
+  // Stepping Back lands on Reviews and drops the merged change so Forward is disabled.
+  await back.click();
+  await expect(crumb).toContainText('Reviews');
+  await expect(forward).toBeDisabled();
+
+  // Open second Agent Change -> Discard -> navigate to Welcome -> Back skips the discarded change.
+  await page.getByText('Agent discard draft').click();
+  await expect(page.getByRole('button', { name: 'Discard', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Discard', exact: true }).click();
+  await expect(page.getByText(/·\s*Discarded/)).toBeVisible();
+
+  await page.getByText('Welcome', { exact: true }).first().click();
+  await expect(crumb).toContainText('Welcome');
+  await back.click();
+  await expect(crumb).toContainText('Reviews');
+  await expect(page.getByText('Agent discard draft')).toBeVisible();
+});

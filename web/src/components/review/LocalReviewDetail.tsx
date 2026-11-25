@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   discardLocalAgentChange,
@@ -21,12 +21,14 @@ export function LocalReviewDetail({
   target,
   onDraftChanged,
   onReviewsChanged,
+  onAgentChangeClosed,
   onContinueAgent,
 }: {
   workspaceSlug: string;
   target: LocalReviewSelection;
   onDraftChanged?: () => void;
   onReviewsChanged?: () => void;
+  onAgentChangeClosed?: (changeId: string) => void;
   onContinueAgent?: (change: AgentChange) => void;
 }) {
   const { t, tl } = useI18n();
@@ -36,6 +38,10 @@ export function LocalReviewDetail({
   const [pending, setPending] = useState<'commit' | 'merge' | 'discard' | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const onAgentChangeClosedRef = useRef(onAgentChangeClosed);
+  useEffect(() => {
+    onAgentChangeClosedRef.current = onAgentChangeClosed;
+  }, [onAgentChangeClosed]);
 
   const reload = useCallback(async () => {
     setError(null);
@@ -46,7 +52,13 @@ export function LocalReviewDetail({
       } else {
         const changes = await listLocalAgentChanges(workspaceSlug);
         const next = changes.find((candidate) => candidate.id === target.changeId);
-        if (!next) throw new Error('Agent Change no longer exists');
+        if (!next) {
+          onAgentChangeClosedRef.current?.(target.changeId);
+          throw new Error('Agent Change no longer exists');
+        }
+        if (next.status === 'merged' || next.status === 'discarded') {
+          onAgentChangeClosedRef.current?.(next.id);
+        }
         setChange(next);
         setDraftDiffs(null);
       }
@@ -78,11 +90,13 @@ export function LocalReviewDetail({
       if (action === 'commit') {
         setNotice(t('Draft committed.'));
       } else if (action === 'merge') {
-        const merge = agentMergeResult(
-          (result as AgentChange).status === 'needsResolution' ? 'needsResolution' : 'merged',
-        );
+        const status = (result as AgentChange).status === 'needsResolution' ? 'needsResolution' : 'merged';
+        const merge = agentMergeResult(status);
         setError(merge.message);
         if (merge.draftChanged) onDraftChanged?.();
+        if (status === 'merged') onAgentChangeClosed?.((result as AgentChange).id);
+      } else if (action === 'discard') {
+        if (target.kind === 'local-agent') onAgentChangeClosed?.(target.changeId);
       } else if (draftChanged) {
         onDraftChanged?.();
       }
