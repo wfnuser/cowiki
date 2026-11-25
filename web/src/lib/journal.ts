@@ -166,6 +166,12 @@ export function startOfDay(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
+/** Milliseconds from `date` until the start of the next local calendar day. */
+export function msUntilNextDay(date: Date): number {
+  const next = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
+  return Math.max(0, next.getTime() - date.getTime());
+}
+
 /** ISO 8601 week: weeks start on Monday; week 1 contains January 4th. */
 export function isoWeek(date: Date): { year: number; week: number } {
   const thursday = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));

@@ -14,10 +14,12 @@ import {
 import {
   dateKey,
   formatDate,
+  fromDateKey,
   journalTimeline,
   type JournalConfig,
   type JournalEntry,
 } from '@/lib/journal';
+import { useTodayKey } from '@/lib/useTodayKey';
 import { obsidianToReaderMarkdown, renderedLineOffset } from '@/lib/obsidian-markdown';
 import { applyTaskToggle } from '@/lib/tasks';
 import { useI18n } from '@/lib/I18nContext';
@@ -25,6 +27,8 @@ import { remarkSoftBreaks } from '@/lib/remark-soft-breaks';
 
 const COMPONENTS = withObsidianReader({});
 const PAGE = 7;
+const DEFAULT_NOW = () => new Date();
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
 interface JournalsViewProps {
   config: JournalConfig;
@@ -49,21 +53,93 @@ interface JournalsViewProps {
  * earlier days loading below. Every day is written in place: a click opens
  * the editor where you clicked, an empty day is a bullet waiting for text.
  */
-export function JournalsView({ config, paths, now = () => new Date(), jumpTo = null, ...day }: JournalsViewProps) {
-  const today = now();
-  const todayKey = dateKey(today);
-  // Recomputed when the day changes or a page is added, not on every render.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const entries = useMemo(() => journalTimeline(config, paths, today), [config, paths, todayKey]);
+export function JournalsView({ config, paths, now = DEFAULT_NOW, jumpTo = null, ...day }: JournalsViewProps) {
+  const todayKey = useTodayKey(now);
+  const entries = useMemo(
+    () => journalTimeline(config, paths, fromDateKey(todayKey) ?? now()),
+    [config, paths, todayKey, now],
+  );
   const [shown, setShown] = useState(PAGE);
+  const containerRef = useRef<HTMLDivElement>(null);
   const more = useRef<HTMLDivElement>(null);
+  const entriesRef = useRef(entries);
+  const settledDaysRef = useRef<Set<string>>(new Set());
+  const pendingJumpRef = useRef<{ key: string; pending: Set<string>; cancel: () => void } | null>(null);
+
+  useEffect(() => {
+    entriesRef.current = entries;
+  }, [entries]);
+
   // A day picked in the calendar may be further down than what has loaded.
   const jumpIndex = jumpTo ? entries.findIndex((entry) => entry.key === jumpTo.key) : -1;
   const visible = Math.max(shown, jumpIndex + 1);
+
+  // Raise `shown` monotonically so jumping back to a recent day never unmounts
+  // already-expanded older days.
+  useEffect(() => {
+    if (jumpIndex + 1 > shown) setShown(jumpIndex + 1);
+  }, [jumpIndex, shown]);
+
+  const scrollDayIntoView = useCallback((key: string) => {
+    const scope = containerRef.current ?? document;
+    scope.querySelector(`[data-journal-day="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'start' });
+  }, []);
+
+  const handleDaySettled = useCallback((key: string) => {
+    settledDaysRef.current.add(key);
+    const active = pendingJumpRef.current;
+    if (!active || !active.pending.has(key)) return;
+    active.pending.delete(key);
+    // Re-pin the jump target now that an earlier (or target) day's real height is in the DOM.
+    scrollDayIntoView(active.key);
+    if (active.pending.size === 0) active.cancel();
+  }, [scrollDayIntoView]);
+
   useEffect(() => {
     if (!jumpTo) return;
-    document.querySelector(`[data-journal-day="${jumpTo.key}"]`)?.scrollIntoView({ block: 'start' });
-  }, [jumpTo]);
+    pendingJumpRef.current?.cancel();
+    const list = entriesRef.current;
+    const index = list.findIndex((entry) => entry.key === jumpTo.key);
+    if (index < 0) return;
+
+    scrollDayIntoView(jumpTo.key);
+
+    const pending = new Set<string>();
+    for (let i = 0; i <= index; i += 1) {
+      const key = list[i]!.key;
+      if (!settledDaysRef.current.has(key)) pending.add(key);
+    }
+    if (pending.size === 0) return;
+
+    const scrollHost: EventTarget = containerRef.current?.closest('.scroll-pane') ?? window;
+    const onUserScroll = () => cancel();
+    const onKeyDown = (event: Event) => {
+      if (SCROLL_KEYS.has((event as KeyboardEvent).key)) cancel();
+    };
+    let timeoutId: number | null = window.setTimeout(() => cancel(), 10_000);
+    let active = true;
+
+    const cancel = () => {
+      if (!active) return;
+      active = false;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      scrollHost.removeEventListener('wheel', onUserScroll);
+      scrollHost.removeEventListener('touchstart', onUserScroll);
+      scrollHost.removeEventListener('pointerdown', onUserScroll);
+      window.removeEventListener('keydown', onKeyDown);
+      if (pendingJumpRef.current?.cancel === cancel) pendingJumpRef.current = null;
+    };
+
+    pendingJumpRef.current = { key: jumpTo.key, pending, cancel };
+    scrollHost.addEventListener('wheel', onUserScroll, { passive: true });
+    scrollHost.addEventListener('touchstart', onUserScroll, { passive: true });
+    scrollHost.addEventListener('pointerdown', onUserScroll, { passive: true });
+    window.addEventListener('keydown', onKeyDown);
+    return cancel;
+  }, [jumpTo, scrollDayIntoView]);
 
   useEffect(() => {
     const target = more.current;
@@ -76,16 +152,26 @@ export function JournalsView({ config, paths, now = () => new Date(), jumpTo = n
   }, [entries.length, visible]);
 
   return (
-    <div className="journals">
+    <div ref={containerRef} className="journals">
       {entries.slice(0, visible).map((entry) => (
-        <JournalDay key={entry.key} entry={entry} today={entry.key === todayKey} {...day} />
+        <JournalDay
+          key={entry.key}
+          entry={entry}
+          today={entry.key === todayKey}
+          onSettled={handleDaySettled}
+          {...day}
+        />
       ))}
       <div ref={more} aria-hidden style={{ height: 1 }} />
     </div>
   );
 }
 
-export type JournalDayProps = Omit<JournalsViewProps, 'config' | 'paths' | 'now'> & { entry: JournalEntry; today: boolean };
+export type JournalDayProps = Omit<JournalsViewProps, 'config' | 'paths' | 'now' | 'jumpTo'> & {
+  entry: JournalEntry;
+  today: boolean;
+  onSettled?: (key: string) => void;
+};
 
 interface EditSession {
   head: string;
@@ -95,7 +181,7 @@ interface EditSession {
 
 /** One day of the journal, read and written in place (Journals, and Home's today). */
 export function JournalDay({
-  entry, today, read, write, createToday, onOpenPage, onWikilink, loadAsset, getPageSlugs,
+  entry, today, read, write, createToday, onOpenPage, onWikilink, loadAsset, getPageSlugs, onSettled,
 }: JournalDayProps) {
   const { t } = useI18n();
   // undefined while loading; null when today's file does not exist yet.
@@ -109,6 +195,11 @@ export function JournalDay({
   const editing = useRef(false);
   const editor = useRef<LivePreviewEditorHandle>(null);
   useEffect(() => { editing.current = !!session; }, [session]);
+
+  const settled = body !== undefined || error !== '';
+  useEffect(() => {
+    if (settled) onSettled?.(entry.key);
+  }, [settled, entry.key, onSettled]);
 
   useEffect(() => {
     if (entry.missing) return;

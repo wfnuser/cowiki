@@ -10,6 +10,7 @@ import {
   journalDateFromPath,
   journalEntryKeys,
   journalPagePath,
+  msUntilNextDay,
   newJournalBody,
   parseDate,
   renderTemplate,
@@ -91,5 +92,11 @@ test('reads Obsidian daily-notes and periodic-notes settings', () => {
 test('a journal template never keeps its own title', () => {
   assert.equal(withTitle('---\ntype: Note\ntitle: Daily\n---\n\n# Day\n', '2026-11-01'), '---\ntype: Note\ntitle: "2026-11-01"\n---\n\n# Day\n');
   assert.equal(withTitle('# No frontmatter\n', 'x'), '# No frontmatter\n');
+});
+
+test('msUntilNextDay returns exact milliseconds until local midnight', () => {
+  assert.equal(msUntilNextDay(new Date(2026, 9, 31, 23, 59, 30, 0)), 30_000);
+  assert.equal(msUntilNextDay(new Date(2026, 9, 31, 23, 59, 59, 250)), 750);
+  assert.equal(msUntilNextDay(new Date(2026, 9, 31, 0, 0, 0, 0)), 24 * 60 * 60 * 1000);
 });
 

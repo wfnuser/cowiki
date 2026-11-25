@@ -123,7 +123,8 @@ import {
   type PersonalPreferences,
   type SpaceFeatures,
 } from '@/lib/space-features';
-import { dateKey, journalTimeline } from '@/lib/journal';
+import { dateKey, fromDateKey, journalTimeline } from '@/lib/journal';
+import { useTodayKey } from '@/lib/useTodayKey';
 import { ensureDatePage } from '@/lib/date-page';
 import { BUILTIN_PLUGINS } from '@/plugins/builtins';
 import { createPluginHost, createSpaceActivationTracker, type PluginHostOptions, type PluginSnapshot } from '@/plugins/host';
@@ -1645,6 +1646,8 @@ export function MainLayout() {
       .catch(() => { if (live) setRecent({ spaceSlug: journalSpaceSlug, pages: [] }); });
     return () => { live = false; };
   }, [showOverview, activeLocal, journalSpaceSlug, pagesVersion, reviewRefreshKey, homeRefreshTick]);
+  const todayKey = useTodayKey();
+  const todayDate = useMemo(() => fromDateKey(todayKey) ?? new Date(), [todayKey]);
   const [homeCounts, setHomeCounts] = useState<HomeCounts & { spaceSlug: string } | null>(null);
   const countTasks = activeFeaturesReady && activeFeatures.modules.tasks;
   const countCards = activeFeaturesReady && activeFeatures.modules.flashcards;
@@ -1656,7 +1659,7 @@ export function MainLayout() {
       .then((counts) => { if (live) setHomeCounts({ spaceSlug: journalSpaceSlug, ...counts }); })
       .catch(() => { if (live) setHomeCounts(null); });
     return () => { live = false; };
-  }, [showOverview, activeLocal, journalSpaceSlug, activeFeaturesReady, journalConfig, countTasks, countCards, desktop, pagesVersion, homeRefreshTick]);
+  }, [showOverview, activeLocal, journalSpaceSlug, activeFeaturesReady, journalConfig, countTasks, countCards, desktop, pagesVersion, homeRefreshTick, todayKey]);
   const counts = homeCounts?.spaceSlug === journalSpaceSlug ? homeCounts : null;
   const changesToReview = (desktop && activeWorkspace?.localPath
     ? openAgentChanges.length + (sharedSpace && activeWorkingDiffs.length > 0 ? 1 : 0)
@@ -1669,13 +1672,13 @@ export function MainLayout() {
     { id: 'links', count: counts?.links ?? 0, label: counts?.links === 1 ? 'broken link' : 'broken links', onOpen: () => handleTabChange('links') },
   ].filter((need) => need.count > 0);
   const todayEntry = useMemo(
-    () => (journalsAvailable ? journalTimeline(journalConfig, journalPaths, new Date())[0] ?? null : null),
-    [journalsAvailable, journalConfig, journalPaths],
+    () => (journalsAvailable ? journalTimeline(journalConfig, journalPaths, todayDate)[0] ?? null : null),
+    [journalsAvailable, journalConfig, journalPaths, todayDate],
   );
   /** Days with a journal note, for the Journals calendar. */
   const journalDays = useMemo(() => new Set(
-    journalTimeline(journalConfig, journalPaths, new Date()).filter((entry) => !entry.missing).map((entry) => entry.key),
-  ), [journalConfig, journalPaths]);
+    journalTimeline(journalConfig, journalPaths, todayDate).filter((entry) => !entry.missing).map((entry) => entry.key),
+  ), [journalConfig, journalPaths, todayDate]);
   const [journalJump, setJournalJump] = useState<{ key: string; nonce: number } | null>(null);
 
   // Determine active page/source for panel highlight
@@ -1987,8 +1990,8 @@ export function MainLayout() {
                 {showJournals && (
                   <JournalCalendar
                     days={journalDays}
-                    today={dateKey(new Date())}
-                    onGoTo={(key) => setJournalJump({ key, nonce: Date.now() })}
+                    today={todayKey}
+                    onGoTo={(key) => setJournalJump((previous) => ({ key, nonce: (previous?.nonce ?? 0) + 1 }))}
                   />
                 )}
 
