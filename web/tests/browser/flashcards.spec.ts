@@ -75,4 +75,8 @@ test('decks list what is new and due; a deck studies only its cards', async ({ p
   await page.getByRole('button', { name: 'All decks' }).click();
   await expect(decks.locator('.deck-row-main')).toHaveText(['Biology20', 'Japanese00', 'Unsorted10']);
   await expect(page.getByRole('button', { name: 'Study all · 3' })).toBeVisible();
+  // Quick-study button on a deck starts that deck's session directly.
+  await page.getByRole('button', { name: 'Study Biology' }).click();
+  await expect(page.getByText('2 left')).toBeVisible();
+  await expect(page.getByText('Biology', { exact: true })).toBeVisible();
 });

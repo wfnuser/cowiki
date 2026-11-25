@@ -6,6 +6,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { C, colorForSpaceId } from '@/lib/design';
+import { useI18n } from '@/lib/I18nContext';
 
 export interface SpaceRailItem {
   id: string;
@@ -61,7 +62,10 @@ export function SpaceRail<T extends SpaceRailItem>({
 }: SpaceRailProps<T>) {
   // macOS 26 draws 14pt traffic lights at x 9–69. The desktop rail (its 1px
   // border included) leaves 9px on both sides and centres them over the logo.
+  const { t, tl } = useI18n();
   const width = titlebarInset ? 79 : 68;
+  const resolvedCreateLabel = tl(createLabel);
+  const resolvedDiscoverLabel = tl(discoverLabel);
   return (
     <aside style={{
       width, minWidth: width, height: '100vh',
@@ -106,7 +110,7 @@ export function SpaceRail<T extends SpaceRailItem>({
         <TooltipTrigger asChild>
           <button
             onClick={onCreateWorkspace}
-            aria-label={createLabel}
+            aria-label={resolvedCreateLabel}
             style={{
               width: 40, height: 40, borderRadius: 12, border: `1px dashed ${C.faint}`,
               background: 'transparent', cursor: 'pointer',
@@ -119,7 +123,7 @@ export function SpaceRail<T extends SpaceRailItem>({
             <Plus size={16} />
           </button>
         </TooltipTrigger>
-        <TooltipContent side="right">{createLabel}</TooltipContent>
+        <TooltipContent side="right">{resolvedCreateLabel}</TooltipContent>
       </Tooltip>
 
       {/* Spacer */}
@@ -135,7 +139,7 @@ export function SpaceRail<T extends SpaceRailItem>({
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
               <button
-                aria-label={showCloudActions ? `Account: ${userName}` : 'Sign up or sign in'}
+                aria-label={showCloudActions ? `${t('Account')}: ${userName}` : t('Sign up or sign in')}
                 className="transition-[background-color,border-color] hover:border-border-hover hover:bg-bg-hover"
                 style={{
                   width: 34, height: 34, borderRadius: 10,
@@ -149,7 +153,7 @@ export function SpaceRail<T extends SpaceRailItem>({
               </button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
-          {!showCloudActions && <TooltipContent side="right">Sign up / Sign in</TooltipContent>}
+          {!showCloudActions && <TooltipContent side="right">{t('Sign up / Sign in')}</TooltipContent>}
         </Tooltip>
         <DropdownMenuContent side="right" align="end" sideOffset={10} className="w-[210px] rounded-xl p-1.5">
           {showCloudActions ? (
@@ -164,7 +168,7 @@ export function SpaceRail<T extends SpaceRailItem>({
                   aria-hidden
                   style={{ width: 8, height: 8, borderRadius: '50%', background: C.amber, boxShadow: `0 0 0 3px ${C.amberSoft}` }}
                 />
-                Not signed in
+                {t('Not signed in')}
               </div>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -173,7 +177,7 @@ export function SpaceRail<T extends SpaceRailItem>({
                 style={{ color: C.accent }}
               >
                 <Cloud size={16} />
-                Sign in
+                {t('Sign in')}
               </DropdownMenuItem>
             </>
           )}
@@ -182,19 +186,19 @@ export function SpaceRail<T extends SpaceRailItem>({
               a connected Cloud account. */}
           {showSettings && (
             <DropdownMenuItem onClick={onSettings}>
-              <Settings size={14} className="mr-2" /> Settings
+              <Settings size={14} className="mr-2" /> {t('Settings')}
             </DropdownMenuItem>
           )}
           {showCloudActions && (
             <>
               {showDiscover && (
                 <DropdownMenuItem onClick={onDiscover}>
-                  <Compass size={14} className="mr-2" /> {discoverLabel}
+                  <Compass size={14} className="mr-2" /> {resolvedDiscoverLabel}
                 </DropdownMenuItem>
               )}
               {(showSettings || showDiscover) && <DropdownMenuSeparator />}
               <DropdownMenuItem onClick={onLogout}>
-                <LogOut size={14} className="mr-2" /> Sign out
+                <LogOut size={14} className="mr-2" /> {t('Sign out')}
               </DropdownMenuItem>
             </>
           )}
@@ -250,6 +254,7 @@ function SpaceTile({
 // ── Notification Bell ──
 
 function NotificationBell({ unread, onOpen }: { unread: number; onOpen: () => void }) {
+  const { t } = useI18n();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -276,7 +281,7 @@ function NotificationBell({ unread, onOpen }: { unread: number; onOpen: () => vo
           )}
         </button>
       </TooltipTrigger>
-      <TooltipContent side="right">Notifications</TooltipContent>
+      <TooltipContent side="right">{t('Notifications')}</TooltipContent>
     </Tooltip>
   );
 }

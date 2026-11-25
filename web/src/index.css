@@ -245,6 +245,14 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .prose code { background: var(--color-bg-hover); padding: 1px 4px; border-radius: 3px; font-family: var(--font-mono); font-size: var(--doc-code-size); color: var(--color-accent); }
 .prose pre { background: var(--color-bg-secondary); color: var(--color-text); padding: var(--doc-code-pad) 16px; border-radius: 6px; margin: var(--doc-gap) 0; font-family: var(--font-mono); font-size: var(--doc-code-size); line-height: var(--doc-code-line); white-space: pre-wrap; overflow-wrap: anywhere; }
 .prose pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+/* Reader code-block syntax tokens: match CodeMirror's editorHighlighting (--color-syntax-*). */
+.tok-keyword { color: var(--color-syntax-keyword); }
+.tok-string { color: var(--color-syntax-string); }
+.tok-comment { color: var(--color-syntax-comment); font-style: italic; }
+.tok-literal { color: var(--color-syntax-literal); }
+.tok-type { color: var(--color-syntax-type); }
+.tok-fn { color: var(--color-syntax-fn); }
+.tok-tag { color: var(--color-syntax-tag); }
 .prose blockquote { border-left: 3px solid var(--color-border); padding-left: 1rem; color: var(--color-text-secondary); margin: var(--doc-gap) 0; }
 
 /* Callouts (lib/callouts.ts), the same in the reader and the editor: a
@@ -339,6 +347,11 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 /* Click to edit (DESIGN_SYSTEM.md, "Editing"): reading text shows a text caret. */
 .page-reader-editable { cursor: text; }
 .page-reader-editable :is(a, button, input, label, summary, [role="button"]) { cursor: pointer; }
+.reader-target-line {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-radius: 4px;
+  transition: background-color 600ms ease;
+}
 
 /* Journals, as in Logseq: one stream scrolled with the wheel. Each day keeps
    some room below its text, today the most, so days read as a sequence and
@@ -393,45 +406,160 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .space-home .journal-day.is-today { min-height: 180px; }
 .home-recent { margin-top: 12px; }
 
-/* Flashcard decks, as in Anki: a tree with New and Due columns. */
-.deck-head { display: flex; align-items: center; padding: 0 10px 6px 26px; color: var(--color-text-tertiary); font-size: 12px; }
-.deck-head.is-flat { padding-left: 4px; }
-.deck-row { display: flex; align-items: center; border-top: 1px solid var(--color-border-soft); }
+/* Flashcard decks, as in Anki: a hairline summary band over a deck tree with
+   New and Due columns (DESIGN_SYSTEM.md, "Hairlines, not boxes"). */
+.deck-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px 24px;
+  padding: 14px 0 18px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+.deck-metrics { display: flex; flex-wrap: wrap; align-items: center; gap: 0; margin: 0; }
+.deck-metric { display: flex; flex-direction: column; gap: 2px; padding-right: 24px; }
+.deck-metric + .deck-metric { padding-left: 24px; border-left: 1px solid var(--color-border-soft); }
+.deck-metric dt { font-size: 12px; line-height: 16px; color: var(--color-text-tertiary); }
+.deck-metric dd { margin: 0; font-size: 22px; line-height: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.deck-head { display: flex; align-items: center; padding: 0 42px 8px 34px; color: var(--color-text-tertiary); font-size: 12px; }
+.deck-head.is-flat { padding-left: 10px; }
+.deck-row { display: flex; align-items: center; gap: 2px; padding-right: 4px; border-top: 1px solid var(--color-border-soft); transition: background-color 120ms ease; }
+.deck-row:hover { background: var(--color-bg-hover); }
 ul[aria-label="Decks"] > li:first-child > .deck-row { border-top: 0; }
-.deck-row-toggle { display: inline-flex; width: 22px; height: 22px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 5px; color: var(--color-text-faint); }
-button.deck-row-toggle:hover { background: var(--color-bg-hover); color: var(--color-text-secondary); }
-.deck-row-main { display: flex; min-width: 0; flex: 1; align-items: center; padding: 9px 10px 9px 4px; border-radius: 6px; font-size: 14px; text-align: left; cursor: pointer; transition: background-color 120ms ease; }
-.deck-row-main:hover { background: var(--color-bg-hover); }
-.deck-count { width: 56px; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.deck-row-toggle { display: inline-flex; width: 22px; height: 22px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 6px; color: var(--color-text-faint); transition: background-color 120ms ease, color 120ms ease; }
+button.deck-row-toggle:hover { background: var(--color-bg-active); color: var(--color-text-secondary); }
+.deck-row-main { display: flex; min-width: 0; flex: 1; align-items: center; padding: 11px 8px 11px 6px; border-radius: 6px; font-size: 14px; text-align: left; cursor: pointer; }
+.deck-row-study { display: inline-flex; width: 28px; height: 28px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 6px; color: var(--color-text-tertiary); opacity: 0; transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease; cursor: pointer; }
+.deck-row:hover .deck-row-study, .deck-row-study:focus-visible { opacity: 1; }
+.deck-row-study:hover { background: var(--color-accent-soft); color: var(--color-accent); }
+.deck-count { width: 56px; flex-shrink: 0; text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }
 
-/* Studying a card (DESIGN_SYSTEM.md, "Flashcards"): one paper card in a
-   centred column. The question is content, so it is serif and large; the
-   answer reads like a page. A list or a long answer stays left-aligned in a
-   block that is itself centred. */
+/* Studying a card (DESIGN_SYSTEM.md, "Flashcards"): one tactile paper card in
+   a centred focus column. Stacked-deck edge appears while more cards remain;
+   revealing splits the card into warm question paper and a gently tinted
+   answer pane without jumping the frame. */
+.study-stage {
+  position: relative;
+  z-index: 0;
+}
+.study-stage.has-stack::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -6px;
+  height: 16px;
+  z-index: -1;
+  border: 1px solid var(--color-border-soft);
+  border-top: 0;
+  border-radius: 0 0 12px 12px;
+  background: color-mix(in srgb, var(--color-panel) 78%, var(--color-bg-secondary));
+}
 .study-card {
   display: flex;
   flex-direction: column;
-  min-height: clamp(260px, 42vh, 420px);
-  padding: 40px 48px;
-  border: 1px solid var(--color-border-soft);
+  min-height: clamp(280px, 44vh, 430px);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   background: var(--color-panel);
   box-shadow: var(--shadow-card);
+  overflow: hidden;
 }
-.study-front { flex: 1; display: flex; align-items: center; justify-content: center; }
+.study-front {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 44px 48px;
+}
+.study-card.is-revealed .study-front {
+  flex: 0 1 auto;
+  min-height: 148px;
+  padding: 36px 48px 32px;
+}
+.study-answer-pane {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 30px 48px 36px;
+  border-top: 1px solid var(--color-border-soft);
+  background: color-mix(in srgb, var(--color-bg-secondary) 52%, var(--color-panel));
+}
 .study-face, .study-answer { max-width: 34em; overflow-wrap: anywhere; color: var(--color-text); }
 .study-face {
   font-family: var(--font-serif);
   font-size: var(--text-title);
-  line-height: 1.45;
+  line-height: 1.48;
   text-align: center;
   text-wrap: balance;
 }
-.study-answer { font-size: var(--text-lead); line-height: 1.65; margin: 0 auto; }
+.study-face code { font-size: 0.82em; padding: 2px 6px; border-radius: 4px; }
+.study-answer { width: 100%; font-size: var(--text-lead); line-height: 1.65; }
 .study-face > :first-child, .study-answer > :first-child { margin-top: 0; }
 .study-face > :last-child, .study-answer > :last-child { margin-bottom: 0; }
 .study-face :is(ul, ol) { display: inline-block; text-align: left; }
-.study-answer-rule { width: 40px; height: 1px; margin: 28px auto; background: var(--color-border); }
+/* Single-bullet Logseq/Obsidian answers read cleanly as centred prose without a lonely dot. */
+.study-answer > ul:only-child { padding-left: 0; margin: 0; }
+.study-answer > ul:only-child > li:only-child { text-align: center; }
+.study-answer > ul:only-child > li:only-child::before { display: none; }
+.study-show-btn {
+  display: flex;
+  width: 100%;
+  height: 52px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: 10px;
+  background: var(--color-text);
+  color: var(--color-bg);
+  font-size: var(--text-body);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 120ms ease, transform 100ms ease;
+}
+.study-show-btn:hover { opacity: 0.9; }
+.study-show-btn:active { transform: translateY(1px); }
+.study-show-kbd {
+  border: 1px solid color-mix(in srgb, var(--color-bg) 28%, transparent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: var(--text-caption);
+  font-weight: 400;
+  line-height: 16px;
+  color: color-mix(in srgb, var(--color-bg) 78%, transparent);
+}
+.study-rate-btn {
+  display: flex;
+  height: 60px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-panel);
+  box-shadow: var(--shadow-rest);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, transform 100ms ease;
+}
+.study-rate-btn:active { transform: translateY(1px); }
+.study-rate-btn[data-tone="red"]:hover {
+  border-color: color-mix(in srgb, var(--color-red) 40%, var(--color-border));
+  background: color-mix(in srgb, var(--color-red-soft) 55%, var(--color-panel));
+}
+.study-rate-btn[data-tone="amber"]:hover {
+  border-color: color-mix(in srgb, var(--color-amber) 40%, var(--color-border));
+  background: color-mix(in srgb, var(--color-amber-soft) 55%, var(--color-panel));
+}
+.study-rate-btn[data-tone="green"]:hover {
+  border-color: color-mix(in srgb, var(--color-green) 40%, var(--color-border));
+  background: color-mix(in srgb, var(--color-green-soft) 55%, var(--color-panel));
+}
 .study-reveal { animation: study-reveal 160ms ease-out; }
 @keyframes study-reveal { from { opacity: 0; transform: translateY(4px); } }
 @media (prefers-reduced-motion: reduce) { .study-reveal { animation: none; } }

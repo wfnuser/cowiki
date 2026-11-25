@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowUpRight, Columns3, FileText, List as ListIcon, LoaderCircle, Play, Plus, RefreshCw } from 'lucide-react';
+import { ArrowUpRight, Columns3, FileText, List as ListIcon, LoaderCircle, Play, Plus, RefreshCw, Undo2 } from 'lucide-react';
 
 import { ViewHeader, ViewIconButton, ViewTabs } from '@/components/ui/view-header';
 import { DatePicker, dayLabel } from '@/components/ui/date-picker';
 import { WeekNav } from '@/components/WeekNav';
 import { listTaskSources } from '@/local-api';
 import { addDays, dateKey, journalDateFromPath, startOfIsoWeek, type JournalConfig } from '@/lib/journal';
+import { useI18n } from '@/lib/I18nContext';
 import { cn } from '@/lib/utils';
 import {
   extractTasks,
@@ -38,15 +39,16 @@ function readLayouts(): Partial<Record<Filter, Layout>> {
 
 /** List or board, as a small two-icon switch in the title row. */
 function LayoutToggle({ value, onChange }: { value: Layout; onChange: (layout: Layout) => void }) {
+  const { t } = useI18n();
   return (
-    <div role="group" aria-label="Layout" className="mr-1 flex items-center rounded-md bg-bg-hover p-0.5">
+    <div role="group" aria-label={t('Layout')} className="mr-1 flex items-center rounded-md bg-bg-hover p-0.5">
       {(['list', 'board'] as const).map((id) => (
         <button
           key={id}
           type="button"
           aria-pressed={value === id}
-          aria-label={id === 'list' ? 'List' : 'Board'}
-          title={id === 'list' ? 'List' : 'Board'}
+          aria-label={id === 'list' ? t('List') : t('Board')}
+          title={id === 'list' ? t('List') : t('Board')}
           onClick={() => onChange(id)}
           className={cn(
             'flex size-7 items-center justify-center rounded transition-colors',
@@ -69,7 +71,8 @@ const COLUMNS: Array<{ status: BoardStatus; title: string }> = [
 interface TasksViewProps {
   workspaceSlug: string;
   journal: JournalConfig;
-  onOpenPage: (path: string) => void;
+  /** Open the task's page; `line` is the 0-based file line when clicking a specific task. */
+  onOpenPage: (path: string, line?: number) => void;
   /** Toggle a task in its page; resolves when the file is written. */
   onToggleTask: (task: TaskItem) => Promise<void>;
   /** Set a task's status from the board. */
@@ -87,14 +90,14 @@ function readable(text: string): string {
   return text.replace(/\[\[([^\]|]+?)(?:\\?\|([^\]]+))?\]\]/g, (_match, page: string, alias?: string) => (alias ?? page).trim());
 }
 
-function relativeDay(day: string, today: string): string {
-  if (day === today) return 'Today';
+function relativeDay(day: string, today: string, locale: 'en' | 'zh-CN', t: ReturnType<typeof useI18n>['t']): string {
+  if (day === today) return t('Today');
   const [y, m, d] = day.split('-').map(Number);
   const [ty, tm, td] = today.split('-').map(Number);
   const diff = Math.round((new Date(y, m - 1, d).getTime() - new Date(ty, tm - 1, td).getTime()) / 86_400_000);
-  if (diff === -1) return 'Yesterday';
-  if (diff < 0) return `${-diff} days ago`;
-  return dayLabel(day, today);
+  if (diff === -1) return t('Yesterday');
+  if (diff < 0) return t('{count} days ago', { count: -diff });
+  return dayLabel(day, today, locale);
 }
 
 /** Tasks in the order given, grouped by the page they live in. */
@@ -105,6 +108,7 @@ function byPage(items: TaskItem[]): Array<[string, TaskItem[]]> {
 }
 
 export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, onSetTaskStatus, onAddTask }: TasksViewProps) {
+  const { locale, t, tl } = useI18n();
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -125,7 +129,13 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
     try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(all)); } catch { /* the choice lasts this session */ }
     return all;
   });
-  const today = dateKey(new Date());
+  const todayDate = new Date();
+  const today = dateKey(todayDate);
+  const tomorrow = dateKey(addDays(todayDate, 1));
+  const selectFilter = (next: Filter) => {
+    setFilter(next);
+    setDraftDue(next === 'upcoming' ? tomorrow : '');
+  };
   const refresh = () => setReloadKey((key) => key + 1);
 
   // Reload whenever the Space, journal settings or reload key change; a
@@ -203,9 +213,10 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
     if (!draft.trim() || adding) return;
     setAdding(true);
     try {
-      await onAddTask(newTaskLine(draft, draftDue || null));
+      const due = draftDue || (filter === 'upcoming' ? tomorrow : null);
+      await onAddTask(newTaskLine(draft, due));
       setDraft('');
-      setDraftDue('');
+      setDraftDue(filter === 'upcoming' ? tomorrow : '');
       refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -218,14 +229,14 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
 
   const sections: Array<{ title: string | null; items: TaskItem[]; tone?: 'red' }> = filter === 'today'
     ? [
-      { title: 'Overdue', items: groups.overdue, tone: 'red' },
-      { title: groups.overdue.length > 0 ? 'Today' : null, items: groups.today },
+      { title: t('Overdue'), items: groups.overdue, tone: 'red' },
+      { title: groups.overdue.length > 0 ? t('Today') : null, items: groups.today },
     ]
     : filter === 'week'
       ? [
-        { title: 'Doing', items: board.doing },
-        { title: 'To do', items: board.todo },
-        { title: 'Done', items: board.done },
+        { title: t('Doing'), items: board.doing },
+        { title: t('To do'), items: board.todo },
+        { title: t('Done'), items: board.done },
       ]
     : filter === 'upcoming'
       ? [{ title: null, items: groups.upcoming }]
@@ -234,11 +245,11 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
         : [{ title: null, items: groups.done }];
 
   const tabs: Array<[Filter, string]> = [
-    ['today', 'Today'],
-    ['week', 'This week'],
-    ['upcoming', 'Upcoming'],
-    ['someday', 'No date'],
-    ['done', 'Done'],
+    ['today', t('Today')],
+    ['week', t('This week')],
+    ['upcoming', t('Upcoming')],
+    ['someday', t('No date')],
+    ['done', t('Done')],
   ];
 
   /** To do, Doing and Done columns; drag a card, or start or finish it in place. */
@@ -246,11 +257,12 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
     <div className="grid grid-cols-3 gap-3">
       {COLUMNS.map((column) => {
         const items = cols[column.status];
+        const colTitle = tl(column.title);
         return (
           <div
             key={column.status}
             role="list"
-            aria-label={column.title}
+            aria-label={colTitle}
             onDragOver={(event) => { event.preventDefault(); setDropTarget(column.status); }}
             onDragLeave={() => setDropTarget((current) => (current === column.status ? null : current))}
             onDrop={(event) => {
@@ -267,7 +279,7 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
             )}
           >
             <h2 className="mb-1.5 flex items-center gap-1.5 px-1.5 pt-0.5 text-small font-medium text-text-secondary">
-              {column.title}
+              {colTitle}
               <span className="font-normal tabular-nums text-text-faint">{items.length}</span>
             </h2>
             {items.map((task) => {
@@ -294,12 +306,24 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                       aria-label={column.status === 'done' ? `Reopen ${task.text}` : `Complete ${task.text}`}
                       className="mt-[2px]"
                     />
-                    <span className={cn('min-w-0 flex-1 text-small leading-[1.45] [overflow-wrap:anywhere]', column.status === 'done' ? 'text-text-tertiary' : 'text-text')}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenPage(task.path, task.line)}
+                      className={cn(
+                        'min-w-0 flex-1 text-left text-small leading-[1.45] hover:underline hover:decoration-border-hover hover:underline-offset-2 [overflow-wrap:anywhere]',
+                        column.status === 'done' ? 'text-text-tertiary' : 'text-text',
+                      )}
+                    >
                       {readable(task.text)}
-                    </span>
+                    </button>
                     {column.status === 'todo' && (
-                      <button type="button" onClick={() => { void move(task, 'doing'); }} disabled={pending.has(key)} className="rounded p-0.5 text-text-faint opacity-0 transition-opacity hover:text-text group-hover:opacity-100 focus-visible:opacity-100" aria-label={`Start ${task.text}`} title="Start">
+                      <button type="button" onClick={() => { void move(task, 'doing'); }} disabled={pending.has(key)} className="rounded p-0.5 text-text-faint opacity-0 transition-opacity hover:text-text group-hover:opacity-100 focus-visible:opacity-100" aria-label={`Start ${task.text}`} title={t('Start')}>
                         <Play className="size-3" />
+                      </button>
+                    )}
+                    {column.status === 'doing' && (
+                      <button type="button" onClick={() => { void move(task, 'todo'); }} disabled={pending.has(key)} className="rounded p-0.5 text-text-faint opacity-0 transition-opacity hover:text-text group-hover:opacity-100 focus-visible:opacity-100" aria-label={`Move ${task.text} back to To do`} title={t('Move back to To do')}>
+                        <Undo2 className="size-3" />
                       </button>
                     )}
                   </div>
@@ -307,7 +331,7 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                     <button type="button" onClick={() => onOpenPage(task.path)} className="max-w-40 truncate hover:text-text-secondary" title={task.path}>
                       {pageLabel(task.path)}
                     </button>
-                    {day && <span className={cn(column.status !== 'done' && day < today && 'text-red')}>{relativeDay(day, today)}</span>}
+                    {day && <span className={cn(column.status !== 'done' && day < today && 'text-red')}>{relativeDay(day, today, locale, t)}</span>}
                   </div>
                 </div>
               );
@@ -321,11 +345,11 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
   return (
     <section style={{ width: layout === 'board' ? 'min(1040px, 100%)' : 'min(860px, 100%)' }}>
       <ViewHeader
-        title="Tasks"
+        title={t('Tasks')}
         actions={(
           <>
             {filter !== 'done' && <LayoutToggle value={layout} onChange={setLayout} />}
-            <ViewIconButton label="Refresh" onClick={refresh} disabled={refreshing}>
+            <ViewIconButton label={t('Refresh')} onClick={refresh} disabled={refreshing}>
               <RefreshCw className={cn('size-3.5', refreshing && 'animate-spin')} />
             </ViewIconButton>
           </>
@@ -333,24 +357,24 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
         className="mb-4"
       />
 
-      <ViewTabs label="Task lists" tabs={tabs.map(([id, label]) => ({ id, label, count: counts[id] }))} value={filter} onChange={setFilter} />
+      <ViewTabs label={t('Task lists')} tabs={tabs.map(([id, label]) => ({ id, label, count: counts[id] }))} value={filter} onChange={selectFilter} />
 
       {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
 
-      {filter !== 'week' && filter !== 'done' && (
+      {(filter === 'today' || filter === 'upcoming') && (
         <form onSubmit={add} className="group -mx-2 mb-3 flex items-center gap-2.5 rounded-md px-2 py-1 transition-colors focus-within:bg-bg-hover/60 hover:bg-bg-hover/60">
           <Plus className="size-[15px] shrink-0 text-text-faint" aria-hidden />
           <input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder="Add a task"
-            aria-label="New task"
+            placeholder={t('Add a task')}
+            aria-label={t('New task')}
             className="h-7 min-w-0 flex-1 bg-transparent text-body text-text outline-none placeholder:text-text-faint focus-visible:outline-none"
           />
           {(draft.trim() || draftDue) && <DatePicker value={draftDue} onChange={setDraftDue} label="Due date" />}
           {draft.trim() && (
             <button type="submit" disabled={adding} className="h-7 shrink-0 rounded-md px-2.5 text-meta font-medium text-accent transition-colors hover:bg-accent-soft disabled:opacity-60">
-              {adding ? 'Adding…' : 'Add'}
+              {adding ? t('Adding…') : t('Add')}
             </button>
           )}
         </form>
@@ -363,12 +387,12 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
       )}
 
       {loading ? (
-        <p className="flex items-center gap-2 py-10 text-small text-text-tertiary"><LoaderCircle className="size-3.5 animate-spin" /> Collecting tasks…</p>
+        <p className="flex items-center gap-2 py-10 text-small text-text-tertiary"><LoaderCircle className="size-3.5 animate-spin" /> {t('Collecting tasks…')}</p>
       ) : layout === 'board' && columns ? (
         renderBoard(columns)
       ) : sections.every((section) => section.items.length === 0) ? (
         <p className="py-10 text-center text-small text-text-tertiary">
-          {filter === 'today' ? 'Nothing due today.' : filter === 'week' ? 'Nothing this week.' : filter === 'done' ? 'Nothing finished yet.' : 'No tasks here.'}
+          {filter === 'today' ? t('Nothing due today.') : filter === 'week' ? t('Nothing this week.') : filter === 'done' ? t('Nothing finished yet.') : t('No tasks here.')}
         </p>
       ) : (
         sections.filter((section) => section.items.length > 0).map((section) => (
@@ -405,22 +429,28 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                           aria-label={done ? `Reopen ${task.text}` : `Complete ${task.text}`}
                           className="mt-[3.5px]"
                         />
-                        <span className={cn(
-                          'min-w-0 flex-1 text-body leading-[22px] [overflow-wrap:anywhere]',
-                          done ? 'text-text-tertiary' : 'text-text',
-                          task.status === 'cancelled' && 'line-through',
-                        )}>
-                          {task.priority && task.priority !== 'medium' && task.priority !== 'low' && task.priority !== 'lowest' && (
-                            <span title={`${task.priority} priority`} className="mr-1 text-red">!</span>
-                          )}
-                          {readable(task.text)}
-                        </span>
-                        {task.status === 'doing' && filter !== 'week' && <span className="mt-[3px] flex shrink-0 items-center gap-1 text-meta leading-4 text-blue"><span className="size-1.5 rounded-full bg-current" />Doing</span>}
+                        <button
+                          type="button"
+                          onClick={() => onOpenPage(task.path, task.line)}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <span className={cn(
+                            'block text-body leading-[22px] hover:underline hover:decoration-border-hover hover:underline-offset-2 [overflow-wrap:anywhere]',
+                            done ? 'text-text-tertiary' : 'text-text',
+                            task.status === 'cancelled' && 'line-through',
+                          )}>
+                            {task.priority && task.priority !== 'medium' && task.priority !== 'low' && task.priority !== 'lowest' && (
+                              <span title={`${task.priority} priority`} className="mr-1 text-red">!</span>
+                            )}
+                            {readable(task.text)}
+                          </span>
+                        </button>
+                        {task.status === 'doing' && filter !== 'week' && <span className="mt-[3px] flex shrink-0 items-center gap-1 text-meta leading-4 text-blue"><span className="size-1.5 rounded-full bg-current" />{t('Doing')}</span>}
                         {done && task.doneDate ? (
-                          <span className="mt-[3px] shrink-0 text-meta leading-4 text-text-faint">{relativeDay(task.doneDate, today)}</span>
+                          <span className="mt-[3px] shrink-0 text-meta leading-4 text-text-faint">{relativeDay(task.doneDate, today, locale, t)}</span>
                         ) : day && (filter !== 'today' || day !== today) && (
                           <span className={cn('mt-[3px] shrink-0 text-meta leading-4 tabular-nums', !done && day < today ? 'text-red' : 'text-text-tertiary')}>
-                            {relativeDay(day, today)}
+                            {relativeDay(day, today, locale, t)}
                           </span>
                         )}
                       </li>

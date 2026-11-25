@@ -50,6 +50,9 @@ test('space navigation replaces Activity with History', () => {
 test('History shares the left-aligned content grid', () => {
   assert.match(historyView, /width: 'min\(860px, 100%\)'/);
   assert.doesNotMatch(historyView, /margin: '0 auto'/);
+  assert.match(historyView, /Save snapshot/);
+  assert.match(historyView, /Snapshot saved\./);
+  assert.doesNotMatch(historyView, /Create checkpoint/);
 });
 
 test('a diff hunk is labelled by the lines it shows', () => {

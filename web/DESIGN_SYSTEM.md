@@ -73,8 +73,9 @@ Notifications, Review details, Cloud pages) is built the same way, with
   centered sentence (`ViewEmpty`).
 - **History** is a timeline: the Current Draft (an accent ring) on top, then
   checkpoints newest first on one line of dots; named checkpoints are ink,
-  automatic ones muted. *Create checkpoint* sits in the title row and
-  appears only when the Draft has changes.
+  automatic ones muted. *Save snapshot* sits in the title row and appears
+  only when the Draft has changes (recording a snapshot without moving the
+  branch; committing to the branch is *Commit draft* in Reviews).
 - Views are left-aligned in the content area (`36px 56px` padding) with a
   `min(860px, 100%)` column; a wide board may use `min(1040px, 100%)`.
 - **Tasks** tabs (Today, This week, Upcoming, No date) each read as a list
@@ -84,24 +85,26 @@ Notifications, Review details, Cloud pages) is built the same way, with
   Doing / Done; its Done is what you finished today (This week: this week).
   A list of This week is grouped the same way. Saved custom views belong in
   query blocks in a page, not in this view.
-- **Flashcards** follow Anki (user decision 2026-11-24): the view is a deck
-  tree with **New** (blue) and **Due** (green) columns, zeros faint; a deck
-  opens its own screen with the same counts, **Study now** and the notes
-  its cards live in. Decks come from tags: the card's own tags besides
-  `#card` (`#Japanese/N2` is a sub-deck), else the page's `tags`, else its
-  folder, else *Unsorted*. "Study all" appears in the title row only when
-  something is due; with nothing to study the view says *All done for
-  today.* — never a disabled button.
-- **Studying** is a focus screen, so unlike other views it is a centred
-  `min(640px, 100%)` column: the deck and *New*/*Review n* (blue/green) on
-  the left, "n left" and quiet icon tools (open note, skip, suspend, reset,
-  end) on the right, a 2px progress line, then one paper card
-  (`.study-card`: 12px radius, `--shadow-card`). The question is content:
-  serif 22px, centred in the card. *Show answer* reveals the answer below a
-  short rule without moving the card's frame; the answer reads like a page
-  (16px). Below the card one wide button, then three equal ratings in the
-  same place, each a coloured dot (red, amber, green), the label, the next
-  interval, and its key in the corner.
+- **Flashcards** follow Anki (user decision 2026-11-24): a hairline summary
+  band at the top holds **New** (blue), **Due** (green), and **Total** counts
+  next to the primary **Study all** CTA (or *All done for today.* when caught
+  up — never a disabled button), above a deck tree with **New** and **Due**
+  columns and a hover-revealed quick-study action on each deck. Opening a
+  deck shows the same hairline summary band with **Study now** and the notes
+  its cards live in (folder prefix muted). Decks come from tags: the card's
+  own tags besides `#card` (`#Japanese/N2` is a sub-deck), else the page's
+  `tags`, else its folder, else *Unsorted*.
+- **Studying** is a centred focus column (`min(640px, 100%)`): the deck and
+  *New*/*Review n* dot on the left, "n left" and quiet icon tools (open note,
+  skip, suspend, reset, end) on the right, an accent progress track, then one
+  tactile paper card (`.study-card`: 12px radius, `--shadow-card`, with a
+  subtle stacked-card edge underneath while more cards remain). The question
+  is content (serif 22px, centred); revealing opens a softly tinted lower
+  answer pane separated by a hairline without moving the frame (single-bullet
+  answers centre cleanly without a lone dot). Below the card sits one warm-ink
+  *Show answer* button, replaced on reveal by three balanced semantic rating
+  buttons (red, amber, green hover wash, dot, label, next interval and inline
+  key hint).
 - **Scrolling areas keep room for the scrollbar** (`.scroll-pane`), so a
   list growing past the window never narrows the column.
 
@@ -164,7 +167,8 @@ Notifications, Review details, Cloud pages) is built the same way, with
   bars are drawn the same way in both and never turn back into `- ` or
   `> ` under the caret; a heading's `## ` appears in the left margin while
   the caret is on it; code fences show only while the caret is in the
-  block. A single newline is a line break in both, as in Obsidian.
+  block; tables stay rendered until the caret enters them. A single newline
+  is a line break in both, as in Obsidian.
 - **Top bar, left:** back and forward arrows (desktop), as in Notion, then
   the breadcrumb. Every page, journal, tool view and Space you open is one
   step (`lib/view-history.ts`); a renamed page keeps its steps and a deleted
@@ -174,8 +178,8 @@ Notifications, Review details, Cloud pages) is built the same way, with
   history does this. Views add no back link of their own (a review detail
   has no "← Reviews"); only the Cloud shell, which has no top bar, keeps one.
 - **Top bar, right to left:** the Agent toggle in the corner, comments, the
-  Space status. The Agent sidebar opens from the top bar's right corner and
-  closes from the same corner of its own header (`PanelRight` both ways), so
+  Space status. The Agent sidebar opens from a Bot icon in the top bar's right
+  corner and closes from the same corner of its own header (`PanelRight`), so
   the toggle never takes space next to an open sidebar. Comments show a
   count only when there are open comments. The **Space status** is one quiet
   menu: a place icon (drive for local, cloud when linked) and the version
@@ -210,8 +214,8 @@ one muted line, then *Continue with GitHub* (ink) and *Continue locally*
   lives and its Cloud action, modules, templates; then one page per module
   with options, e.g. Journal) is stored in the Space and shared with its
   members, so its changes are saved together from a bar that appears once
-  something changed. **App** (General: appearance, default Agent, history
-  checkpoints; Account; API Keys) is only you, on this computer, and
+  something changed. **App** (General: appearance, language, default Agent,
+  history checkpoints; Account; API Keys) is only you, on this computer, and
   applies at once. The **Settings** gear at the foot of the sidebar opens
   the Space's group; *Settings* in the avatar menu opens the app's. The
   Space name at the top of the sidebar is a plain title, not a menu.

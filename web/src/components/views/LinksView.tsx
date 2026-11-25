@@ -9,6 +9,7 @@ import {
   groupBrokenLinks,
   linkDiagnosticsMode,
 } from '@/lib/link-diagnostics';
+import { useI18n } from '@/lib/I18nContext';
 
 interface LinksViewProps {
   workspaceSlug: string;
@@ -16,6 +17,7 @@ interface LinksViewProps {
 }
 
 export function LinksView({ workspaceSlug, onOpenPage }: LinksViewProps) {
+  const { t } = useI18n();
   const [links, setLinks] = useState<BrokenLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -64,32 +66,32 @@ export function LinksView({ workspaceSlug, onOpenPage }: LinksViewProps) {
   return (
     <section style={{ width: 'min(860px, 100%)' }}>
       <ViewHeader
-        title="Broken links"
-        description="Links to pages that don’t exist yet."
+        title={t('Broken links')}
+        description={t('Links to pages that don’t exist yet.')}
         actions={(
-          <ViewIconButton label="Refresh" onClick={() => { void refresh(); }} disabled={refreshing}>
+          <ViewIconButton label={t('Refresh')} onClick={() => { void refresh(); }} disabled={refreshing}>
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : undefined} />
           </ViewIconButton>
         )}
       />
 
       {mode === 'loading' ? (
-        <ViewEmpty><LoaderCircle size={15} className="animate-spin" /> Checking links…</ViewEmpty>
+        <ViewEmpty><LoaderCircle size={15} className="animate-spin" /> {t('Checking links…')}</ViewEmpty>
       ) : mode === 'error' ? (
         <InlineFeedback
-          title="Could not inspect links"
+          title={t('Could not inspect links')}
           description={error}
           action={(
             <button type="button" onClick={() => { void refresh(); }} disabled={refreshing} className="inline-flex items-center gap-1 text-meta font-semibold text-red">
-              <RefreshCw size={12} /> Retry
+              <RefreshCw size={12} /> {t('Retry')}
             </button>
           )}
         />
       ) : mode === 'clean' ? (
-        <ViewEmpty><CircleCheck size={15} className="text-green" aria-hidden /> No broken links.</ViewEmpty>
+        <ViewEmpty><CircleCheck size={15} className="text-green" aria-hidden /> {t('No broken links.')}</ViewEmpty>
       ) : (
         <div aria-live="polite">
-          <ViewSectionHeading meta={brokenLinkSummary(links.length)}>Needs attention</ViewSectionHeading>
+          <ViewSectionHeading meta={brokenLinkSummary(links.length)}>{t('Needs attention')}</ViewSectionHeading>
           <ol className="view-list">
             {groups.map((group) => (
               <li key={group.sourcePath} className="pb-1.5">

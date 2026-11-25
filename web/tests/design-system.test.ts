@@ -133,7 +133,7 @@ test('Tailwind radii derive from the shared shadcn base radius', () => {
 test('search uses the shared accessible dialog primitive', () => {
   const searchModal = sourceOf('components/SearchModal.tsx');
   assert.match(searchModal, /import \{ Dialog, DialogContent, DialogTitle \}/);
-  assert.match(searchModal, /<DialogTitle className="sr-only">Search<\/DialogTitle>/);
+  assert.match(searchModal, /<DialogTitle className="sr-only">(?:\{t\(')?Search(?:'\)\})?<\/DialogTitle>/);
   assert.doesNotMatch(searchModal, /createPortal|role="dialog"/);
   assert.match(sourceOf('components/ui/dialog.tsx'), /bg-dialog-scrim/);
   assert.match(sourceOf('components/ui/dialog.tsx'), /shadow-\[var\(--shadow-dialog\)\]/);

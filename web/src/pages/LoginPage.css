@@ -76,6 +76,11 @@
   background: color-mix(in srgb, var(--color-text) 86%, var(--color-bg));
 }
 
+.login-github-button[data-pending="true"] {
+  opacity: 0.72;
+  cursor: wait;
+}
+
 .login-local-button {
   border: 1px solid var(--color-border);
   background: transparent;
@@ -92,4 +97,34 @@
 .login-local-button:focus-visible {
   outline: none;
   box-shadow: var(--shadow-focus);
+}
+
+.login-status,
+.login-error {
+  margin: 14px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.login-status {
+  color: var(--color-text-tertiary);
+}
+
+.login-cancel-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.login-cancel-button:hover {
+  color: var(--color-text);
+}
+
+.login-error {
+  color: var(--color-red);
 }

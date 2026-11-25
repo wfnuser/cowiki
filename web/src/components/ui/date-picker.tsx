@@ -3,6 +3,7 @@ import { Popover as PopoverPrimitive } from "radix-ui"
 import { useState } from "react"
 
 import { addDays, dateKey, startOfIsoWeek } from "@/lib/journal"
+import { useI18n } from "@/lib/I18nContext"
 import { cn } from "@/lib/utils"
 
 function parse(key: string): Date {
@@ -11,12 +12,12 @@ function parse(key: string): Date {
 }
 
 /** "Today", "Tomorrow", "Mon 24 Nov": short, never the platform's format. */
-export function dayLabel(key: string, today: string): string {
-  if (key === today) return "Today"
-  if (key === dateKey(addDays(parse(today), 1))) return "Tomorrow"
+export function dayLabel(key: string, today: string, locale: "en" | "zh-CN" = "en"): string {
+  if (key === today) return locale === "zh-CN" ? "今天" : "Today"
+  if (key === dateKey(addDays(parse(today), 1))) return locale === "zh-CN" ? "明天" : "Tomorrow"
   const date = parse(key)
   const sameYear = date.getFullYear() === parse(today).getFullYear()
-  return date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }) })
+  return date.toLocaleDateString(locale === "zh-CN" ? "zh-CN" : undefined, { weekday: "short", day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }) })
 }
 
 /** A month of days, Monday first: the date picker's grid and the Journals
@@ -40,23 +41,25 @@ export function MonthCalendar({
   marked?: ReadonlySet<string>
   enabled?: (key: string) => boolean
 }) {
+  const { locale, intl, t } = useI18n()
   const gridStart = startOfIsoWeek(month)
   const days = Array.from({ length: 42 }, (_, index) => addDays(gridStart, index))
+  const weekdays = locale === "zh-CN" ? ["一", "二", "三", "四", "五", "六", "日"] : ["M", "T", "W", "T", "F", "S", "S"]
   return (
     <>
       <div className="flex items-center justify-between px-1 pb-1">
-        <span className="text-small font-medium">{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
+        <span className="text-small font-medium">{month.toLocaleDateString(intl, { month: "long", year: "numeric" })}</span>
         <span className="flex">
-          <button type="button" aria-label="Previous month" onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="flex size-6 items-center justify-center rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text">
+          <button type="button" aria-label={t("Previous month")} onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="flex size-6 items-center justify-center rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text">
             <ChevronLeft className="size-3.5" />
           </button>
-          <button type="button" aria-label="Next month" onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="flex size-6 items-center justify-center rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text">
+          <button type="button" aria-label={t("Next month")} onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="flex size-6 items-center justify-center rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text">
             <ChevronRight className="size-3.5" />
           </button>
         </span>
       </div>
       <div className="grid grid-cols-7 text-center text-caption text-text-faint">
-        {["M", "T", "W", "T", "F", "S", "S"].map((day, index) => <span key={index} className="py-1">{day}</span>)}
+        {weekdays.map((day, index) => <span key={index} className="py-1">{day}</span>)}
       </div>
       <div className="grid grid-cols-7 gap-y-0.5">
         {days.map((date) => {
@@ -106,7 +109,9 @@ function DatePicker({
   label?: string
   className?: string
 }) {
+  const { locale, t, tl } = useI18n()
   const today = dateKey(new Date())
+  const resolvedLabel = tl(label)
   const [open, setOpen] = useState(false)
   const [month, setMonth] = useState(() => {
     const base = parse(value || today)
@@ -117,9 +122,9 @@ function DatePicker({
     setOpen(false)
   }
   const quick: Array<[string, string]> = [
-    ["Today", today],
-    ["Tomorrow", dateKey(addDays(parse(today), 1))],
-    ["Next week", dateKey(addDays(startOfIsoWeek(parse(today)), 7))],
+    [t("Today"), today],
+    [t("Tomorrow"), dateKey(addDays(parse(today), 1))],
+    [t("Next week"), dateKey(addDays(startOfIsoWeek(parse(today)), 7))],
   ]
   return (
     <PopoverPrimitive.Root open={open} onOpenChange={(next) => {
@@ -132,7 +137,7 @@ function DatePicker({
       <PopoverPrimitive.Trigger asChild>
         <button
           type="button"
-          aria-label={value ? `${label}: ${dayLabel(value, today)}` : label}
+          aria-label={value ? `${resolvedLabel}: ${dayLabel(value, today, locale)}` : resolvedLabel}
           className={cn(
             "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-meta transition-colors hover:bg-bg-hover",
             value ? "text-text-secondary" : "text-text-tertiary",
@@ -140,7 +145,7 @@ function DatePicker({
           )}
         >
           <CalendarDays className="size-3.5" aria-hidden />
-          {value ? dayLabel(value, today) : label}
+          {value ? dayLabel(value, today, locale) : resolvedLabel}
         </button>
       </PopoverPrimitive.Trigger>
       <PopoverPrimitive.Portal>
@@ -153,12 +158,12 @@ function DatePicker({
             {quick.map(([name, key]) => (
               <button key={name} type="button" onClick={() => choose(key)} className="flex items-center justify-between rounded-md px-2 py-1.5 text-small hover:bg-bg-hover">
                 {name}
-                <span className="text-meta text-text-tertiary">{dayLabel(key, "0000-01-01").replace(/,? \d{4}$/, "")}</span>
+                <span className="text-meta text-text-tertiary">{dayLabel(key, "0000-01-01", locale).replace(/,? \d{4}$/, "")}</span>
               </button>
             ))}
             {value && (
               <button type="button" onClick={() => choose("")} className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-small text-text-secondary hover:bg-bg-hover">
-                <X className="size-3.5" aria-hidden /> No date
+                <X className="size-3.5" aria-hidden /> {t("No date")}
               </button>
             )}
           </div>

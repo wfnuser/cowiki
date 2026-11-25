@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { FileDiff, DiffHunk, DiffLine, ReviewComment } from '../../api';
 import { C, fonts } from '@/lib/design';
+import { useI18n } from '@/lib/I18nContext';
 import { reviewPreviewPanes, type ReviewPreviewPane } from '@/lib/review-preview';
 import { timeAgo } from '../../lib/time';
 import { hunkLabel } from '@/lib/diff-label';
@@ -39,6 +40,7 @@ function CommentThread({
   onUnresolve?: (id: string) => void;
   onReply?: (body: string, parentId: string) => void;
 }) {
+  const { t } = useI18n();
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [replyBody, setReplyBody] = useState('');
 
@@ -63,20 +65,20 @@ function CommentThread({
             </div>
             <span style={{ fontSize: 12, fontWeight: 600, color: C.ink }}>{c.user_id.slice(0, 8)}</span>
             <span style={{ fontSize: 11, color: C.muted }}>{timeAgo(c.created_at)}</span>
-            {c.resolved && <span style={{ fontSize: 11, color: C.green, fontWeight: 500 }}>Resolved</span>}
+            {c.resolved && <span style={{ fontSize: 11, color: C.green, fontWeight: 500 }}>{t('Resolved')}</span>}
           </div>
           <div style={{ fontSize: 13, color: C.ink2, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{c.body}</div>
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
             {!c.resolved && onResolve && (
               <button onClick={() => onResolve(c.id)} style={smallBtn}>
-                <Check size={11} /> Resolve
+                <Check size={11} /> {t('Resolve')}
               </button>
             )}
             {c.resolved && onUnresolve && (
-              <button onClick={() => onUnresolve(c.id)} style={smallBtn}>Unresolve</button>
+              <button onClick={() => onUnresolve(c.id)} style={smallBtn}>{t('Unresolve')}</button>
             )}
             {onReply && (
-              <button onClick={() => setReplyTo(replyTo === c.id ? null : c.id)} style={smallBtn}>Reply</button>
+              <button onClick={() => setReplyTo(replyTo === c.id ? null : c.id)} style={smallBtn}>{t('Reply')}</button>
             )}
           </div>
           {replyTo === c.id && (
@@ -84,7 +86,7 @@ function CommentThread({
               <input
                 value={replyBody}
                 onChange={(e) => setReplyBody(e.target.value)}
-                placeholder="Reply..."
+                placeholder={t('Reply...')}
                 onKeyDown={(e) => isSubmitEnter(e) && handleReply(c.id)}
                 style={{ flex: 1, fontSize: 12, padding: '4px 8px', border: `1px solid ${C.line}`, borderRadius: 4, outline: 'none', background: C.panel }}
               />
@@ -113,6 +115,7 @@ function CommentComposer({
   onSubmit: (body: string) => void;
   onCancel: () => void;
 }) {
+  const { t } = useI18n();
   const [body, setBody] = useState('');
 
   return (
@@ -129,7 +132,7 @@ function CommentComposer({
                 onSubmit(body.trim());
               }
             }}
-            placeholder="Write a comment..."
+            placeholder={t('Write a comment...')}
             autoFocus
             rows={3}
             style={{
@@ -140,7 +143,7 @@ function CommentComposer({
           />
           <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 6 }}>
             <button onClick={onCancel} style={{ ...smallBtn, fontSize: 12, padding: '4px 10px', border: `1px solid ${C.line}`, borderRadius: 4 }}>
-              <X size={12} /> Cancel
+              <X size={12} /> {t('Cancel')}
             </button>
             <button
               onClick={() => body.trim() && onSubmit(body.trim())}
@@ -151,7 +154,7 @@ function CommentComposer({
                 opacity: body.trim() ? 1 : 0.5, display: 'flex', alignItems: 'center', gap: 4,
               }}
             >
-              <MessageSquare size={12} /> Comment
+              <MessageSquare size={12} /> {t('Comment')}
             </button>
           </div>
         </div>
@@ -186,6 +189,7 @@ function HunkView({
   onUnresolve?: (id: string) => void;
   onReply?: (body: string, parentId: string) => void;
 }) {
+  const { t } = useI18n();
   const lineComments = (line: DiffLine): ReviewComment[] => {
     const ln = line.kind === 'del' ? line.old_line : line.new_line;
     if (ln == null) return [];
@@ -220,7 +224,7 @@ function HunkView({
                   ...gutterStyle, background: gutterBg, cursor: canComment ? 'pointer' : undefined,
                   borderRight: `1px solid ${C.line}`,
                 }}
-                title={canComment ? 'Click to comment' : undefined}
+                title={canComment ? t('Click to comment') : undefined}
               >
                 {line.old_line ?? ''}
               </td>
@@ -231,7 +235,7 @@ function HunkView({
                   ...gutterStyle, background: gutterBg, cursor: canComment ? 'pointer' : undefined,
                   borderRight: `1px solid ${C.line}`,
                 }}
-                title={canComment ? 'Click to comment' : undefined}
+                title={canComment ? t('Click to comment') : undefined}
               >
                 {line.new_line ?? ''}
               </td>
@@ -315,6 +319,7 @@ function FileDiffCard({
   onReply?: (body: string, parentId: string) => void;
   onEditSave?: (path: string, content: string) => Promise<void>;
 }) {
+  const { t, tl } = useI18n();
   const [collapsed, setCollapsed] = useState(false);
   const [composingLine, setComposingLine] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
@@ -367,7 +372,7 @@ function FileDiffCard({
         {collapsed ? <ChevronRight size={14} color={C.muted} /> : <ChevronDown size={14} color={C.muted} />}
         <FileText size={14} color={C.muted} />
         <span style={{ fontSize: 13, fontWeight: 500, color: C.ink }}>{file.path}</span>
-        {sc && <span style={{ fontSize: 12, color: sc }}>{status[0]!.toUpperCase() + status.slice(1)}</span>}
+        {sc && <span style={{ fontSize: 12, color: sc }}>{tl(status[0]!.toUpperCase() + status.slice(1))}</span>}
         <span style={{ marginLeft: 'auto', fontSize: 12, color: C.muted, fontVariantNumeric: 'tabular-nums' }}>
           <span style={{ color: file.additions ? C.green : C.faint }}>+{file.additions}</span>
           {' '}
@@ -383,7 +388,7 @@ function FileDiffCard({
               fontSize: 12, fontWeight: 550, cursor: 'pointer',
             }}
           >
-            <Pencil size={12} /> Edit
+            <Pencil size={12} /> {t('Edit')}
           </button>
         )}
       </div>
@@ -407,7 +412,7 @@ function FileDiffCard({
             background: C.bg, borderTop: `1px solid ${C.lineSoft}`,
           }}>
             <span style={{ fontSize: 12, color: C.faint }}>
-              Saves as a review fix on this submission — the diff below updates to include it.
+              {t('Saves as a review fix on this submission — the diff below updates to include it.')}
             </span>
             {editError && <span style={{ fontSize: 12, color: C.red }}>{editError}</span>}
             <button
@@ -418,7 +423,7 @@ function FileDiffCard({
                 border: `1px solid ${C.line}`, background: C.panel, color: C.ink2, cursor: 'pointer',
               }}
             >
-              Cancel
+              {t('Cancel')}
             </button>
             <button
               onClick={saveEdit}
@@ -429,7 +434,7 @@ function FileDiffCard({
                 color: C.onAccent, cursor: 'pointer', opacity: saving ? 0.6 : 1,
               }}
             >
-              {saving ? 'Saving…' : 'Save review fix'}
+              {saving ? t('Saving…') : t('Save review fix')}
             </button>
           </div>
         </div>
@@ -441,7 +446,7 @@ function FileDiffCard({
             <RenderedPreview panes={previewPanes} />
           ) : (
             <div style={{ padding: 22, textAlign: 'center', color: C.muted, fontSize: 13 }}>
-              Rendered preview is available for text Markdown files.
+              {t('Rendered preview is available for text Markdown files.')}
             </div>
           )
         ) : <div style={{ overflowX: 'auto' }}>
@@ -456,7 +461,7 @@ function FileDiffCard({
               {file.hunks.length === 0 ? (
                 <tr>
                   <td colSpan={4} style={{ padding: 16, textAlign: 'center', color: C.muted, fontSize: 13 }}>
-                    No changes in this file
+                    {t('No changes in this file')}
                   </td>
                 </tr>
               ) : (
@@ -486,6 +491,7 @@ function FileDiffCard({
 }
 
 function RenderedPreview({ panes }: { panes: ReviewPreviewPane[] }) {
+  const { tl } = useI18n();
   return (
     <div style={{
       display: 'grid',
@@ -496,7 +502,7 @@ function RenderedPreview({ panes }: { panes: ReviewPreviewPane[] }) {
       {panes.map((pane, index) => (
         <section
           key={pane.key}
-          aria-label={`${pane.label} rendered Markdown`}
+          aria-label={`${tl(pane.label)} rendered Markdown`}
           style={{
             minWidth: 0,
             borderLeft: index > 0 ? `1px solid ${C.line}` : undefined,
@@ -510,7 +516,7 @@ function RenderedPreview({ panes }: { panes: ReviewPreviewPane[] }) {
             fontSize: 12,
             fontWeight: 600,
           }}>
-            {pane.label}
+            {tl(pane.label)}
           </div>
           <article className="prose" style={{ maxWidth: 'none', padding: '22px 26px 30px' }}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{pane.content}</ReactMarkdown>
@@ -539,23 +545,24 @@ export function DiffView({
   onReply?: (body: string, parentId: string) => void;
   onEditSave?: (path: string, content: string) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [mode, setMode] = useState<'source' | 'rendered'>('source');
   if (!diffs.length) {
-    return <p style={{ color: C.muted, fontSize: 14 }}>No file changes.</p>;
+    return <p style={{ color: C.muted, fontSize: 14 }}>{t('No file changes.')}</p>;
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div
         role="group"
-        aria-label="Review display"
+        aria-label={t('Review display')}
         style={{ alignSelf: 'flex-end', display: 'inline-flex', padding: 3, borderRadius: 8, background: C.rail }}
       >
         <ViewModeButton active={mode === 'source'} onClick={() => setMode('source')}>
-          Source diff
+          {t('Source diff')}
         </ViewModeButton>
         <ViewModeButton active={mode === 'rendered'} onClick={() => setMode('rendered')}>
-          Rendered preview
+          {t('Rendered preview')}
         </ViewModeButton>
       </div>
       {diffs.map((f) => (
