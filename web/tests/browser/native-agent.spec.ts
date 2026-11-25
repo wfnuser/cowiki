@@ -63,6 +63,8 @@ async function desktop(page: Page, options: { approval?: boolean; panelWidth?: n
         const current = sessions.get(id)!;
         const started = await update(id, { status: 'running', threadId: 'thread-1', model: 'gpt-fake', items: [...current.items, { type: 'message', id: `user-${current.seq}`, role: 'user', text: args.text, turnId: null }] });
         setTimeout(() => {
+          // A run stopped before its reply arrived stays stopped, as with a real Agent.
+          if (sessions.get(id)?.status === 'stopped') return;
           void update(id, {
             status: options.approval ? 'waiting' : 'running',
             items: [...started.items,
