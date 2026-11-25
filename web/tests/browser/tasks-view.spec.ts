@@ -15,7 +15,7 @@ test.afterAll(async () => { await server.close(); });
 
 // One open task today, enough finished ones to overflow the window, and one open task far down the page.
 const done = Array.from({ length: 40 }, (_, index) => `- [x] Finished task ${index + 1} ✅ 2026-11-2${index % 4}`).join('\n');
-const TASKS = `---\ntype: Note\ntitle: Plan\n---\n\n# Plan\n\n- [ ] Write the report 📅 2026-11-24\n${done}\n- [ ] Deep bottom task 📅 2026-11-24\n`;
+const TASKS = `---\ntype: Note\ntitle: Plan\n---\n\n# Plan\n\n- [ ] Write the report 📅 2026-11-24\n- TODO [#A] Ship Logseq fix\n  DEADLINE: <2026-11-24 Tue>\n${done}\n- [ ] Deep bottom task 📅 2026-11-24\n`;
 
 async function desktop(page: Page) {
   const space = { name: 'My Space', slug: 'personal', id: 'personal', visibility: 'private', role: 'owner', localPath: '/Users/me/cowiki/personal' };
@@ -156,4 +156,26 @@ test('board cards can return from Doing to To do and task text jumps to its line
   // Clicking a task near the bottom of a long page opens that page scrolled to that line.
   await todoList.getByRole('button', { name: 'Deep bottom task', exact: true }).click();
   await expect(page.locator('article').getByText('Deep bottom task')).toBeInViewport();
+});
+
+test('Logseq tasks stay in Done after completing on the board and show high-priority mark', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  await desktop(page);
+  await page.goto(origin);
+  await page.getByRole('button', { name: /^Tasks\s*\d*$/ }).first().click();
+  await page.getByRole('button', { name: 'Board', exact: true }).click();
+
+  const todoList = page.getByRole('list', { name: 'To do' });
+  const doneList = page.getByRole('list', { name: 'Done' });
+  const card = todoList.getByRole('listitem').filter({ hasText: 'Ship Logseq fix' });
+  await expect(card).toBeVisible();
+  // High-priority indicator matches list rows.
+  await expect(card.locator('[title="high priority"]')).toHaveText('!');
+
+  // Completing a Logseq task keeps it in Done on Today board AND This week board.
+  await card.getByRole('checkbox', { name: 'Complete Ship Logseq fix' }).click();
+  await expect(doneList.getByText('Ship Logseq fix')).toBeVisible();
+
+  await page.getByRole('tab', { name: /^This week/ }).click();
+  await expect(page.getByRole('list', { name: 'Done' }).getByText('Ship Logseq fix')).toBeVisible();
 });

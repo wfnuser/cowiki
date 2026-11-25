@@ -87,7 +87,9 @@ test('toggling stamps and removes the completion date', () => {
   const done = toggledTaskLine('- [ ] Pay rent 📅 2026-11-01', '2026-10-31');
   assert.equal(done, '- [x] Pay rent 📅 2026-11-01 ✅ 2026-10-31');
   assert.equal(toggledTaskLine(done, '2026-11-02'), '- [ ] Pay rent 📅 2026-11-01');
-  assert.equal(toggledTaskLine('- TODO Call', '2026-10-31'), '- DONE Call');
+  const logseqDone = toggledTaskLine('- TODO Call', '2026-10-31');
+  assert.equal(logseqDone, '- DONE Call ✅ 2026-10-31');
+  assert.equal(toggledTaskLine(logseqDone, '2026-11-02'), '- TODO Call');
   assert.equal(toggledTaskLine('- DONE Call', '2026-10-31'), '- TODO Call');
   assert.throws(() => toggledTaskLine('just text', '2026-10-31'));
 });
@@ -145,7 +147,9 @@ test('board moves set the status on the task line', () => {
   assert.equal(taskLineWithStatus('- [x] Draft ✅ 2026-10-30', 'todo', '2026-11-01'), '- [ ] Draft');
   assert.equal(taskLineWithStatus('- [-] ~~Dropped~~', 'doing', '2026-11-01'), '- [/] Dropped');
   assert.equal(taskLineWithStatus('  - TODO Call Ana', 'doing', '2026-11-01'), '  - DOING Call Ana');
-  assert.equal(taskLineWithStatus('- DOING Call Ana', 'done', '2026-11-01'), '- DONE Call Ana');
+  assert.equal(taskLineWithStatus('- DOING Call Ana', 'done', '2026-11-01'), '- DONE Call Ana ✅ 2026-11-01');
+  assert.equal(taskLineWithStatus('- DONE Call Ana ✅ 2026-10-30', 'done', '2026-11-01'), '- DONE Call Ana ✅ 2026-10-30');
+  assert.equal(taskLineWithStatus('- DONE Call Ana ✅ 2026-11-01', 'todo', '2026-11-02'), '- TODO Call Ana');
   assert.throws(() => taskLineWithStatus('plain text', 'done', '2026-11-01'), /no longer a task/);
   const page = '# Plan\n\n- [ ] One\n- [ ] Two\n';
   const [, two] = extractTasks('Plan.md', page);
@@ -198,4 +202,21 @@ test('any list tab reads as a board: open tasks by status, Done is what finished
   const someday = tabBoard(tasks, groups, 'someday', today);
   assert.deepEqual(text(someday.todo), ['Someday']);
   assert.deepEqual(text(someday.done), ['Finished today']);
+});
+
+test('Logseq tasks moved to Done stay visible on week and tab boards, with journal-day fallback', () => {
+  const today = '2026-11-24';
+  const movedLine = taskLineWithStatus('- TODO Call Ana 📅 2026-11-24', 'done', today);
+  const tasks = [
+    ...extractTasks('Plan.md', [movedLine, '- DONE Undated external Logseq task'].join('\n')),
+    ...extractTasks('journal/2026-11-24.md', '- DONE External journal Logseq task', today),
+  ];
+  const groups = groupTasks(tasks, today);
+  const text = (items: { text: string }[]) => items.map((task) => task.text);
+
+  const week = weekBoard(tasks, '2026-11-23', '2026-11-29');
+  assert.deepEqual(text(week.done), ['Call Ana', 'External journal Logseq task']);
+
+  const todayBoard = tabBoard(tasks, groups, 'today', today);
+  assert.deepEqual(text(todayBoard.done), ['External journal Logseq task', 'Call Ana']);
 });

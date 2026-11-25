@@ -192,22 +192,29 @@ export function extractTasks(path: string, content: string, journalDate: string 
 
 /** Return the line with its completion state flipped. */
 export function toggledTaskLine(line: string, today: string): string {
+  const doneStamp = new RegExp(`\\s*✅\\uFE0F?\\s*${DATE}`, 'u');
   const checkbox = CHECKBOX.exec(line);
   if (checkbox) {
     // Done and cancelled tasks both show as checked, so either one reopens.
     const closed = checkbox[2] === 'x' || checkbox[2] === 'X' || checkbox[2] === '-';
     if (closed) {
-      const reopened = checkbox[3].replace(new RegExp(`\\s*✅\\uFE0F?\\s*${DATE}`, 'u'), '');
+      const reopened = checkbox[3].replace(doneStamp, '');
       return `${checkbox[1]}[ ] ${reopened}`.replace(/\s+$/, '');
     }
     const body = checkbox[3].replace(/\s+$/, '');
-    const stamp = new RegExp(`✅\\uFE0F?\\s*${DATE}`, 'u').test(body) ? '' : ` ✅ ${today}`;
+    const stamp = doneStamp.test(body) ? '' : ` ✅ ${today}`;
     return `${checkbox[1]}[x] ${body}${stamp}`;
   }
   const logseq = LOGSEQ.exec(line);
   if (logseq) {
     const closed = logseq[2] === 'DONE' || logseq[2].startsWith('CANCEL');
-    return `${logseq[1]}${closed ? 'TODO' : 'DONE'} ${logseq[3]}`;
+    if (closed) {
+      const reopened = logseq[3].replace(doneStamp, '');
+      return `${logseq[1]}TODO ${reopened}`.replace(/\s+$/, '');
+    }
+    const body = logseq[3].replace(/\s+$/, '');
+    const stamp = doneStamp.test(body) ? '' : ` ✅ ${today}`;
+    return `${logseq[1]}DONE ${body}${stamp}`;
   }
   throw new Error('This line is no longer a task.');
 }
@@ -239,8 +246,8 @@ function editTaskLine(content: string, task: Pick<TaskItem, 'line' | 'raw'>, edi
 export type BoardStatus = 'todo' | 'doing' | 'done';
 
 /**
- * The line with its status set: Obsidian Tasks' `[/]` for in progress and a
- * ✅ date when done; Logseq lines keep using TODO / DOING / DONE.
+ * The line with its status set: Obsidian Tasks' `[/]` for in progress, Logseq's
+ * TODO / DOING / DONE keywords, and a `✅ YYYY-MM-DD` completion stamp when done.
  */
 export function taskLineWithStatus(line: string, status: BoardStatus, today: string): string {
   const doneStamp = new RegExp(`\\s*✅\\uFE0F?\\s*${DATE}`, 'u');
@@ -254,12 +261,24 @@ export function taskLineWithStatus(line: string, status: BoardStatus, today: str
     return `${checkbox[1]}[${status === 'doing' ? '/' : ' '}] ${open}`.replace(/\s+$/, '');
   }
   const logseq = LOGSEQ.exec(line);
-  if (logseq) return `${logseq[1]}${status === 'todo' ? 'TODO' : status === 'doing' ? 'DOING' : 'DONE'} ${logseq[3]}`;
+  if (logseq) {
+    const body = logseq[3].replace(/\s+$/, '');
+    if (status === 'done') {
+      return `${logseq[1]}DONE ${body}${doneStamp.test(body) ? '' : ` ✅ ${today}`}`;
+    }
+    const open = body.replace(doneStamp, '').replace(/^~~(.*)~~$/, '$1');
+    return `${logseq[1]}${status === 'doing' ? 'DOING' : 'TODO'} ${open}`.replace(/\s+$/, '');
+  }
   throw new Error('This line is no longer a task.');
 }
 
 export function applyTaskStatus(content: string, task: Pick<TaskItem, 'line' | 'raw'>, status: BoardStatus, today: string): string {
   return editTaskLine(content, task, (line) => taskLineWithStatus(line, status, today));
+}
+
+/** Completion day for a finished task: explicit done date, else a Logseq journal task's day. */
+export function effectiveDoneDate(task: Pick<TaskItem, 'doneDate' | 'syntax' | 'journalDate'>): string | null {
+  return task.doneDate ?? (task.syntax === 'logseq' ? task.journalDate : null);
 }
 
 export interface WeekBoard {
@@ -287,8 +306,11 @@ export function weekBoard(tasks: TaskItem[], first: string, last: string): WeekB
     todo: tasks.filter((task) => task.status === 'todo' && due(task)).sort(byDay),
     doing: tasks.filter((task) => task.status === 'doing' && (taskDay(task) === null || due(task))).sort(byDay),
     done: tasks
-      .filter((task) => task.status === 'done' && task.doneDate !== null && task.doneDate >= first && task.doneDate <= last)
-      .sort((left, right) => (left.doneDate ?? '').localeCompare(right.doneDate ?? '')),
+      .filter((task) => {
+        const doneDay = effectiveDoneDate(task);
+        return task.status === 'done' && doneDay !== null && doneDay >= first && doneDay <= last;
+      })
+      .sort((left, right) => (effectiveDoneDate(left) ?? '').localeCompare(effectiveDoneDate(right) ?? '')),
   };
 }
 
@@ -410,7 +432,9 @@ export function tabBoard(
   return {
     todo: open.filter((task) => task.status !== 'doing'),
     doing: open.filter((task) => task.status === 'doing'),
-    done: tasks.filter((task) => task.status === 'done' && task.doneDate === today && inTab(task)).sort(compareTasks),
+    done: tasks
+      .filter((task) => task.status === 'done' && effectiveDoneDate(task) === today && inTab(task))
+      .sort(compareTasks),
   };
 }
 
