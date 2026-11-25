@@ -77,6 +77,13 @@ Notifications, Review details, Cloud pages) is built the same way, with
   appears only when the Draft has changes.
 - Views are left-aligned in the content area (`36px 56px` padding) with a
   `min(860px, 100%)` column; a wide board may use `min(1040px, 100%)`.
+- **Tasks** tabs (Today, This week, Upcoming, No date) each read as a list
+  or a board (user decision 2026-11-25), chosen by a two-icon switch in the
+  title row and remembered per tab on the device; This week starts as a
+  board, the others as lists, and Done is only a list. A board is To do /
+  Doing / Done; its Done is what you finished today (This week: this week).
+  A list of This week is grouped the same way. Saved custom views belong in
+  query blocks in a page, not in this view.
 - **Flashcards** follow Anki (user decision 2026-11-24): the view is a deck
   tree with **New** (blue) and **Due** (green) columns, zeros faint; a deck
   opens its own screen with the same counts, **Study now** and the notes

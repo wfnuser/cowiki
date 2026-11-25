@@ -387,6 +387,33 @@ export function groupTasks(tasks: TaskItem[], today: string, doneLimit = 50): Ta
   return groups;
 }
 
+/** The Tasks view's tabs; each can be read as a list or a board. */
+export type TaskTab = 'today' | 'week' | 'upcoming' | 'someday' | 'done';
+
+/**
+ * A list tab as board columns: the tab's open tasks split into To do and
+ * Doing, and Done for what was finished today among that tab's tasks
+ * (This week uses `weekBoard`, whose Done is the whole week).
+ */
+export function tabBoard(
+  tasks: TaskItem[],
+  groups: TaskGroups,
+  tab: 'today' | 'upcoming' | 'someday',
+  today: string,
+): Pick<WeekBoard, 'todo' | 'doing' | 'done'> {
+  const open = tab === 'today' ? [...groups.overdue, ...groups.today] : groups[tab];
+  const inTab = (task: TaskItem) => {
+    if (tab === 'today') return true;
+    const day = taskDay(task);
+    return tab === 'upcoming' ? day !== null && day > today : day === null;
+  };
+  return {
+    todo: open.filter((task) => task.status !== 'doing'),
+    doing: open.filter((task) => task.status === 'doing'),
+    done: tasks.filter((task) => task.status === 'done' && task.doneDate === today && inTab(task)).sort(compareTasks),
+  };
+}
+
 /** Stable identity of a task across reloads (path + original line text). */
 export function taskKey(task: Pick<TaskItem, 'path' | 'line' | 'raw'>): string {
   return `${task.path}\u0000${task.line}\u0000${task.raw}`;

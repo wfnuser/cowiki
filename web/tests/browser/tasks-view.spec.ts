@@ -68,3 +68,34 @@ test('a task checkbox sits centred on the first line of its text', async ({ page
   });
   expect(Math.abs(offset)).toBeLessThanOrEqual(0.5);
 });
+
+test('every tab switches between list and board, and remembers it', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  await desktop(page);
+  await page.goto(origin);
+  await page.getByRole('button', { name: /^Tasks\s*\d*$/ }).first().click();
+  await expect(page.getByText('Write the report')).toBeVisible();
+
+  // Today starts as a list; as a board its open task is in To do.
+  await expect(page.getByRole('list', { name: 'To do' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Board', exact: true }).click();
+  await expect(page.getByRole('list', { name: 'To do' }).getByText('Write the report')).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Doing' })).toBeVisible();
+
+  // This week starts as a board and reads as a list by status too.
+  await page.getByRole('tab', { name: /^This week/ }).click();
+  await expect(page.getByRole('list', { name: 'Doing' })).toBeVisible();
+  await page.getByRole('button', { name: 'List', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /^To do/ })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Doing' })).toHaveCount(0);
+
+  // Done is only a list.
+  await page.getByRole('tab', { name: /^Done/ }).click();
+  await expect(page.getByRole('group', { name: 'Layout' })).toHaveCount(0);
+
+  // The choices survive a reload.
+  await page.reload();
+  await page.getByRole('button', { name: /^Tasks\s*\d*$/ }).first().click();
+  await expect(page.getByRole('list', { name: 'To do' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Board', exact: true })).toHaveAttribute('aria-pressed', 'true');
+});
