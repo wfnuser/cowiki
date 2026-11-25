@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowUpRight, Check, ChevronLeft, ChevronRight, CirclePause, FileText, Layers, LoaderCircle, Play, RefreshCw, RotateCcw, SkipForward, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowUpRight, ChevronLeft, ChevronRight, CirclePause, FileText, LoaderCircle, RefreshCw, RotateCcw, SkipForward, SlidersHorizontal, X } from 'lucide-react';
 import { Popover as PopoverPrimitive } from 'radix-ui';
 
 import { withObsidianReader } from '@/components/ObsidianReader';
@@ -36,10 +36,10 @@ import {
 
 const MARKDOWN = withObsidianReader(undefined);
 // Logseq's answers and shortcuts (f / t / r), with 1-3 as well.
-const SCORES: Array<{ score: Score; label: string; keys: string[]; dot: string; tone: 'red' | 'amber' | 'green' }> = [
-  { score: 1, label: 'Forgotten', keys: ['f', '1'], dot: 'bg-red', tone: 'red' },
-  { score: 3, label: 'Took a while', keys: ['t', '2'], dot: 'bg-amber', tone: 'amber' },
-  { score: 5, label: 'Remembered', keys: ['r', '3'], dot: 'bg-green', tone: 'green' },
+const SCORES: Array<{ score: Score; label: string; keys: string[] }> = [
+  { score: 1, label: 'Forgotten', keys: ['f', '1'] },
+  { score: 3, label: 'Took a while', keys: ['t', '2'] },
+  { score: 5, label: 'Remembered', keys: ['r', '3'] },
 ];
 
 interface FlashcardsViewProps {
@@ -56,7 +56,14 @@ function CardText({ text, className }: { text: string; className: string }) {
 }
 
 export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewProps) {
-  const { t, tl } = useI18n();
+  const { t, tl, locale } = useI18n();
+  /** The next interval as a person says it: "Tomorrow", "4d" → "4 天". */
+  const intervalText = (label: string) => {
+    const match = /^(\d+(?:\.\d+)?)(d|mo|y)$/.exec(label);
+    if (!match) return tl(label);
+    const key = match[2] === 'd' ? '{count}d' : match[2] === 'mo' ? '{count}mo' : '{count}y';
+    return t(key, { count: match[1] });
+  };
   const [cards, setCards] = useState<Flashcard[]>([]);
   const [store, setStore] = useState<ReviewStore>(emptyReviewStore);
   const [loading, setLoading] = useState(true);
@@ -114,12 +121,6 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
   const stats = useMemo(() => deckStats(cards, store, now), [cards, store, now]);
   const queue = useMemo(() => buildQueue(cards, store, now, today), [cards, store, now, today]);
   const tree = useMemo(() => deckTree(cards), [cards]);
-  /** Today's queue of some cards, split like Anki's New and Due columns. */
-  const queueOf = (some: Flashcard[]) => {
-    const list = buildQueue(some, store, now, today);
-    const fresh = list.filter((card) => isNew(store, card)).length;
-    return { list, fresh, due: list.length - fresh };
-  };
   const study = (list: Flashcard[], deck: string | null) => {
     setSession(list);
     setSessionSize(list.length);
@@ -211,16 +212,12 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
     const left = session?.length ?? 0;
     const progress = sessionSize > 0 ? (sessionSize - left) / sessionSize : 0;
     const tool = 'inline-flex size-8 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4';
-    const key = 'rounded border border-border px-1.5 text-caption font-normal leading-4 text-text-faint';
     return (
       <section className="mx-auto flex min-h-[calc(100vh-150px)] flex-col justify-center pb-8" style={{ width: 'min(640px, 100%)' }}>
         <div className="mb-2.5 flex h-8 items-center justify-between gap-3">
-          <span className="flex min-w-0 items-center gap-2 text-small text-text-secondary">
-            <span className="truncate font-medium">{sessionDeck ? sessionDeck.split('/').join(' / ') : t('All decks')}</span>
-            <span className={cn('inline-flex shrink-0 items-center gap-1.5 text-meta', fresh ? 'text-blue' : 'text-green')}>
-              <span aria-hidden className={cn('size-1.5 rounded-full', fresh ? 'bg-blue' : 'bg-green')} />
-              {fresh ? t('New') : t('Review {count}', { count: schedule.repeats + 1 })}
-            </span>
+          <span className="flex min-w-0 items-baseline gap-2.5 text-small">
+            <span className="truncate font-medium text-text-secondary">{sessionDeck ? sessionDeck.split('/').join(' / ') : t('All decks')}</span>
+            <span className="shrink-0 text-meta text-text-tertiary">{fresh ? t('New') : t('Review {count}', { count: schedule.repeats + 1 })}</span>
           </span>
           <div className="flex shrink-0 items-center gap-0.5">
             <span className="mr-2 text-meta tabular-nums text-text-tertiary">{t('{count} left', { count: left })}</span>
@@ -232,51 +229,45 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
             <button type="button" onClick={endSession} className={tool} aria-label={t('End')} title={t('End session')}><X /></button>
           </div>
         </div>
-        <div className="mb-6 h-1 overflow-hidden rounded-full bg-border-soft" role="progressbar" aria-label={t('Session progress')} aria-valuemin={0} aria-valuemax={sessionSize} aria-valuenow={sessionSize - left}>
-          <div className="h-full rounded-full bg-accent transition-[width] duration-300" style={{ width: `${progress * 100}%` }} />
+        <div className="study-progress" role="progressbar" aria-label={t('Session progress')} aria-valuemin={0} aria-valuemax={sessionSize} aria-valuenow={sessionSize - left}>
+          <div style={{ width: `${progress * 100}%` }} />
         </div>
         {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
-        <div className={cn('study-stage', left > 1 && 'has-stack')}>
-          <div className={cn('study-card', revealed && current.back && 'is-revealed')}>
-            <div className="study-front">
-              {changedSinceReview(store, current) && (
-                <p className="mb-4 flex items-center justify-center gap-1.5 text-meta text-amber"><span className="size-1.5 rounded-full bg-current" />{t('The answer changed since your last review.')}</p>
-              )}
-              <CardText className="study-face" text={renderCloze(current.front, revealed)} />
-            </div>
-            {revealed && current.back && (
-              <div className="study-answer-pane study-reveal">
-                <CardText className="study-answer" text={renderCloze(current.back, true)} />
-              </div>
+        <div className={cn('study-card', revealed && current.back && 'is-revealed')}>
+          <div className="study-front">
+            {changedSinceReview(store, current) && (
+              <p className="mb-4 text-meta text-text-tertiary">{t('The answer changed since your last review.')}</p>
             )}
+            <CardText className="study-face" text={renderCloze(current.front, revealed)} />
           </div>
+          {revealed && current.back && (
+            <div className="study-answer-pane study-reveal">
+              <CardText className="study-answer" text={renderCloze(current.back, true)} />
+            </div>
+          )}
         </div>
-        <div className="mt-5">
+        <div className="study-actions">
           {!revealed ? (
-            <button type="button" onClick={() => setRevealed(true)} className="study-show-btn">
-              {current.cloze && !current.back ? t('Show clozes') : t('Show answer')}
-              <kbd className="study-show-kbd">Space</kbd>
+            <button type="button" onClick={() => setRevealed(true)} className="study-action">
+              <span className="study-action-label">{current.cloze && !current.back ? t('Show clozes') : t('Show answer')}</span>
+              <kbd className="study-key">{locale === 'en' ? 'Space' : t('Space bar')}</kbd>
             </button>
           ) : (
-            <div className="study-reveal grid grid-cols-3 gap-3">
+            <div className="study-reveal study-ratings">
               {SCORES.map((item) => {
                 const label = tl(item.label);
                 return (
                   <button
                     key={item.score}
                     type="button"
-                    data-tone={item.tone}
                     onClick={() => rate(item.score)}
                     title={`${label} (${item.keys[0].toUpperCase()})`}
-                    className="study-rate-btn"
+                    className="study-action is-rating"
                   >
-                    <span className="flex items-center gap-2 text-small font-medium text-text">
-                      <span aria-hidden className={cn('size-2 rounded-full', item.dot)} />
-                      {label}
-                    </span>
-                    <span className="flex items-center gap-2 text-meta tabular-nums text-text-tertiary">
-                      <span>{tl(intervals[item.score])}</span>
-                      <kbd className={key}>{item.keys[0].toUpperCase()}</kbd>
+                    <span className="study-action-label">{label}</span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="study-interval">{intervalText(intervals[item.score])}</span>
+                      <kbd className="study-key">{item.keys[0].toUpperCase()}</kbd>
                     </span>
                   </button>
                 );
@@ -304,7 +295,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
               <NumberField label={t('New cards per day')} value={store.settings.newPerDay} onChange={(value) => updateSetting('newPerDay', String(value))} />
             </span>
             <span className="flex items-center justify-between gap-3">
-              {t('Reviews')}
+              {t('Card reviews')}
               <NumberField label={t('Reviews per day')} value={store.settings.reviewsPerDay} step={10} onChange={(value) => updateSetting('reviewsPerDay', String(value))} />
             </span>
           </div>
@@ -317,23 +308,24 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
       <RefreshCw className="size-3.5" />
     </ViewIconButton>
   );
-  const studyButton = (list: Flashcard[], deck: string | null, label: string) => (
-    <button
-      type="button"
-      onClick={() => study(list, deck)}
-      className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-small font-medium text-on-accent transition-colors hover:bg-accent-hover"
-    >
-      <Play className="size-3.5 fill-current" aria-hidden />
-      {label}
-    </button>
+  /** Readwise's one line: how many cards today, and one word to start. */
+  const todayLine = (list: Flashcard[], deck: string | null) => (
+    <p className="flashcards-today">
+      {list.length > 0 ? (
+        <>
+          <span>{t(list.length === 1 ? '{count} card to review today.' : '{count} cards to review today.', { count: list.length })}</span>
+          <button type="button" className="flashcards-start" onClick={() => study(list, deck)}>{t('Start')}</button>
+        </>
+      ) : (
+        <span className="text-text-tertiary">{t('All done for today.')}</span>
+      )}
+    </p>
   );
-  const done = <p className="m-0 flex items-center gap-1.5 text-small text-text-tertiary"><Check className="size-4 text-green" aria-hidden /> {t('All done for today.')}</p>;
 
   // Anki's deck screen: what is due in one deck, and where its cards live.
   const deck = openDeck ? findDeck(tree, openDeck) : null;
   if (deck) {
-    const queue = queueOf(deck.cards);
-    const stats = deckStats(deck.cards, store, now);
+    const list = buildQueue(deck.cards, store, now, today);
     const byPage = new Map<string, number>();
     for (const item of deck.cards) byPage.set(item.path, (byPage.get(item.path) ?? 0) + 1);
     return (
@@ -344,14 +336,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
           actions={<>{limits}{refreshButton}</>}
         />
         {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
-        <div className="deck-summary">
-          <dl className="deck-metrics">
-            <div className="deck-metric"><dt>{t('New')}</dt><dd className={queue.fresh ? 'text-blue' : 'text-text-faint'}>{queue.fresh}</dd></div>
-            <div className="deck-metric"><dt>{t('Due')}</dt><dd className={queue.due ? 'text-green' : 'text-text-faint'}>{queue.due}</dd></div>
-            <div className="deck-metric"><dt>{t('Cards')}</dt><dd className="text-text-secondary">{stats.total}</dd></div>
-          </dl>
-          <div>{queue.list.length ? studyButton(queue.list, deck.path, t('Study now')) : done}</div>
-        </div>
+        {todayLine(list, deck.path)}
         <ViewSectionHeading meta={byPage.size}>{t('Notes')}</ViewSectionHeading>
         <ul className="view-list">
           {[...byPage.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([path, count]) => {
@@ -378,46 +363,38 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
   }
 
   const hasSubdecks = tree.some((node) => node.children.length > 0);
-  const allFresh = queue.filter((card) => isNew(store, card)).length;
-  const allDue = queue.length - allFresh;
   const rows = (nodes: DeckNode[], depth: number): React.ReactNode => nodes.map((node) => {
-    const queue = queueOf(node.cards);
+    const list = buildQueue(node.cards, store, now, today);
     const open = !collapsed.has(node.path);
     return (
       <li key={node.path}>
-        <div className="deck-row" style={{ paddingLeft: (hasSubdecks ? 4 : 4) + depth * 18 }}>
-          {hasSubdecks && (node.children.length > 0 ? (
-            <button
-              type="button"
-              aria-label={open ? `Collapse ${node.name}` : `Expand ${node.name}`}
-              onClick={() => setCollapsed((current) => {
-                const next = new Set(current);
-                if (open) next.add(node.path); else next.delete(node.path);
-                return next;
-              })}
-              className="deck-row-toggle"
-            >
-              <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} aria-hidden />
-            </button>
-          ) : <span className="deck-row-toggle" aria-hidden />)}
-          <button type="button" className="deck-row-main" onClick={() => setOpenDeck(node.path)}>
-            <Layers className="mr-2.5 size-3.5 shrink-0 text-text-faint" aria-hidden />
-            <span className="min-w-0 flex-1 truncate text-text">{node.name}</span>
-            <span className={cn('deck-count', queue.fresh ? 'text-blue' : 'text-text-faint')}>{queue.fresh}</span>
-            <span className={cn('deck-count', queue.due ? 'text-green' : 'text-text-faint')}>{queue.due}</span>
+        <div className={cn('deck-line', list.length > 0 && 'has-due')}>
+          {hasSubdecks && (
+            <span className="deck-toggle-slot" style={{ marginLeft: depth * 18 }}>
+              {node.children.length > 0 && (
+                <button
+                  type="button"
+                  aria-label={t(open ? 'Collapse {name}' : 'Expand {name}', { name: node.name })}
+                  onClick={() => setCollapsed((current) => {
+                    const next = new Set(current);
+                    if (open) next.add(node.path); else next.delete(node.path);
+                    return next;
+                  })}
+                  className="deck-toggle"
+                >
+                  <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} aria-hidden />
+                </button>
+              )}
+            </span>
+          )}
+          <button type="button" className="deck-open" onClick={() => setOpenDeck(node.path)}>
+            <span className="deck-name">{node.name}</span>
+            <span className="deck-due">{list.length > 0 ? t('{count} to review', { count: list.length }) : t('Done')}</span>
           </button>
-          {queue.list.length > 0 ? (
-            <button
-              type="button"
-              className="deck-row-study"
-              aria-label={`Study ${node.name}`}
-              title={`Study ${node.name}`}
-              onClick={() => study(queue.list, node.path)}
-            >
-              <Play className="size-3 fill-current" aria-hidden />
+          {list.length > 0 && (
+            <button type="button" className="deck-start" aria-label={t('Study {name}', { name: node.name })} onClick={() => study(list, node.path)}>
+              {t('Start')}
             </button>
-          ) : (
-            <span className="inline-block size-7 shrink-0" aria-hidden />
           )}
         </div>
         {open && node.children.length > 0 && <ul className="m-0 list-none p-0">{rows(node.children, depth + 1)}</ul>}
@@ -447,30 +424,16 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
         </ViewEmpty>
       ) : (
         <>
-          <div className="deck-summary">
-            <dl className="deck-metrics">
-              <div className="deck-metric"><dt>{t('New')}</dt><dd className={allFresh ? 'text-blue' : 'text-text-faint'}>{allFresh}</dd></div>
-              <div className="deck-metric"><dt>{t('Due')}</dt><dd className={allDue ? 'text-green' : 'text-text-faint'}>{allDue}</dd></div>
-              <div className="deck-metric"><dt>{t('Total')}</dt><dd className="text-text-secondary">{stats.total}</dd></div>
-            </dl>
-            <div>
-              {queue.length > 0 ? studyButton(queue, null, t('Study all · {count}', { count: queue.length })) : done}
-            </div>
-          </div>
-          <div className={cn('deck-head', !hasSubdecks && 'is-flat')} aria-hidden>
-            <span className="flex-1">{t('Deck')}</span>
-            <span className="deck-count">{t('New')}</span>
-            <span className="deck-count">{t('Due')}</span>
-          </div>
-          <ul className="m-0 list-none border-y border-border-soft p-0" aria-label={t('Decks')}>{rows(tree, 0)}</ul>
+          {todayLine(queue, null)}
+          <ul className="view-list" aria-label={t('Decks')}>{rows(tree, 0)}</ul>
           {(stats.suspended > 0 || reviewed > 0 || stats.changed > 0) && (
-            <div className="mt-3 flex flex-wrap items-center justify-end gap-2 px-1 text-small text-text-tertiary">
-              <span>
-                {stats.suspended > 0 && <><span className="tabular-nums">{stats.suspended}</span> {t('suspended')}</>}
-                {reviewed > 0 && <>{stats.suspended > 0 && ' · '}<span className="tabular-nums">{reviewed}</span> {t('reviewed now')}</>}
-                {stats.changed > 0 && <span className="text-amber">{(stats.suspended > 0 || reviewed > 0) && ' · '}<span className="tabular-nums">{stats.changed}</span> {t('changed since review')}</span>}
-              </span>
-            </div>
+            <p className="mt-4 text-meta text-text-tertiary">
+              {[
+                stats.suspended > 0 && `${stats.suspended} ${t('suspended')}`,
+                reviewed > 0 && `${reviewed} ${t('reviewed now')}`,
+                stats.changed > 0 && `${stats.changed} ${t('changed since review')}`,
+              ].filter(Boolean).join(' · ')}
+            </p>
           )}
         </>
       )}

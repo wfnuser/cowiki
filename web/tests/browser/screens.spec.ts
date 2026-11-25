@@ -165,7 +165,7 @@ for (const scheme of ['light', 'dark'] as const) {
     await nav(page, 'Tasks'); await shot('05-tasks');
     await nav(page, 'Flashcards'); await shot('06-flashcards');
     await page.getByRole('button', { name: /^Rust/ }).click(); await shot('07-deck');
-    await page.getByRole('button', { name: 'Study now' }).click(); await shot('08-study');
+    await page.getByRole('button', { name: 'Start', exact: true }).click(); await shot('08-study');
     await page.keyboard.press('Space'); await shot('09-study-answer');
     await nav(page, 'Reviews'); await shot('10-reviews');
     await page.getByRole('button', { name: /Current Draft/ }).click(); await shot('11-review-detail');

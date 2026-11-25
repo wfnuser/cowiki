@@ -67,7 +67,7 @@ Notifications, Review details, Cloud pages) is built the same way, with
   "lists looked unfinished next to the rest"). A row is one line: an icon,
   the name, an optional detail after it in tertiary (a folder, an author, a
   time), then at most one or two quiet values on the right (`5 files +31
-  −0`; zeros faint). A table with columns (the deck list) keeps hairlines.
+  −0`; zeros faint).
   Never show raw ids or hashes; times read the way a person says them
   ("4:05 PM", "Yesterday, 4:05 PM"). **Empty and loading** states are one
   centered sentence (`ViewEmpty`).
@@ -85,26 +85,30 @@ Notifications, Review details, Cloud pages) is built the same way, with
   Doing / Done; its Done is what you finished today (This week: this week).
   A list of This week is grouped the same way. Saved custom views belong in
   query blocks in a page, not in this view.
-- **Flashcards** follow Anki (user decision 2026-11-24): a hairline summary
-  band at the top holds **New** (blue), **Due** (green), and **Total** counts
-  next to the primary **Study all** CTA (or *All done for today.* when caught
-  up — never a disabled button), above a deck tree with **New** and **Due**
-  columns and a hover-revealed quick-study action on each deck. Opening a
-  deck shows the same hairline summary band with **Study now** and the notes
-  its cards live in (folder prefix muted). Decks come from tags: the card's
-  own tags besides `#card` (`#Japanese/N2` is a sub-deck), else the page's
-  `tags`, else its folder, else *Unsorted*.
-- **Studying** is a centred focus column (`min(640px, 100%)`): the deck and
-  *New*/*Review n* dot on the left, "n left" and quiet icon tools (open note,
-  skip, suspend, reset, end) on the right, an accent progress track, then one
-  tactile paper card (`.study-card`: 12px radius, `--shadow-card`, with a
-  subtle stacked-card edge underneath while more cards remain). The question
-  is content (serif 22px, centred); revealing opens a softly tinted lower
-  answer pane separated by a hairline without moving the frame (single-bullet
-  answers centre cleanly without a lone dot). Below the card sits one warm-ink
-  *Show answer* button, replaced on reveal by three balanced semantic rating
-  buttons (red, amber, green hover wash, dot, label, next interval and inline
-  key hint).
+- **Flashcards** read like Readwise (user decision 2026-11-25, replacing
+  the Anki-style summary band): under the title, one sentence says how many
+  cards are due today (*3 cards to review today.*) followed by one accent
+  word, **Start**; when nothing is due it says *All done for today.* in
+  tertiary, never a disabled button. Below are the decks as plain view rows
+  (a chevron for sub-decks, the name, then "n to review" or a faint *Done*);
+  no column headers and no New/Due split. Clicking a row opens the deck, which
+  repeats the same sentence and lists the notes its cards live in (folder
+  prefix muted). Hovering a deck with cards due swaps its count for **Start**
+  in the same spot, so no gutter is reserved for it. The accent appears only
+  on **Start**: no blue for new cards, no green for due ones (user: "blue and
+  orange together is a bit much"). Decks come from tags: the card's own tags
+  besides `#card` (`#Japanese/N2` is a sub-deck), else the page's `tags`,
+  else its folder, else *Unsorted*.
+- **Studying** is a centred focus column (`min(640px, 100%)`) with no colour:
+  the deck and *New*/*Review n* in plain text on the left, "n left" and quiet
+  icon tools (open note, skip, suspend, reset, end) on the right, a 2px
+  neutral progress line, then one paper card (`.study-card`: 12px radius,
+  `--shadow-card`). The question is content (serif 22px, centred); revealing
+  adds a lower answer pane under a hairline without moving the frame
+  (single-bullet answers centre cleanly without a lone dot). Below the card
+  sit text buttons only: *Show answer* with its key, then on reveal three
+  equal answers (label, next interval in the reader's language, key hint),
+  with a hover fill and no red/amber/green.
 - **Scrolling areas keep room for the scrollbar** (`.scroll-pane`), so a
   list growing past the window never narrows the column.
 

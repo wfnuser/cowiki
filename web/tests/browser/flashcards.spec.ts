@@ -49,20 +49,22 @@ async function setup(page: Page, body: string, more: Array<[string, string]> = [
 }
 
 
-test('decks list what is new and due; a deck studies only its cards', async ({ page }) => {
+test('one line says what is due today; a deck studies only its cards', async ({ page }) => {
   await setup(page, '# Doc\n');
   await page.goto(origin);
   await page.getByRole('button', { name: 'Flashcards', exact: true }).click();
   const decks = page.getByRole('list', { name: 'Decks' });
-  await expect(decks.locator('.deck-row-main')).toHaveText(['Biology20', 'Japanese30', 'N220', 'N510', 'Unsorted10']);
-  await expect(page.getByText('Nothing to review')).toHaveCount(0);
+  await expect(page.getByText('6 cards to review today.')).toBeVisible();
+  await expect(decks.locator('.deck-open')).toHaveText(['Biology2 to review', 'Japanese3 to review', 'N22 to review', 'N51 to review', 'Unsorted1 to review']);
   await page.getByRole('button', { name: 'Collapse Japanese' }).click();
-  await expect(decks.locator('.deck-row-main')).toHaveText(['Biology20', 'Japanese30', 'Unsorted10']);
+  await expect(decks.locator('.deck-open')).toHaveText(['Biology2 to review', 'Japanese3 to review', 'Unsorted1 to review']);
 
+  // The whole row opens a deck; its own line starts only its cards.
   await page.getByRole('button', { name: /^Japanese/ }).click();
   await expect(page.getByRole('heading', { name: 'Japanese' })).toBeVisible();
   await expect(page.getByText('Languages/Japanese')).toBeVisible();
-  await page.getByRole('button', { name: 'Study now' }).click();
+  await expect(page.getByText('3 cards to review today.')).toBeVisible();
+  await page.getByRole('button', { name: 'Start', exact: true }).click();
   await expect(page.getByText('3 left')).toBeVisible();
   await expect(page.getByText('Japanese', { exact: true })).toBeVisible();
   await expect(page.getByRole('progressbar', { name: 'Session progress' })).toHaveAttribute('aria-valuenow', '0');
@@ -73,10 +75,48 @@ test('decks list what is new and due; a deck studies only its cards', async ({ p
   // Back on the deck: all three were Japanese cards; nothing left today.
   await expect(page.getByText('All done for today.')).toBeVisible();
   await page.getByRole('button', { name: 'All decks' }).click();
-  await expect(decks.locator('.deck-row-main')).toHaveText(['Biology20', 'Japanese00', 'Unsorted10']);
-  await expect(page.getByRole('button', { name: 'Study all · 3' })).toBeVisible();
-  // Quick-study button on a deck starts that deck's session directly.
-  await page.getByRole('button', { name: 'Study Biology' }).click();
+  await expect(decks.locator('.deck-open')).toHaveText(['Biology2 to review', 'JapaneseDone', 'Unsorted1 to review']);
+  await expect(page.getByText('3 cards to review today.')).toBeVisible();
+
+  // Hovering a deck swaps its count for Start in the same spot.
+  const biology = decks.locator('.deck-line').first();
+  const count = biology.locator('.deck-due');
+  const before = await count.boundingBox();
+  await biology.hover();
+  await expect(count).toBeHidden();
+  const start = page.getByRole('button', { name: 'Study Biology' });
+  await expect(start).toBeVisible();
+  const after = await start.boundingBox();
+  expect(Math.abs((before!.x + before!.width) - (after!.x + after!.width))).toBeLessThan(10);
+  await start.click();
   await expect(page.getByText('2 left')).toBeVisible();
   await expect(page.getByText('Biology', { exact: true })).toBeVisible();
+});
+
+test('studying uses one accent at most: plain text answers, no coloured dots', async ({ page }) => {
+  await setup(page, '# Doc\n');
+  await page.goto(origin);
+  await page.getByRole('button', { name: 'Flashcards', exact: true }).click();
+  await page.getByRole('button', { name: 'Start', exact: true }).click();
+  await page.keyboard.press('Space');
+  const ratings = page.locator('.study-ratings button');
+  await expect(ratings).toHaveCount(3);
+  await expect(ratings.nth(0)).toContainText('Forgotten');
+  await expect(ratings.nth(2)).toContainText('Remembered');
+  // No red/amber/green/blue anywhere in the study column.
+  const colours = await page.locator('section').first().evaluate((root) => {
+    const seen = new Set<string>();
+    for (const el of root.querySelectorAll('*')) {
+      const style = getComputedStyle(el);
+      for (const value of [style.color, style.backgroundColor, style.borderTopColor]) seen.add(value);
+    }
+    return [...seen];
+  });
+  const vivid = colours.filter((value) => {
+    const match = /rgba?\((\d+), (\d+), (\d+)(?:, ([\d.]+))?\)/.exec(value);
+    if (!match || (match[4] !== undefined && Number(match[4]) === 0)) return false;
+    const [r, g, b] = match.slice(1, 4).map(Number);
+    return Math.max(r, g, b) - Math.min(r, g, b) > 60;
+  });
+  expect(vivid).toEqual([]);
 });

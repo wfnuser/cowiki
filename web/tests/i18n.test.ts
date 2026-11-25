@@ -36,8 +36,8 @@ test('locale defaults to English and persists per device', () => {
 test('translations support interpolation, fallback labels, and non-empty Chinese copy', () => {
   assert.equal(translate('en', 'Settings'), 'Settings');
   assert.equal(translate('zh-CN', 'Settings'), '设置');
-  assert.equal(translate('en', 'Study all · {count}', { count: 12 }), 'Study all · 12');
-  assert.equal(translate('zh-CN', 'Study all · {count}', { count: 12 }), '全部学习 · 12');
+  assert.equal(translate('en', '{count} cards to review today.', { count: 12 }), '12 cards to review today.');
+  assert.equal(translate('zh-CN', '{count} cards to review today.', { count: 12 }), '今天有 12 张卡要复习。');
   assert.equal(translateLabel('zh-CN', 'Daily journal'), '每日日记');
   assert.equal(translateLabel('zh-CN', 'Custom User Title'), 'Custom User Title');
   assert.equal(intlLocale('en'), 'en-US');
