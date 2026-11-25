@@ -5,7 +5,6 @@ import {
   type ReviewDetail as ReviewDetailData, type ReviewComment,
 } from '../../api';
 import { DiffView } from './DiffView';
-import { ReviewBackButton } from './ReviewBackButton';
 import { C, fonts } from '@/lib/design';
 import { timeAgo } from '../../lib/time';
 import { AvatarBadge } from '@/components/ui/avatar-badge';
@@ -129,8 +128,7 @@ export function ReviewDetail({
   if (error) {
     return (
       <div style={{ padding: 24 }}>
-        <ReviewBackButton onClick={onBack} />
-        <p style={{ color: C.red, fontSize: 14, marginTop: 12 }}>Failed to load review: {error}</p>
+        <p style={{ color: C.red, fontSize: 14 }}>Failed to load review: {error}</p>
       </div>
     );
   }
@@ -138,8 +136,7 @@ export function ReviewDetail({
   if (data == null) {
     return (
       <div style={{ padding: 24 }}>
-        <ReviewBackButton onClick={onBack} />
-        <p style={{ color: C.muted, fontSize: 14, marginTop: 12 }}>Loading review...</p>
+        <p style={{ color: C.muted, fontSize: 14 }}>Loading review...</p>
       </div>
     );
   }
@@ -155,12 +152,8 @@ export function ReviewDetail({
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Header */}
       <div style={{ flexShrink: 0 }}>
-        <ReviewBackButton onClick={onBack}>
-          Reviews
-          <span style={{ color: C.faint }}> · #{submissionId.slice(0, 6)}</span>
-        </ReviewBackButton>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+        {/* No back link: the top bar's back arrow (and its breadcrumb) lead to Reviews. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <h1 className="view-title min-w-0 truncate">{submission.summary || 'Submission'}</h1>
           <span className="flex shrink-0 items-center gap-1.5 text-small" style={{ color: status.fg }}>
             <span aria-hidden className="size-1.5 rounded-full" style={{ background: status.fg }} />

@@ -1986,7 +1986,6 @@ export function MainLayout() {
                   <LocalReviewDetail
                     workspaceSlug={activeView.workspaceSlug}
                     target={activeView.target}
-                    onBack={() => handleTabChange('reviews')}
                     onDraftChanged={() => {
                       if (!activeWorkspace || activeWorkspace.slug !== activeView.workspaceSlug) return;
                       void loadSpacePages(activeWorkspace);

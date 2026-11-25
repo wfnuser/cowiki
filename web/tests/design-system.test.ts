@@ -216,20 +216,18 @@ test('space monograms keep the original tile green and shared foreground token',
   assert.doesNotMatch(sourceOf('cloud/CloudInvitationPage.tsx'), /identityKey/);
 });
 
-test('review detail views share the ReviewBackButton chrome control', () => {
+test('in-app review details leave going back to the top bar', () => {
   const reviewBackButton = sourceOf('components/review/ReviewBackButton.tsx');
   assert.match(reviewBackButton, /<button/);
   assert.doesNotMatch(reviewBackButton, /from '@\/components\/ui\/button'/);
-  const consumers = [
-    'components/review/ReviewDetail.tsx',
-    'components/review/LocalReviewDetail.tsx',
-    'cloud/CloudReviewsView.tsx',
-  ];
-  for (const rel of consumers) {
-    const source = sourceOf(rel);
-    assert.match(source, /import \{ ReviewBackButton \}/, `${rel} must use the shared back button`);
-    assert.doesNotMatch(source, /const backBtnStyle|const backButtonStyle/, `${rel} must not define its own back button style`);
+  // The app's back arrow and breadcrumb already lead to Reviews (DESIGN_SYSTEM.md, "Top bar").
+  for (const rel of ['components/review/ReviewDetail.tsx', 'components/review/LocalReviewDetail.tsx']) {
+    assert.doesNotMatch(sourceOf(rel), /ReviewBackButton/, `${rel} must not add its own back link`);
   }
+  // The Cloud shell has no top-bar history, so it keeps the shared control.
+  const cloud = sourceOf('cloud/CloudReviewsView.tsx');
+  assert.match(cloud, /import \{ ReviewBackButton \}/);
+  assert.doesNotMatch(cloud, /const backBtnStyle|const backButtonStyle/);
 });
 
 test('components never use a platform control that has a CoWiki replacement', () => {

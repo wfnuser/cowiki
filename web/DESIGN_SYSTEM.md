@@ -156,7 +156,8 @@ Notifications, Review details, Cloud pages) is built the same way, with
   one leaves them. ⌘[ and ⌘] outside text (the editor uses them to indent),
   ⌘⌥← and ⌘⌥→ everywhere (Obsidian), and the mouse's side buttons. An arrow
   with nowhere to go stays in place, faint. In the browser the browser's own
-  history does this.
+  history does this. Views add no back link of their own (a review detail
+  has no "← Reviews"); only the Cloud shell, which has no top bar, keeps one.
 - **Top bar, right to left:** the Agent toggle in the corner, comments, the
   Space status. The Agent sidebar opens from the top bar's right corner and
   closes from the same corner of its own header (`PanelRight` both ways), so
@@ -182,6 +183,8 @@ one muted line, then *Continue with GitHub* (ink) and *Continue locally*
   the page leads; hover and the open entry are ink. The Space rail shows
   each Space as a muted colour tile; the open one is marked by a bar at the
   rail's edge, not a ring.
+- The desktop rail is 78px wide so macOS 26's traffic lights (14pt, x 9–69)
+  keep 9px on both sides; the browser's rail, with no traffic lights, is 68px.
 - The open item in the left navigation is a quiet grey row
   (`bg-bg-active/70`, ink text) with only its icon in the accent, the same
   treatment as the open page in the tree. No orange fills.

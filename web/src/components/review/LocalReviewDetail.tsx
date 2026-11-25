@@ -13,20 +13,17 @@ import { Button } from '@/components/ui/button';
 import { InlineFeedback } from '@/components/ui/inline-feedback';
 import { ViewEmpty, ViewHeader } from '@/components/ui/view-header';
 import { DiffView } from './DiffView';
-import { ReviewBackButton } from './ReviewBackButton';
 import { agentMergeResult, type LocalReviewSelection } from './local-review-model';
 
 export function LocalReviewDetail({
   workspaceSlug,
   target,
-  onBack,
   onDraftChanged,
   onReviewsChanged,
   onContinueAgent,
 }: {
   workspaceSlug: string;
   target: LocalReviewSelection;
-  onBack: () => void;
   onDraftChanged?: () => void;
   onReviewsChanged?: () => void;
   onContinueAgent?: (change: AgentChange) => void;
@@ -129,9 +126,8 @@ export function LocalReviewDetail({
 
   return (
     <section style={{ width: 'min(1040px, 100%)' }}>
-      <ReviewBackButton onClick={onBack} />
       <ViewHeader
-        className="mb-5 mt-2"
+        className="mb-5"
         title={title}
         actions={actions}
         description={(
