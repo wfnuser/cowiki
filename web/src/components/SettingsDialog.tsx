@@ -375,6 +375,7 @@ export function SettingsDialog({
     const pending = window.setTimeout(() => {
       setPage(firstPage);
       setDraft(spaceFeatures ?? null);
+      setTheme(loadTheme());
       setSpaceError('');
     }, 0);
     return () => window.clearTimeout(pending);
@@ -710,11 +711,11 @@ export function SettingsDialog({
               </DialogDescription>
             </DialogHeader>
             <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-4">{body}</div>
-            {onSpacePage && space && (dirty || spaceError || space.configurationError) && (
+            {space && (dirty || spaceError || (onSpacePage && space.configurationError)) && (
               <div className="flex shrink-0 items-center gap-2 border-t border-border-soft bg-panel px-7 py-3">
                 {spaceError
                   ? <p role="alert" className="min-w-0 flex-1 truncate text-small text-red" title={spaceError}>{spaceError}</p>
-                  : <span className="flex-1 text-small text-text-tertiary">{dirty ? 'Unsaved changes' : ''}</span>}
+                  : <span className="min-w-0 flex-1 truncate text-small text-text-tertiary">{dirty ? (onSpacePage ? 'Unsaved changes' : `Unsaved changes in ${space.name}`) : ''}</span>}
                 {(space.configurationError || spaceError) && <Button size="sm" variant="outline" onClick={() => { void reloadSpace(); }} disabled={saving || reloading}>{reloading ? 'Reloading…' : 'Reload settings'}</Button>}
                 {dirty && <Button size="sm" variant="outline" onClick={() => setDraft(space.features)} disabled={saving || reloading}>Discard</Button>}
                 {dirty && <Button size="sm" onClick={() => { void saveSpace(); }} disabled={saving || reloading || !space.ready}>{saving ? 'Saving…' : 'Save'}</Button>}

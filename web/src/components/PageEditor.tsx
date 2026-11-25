@@ -37,6 +37,8 @@ export interface PageEditorHandle {
   applyExternalFile: (fullBody: string) => 'applied' | 'conflict';
   /** Handle an Agent deleting or renaming the open file without losing human text. */
   applyExternalDeletion: () => 'applied' | 'conflict';
+  /** Flush any pending or in-flight save; returns true when the document is saved. */
+  flush: () => Promise<boolean>;
   /** How far the page is scrolled, so the reader can open at the same place. */
   scrollTop: () => number;
 }
@@ -84,35 +86,47 @@ export const PageEditor = forwardRef<PageEditorHandle, {
   const savedBody = useRef(initialPage.current.body);
   const document = useRef(new VersionedDocument(initialPage.current.body));
   const liveEditor = useRef<LivePreviewEditorHandle>(null);
-  const saving = useRef(false);
+  const inFlight = useRef<Promise<boolean> | null>(null);
   const timer = useRef<number | null>(null);
   const feedbackTimer = useRef<number | null>(null);
   const manualSaveRequested = useRef(false);
 
-  const flush = useCallback(async (showConfirmation = false) => {
+  const flush = useCallback(async (showConfirmation = false): Promise<boolean> => {
     if (showConfirmation) manualSaveRequested.current = true;
     if (timer.current !== null) { window.clearTimeout(timer.current); timer.current = null; }
-    if (saving.current) return;
-    saving.current = true;
-    try {
-      while (latestBody.current !== savedBody.current) {
-        const body = latestBody.current;
-        await onSave(restoreSystemFrontmatter(initialPage.current.systemFrontmatter, body));
-        savedBody.current = body;
-      }
-      if (feedbackTimer.current !== null) window.clearTimeout(feedbackTimer.current);
-      if (manualSaveRequested.current) {
-        setFeedback({ type: 'saved', text: 'Saved locally' });
-        feedbackTimer.current = window.setTimeout(() => setFeedback(null), 1600);
-      } else {
-        setFeedback(null);
-      }
-    } catch (e) {
-      setFeedback({ type: 'error', text: e instanceof Error ? e.message : 'Failed to save' });
-    } finally {
-      manualSaveRequested.current = false;
-      saving.current = false;
+    while (inFlight.current) {
+      const ok = await inFlight.current;
+      if (!ok) return false;
+      if (latestBody.current === savedBody.current && !manualSaveRequested.current) return true;
     }
+    if (latestBody.current === savedBody.current && !manualSaveRequested.current) return true;
+    const run = async (): Promise<boolean> => {
+      try {
+        while (latestBody.current !== savedBody.current) {
+          const body = latestBody.current;
+          await onSave(restoreSystemFrontmatter(initialPage.current.systemFrontmatter, body));
+          savedBody.current = body;
+        }
+        if (feedbackTimer.current !== null) window.clearTimeout(feedbackTimer.current);
+        if (manualSaveRequested.current) {
+          setFeedback({ type: 'saved', text: 'Saved locally' });
+          feedbackTimer.current = window.setTimeout(() => setFeedback(null), 1600);
+        } else {
+          setFeedback(null);
+        }
+        return true;
+      } catch (e) {
+        setFeedback({ type: 'error', text: e instanceof Error ? e.message : 'Failed to save' });
+        return false;
+      } finally {
+        manualSaveRequested.current = false;
+      }
+    };
+    const work = run().finally(() => {
+      if (inFlight.current === work) inFlight.current = null;
+    });
+    inFlight.current = work;
+    return work;
   }, [onSave]);
 
   const scheduleSave = useCallback((doc: string) => {
@@ -176,12 +190,12 @@ export const PageEditor = forwardRef<PageEditorHandle, {
       onExternalDeleted?.();
       return 'applied';
     },
+    flush: () => flush(),
     scrollTop: () => scroller.current?.scrollTop ?? 0,
-  }), [onExternalDeleted]);
+  }), [flush, onExternalDeleted]);
 
   const handleDone = useCallback(async () => {
-    await flush();
-    if (latestBody.current !== savedBody.current) return; // save failed — stay
+    if (!(await flush())) return; // save failed — stay
     onDone();
   }, [flush, onDone]);
 

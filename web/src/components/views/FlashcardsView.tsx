@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowUpRight, Check, ChevronLeft, ChevronRight, CirclePause, FileText, LoaderCircle, RefreshCw, RotateCcw, SkipForward, SlidersHorizontal, X } from 'lucide-react';
@@ -170,9 +170,9 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
     persist({ ...store, settings: { ...store.settings, [key]: amount } });
   };
 
+  const onStudyKey = useRef<(event: KeyboardEvent) => void>(() => {});
   useEffect(() => {
-    if (!current) return;
-    const onKey = (event: KeyboardEvent) => {
+    onStudyKey.current = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
@@ -192,9 +192,15 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
         rate(choice.score);
       }
     };
+  });
+
+  const studying = current !== null;
+  useEffect(() => {
+    if (!studying) return;
+    const onKey = (event: KeyboardEvent) => onStudyKey.current(event);
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  });
+  }, [studying]);
 
   if (current) {
     const schedule = scheduleOf(store, current);
@@ -349,13 +355,14 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
     );
   }
 
+  const hasSubdecks = tree.some((node) => node.children.length > 0);
   const rows = (nodes: DeckNode[], depth: number): React.ReactNode => nodes.map((node) => {
     const queue = queueOf(node.cards);
     const open = !collapsed.has(node.path);
     return (
       <li key={node.path}>
-        <div className="deck-row" style={{ paddingLeft: 4 + depth * 18 }}>
-          {node.children.length > 0 ? (
+        <div className="deck-row" style={{ paddingLeft: (hasSubdecks ? 4 : 0) + depth * 18 }}>
+          {hasSubdecks && (node.children.length > 0 ? (
             <button
               type="button"
               aria-label={open ? `Collapse ${node.name}` : `Expand ${node.name}`}
@@ -368,7 +375,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
             >
               <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} aria-hidden />
             </button>
-          ) : <span className="deck-row-toggle" aria-hidden />}
+          ) : <span className="deck-row-toggle" aria-hidden />)}
           <button type="button" className="deck-row-main" onClick={() => setOpenDeck(node.path)}>
             <span className="min-w-0 flex-1 truncate text-text">{node.name}</span>
             <span className={cn('deck-count', queue.fresh ? 'text-blue' : 'text-text-faint')}>{queue.fresh}</span>
@@ -409,7 +416,7 @@ export function FlashcardsView({ workspaceSlug, onOpenSource }: FlashcardsViewPr
         </ViewEmpty>
       ) : (
         <>
-          <div className="deck-head" aria-hidden>
+          <div className={cn('deck-head', !hasSubdecks && 'is-flat')} aria-hidden>
             <span className="flex-1">Deck</span>
             <span className="deck-count">New</span>
             <span className="deck-count">Due</span>

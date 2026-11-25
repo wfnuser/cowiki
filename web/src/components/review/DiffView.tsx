@@ -122,6 +122,13 @@ function CommentComposer({
           <textarea
             value={body}
             onChange={(e) => setBody(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+              else if ((e.metaKey || e.ctrlKey) && isSubmitEnter(e) && body.trim()) {
+                e.preventDefault();
+                onSubmit(body.trim());
+              }
+            }}
             placeholder="Write a comment..."
             autoFocus
             rows={3}
@@ -158,6 +165,7 @@ function HunkView({
   hunk,
   filePath,
   comments,
+  canComment,
   composingLine,
   onStartComment,
   onCancelComment,
@@ -169,6 +177,7 @@ function HunkView({
   hunk: DiffHunk;
   filePath: string;
   comments: ReviewComment[];
+  canComment: boolean;
   composingLine: number | null;
   onStartComment: (line: number) => void;
   onCancelComment: () => void;
@@ -206,23 +215,23 @@ function HunkView({
             <tr style={{ background: bgColor }}>
               {/* Old line number */}
               <td
-                onClick={() => ln != null && onStartComment(ln)}
+                onClick={canComment ? () => ln != null && onStartComment(ln) : undefined}
                 style={{
-                  ...gutterStyle, background: gutterBg, cursor: 'pointer',
+                  ...gutterStyle, background: gutterBg, cursor: canComment ? 'pointer' : undefined,
                   borderRight: `1px solid ${C.line}`,
                 }}
-                title="Click to comment"
+                title={canComment ? 'Click to comment' : undefined}
               >
                 {line.old_line ?? ''}
               </td>
               {/* New line number */}
               <td
-                onClick={() => ln != null && onStartComment(ln)}
+                onClick={canComment ? () => ln != null && onStartComment(ln) : undefined}
                 style={{
-                  ...gutterStyle, background: gutterBg, cursor: 'pointer',
+                  ...gutterStyle, background: gutterBg, cursor: canComment ? 'pointer' : undefined,
                   borderRight: `1px solid ${C.line}`,
                 }}
-                title="Click to comment"
+                title={canComment ? 'Click to comment' : undefined}
               >
                 {line.new_line ?? ''}
               </td>
@@ -251,7 +260,7 @@ function HunkView({
               </tr>
             )}
             {/* Comment composer */}
-            {composingLine === ln && ln != null && (
+            {canComment && composingLine === ln && ln != null && (
               <CommentComposer
                 onSubmit={(body) => onSubmitComment(body, ln)}
                 onCancel={onCancelComment}
@@ -457,6 +466,7 @@ function FileDiffCard({
                     hunk={hunk}
                     filePath={file.path}
                     comments={fileComments}
+                    canComment={Boolean(onAddComment)}
                     composingLine={composingLine}
                     onStartComment={(ln) => setComposingLine(composingLine === ln ? null : ln)}
                     onCancelComment={() => setComposingLine(null)}

@@ -298,7 +298,7 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                       {readable(task.text)}
                     </span>
                     {column.status === 'todo' && (
-                      <button type="button" onClick={() => { void move(task, 'doing'); }} disabled={pending.has(key)} className="rounded p-0.5 text-text-faint opacity-0 transition-opacity hover:text-text group-hover:opacity-100" aria-label={`Start ${task.text}`} title="Start">
+                      <button type="button" onClick={() => { void move(task, 'doing'); }} disabled={pending.has(key)} className="rounded p-0.5 text-text-faint opacity-0 transition-opacity hover:text-text group-hover:opacity-100 focus-visible:opacity-100" aria-label={`Start ${task.text}`} title="Start">
                         <Play className="size-3" />
                       </button>
                     )}

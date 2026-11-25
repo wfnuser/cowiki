@@ -135,23 +135,14 @@ export function SpaceRail<T extends SpaceRailItem>({
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
               <button
+                aria-label={showCloudActions ? `Account: ${userName}` : 'Sign up or sign in'}
+                className="transition-[background-color,border-color] hover:border-border-hover hover:bg-bg-hover"
                 style={{
                   width: 34, height: 34, borderRadius: 10,
                   background: C.sidebar,
                   border: `1px solid ${C.line}`,
                   cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 13, fontWeight: 600, color: showCloudActions ? C.ink2 : C.muted,
-                  transition: 'background 0.15s, border-color 0.15s',
-                }}
-                onMouseEnter={(e) => {
-                  if (showCloudActions) return;
-                  e.currentTarget.style.background = C.rail;
-                  e.currentTarget.style.borderColor = `color-mix(in srgb, ${C.accent} 40%, transparent)`;
-                }}
-                onMouseLeave={(e) => {
-                  if (showCloudActions) return;
-                  e.currentTarget.style.background = C.sidebar;
-                  e.currentTarget.style.borderColor = `color-mix(in srgb, ${C.accent} 25%, transparent)`;
                 }}
               >
                 {showCloudActions ? (userName?.[0]?.toUpperCase() || 'U') : <Cloud size={17} />}

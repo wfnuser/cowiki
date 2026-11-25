@@ -46,8 +46,20 @@ export function PluginSettings({ plugins, features, preferences, onFeatures, onP
         />
       )}
       {plugin.settings && (!part || part === 'fields') && (
-        <section className="settings-section" aria-disabled={!plugin.enabled(features)}>
-          <h3 className="settings-heading">{plugin.settings.title}</h3>
+        <section className={part === 'fields' ? 'settings-section is-first' : 'settings-section'} aria-disabled={!plugin.enabled(features)}>
+          <h3 className={part === 'fields' ? 'sr-only' : 'settings-heading'}>{plugin.settings.title}</h3>
+          {part === 'fields' && !plugin.enabled(features) && (
+            <p className="mb-3 flex items-center justify-between gap-3 text-meta text-text-tertiary">
+              <span>{plugin.label} is off for this Space.</span>
+              <button
+                type="button"
+                onClick={() => onFeatures(plugin.setEnabled(features, true))}
+                className="shrink-0 font-medium text-accent hover:underline"
+              >
+                Turn on
+              </button>
+            </p>
+          )}
           <div className="grid grid-cols-[112px_minmax(0,1fr)] items-center gap-x-3 gap-y-2" style={{ opacity: plugin.enabled(features) ? 1 : 0.55 }}>
             {plugin.settings.fields.map((field) => (
               <div key={field.id} className="contents">

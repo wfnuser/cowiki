@@ -442,20 +442,11 @@ function PageTreeItem({
     return (
       <>
         <div
+          className="group hover:bg-bg-hover"
           style={{
             display: 'flex', alignItems: 'center', gap: 8,
             padding: '6px 10px', paddingLeft: 10 + pl, borderRadius: 6,
             cursor: 'pointer', fontSize: 14, color: C.nav, position: 'relative',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = C.rail;
-            const btn = e.currentTarget.querySelector('[data-row-menu]') as HTMLElement | null;
-            if (btn) btn.style.opacity = '1';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'transparent';
-            const btn = e.currentTarget.querySelector('[data-row-menu]') as HTMLElement | null;
-            if (btn) btn.style.opacity = '0';
           }}
         >
           <span onClick={() => setOpen(!open)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, userSelect: 'none', minWidth: 0 }}>
@@ -465,10 +456,16 @@ function PageTreeItem({
           </span>
           {!readOnly && <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button data-row-menu onClick={(e) => e.stopPropagation()} style={{
-                background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: C.faint, display: 'flex',
-                opacity: 0, transition: 'opacity 0.1s',
-              }}>
+              <button
+                type="button"
+                data-row-menu
+                aria-label={`Folder options for ${title}`}
+                onClick={(e) => e.stopPropagation()}
+                className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: C.faint, display: 'flex',
+                }}
+              >
                 <MoreHorizontal size={13} />
               </button>
             </DropdownMenuTrigger>
@@ -504,24 +501,15 @@ function PageTreeItem({
   const conceptId = conceptIdFromPath(pagePath);
   return (
     <div
+      className={cn('group', !isActive && 'hover:bg-bg-hover')}
       style={{
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '6px 10px', paddingLeft: 10 + pl, borderRadius: 6,
         cursor: 'pointer', fontSize: 14,
-        background: isActive ? `color-mix(in srgb, ${C.ink} 5%, transparent)` : 'transparent',
+        background: isActive ? `color-mix(in srgb, ${C.ink} 5%, transparent)` : undefined,
         color: isActive ? C.ink : C.nav,
         fontWeight: isActive ? 550 : 400,
         boxShadow: isActive ? shadows.tick : 'none',
-      }}
-      onMouseEnter={(e) => {
-        if (!isActive) e.currentTarget.style.background = C.rail;
-        const btn = e.currentTarget.querySelector('[data-row-menu]') as HTMLElement | null;
-        if (btn) btn.style.opacity = '1';
-      }}
-      onMouseLeave={(e) => {
-        if (!isActive) e.currentTarget.style.background = 'transparent';
-        const btn = e.currentTarget.querySelector('[data-row-menu]') as HTMLElement | null;
-        if (btn) btn.style.opacity = '0';
       }}
     >
       <span onClick={() => onSelectPage(conceptId, pagePath)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
@@ -530,10 +518,16 @@ function PageTreeItem({
       </span>
       {!readOnly && <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button data-row-menu onClick={(e) => e.stopPropagation()} style={{
-            background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: C.faint, display: 'flex',
-            opacity: 0, transition: 'opacity 0.1s',
-          }}>
+          <button
+            type="button"
+            data-row-menu
+            aria-label={`Page options for ${title}`}
+            onClick={(e) => e.stopPropagation()}
+            className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: C.faint, display: 'flex',
+            }}
+          >
             <MoreHorizontal size={13} />
           </button>
         </DropdownMenuTrigger>
