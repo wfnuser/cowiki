@@ -103,6 +103,47 @@ export function forgetSpace(history: ViewHistory, workspaceSlug: string): ViewHi
   return forgetWhere(history, (entry) => entry.workspaceSlug === workspaceSlug);
 }
 
+/** A local Agent Change was merged or discarded: its detail steps leave history. */
+export function forgetAgentChange(history: ViewHistory, workspaceSlug: string, changeId: string): ViewHistory {
+  return forgetWhere(history, (entry) => (
+    entry.workspaceSlug === workspaceSlug
+    && entry.view.kind === 'review-detail'
+    && entry.view.target.kind === 'local-agent'
+    && entry.view.target.changeId === changeId
+  ));
+}
+
+/**
+ * Drop entries that can no longer be shown and step by `delta`.
+ * When the current entry itself was removed (for example, stepping Back
+ * from a just-merged Agent Change), `delta === -1` lands on the nearest
+ * surviving entry before it instead of skipping two steps, and `delta === 1`
+ * lands on the nearest surviving entry after it.
+ */
+export function stepAvailable(
+  history: ViewHistory,
+  delta: -1 | 1,
+  gone: (entry: HistoryEntry) => boolean,
+): { history: ViewHistory; entry: HistoryEntry } | null {
+  const current = history.index >= 0 ? history.entries[history.index] : undefined;
+  const currentGone = !!current && gone(current);
+  const cleaned = forgetWhere(history, gone);
+  if (!currentGone) return step(cleaned, delta);
+  if (delta === -1) {
+    const entry = cleaned.index >= 0 ? cleaned.entries[cleaned.index] : undefined;
+    return entry ? { history: cleaned, entry } : null;
+  }
+  const nextIndex = cleaned.index + 1;
+  if (nextIndex < cleaned.entries.length) {
+    return { history: { entries: cleaned.entries, index: nextIndex }, entry: cleaned.entries[nextIndex] };
+  }
+  const hasSurvivingAfter = history.entries.slice(history.index + 1).some((entry) => !gone(entry));
+  if (hasSurvivingAfter && cleaned.index >= 0) {
+    return { history: cleaned, entry: cleaned.entries[cleaned.index] };
+  }
+  return null;
+}
+
 /**
  * The key that moves through history, or null. ⌘[ and ⌘] (Notion, Safari,
  * Finder) only outside text, where the editor uses them to outdent and

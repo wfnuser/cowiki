@@ -182,7 +182,7 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
   const board = useMemo(() => weekBoard(tasks, dateKey(week), dateKey(addDays(week, 6))), [tasks, week]);
   const counts: Record<Filter, number> = {
     today: groups.overdue.length + groups.today.length,
-    week: board.todo.length + board.doing.length + board.done.length,
+    week: board.todo.length + board.doing.length,
     upcoming: groups.upcoming.length,
     someday: groups.someday.length,
     done: groups.done.length,

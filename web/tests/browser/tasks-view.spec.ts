@@ -167,15 +167,23 @@ test('Logseq tasks stay in Done after completing on the board and show high-prio
 
   const todoList = page.getByRole('list', { name: 'To do' });
   const doneList = page.getByRole('list', { name: 'Done' });
+  const todayTab = page.getByRole('tab', { name: /^Today/ });
+  const weekTab = page.getByRole('tab', { name: /^This week/ });
   const card = todoList.getByRole('listitem').filter({ hasText: 'Ship Logseq fix' });
   await expect(card).toBeVisible();
   // High-priority indicator matches list rows.
   await expect(card.locator('[title="high priority"]')).toHaveText('!');
+  // Both Today and This week tab badges count only open tasks (not Done).
+  await expect(todayTab).toContainText('3');
+  await expect(weekTab).toContainText('3');
 
-  // Completing a Logseq task keeps it in Done on Today board AND This week board.
+  // Completing a Logseq task keeps it in Done on Today board AND This week board,
+  // and decrements both open-work tab badges consistently.
   await card.getByRole('checkbox', { name: 'Complete Ship Logseq fix' }).click();
   await expect(doneList.getByText('Ship Logseq fix')).toBeVisible();
+  await expect(todayTab).toContainText('2');
+  await expect(weekTab).toContainText('2');
 
-  await page.getByRole('tab', { name: /^This week/ }).click();
+  await weekTab.click();
   await expect(page.getByRole('list', { name: 'Done' }).getByText('Ship Logseq fix')).toBeVisible();
 });

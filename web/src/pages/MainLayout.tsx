@@ -69,7 +69,7 @@ import { ExcalidrawReader } from '../components/ExcalidrawDrawing';
 import { isExcalidrawPage } from '../lib/excalidraw';
 import { showsRoute, viewForRoute } from '../lib/route-view';
 import {
-  EMPTY_HISTORY, canGoBack, canGoForward, entryKey, forgetPath, forgetWhere, historyShortcut, movePath, step, visit,
+  EMPTY_HISTORY, canGoBack, canGoForward, entryKey, forgetPath, forgetSpace, forgetWhere, historyShortcut, movePath, stepAvailable, visit,
   type HistoryEntry, type HistoryView as HistoryStep,
 } from '../lib/view-history';
 import { HistoryButtons } from '../components/layout/HistoryButtons';
@@ -227,6 +227,30 @@ export function MainLayout() {
   const [viewHistory, setViewHistory] = useState(EMPTY_HISTORY);
   const viewHistoryRef = useRef(viewHistory);
   useEffect(() => { viewHistoryRef.current = viewHistory; }, [viewHistory]);
+  const closedAgentChangesRef = useRef<Set<string>>(new Set());
+  const activeAgentChangeIdsRef = useRef<Map<string, ReadonlySet<string>>>(new Map());
+  const isClosedAgentEntry = useCallback((entry: HistoryEntry): boolean => {
+    if (entry.view.kind !== 'review-detail' || entry.view.target.kind !== 'local-agent') return false;
+    const changeId = entry.view.target.changeId;
+    if (closedAgentChangesRef.current.has(`${entry.workspaceSlug}\0${changeId}`)) return true;
+    const activeIds = activeAgentChangeIdsRef.current.get(entry.workspaceSlug);
+    return activeIds !== undefined && !activeIds.has(changeId);
+  }, []);
+  const pruneNonCurrentClosedAgentHistory = useCallback(() => {
+    setViewHistory((history) => {
+      const current = history.index >= 0 ? history.entries[history.index] : undefined;
+      const currentKey = current ? entryKey(current) : null;
+      const next = forgetWhere(history, (entry) => (
+        entryKey(entry) !== currentKey && isClosedAgentEntry(entry)
+      ));
+      viewHistoryRef.current = next;
+      return next;
+    });
+  }, [isClosedAgentEntry]);
+  const markAgentChangeClosed = useCallback((workspaceSlug: string, changeId: string) => {
+    closedAgentChangesRef.current.add(`${workspaceSlug}\0${changeId}`);
+    pruneNonCurrentClosedAgentHistory();
+  }, [pruneNonCurrentClosedAgentHistory]);
   const [spaceFeatures, setSpaceFeatures] = useState<Record<string, SpaceFeatures>>({});
   const [featureLoadErrors, setFeatureLoadErrors] = useState<Record<string, string>>({});
   const [preferences, setPreferences] = useState<PersonalPreferences>(safePreferences);
@@ -620,15 +644,24 @@ export function MainLayout() {
       return () => window.clearTimeout(task);
     }
     let cancelled = false;
+    const spaceSlug = activeWorkspace.slug;
     Promise.all([
-      listLocalAgentChanges(activeWorkspace.slug),
-      getLocalWorkingDiff(activeWorkspace.slug),
+      listLocalAgentChanges(spaceSlug),
+      getLocalWorkingDiff(spaceSlug),
     ]).then(([changes, diffs]) => {
       if (cancelled) return;
       const openChanges = changes.filter((change) => change.status === 'open');
+      const activeIds = new Set(
+        changes
+          .filter((change) => change.status === 'open' || change.status === 'needsResolution')
+          .map((change) => change.id),
+      );
+      activeAgentChangeIdsRef.current.set(spaceSlug, activeIds);
+      for (const id of activeIds) closedAgentChangesRef.current.delete(`${spaceSlug}\0${id}`);
+      pruneNonCurrentClosedAgentHistory();
       setOpenAgentChanges(openChanges);
       setWorkingDiffs(diffs);
-      setWorkingDiffsSpaceSlug(activeWorkspace.slug);
+      setWorkingDiffsSpaceSlug(spaceSlug);
       setVersionSelection((current) => (
         current.kind === 'agent' && !openChanges.some((change) => change.id === current.changeId)
           ? { kind: 'working' }
@@ -638,11 +671,11 @@ export function MainLayout() {
       if (cancelled) return;
       setOpenAgentChanges([]);
       setWorkingDiffs([]);
-      setWorkingDiffsSpaceSlug(activeWorkspace.slug);
+      setWorkingDiffsSpaceSlug(spaceSlug);
       setVersionSelection({ kind: 'working' });
     });
     return () => { cancelled = true; };
-  }, [activeWorkspace?.localPath, activeWorkspace?.slug, desktop, reviewRefreshKey]);
+  }, [activeWorkspace?.localPath, activeWorkspace?.slug, desktop, pruneNonCurrentClosedAgentHistory, reviewRefreshKey]);
 
   useEffect(() => {
     if (!desktop || !activeWorkspace?.localPath) {
@@ -826,7 +859,18 @@ export function MainLayout() {
   const historyKey = historyEntry ? entryKey(historyEntry) : null;
   const recordHistory = useEffectEvent(() => {
     // Arriving where back or forward pointed matches the current entry, so it adds nothing.
-    if (historyEntry) setViewHistory((history) => visit(history, historyEntry));
+    // Drop any closed Agent Changes before appending the new step so leaving a merged/discarded
+    // change removes it from the Back stack cleanly.
+    if (!historyEntry) return;
+    const nextKey = entryKey(historyEntry);
+    setViewHistory((history) => {
+      const cleaned = forgetWhere(history, (entry) => (
+        entryKey(entry) !== nextKey && isClosedAgentEntry(entry)
+      ));
+      const updated = visit(cleaned, historyEntry);
+      viewHistoryRef.current = updated;
+      return updated;
+    });
   });
   useEffect(() => { recordHistory(); }, [historyKey]);
 
@@ -886,16 +930,24 @@ export function MainLayout() {
   // Read the latest viewHistory via ref so stepping after an async flush never
   // acts on a stale pre-await closure.
   const stepHistory = (delta: -1 | 1) => {
-    // Skip steps that can no longer be shown: a removed Space, a module turned off.
-    const history = forgetWhere(viewHistoryRef.current, (entry) => {
+    // Skip steps that can no longer be shown: a removed Space, a module turned off,
+    // or an Agent Change that was merged or discarded.
+    const isUnavailable = (entry: HistoryEntry) => {
       const ws = workspaces.find((workspace) => workspace.slug === entry.workspaceSlug);
-      return !ws || !historyViewAvailable(ws, entry.view);
-    });
-    const next = step(history, delta);
+      return !ws || !historyViewAvailable(ws, entry.view) || isClosedAgentEntry(entry);
+    };
+    const next = stepAvailable(viewHistoryRef.current, delta, isUnavailable);
     const ws = next && workspaces.find((workspace) => workspace.slug === next.entry.workspaceSlug);
     if (!next || !ws) {
-      viewHistoryRef.current = history;
-      setViewHistory(history);
+      const current = viewHistoryRef.current.index >= 0
+        ? viewHistoryRef.current.entries[viewHistoryRef.current.index]
+        : undefined;
+      const currentKey = current ? entryKey(current) : null;
+      const cleaned = forgetWhere(viewHistoryRef.current, (entry) => (
+        entryKey(entry) !== currentKey && isUnavailable(entry)
+      ));
+      viewHistoryRef.current = cleaned;
+      setViewHistory(cleaned);
       return;
     }
     viewHistoryRef.current = next.history;
@@ -1409,7 +1461,11 @@ export function MainLayout() {
     const deletedSlug = showDeleteConfirm.slug;
     try {
       await deleteWorkspace(deletedSlug);
-      setViewHistory((history) => forgetWhere(history, (entry) => entry.workspaceSlug === deletedSlug));
+      activeAgentChangeIdsRef.current.delete(deletedSlug);
+      for (const key of [...closedAgentChangesRef.current]) {
+        if (key.startsWith(`${deletedSlug}\0`)) closedAgentChangesRef.current.delete(key);
+      }
+      setViewHistory((history) => forgetSpace(history, deletedSlug));
       setShowDeleteConfirm(null);
       loadWorkspaces();
       setMessage({ text: 'Workspace deleted.', type: 'success' });
@@ -2114,6 +2170,7 @@ export function MainLayout() {
                       void loadSpaceSources(activeWorkspace);
                     }}
                     onReviewsChanged={() => setReviewRefreshKey((key) => key + 1)}
+                    onAgentChangeClosed={(changeId) => markAgentChangeClosed(activeView.workspaceSlug, changeId)}
                     onContinueAgent={(change: AgentChange) => {
                       setAgentPanelOpen(true);
                       setAgentOpenRequest({

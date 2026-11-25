@@ -5,12 +5,14 @@ import {
   EMPTY_HISTORY,
   canGoBack,
   canGoForward,
+  forgetAgentChange,
   forgetPath,
   forgetSpace,
   forgetWhere,
   historyShortcut,
   movePath,
   step,
+  stepAvailable,
   visit,
   type HistoryEntry,
   type ViewHistory,
@@ -131,4 +133,55 @@ test('steps that cannot be shown any more leave history', () => {
   // The removed step on screen hands over to the one before it.
   assert.equal(history.index, 1);
   assert.deepEqual(step(history, -1)?.entry, tool('home'));
+});
+
+test('merged or discarded Agent Changes leave history and stepping off them lands on the adjacent entry', () => {
+  const agentChange = (changeId: string, workspaceSlug = 'mine'): HistoryEntry => ({
+    workspaceSlug,
+    view: { kind: 'review-detail', target: { kind: 'local-agent', changeId } },
+  });
+  const reviews = (workspaceSlug = 'mine'): HistoryEntry => ({ workspaceSlug, view: { kind: 'review-list' } });
+
+  // forgetAgentChange scopes to workspace + changeId.
+  const pruned = forgetAgentChange(
+    walk(tool('home'), agentChange('c1'), agentChange('c1', 'team'), agentChange('c2')),
+    'mine',
+    'c1',
+  );
+  assert.deepEqual(pruned.entries, [tool('home'), agentChange('c1', 'team'), agentChange('c2')]);
+
+  // Stepping Back from a just-closed Agent Change lands on Reviews (not skipping it), with Forward disabled.
+  const atClosedEnd = walk(tool('home'), reviews(), agentChange('c1'));
+  const backFromClosed = stepAvailable(
+    atClosedEnd,
+    -1,
+    (entry) => entry.view.kind === 'review-detail' && entry.view.target.kind === 'local-agent' && entry.view.target.changeId === 'c1',
+  );
+  assert.ok(backFromClosed);
+  assert.deepEqual(backFromClosed.entry, reviews());
+  assert.equal(canGoForward(backFromClosed.history), false);
+  assert.equal(canGoBack(backFromClosed.history), true);
+
+  // Standing on a closed middle entry: Back goes to the entry before it, Forward goes to the entry after it.
+  const atClosedMid = step(walk(tool('home'), agentChange('c1'), page('a.md')), -1)!.history;
+  const isC1 = (entry: HistoryEntry) =>
+    entry.view.kind === 'review-detail' && entry.view.target.kind === 'local-agent' && entry.view.target.changeId === 'c1';
+  const backMid = stepAvailable(atClosedMid, -1, isC1);
+  assert.deepEqual(backMid?.entry, tool('home'));
+  assert.equal(canGoForward(backMid!.history), true);
+  const fwdMid = stepAvailable(atClosedMid, 1, isC1);
+  assert.deepEqual(fwdMid?.entry, page('a.md'));
+  assert.equal(canGoBack(fwdMid!.history), true);
+
+  // Standing on a closed first entry: Back is null, Forward reaches the surviving entry ahead.
+  const atClosedStart = step(walk(agentChange('c1'), page('a.md')), -1)!.history;
+  assert.equal(stepAvailable(atClosedStart, -1, isC1), null);
+  const fwdStart = stepAvailable(atClosedStart, 1, isC1);
+  assert.deepEqual(fwdStart?.entry, page('a.md'));
+  assert.equal(canGoBack(fwdStart!.history), false);
+
+  // Standing on a closed entry between two identical entries [A, c1, A]: Forward still lands on A.
+  const sandwiched = step(walk(page('a.md'), agentChange('c1'), page('a.md')), -1)!.history;
+  const fwdSandwich = stepAvailable(sandwiched, 1, isC1);
+  assert.deepEqual(fwdSandwich?.entry, page('a.md'));
 });
