@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import {
   ChevronRight, FileText, Folder,
   MoreHorizontal, Plus, FolderPlus, Settings, House, GitPullRequest, Users, History,
-  FileCode, Pencil, Trash2, Search, Unlink,
+  FileCode, Pencil, Trash2, Search,
   PanelLeft, CalendarDays, CheckSquare, Layers,
 } from 'lucide-react';
 import type { Workspace, PageMeta, SourceItem } from '../../api';
@@ -30,7 +30,6 @@ interface SpacePanelProps {
   reviewCount: number;
   isPersonal: boolean;
   showReviews?: boolean;
-  showLinkDiagnostics?: boolean;
   isOwner: boolean;
   onSelectPage: (slug: string, path?: string) => void;
   onSelectSource: (filename: string) => void;
@@ -67,7 +66,6 @@ export function SpacePanel({
   reviewCount,
   isPersonal,
   showReviews = !isPersonal,
-  showLinkDiagnostics = false,
   onSelectPage,
   onSelectSource,
   onNewPage,
@@ -125,7 +123,6 @@ export function SpacePanel({
     { tab: 'reviews', icon: <GitPullRequest size={16} />, label: 'Reviews', badge: reviewCount || undefined, hide: !showReviews },
     { tab: 'members', icon: <Users size={16} />, label: 'Members & roles', hide: isPersonal },
     { tab: 'history', icon: <History size={16} />, label: 'History', hide: !showHistory },
-    { tab: 'links', icon: <Unlink size={16} />, label: 'Links', hide: !showLinkDiagnostics },
   ];
 
   const wikiActive = activeTab === 'wiki';

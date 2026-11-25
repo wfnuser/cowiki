@@ -47,7 +47,7 @@ leads and the chrome stays quiet. Check every new screen against these.
 
 ## View layout
 
-Every tool view (Tasks, Flashcards, History, Links, Reviews, Members,
+Every tool view (Tasks, Flashcards, History, Broken links, Reviews, Members,
 Notifications, Review details, Cloud pages) is built the same way, with
 `components/ui/view-header`:
 
@@ -125,8 +125,11 @@ Notifications, Review details, Cloud pages) is built the same way, with
   Home is small on purpose:
   - one quiet line of what needs you: tasks due or overdue, cards to
     review today, changes waiting for review (your unsent draft counts in a
-    shared Space). Only non-zero counts show; with nothing to do the line is
-    gone. Each count opens its view.
+    shared Space), broken links. Only non-zero counts show; with nothing to
+    do the line is gone. Each count opens its view. **Broken links** (links
+    to pages that do not exist yet) have no sidebar entry of their own
+    (user decision 2026-11-25): in Obsidian such links are often deliberate,
+    so they are a count here, not a place to visit.
   - **today's journal**, written in place (when the Journal module is on);
   - **Recently edited** pages as hairline rows (local Spaces; a Cloud Space
     in the browser cannot list edit times).

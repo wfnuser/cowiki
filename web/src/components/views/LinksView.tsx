@@ -64,8 +64,8 @@ export function LinksView({ workspaceSlug, onOpenPage }: LinksViewProps) {
   return (
     <section style={{ width: 'min(860px, 100%)' }}>
       <ViewHeader
-        title="Links"
-        description="Internal links whose target page doesn’t exist."
+        title="Broken links"
+        description="Links to pages that don’t exist yet."
         actions={(
           <ViewIconButton label="Refresh" onClick={() => { void refresh(); }} disabled={refreshing}>
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : undefined} />
