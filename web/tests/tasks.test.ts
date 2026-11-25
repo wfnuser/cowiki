@@ -10,6 +10,7 @@ import {
   newTaskLine,
   parseTaskLine,
   taskLineWithStatus,
+  tabBoard,
   toggledTaskLine,
   weekBoard,
 } from '../src/lib/tasks.ts';
@@ -167,4 +168,34 @@ test('the week board collects open, in-progress and finished tasks', () => {
   assert.deepEqual(board.todo.map((task) => task.text), ['Overdue', 'This week']);
   assert.deepEqual(board.doing.map((task) => task.text), ['Doing no date']);
   assert.deepEqual(board.done.map((task) => task.text), ['Done this week']);
+});
+
+test('any list tab reads as a board: open tasks by status, Done is what finished today', () => {
+  const today = '2026-11-24';
+  const tasks = extractTasks('Plan.md', [
+    '- [ ] Overdue 📅 2026-11-20',
+    '- [/] Doing today 📅 2026-11-24',
+    '- [ ] Later 📅 2026-12-01',
+    '- [/] Doing later 📅 2026-12-02',
+    '- [ ] Someday',
+    '- [x] Finished today ✅ 2026-11-24',
+    '- [x] Finished later task 📅 2026-12-03 ✅ 2026-11-24',
+    '- [x] Finished last week ✅ 2026-11-17',
+  ].join('\n'));
+  const groups = groupTasks(tasks, today);
+  const text = (items: { text: string }[]) => items.map((task) => task.text);
+
+  const todayBoard = tabBoard(tasks, groups, 'today', today);
+  assert.deepEqual(text(todayBoard.todo), ['Overdue']);
+  assert.deepEqual(text(todayBoard.doing), ['Doing today']);
+  assert.deepEqual(text(todayBoard.done), ['Finished later task', 'Finished today']);
+
+  const upcoming = tabBoard(tasks, groups, 'upcoming', today);
+  assert.deepEqual(text(upcoming.todo), ['Later']);
+  assert.deepEqual(text(upcoming.doing), ['Doing later']);
+  assert.deepEqual(text(upcoming.done), ['Finished later task']);
+
+  const someday = tabBoard(tasks, groups, 'someday', today);
+  assert.deepEqual(text(someday.todo), ['Someday']);
+  assert.deepEqual(text(someday.done), ['Finished today']);
 });

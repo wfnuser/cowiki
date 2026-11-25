@@ -104,6 +104,7 @@ import { openExternalUrl } from '@/external-links';
 import { TasksView } from '../components/views/TasksView';
 import { FlashcardsView } from '../components/views/FlashcardsView';
 import { JournalDay, JournalsView } from '../components/views/JournalsView';
+import { JournalCalendar } from '../components/views/JournalCalendar';
 import { SpaceHome, type HomeNeed } from '../components/views/SpaceHome';
 import { loadHomeCounts, type HomeCounts } from '@/lib/home-counts';
 import { ObsidianImportDialog } from '../components/ObsidianImportDialog';
@@ -1249,6 +1250,7 @@ export function MainLayout() {
       case 'home':
       case 'journals':
         setEditingPage(false);
+        setJournalJump(null);
         setActiveView({ kind: tab, workspaceSlug: activeWorkspace.slug });
         navigate('/', { replace: true });
         break;
@@ -1577,11 +1579,11 @@ export function MainLayout() {
   useEffect(() => {
     if (!showOverview || !activeLocal || !journalSpaceSlug || !activeFeaturesReady) return;
     let live = true;
-    loadHomeCounts({ spaceSlug: journalSpaceSlug, journal: journalConfig, tasks: countTasks, cards: countCards })
+    loadHomeCounts({ spaceSlug: journalSpaceSlug, journal: journalConfig, tasks: countTasks, cards: countCards, links: desktop })
       .then((counts) => { if (live) setHomeCounts({ spaceSlug: journalSpaceSlug, ...counts }); })
       .catch(() => { if (live) setHomeCounts(null); });
     return () => { live = false; };
-  }, [showOverview, activeLocal, journalSpaceSlug, activeFeaturesReady, journalConfig, countTasks, countCards, pagesVersion, homeRefreshTick]);
+  }, [showOverview, activeLocal, journalSpaceSlug, activeFeaturesReady, journalConfig, countTasks, countCards, desktop, pagesVersion, homeRefreshTick]);
   const counts = homeCounts?.spaceSlug === journalSpaceSlug ? homeCounts : null;
   const changesToReview = (desktop && activeWorkspace?.localPath
     ? openAgentChanges.length + (sharedSpace && activeWorkingDiffs.length > 0 ? 1 : 0)
@@ -1590,11 +1592,18 @@ export function MainLayout() {
     { id: 'tasks', count: counts?.tasks ?? 0, label: counts?.tasks === 1 ? 'task due' : 'tasks due', onOpen: () => handleTabChange('tasks') },
     { id: 'cards', count: counts?.cards ?? 0, label: counts?.cards === 1 ? 'card to review' : 'cards to review', onOpen: () => handleTabChange('flashcards') },
     { id: 'reviews', count: changesToReview, label: changesToReview === 1 ? 'change to review' : 'changes to review', onOpen: () => handleTabChange('reviews') },
+    // Broken links have no sidebar entry: they show here only when there are some.
+    { id: 'links', count: counts?.links ?? 0, label: counts?.links === 1 ? 'broken link' : 'broken links', onOpen: () => handleTabChange('links') },
   ].filter((need) => need.count > 0);
   const todayEntry = useMemo(
     () => (journalsAvailable ? journalTimeline(journalConfig, journalPaths, new Date())[0] ?? null : null),
     [journalsAvailable, journalConfig, journalPaths],
   );
+  /** Days with a journal note, for the Journals calendar. */
+  const journalDays = useMemo(() => new Set(
+    journalTimeline(journalConfig, journalPaths, new Date()).filter((entry) => !entry.missing).map((entry) => entry.key),
+  ), [journalConfig, journalPaths]);
+  const [journalJump, setJournalJump] = useState<{ key: string; nonce: number } | null>(null);
 
   // Determine active page/source for panel highlight
   const currentActivePage = activeView?.kind === 'page' ? activeView.slug : null;
@@ -1710,7 +1719,6 @@ export function MainLayout() {
                 reviewCount={reviewCount}
                 isPersonal={personal}
                 showReviews={desktop || !personal}
-                showLinkDiagnostics={desktop && !!activeWorkspace?.localPath}
                 isOwner={isOwner}
                 onSelectPage={(slug, path) => activeWorkspace && selectPage(activeWorkspace, slug, path)}
                 onSelectSource={(filename) => activeWorkspace && selectSource(activeWorkspace, filename)}
@@ -1863,7 +1871,7 @@ export function MainLayout() {
                 {activeView?.kind === 'links' && (
                   <>
                     <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>Links</span>
+                    <span style={{ color: C.ink }}>Broken links</span>
                   </>
                 )}
                 {activeView?.kind === 'tasks' && (
@@ -1900,6 +1908,14 @@ export function MainLayout() {
                     onSeeReviews={() => handleTabChange('reviews')}
                     versions={!isHtmlPage}
                     cloudAction={spaceCloudAction}
+                  />
+                )}
+
+                {showJournals && (
+                  <JournalCalendar
+                    days={journalDays}
+                    today={dateKey(new Date())}
+                    onGoTo={(key) => setJournalJump({ key, nonce: Date.now() })}
                   />
                 )}
 
@@ -2213,6 +2229,7 @@ export function MainLayout() {
                     key={activeWorkspace.slug}
                     config={activeFeatures.journal}
                     paths={journalPaths}
+                    jumpTo={journalJump}
                     read={readJournal}
                     write={writeJournal}
                     createToday={async () => (await ensureTodayEntry(activeWorkspace)).path}

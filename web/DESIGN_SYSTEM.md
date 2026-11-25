@@ -47,7 +47,7 @@ leads and the chrome stays quiet. Check every new screen against these.
 
 ## View layout
 
-Every tool view (Tasks, Flashcards, History, Links, Reviews, Members,
+Every tool view (Tasks, Flashcards, History, Broken links, Reviews, Members,
 Notifications, Review details, Cloud pages) is built the same way, with
 `components/ui/view-header`:
 
@@ -77,6 +77,13 @@ Notifications, Review details, Cloud pages) is built the same way, with
   appears only when the Draft has changes.
 - Views are left-aligned in the content area (`36px 56px` padding) with a
   `min(860px, 100%)` column; a wide board may use `min(1040px, 100%)`.
+- **Tasks** tabs (Today, This week, Upcoming, No date) each read as a list
+  or a board (user decision 2026-11-25), chosen by a two-icon switch in the
+  title row and remembered per tab on the device; This week starts as a
+  board, the others as lists, and Done is only a list. A board is To do /
+  Doing / Done; its Done is what you finished today (This week: this week).
+  A list of This week is grouped the same way. Saved custom views belong in
+  query blocks in a page, not in this view.
 - **Flashcards** follow Anki (user decision 2026-11-24): the view is a deck
   tree with **New** (blue) and **Due** (green) columns, zeros faint; a deck
   opens its own screen with the same counts, **Study now** and the notes
@@ -118,8 +125,11 @@ Notifications, Review details, Cloud pages) is built the same way, with
   Home is small on purpose:
   - one quiet line of what needs you: tasks due or overdue, cards to
     review today, changes waiting for review (your unsent draft counts in a
-    shared Space). Only non-zero counts show; with nothing to do the line is
-    gone. Each count opens its view.
+    shared Space), broken links. Only non-zero counts show; with nothing to
+    do the line is gone. Each count opens its view. **Broken links** (links
+    to pages that do not exist yet) have no sidebar entry of their own
+    (user decision 2026-11-25): in Obsidian such links are often deliberate,
+    so they are a count here, not a place to visit.
   - **today's journal**, written in place (when the Journal module is on);
   - **Recently edited** pages as hairline rows (local Spaces; a Cloud Space
     in the browser cannot list edit times).
@@ -131,6 +141,11 @@ Notifications, Review details, Cloud pages) is built the same way, with
   inside a day are 15px sans section labels. An empty day is a single faint
   bullet, ready for text. Opening Home or Journals writes nothing; today's
   file is created from the journal template on the first click.
+  To reach a day, **Go to a day** (a calendar icon in the top bar, in the
+  slot comments use on a page) opens a month with a dot under every day
+  that has a note, as in Obsidian's Calendar; only those days and today can
+  be picked, and the stream loads down to the day and scrolls to it. The
+  `journal` folder stays in the page tree (user decision 2026-11-25).
 - **Click to edit**, as in Logseq; there is no Edit button. A single click
   in a page or journal day opens the editor with the caret where you
   clicked (matched through the text, `lib/click-to-edit.ts`). Links,

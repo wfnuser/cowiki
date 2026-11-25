@@ -153,7 +153,6 @@ export function CloudSpaceView({ client, session, route, onSignOut }: CloudSpace
               reviewCount={0}
               isPersonal={false}
               showReviews
-              showLinkDiagnostics={false}
               showHistory={false}
               isOwner={space?.role === 'owner'}
               readOnly

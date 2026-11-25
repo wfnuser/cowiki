@@ -170,7 +170,8 @@ for (const scheme of ['light', 'dark'] as const) {
     await nav(page, 'Reviews'); await shot('10-reviews');
     await page.getByRole('button', { name: /Current Draft/ }).click(); await shot('11-review-detail');
     await nav(page, 'History'); await shot('12-history');
-    await nav(page, 'Links'); await shot('13-links');
+    await nav(page, 'Home');
+    await page.getByRole('navigation', { name: 'Needs you' }).getByRole('button', { name: /broken links/ }).click(); await shot('13-links');
     await nav(page, 'Home');
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k');
     await page.keyboard.type('String'); await shot('14-search');

@@ -13,6 +13,7 @@ const tauriLib = readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url
 const spacePanel = readFileSync(new URL('../src/components/layout/SpacePanel.tsx', import.meta.url), 'utf8');
 const mainLayout = readFileSync(new URL('../src/pages/MainLayout.tsx', import.meta.url), 'utf8');
 const linksView = readFileSync(new URL('../src/components/views/LinksView.tsx', import.meta.url), 'utf8');
+const homeCounts = readFileSync(new URL('../src/lib/home-counts.ts', import.meta.url), 'utf8');
 
 test('broken-link summaries and groups stay concise', () => {
   assert.equal(brokenLinkSummary(0), 'No broken links');
@@ -42,12 +43,16 @@ test('desktop diagnostics use one registered read-only Tauri command', () => {
   assert.doesNotMatch(tauriLib, /fn local_(?:repair|fix)_broken_links/);
 });
 
-test('the local-only Links view refreshes on demand and window focus without polling', () => {
-  assert.match(spacePanel, /showLinkDiagnostics/);
-  assert.match(spacePanel, /label: 'Links'/);
+test('broken links have no sidebar entry; Home counts them and opens the view', () => {
+  assert.doesNotMatch(spacePanel, /tab: 'links'/);
+  assert.match(mainLayout, /id: 'links', count: counts\?\.links/);
+  assert.match(mainLayout, /links: desktop/);
+  assert.match(homeCounts, /listBrokenLinks/);
+});
+
+test('the local-only Broken links view refreshes on demand and window focus without polling', () => {
   assert.match(mainLayout, /kind: 'links'/);
   assert.match(mainLayout, /<LinksView/);
-  assert.match(mainLayout, /showLinkDiagnostics=\{desktop/);
   assert.doesNotMatch(linksView, /setInterval/);
   assert.match(linksView, /addEventListener\('focus'/);
   assert.match(linksView, /label="Refresh"/);

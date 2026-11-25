@@ -31,3 +31,11 @@ test('the Space title bar drags the window instead of selecting its label', () =
 test('the main window is allowed to start native window dragging', () => {
   assert.ok(desktopCapability.permissions.includes('core:window:allow-start-dragging'));
 });
+
+test('the window hands drags to the page, so the Tasks board can drop', () => {
+  // Tauri's native file-drop handler claims every drag over the webview
+  // (wry never forwards it to WebKit), so HTML drag and drop never fires.
+  const tauriLib = readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
+  assert.match(tauriLib, /WebviewWindowBuilder::new\(app, "main"[\s\S]*?\.disable_drag_drop_handler\(\)/);
+  assert.doesNotMatch(tauriLib, /on_drag_drop_event|DragDropEvent/);
+});

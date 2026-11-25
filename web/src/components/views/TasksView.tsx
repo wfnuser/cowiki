@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowUpRight, FileText, LoaderCircle, Play, Plus, RefreshCw } from 'lucide-react';
+import { ArrowUpRight, Columns3, FileText, List as ListIcon, LoaderCircle, Play, Plus, RefreshCw } from 'lucide-react';
 
 import { ViewHeader, ViewIconButton, ViewTabs } from '@/components/ui/view-header';
 import { DatePicker, dayLabel } from '@/components/ui/date-picker';
@@ -11,14 +11,54 @@ import {
   extractTasks,
   groupTasks,
   newTaskLine,
+  tabBoard,
   taskDay,
   taskKey,
   weekBoard,
   type BoardStatus,
   type TaskItem,
+  type TaskTab,
+  type WeekBoard,
 } from '@/lib/tasks';
 
-type Filter = 'today' | 'week' | 'upcoming' | 'someday' | 'done';
+type Filter = TaskTab;
+type Layout = 'list' | 'board';
+type Columns = Pick<WeekBoard, 'todo' | 'doing' | 'done'>;
+
+/** Each tab's layout is remembered on this device; This week starts as a board. */
+const LAYOUT_KEY = 'cowiki.tasks.layout';
+function readLayouts(): Partial<Record<Filter, Layout>> {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? '{}');
+    return saved && typeof saved === 'object' ? saved as Partial<Record<Filter, Layout>> : {};
+  } catch {
+    return {};
+  }
+}
+
+/** List or board, as a small two-icon switch in the title row. */
+function LayoutToggle({ value, onChange }: { value: Layout; onChange: (layout: Layout) => void }) {
+  return (
+    <div role="group" aria-label="Layout" className="mr-1 flex items-center rounded-md bg-bg-hover p-0.5">
+      {(['list', 'board'] as const).map((id) => (
+        <button
+          key={id}
+          type="button"
+          aria-pressed={value === id}
+          aria-label={id === 'list' ? 'List' : 'Board'}
+          title={id === 'list' ? 'List' : 'Board'}
+          onClick={() => onChange(id)}
+          className={cn(
+            'flex size-7 items-center justify-center rounded transition-colors',
+            value === id ? 'bg-panel text-text shadow-[var(--shadow-chip)]' : 'text-text-tertiary hover:text-text',
+          )}
+        >
+          {id === 'list' ? <ListIcon className="size-3.5" /> : <Columns3 className="size-3.5" />}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const COLUMNS: Array<{ status: BoardStatus; title: string }> = [
   { status: 'todo', title: 'To do' },
@@ -78,6 +118,13 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
   const [week, setWeek] = useState(() => startOfIsoWeek(new Date()));
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<BoardStatus | null>(null);
+  const [layouts, setLayouts] = useState(readLayouts);
+  const layout: Layout = filter === 'done' ? 'list' : layouts[filter] ?? (filter === 'week' ? 'board' : 'list');
+  const setLayout = (next: Layout) => setLayouts((previous) => {
+    const all = { ...previous, [filter]: next };
+    try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(all)); } catch { /* the choice lasts this session */ }
+    return all;
+  });
   const today = dateKey(new Date());
   const refresh = () => setReloadKey((key) => key + 1);
 
@@ -167,11 +214,19 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
     }
   };
 
+  const columns: Columns | null = filter === 'week' ? board : filter === 'done' ? null : tabBoard(tasks, groups, filter, today);
+
   const sections: Array<{ title: string | null; items: TaskItem[]; tone?: 'red' }> = filter === 'today'
     ? [
       { title: 'Overdue', items: groups.overdue, tone: 'red' },
       { title: groups.overdue.length > 0 ? 'Today' : null, items: groups.today },
     ]
+    : filter === 'week'
+      ? [
+        { title: 'Doing', items: board.doing },
+        { title: 'To do', items: board.todo },
+        { title: 'Done', items: board.done },
+      ]
     : filter === 'upcoming'
       ? [{ title: null, items: groups.upcoming }]
       : filter === 'someday'
@@ -186,14 +241,94 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
     ['done', 'Done'],
   ];
 
+  /** To do, Doing and Done columns; drag a card, or start or finish it in place. */
+  const renderBoard = (cols: Columns) => (
+    <div className="grid grid-cols-3 gap-3">
+      {COLUMNS.map((column) => {
+        const items = cols[column.status];
+        return (
+          <div
+            key={column.status}
+            role="list"
+            aria-label={column.title}
+            onDragOver={(event) => { event.preventDefault(); setDropTarget(column.status); }}
+            onDragLeave={() => setDropTarget((current) => (current === column.status ? null : current))}
+            onDrop={(event) => {
+              event.preventDefault();
+              setDropTarget(null);
+              const key = event.dataTransfer.getData('text/plain') || dragging;
+              const task = tasks.find((item) => taskKey(item) === key);
+              setDragging(null);
+              if (task) void move(task, column.status);
+            }}
+            className={cn(
+              'min-h-40 rounded-lg p-1.5 transition-colors',
+              dropTarget === column.status ? 'bg-accent-soft/60 ring-1 ring-inset ring-accent/40' : 'bg-bg-secondary/70',
+            )}
+          >
+            <h2 className="mb-1.5 flex items-center gap-1.5 px-1.5 pt-0.5 text-small font-medium text-text-secondary">
+              {column.title}
+              <span className="font-normal tabular-nums text-text-faint">{items.length}</span>
+            </h2>
+            {items.map((task) => {
+              const key = taskKey(task);
+              const day = column.status === 'done' ? task.doneDate : taskDay(task);
+              return (
+                <div
+                  key={key}
+                  role="listitem"
+                  draggable={!pending.has(key)}
+                  onDragStart={(event) => { event.dataTransfer.setData('text/plain', key); setDragging(key); }}
+                  onDragEnd={() => { setDragging(null); setDropTarget(null); }}
+                  className={cn(
+                    'group mb-1.5 cursor-grab rounded-md border border-border-soft bg-panel px-2.5 py-2 shadow-[var(--shadow-rest)] transition-opacity',
+                    (pending.has(key) || dragging === key) && 'opacity-50',
+                  )}
+                >
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={column.status === 'done'}
+                      disabled={pending.has(key)}
+                      onChange={() => { void move(task, column.status === 'done' ? 'todo' : 'done'); }}
+                      aria-label={column.status === 'done' ? `Reopen ${task.text}` : `Complete ${task.text}`}
+                      className="mt-[2px]"
+                    />
+                    <span className={cn('min-w-0 flex-1 text-small leading-[1.45] [overflow-wrap:anywhere]', column.status === 'done' ? 'text-text-tertiary' : 'text-text')}>
+                      {readable(task.text)}
+                    </span>
+                    {column.status === 'todo' && (
+                      <button type="button" onClick={() => { void move(task, 'doing'); }} disabled={pending.has(key)} className="rounded p-0.5 text-text-faint opacity-0 transition-opacity hover:text-text group-hover:opacity-100 focus-visible:opacity-100" aria-label={`Start ${task.text}`} title="Start">
+                        <Play className="size-3" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="mt-1 flex gap-2 pl-[23px] text-caption text-text-tertiary">
+                    <button type="button" onClick={() => onOpenPage(task.path)} className="max-w-40 truncate hover:text-text-secondary" title={task.path}>
+                      {pageLabel(task.path)}
+                    </button>
+                    {day && <span className={cn(column.status !== 'done' && day < today && 'text-red')}>{relativeDay(day, today)}</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
-    <section style={{ width: filter === 'week' ? 'min(1040px, 100%)' : 'min(860px, 100%)' }}>
+    <section style={{ width: layout === 'board' ? 'min(1040px, 100%)' : 'min(860px, 100%)' }}>
       <ViewHeader
         title="Tasks"
         actions={(
-          <ViewIconButton label="Refresh" onClick={refresh} disabled={refreshing}>
-            <RefreshCw className={cn('size-3.5', refreshing && 'animate-spin')} />
-          </ViewIconButton>
+          <>
+            {filter !== 'done' && <LayoutToggle value={layout} onChange={setLayout} />}
+            <ViewIconButton label="Refresh" onClick={refresh} disabled={refreshing}>
+              <RefreshCw className={cn('size-3.5', refreshing && 'animate-spin')} />
+            </ViewIconButton>
+          </>
         )}
         className="mb-4"
       />
@@ -221,90 +356,19 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
         </form>
       )}
 
+      {filter === 'week' && !loading && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <WeekNav week={week} onOpenWeek={(date) => setWeek(startOfIsoWeek(date))} />
+        </div>
+      )}
+
       {loading ? (
         <p className="flex items-center gap-2 py-10 text-small text-text-tertiary"><LoaderCircle className="size-3.5 animate-spin" /> Collecting tasks…</p>
-      ) : filter === 'week' ? (
-        <div>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <WeekNav week={week} onOpenWeek={(date) => setWeek(startOfIsoWeek(date))} />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            {COLUMNS.map((column) => {
-              const items = board[column.status];
-              return (
-                <div
-                  key={column.status}
-                  role="list"
-                  aria-label={column.title}
-                  onDragOver={(event) => { event.preventDefault(); setDropTarget(column.status); }}
-                  onDragLeave={() => setDropTarget((current) => (current === column.status ? null : current))}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    setDropTarget(null);
-                    const key = event.dataTransfer.getData('text/plain') || dragging;
-                    const task = tasks.find((item) => taskKey(item) === key);
-                    setDragging(null);
-                    if (task) void move(task, column.status);
-                  }}
-                  className={cn(
-                    'min-h-40 rounded-lg p-1.5 transition-colors',
-                    dropTarget === column.status ? 'bg-accent-soft/60 ring-1 ring-inset ring-accent/40' : 'bg-bg-secondary/70',
-                  )}
-                >
-                  <h2 className="mb-1.5 flex items-center gap-1.5 px-1.5 pt-0.5 text-small font-medium text-text-secondary">
-                    {column.title}
-                    <span className="font-normal tabular-nums text-text-faint">{items.length}</span>
-                  </h2>
-                  {items.map((task) => {
-                    const key = taskKey(task);
-                    const day = column.status === 'done' ? task.doneDate : taskDay(task);
-                    return (
-                      <div
-                        key={key}
-                        role="listitem"
-                        draggable={!pending.has(key)}
-                        onDragStart={(event) => { event.dataTransfer.setData('text/plain', key); setDragging(key); }}
-                        onDragEnd={() => { setDragging(null); setDropTarget(null); }}
-                        className={cn(
-                          'group mb-1.5 cursor-grab rounded-md border border-border-soft bg-panel px-2.5 py-2 shadow-[var(--shadow-rest)] transition-opacity',
-                          (pending.has(key) || dragging === key) && 'opacity-50',
-                        )}
-                      >
-                        <div className="flex items-start gap-2">
-                          <input
-                            type="checkbox"
-                            checked={column.status === 'done'}
-                            disabled={pending.has(key)}
-                            onChange={() => { void move(task, column.status === 'done' ? 'todo' : 'done'); }}
-                            aria-label={column.status === 'done' ? `Reopen ${task.text}` : `Complete ${task.text}`}
-                            className="mt-[3px]"
-                          />
-                          <span className={cn('min-w-0 flex-1 text-small leading-[1.45] [overflow-wrap:anywhere]', column.status === 'done' ? 'text-text-tertiary' : 'text-text')}>
-                            {readable(task.text)}
-                          </span>
-                          {column.status === 'todo' && (
-                            <button type="button" onClick={() => { void move(task, 'doing'); }} disabled={pending.has(key)} className="rounded p-0.5 text-text-faint opacity-0 transition-opacity hover:text-text group-hover:opacity-100 focus-visible:opacity-100" aria-label={`Start ${task.text}`} title="Start">
-                              <Play className="size-3" />
-                            </button>
-                          )}
-                        </div>
-                        <div className="mt-1 flex gap-2 pl-[23px] text-caption text-text-tertiary">
-                          <button type="button" onClick={() => onOpenPage(task.path)} className="max-w-40 truncate hover:text-text-secondary" title={task.path}>
-                            {pageLabel(task.path)}
-                          </button>
-                          {day && <span className={cn(column.status !== 'done' && day < today && 'text-red')}>{relativeDay(day, today)}</span>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+      ) : layout === 'board' && columns ? (
+        renderBoard(columns)
       ) : sections.every((section) => section.items.length === 0) ? (
         <p className="py-10 text-center text-small text-text-tertiary">
-          {filter === 'today' ? 'Nothing due today.' : filter === 'done' ? 'Nothing finished yet.' : 'No tasks here.'}
+          {filter === 'today' ? 'Nothing due today.' : filter === 'week' ? 'Nothing this week.' : filter === 'done' ? 'Nothing finished yet.' : 'No tasks here.'}
         </p>
       ) : (
         sections.filter((section) => section.items.length > 0).map((section) => (
@@ -351,7 +415,7 @@ export function TasksView({ workspaceSlug, journal, onOpenPage, onToggleTask, on
                           )}
                           {readable(task.text)}
                         </span>
-                        {task.status === 'doing' && <span className="mt-[3px] flex shrink-0 items-center gap-1 text-meta leading-4 text-blue"><span className="size-1.5 rounded-full bg-current" />Doing</span>}
+                        {task.status === 'doing' && filter !== 'week' && <span className="mt-[3px] flex shrink-0 items-center gap-1 text-meta leading-4 text-blue"><span className="size-1.5 rounded-full bg-current" />Doing</span>}
                         {done && task.doneDate ? (
                           <span className="mt-[3px] shrink-0 text-meta leading-4 text-text-faint">{relativeDay(task.doneDate, today)}</span>
                         ) : day && (filter !== 'today' || day !== today) && (
