@@ -1,0 +1,574 @@
+{
+  "change": {
+    "createdAt": 1795532806,
+    "diffs": [
+      {
+        "additions": 3,
+        "deletions": 1,
+        "hunks": [
+          {
+            "header": "@@ -1,13 +1,15 @@",
+            "lines": [
+              {
+                "kind": "ctx",
+                "new_line": 1,
+                "old_line": 1,
+                "text": "---"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 2,
+                "old_line": 2,
+                "text": "type: guide"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 3,
+                "old_line": 3,
+                "text": "title: \"Build message navigation\""
+              },
+              {
+                "kind": "ctx",
+                "new_line": 4,
+                "old_line": 4,
+                "text": "status: active"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 5,
+                "old_line": 5,
+                "text": "trust_tier: editorial"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 6,
+                "old_line": 6,
+                "text": "verified: false"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 7,
+                "old_line": 7,
+                "text": "scope: add_custom_command"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 8,
+                "old_line": 8,
+                "text": "version: \"3.28.0\""
+              },
+              {
+                "kind": "ctx",
+                "new_line": 9,
+                "old_line": 9,
+                "text": "---"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 10,
+                "old_line": 10,
+                "text": ""
+              },
+              {
+                "kind": "ctx",
+                "new_line": 11,
+                "old_line": 11,
+                "text": "# Build message navigation"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 12,
+                "old_line": 12,
+                "text": ""
+              },
+              {
+                "kind": "del",
+                "new_line": null,
+                "old_line": 13,
+                "text": "The build handbook links to the message syntax."
+              },
+              {
+                "kind": "add",
+                "new_line": 13,
+                "old_line": null,
+                "text": "The sample literal is `[[comment-draft]]`."
+              },
+              {
+                "kind": "add",
+                "new_line": 14,
+                "old_line": null,
+                "text": ""
+              },
+              {
+                "kind": "add",
+                "new_line": 15,
+                "old_line": null,
+                "text": "See [progress messages](build-messages.md)."
+              }
+            ]
+          }
+        ],
+        "is_binary": false,
+        "new_binary_hash": null,
+        "new_content": "---\ntype: guide\ntitle: \"Build message navigation\"\nstatus: active\ntrust_tier: editorial\nverified: false\nscope: add_custom_command\nversion: \"3.28.0\"\n---\n\n# Build message navigation\n\nThe sample literal is `[[comment-draft]]`.\n\nSee [progress messages](build-messages.md).\n",
+        "old_binary_hash": null,
+        "old_content": "---\ntype: guide\ntitle: \"Build message navigation\"\nstatus: active\ntrust_tier: editorial\nverified: false\nscope: add_custom_command\nversion: \"3.28.0\"\n---\n\n# Build message navigation\n\nThe build handbook links to the message syntax.\n",
+        "path": "build-message-navigation.md"
+      },
+      {
+        "additions": 3,
+        "deletions": 1,
+        "hunks": [
+          {
+            "header": "@@ -1,13 +1,15 @@",
+            "lines": [
+              {
+                "kind": "ctx",
+                "new_line": 1,
+                "old_line": 1,
+                "text": "---"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 2,
+                "old_line": 2,
+                "text": "type: guide"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 3,
+                "old_line": 3,
+                "text": "title: \"Recently produced inputs\""
+              },
+              {
+                "kind": "ctx",
+                "new_line": 4,
+                "old_line": 4,
+                "text": "status: active"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 5,
+                "old_line": 5,
+                "text": "trust_tier: editorial"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 6,
+                "old_line": 6,
+                "text": "verified: false"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 7,
+                "old_line": 7,
+                "text": "scope: file"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 8,
+                "old_line": 8,
+                "text": "version: \"3.28.0\""
+              },
+              {
+                "kind": "ctx",
+                "new_line": 9,
+                "old_line": 9,
+                "text": "---"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 10,
+                "old_line": 10,
+                "text": ""
+              },
+              {
+                "kind": "ctx",
+                "new_line": 11,
+                "old_line": 11,
+                "text": "# Recently produced inputs"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 12,
+                "old_line": 12,
+                "text": ""
+              },
+              {
+                "kind": "del",
+                "new_line": null,
+                "old_line": 13,
+                "text": "A generator writes a file immediately before the configure step reads it."
+              },
+              {
+                "kind": "add",
+                "new_line": 13,
+                "old_line": null,
+                "text": "INPUT_MAY_BE_RECENT enables the same permission-denied retries on Linux as on Windows."
+              },
+              {
+                "kind": "add",
+                "new_line": 14,
+                "old_line": null,
+                "text": ""
+              },
+              {
+                "kind": "add",
+                "new_line": 15,
+                "old_line": null,
+                "text": "The option was introduced in 3.26."
+              }
+            ]
+          }
+        ],
+        "is_binary": false,
+        "new_binary_hash": null,
+        "new_content": "---\ntype: guide\ntitle: \"Recently produced inputs\"\nstatus: active\ntrust_tier: editorial\nverified: false\nscope: file\nversion: \"3.28.0\"\n---\n\n# Recently produced inputs\n\nINPUT_MAY_BE_RECENT enables the same permission-denied retries on Linux as on Windows.\n\nThe option was introduced in 3.26.\n",
+        "old_binary_hash": null,
+        "old_content": "---\ntype: guide\ntitle: \"Recently produced inputs\"\nstatus: active\ntrust_tier: editorial\nverified: false\nscope: file\nversion: \"3.28.0\"\n---\n\n# Recently produced inputs\n\nA generator writes a file immediately before the configure step reads it.\n",
+        "path": "recently-produced-inputs.md"
+      }
+    ],
+    "id": "10070e7a-82a5-4050-ac96-15af74ef3621",
+    "status": "open",
+    "title": "Update the CMake build handbook",
+    "worktreePath": "fixture/worktree"
+  },
+  "devCases": [
+    "aeee390db252024e",
+    "36d6acb0d77730d8"
+  ],
+  "report": {
+    "asOf": "2026-11-24",
+    "canStage": true,
+    "findings": [
+      {
+        "candidate_excerpt": "trust_tier: editorial",
+        "code": "invalid_trust_tier",
+        "evidence": null,
+        "evidence_excerpt": null,
+        "id": "37028f70ccbf557beef66262e58b70b7ef460376edeba58c4d8e29c305ade443",
+        "location": {
+          "first": 5,
+          "last": 5,
+          "path": "build-message-navigation.md",
+          "snapshot": "0e70ab2ac7f91af7b39335b94f68b5b7adea249c516bff3bac0ba75ee29be707"
+        },
+        "message": "Invalid trust_tier 'editorial'; MUST be one of: human_verified, human_authored, agent_draft, unverified.",
+        "path": "build-message-navigation.md",
+        "severity": "critical",
+        "subject": null,
+        "verdict": null
+      },
+      {
+        "candidate_excerpt": "trust_tier: editorial",
+        "code": "invalid_trust_tier",
+        "evidence": null,
+        "evidence_excerpt": null,
+        "id": "84d71c7fc5ba88b811c4d33d446a7cbebcd9210da21b131575498ad9f2f9d3da",
+        "location": {
+          "first": 5,
+          "last": 5,
+          "path": "recently-produced-inputs.md",
+          "snapshot": "455e51357a517cfb332741761f1198e256f3bb6359c086d76f56d0d98f2a14ba"
+        },
+        "message": "Invalid trust_tier 'editorial'; MUST be one of: human_verified, human_authored, agent_draft, unverified.",
+        "path": "recently-produced-inputs.md",
+        "severity": "critical",
+        "subject": null,
+        "verdict": null
+      },
+      {
+        "candidate_excerpt": "INPUT_MAY_BE_RECENT enables the same permission-denied retries on Linux as on Windows.",
+        "code": "contradicts_verified",
+        "evidence": {
+          "first": 17,
+          "last": 17,
+          "path": "file-3.28.0.md",
+          "snapshot": "8465b07fd5f5aa3cc7172a2ebcf7ffb2523c4d2c035bb5bd9e5d6f53735a372d"
+        },
+        "evidence_excerpt": "From 3.26 INPUT_MAY_BE_RECENT enables a few retries on Windows when permission to read a newly made input is denied. The option is meaningful only on Windows.",
+        "id": "09673f5cd6062d51544c2346f35553631ba25a49c29f35b7858ecd4d2df66b52",
+        "location": {
+          "first": 13,
+          "last": 13,
+          "path": "recently-produced-inputs.md",
+          "snapshot": "455e51357a517cfb332741761f1198e256f3bb6359c086d76f56d0d98f2a14ba"
+        },
+        "message": "Conflicts with an active human-verified claim.",
+        "path": "recently-produced-inputs.md",
+        "severity": "critical",
+        "subject": null,
+        "verdict": "contradiction"
+      },
+      {
+        "candidate_excerpt": "See [progress messages](build-messages.md).",
+        "code": "inbound_redirect",
+        "evidence": {
+          "first": 9,
+          "last": 9,
+          "path": "build-messages.md",
+          "snapshot": "55b372359e5ba2f15f3620ebb51e6df5df957f68d903a9eafcbb1e5b5b51ae47"
+        },
+        "evidence_excerpt": "redirect_to: reference-index.md",
+        "id": "a8c0498b9ad6c3a337d49880d73bf3346ca694cef78d2424dc386dd45c302348",
+        "location": {
+          "first": 15,
+          "last": 15,
+          "path": "build-message-navigation.md",
+          "snapshot": "0e70ab2ac7f91af7b39335b94f68b5b7adea249c516bff3bac0ba75ee29be707"
+        },
+        "message": "Link points to redirect stub build-messages.md.",
+        "path": "build-message-navigation.md",
+        "severity": "warning",
+        "subject": "build-messages.md",
+        "verdict": null
+      }
+    ],
+    "proposals": [
+      {
+        "diff": {
+          "additions": 1,
+          "deletions": 1,
+          "hunks": [
+            {
+              "header": "@@ -1,15 +1,15 @@",
+              "lines": [
+                {
+                  "kind": "ctx",
+                  "new_line": 1,
+                  "old_line": 1,
+                  "text": "---"
+                },
+                {
+                  "kind": "ctx",
+                  "new_line": 2,
+                  "old_line": 2,
+                  "text": "type: guide"
+                },
+                {
+                  "kind": "ctx",
+                  "new_line": 3,
+                  "old_line": 3,
+                  "text": "title: \"Build message navigation\""
+                },
+                {
+                  "kind": "ctx",
+                  "new_line": 4,
+                  "old_line": 4,
+                  "text": "status: active"
+                },
+                {
+                  "kind": "ctx",
+                  "new_line": 5,
+                  "old_line": 5,
+                  "text": "trust_tier: editorial"
+                },
+                {
+                  "kind": "ctx",
+                  "new_line": 6,
+                  "old_line": 6,
+                  "text": "verified: false"
+                },
+                {
+                  "kind": "ctx",
+                  "new_line": 7,
+                  "old_line": 7,
+                  "text": "scope: add_custom_command"
+                },
+                {
+                  "kind": "ctx",
+                  "new_line": 8,
+                  "old_line": 8,
+                  "text": "version: \"3.28.0\""
+                },
+                {
+                  "kind": "ctx",
+                  "new_line": 9,
+                  "old_line": 9,
+                  "text": "---"
+                },
+                {
+                  "kind": "ctx",
+                  "new_line": 10,
+                  "old_line": 10,
+                  "text": ""
+                },
+                {
+                  "kind": "ctx",
+                  "new_line": 11,
+                  "old_line": 11,
+                  "text": "# Build message navigation"
+                },
+                {
+                  "kind": "ctx",
+                  "new_line": 12,
+                  "old_line": 12,
+                  "text": ""
+                },
+                {
+                  "kind": "ctx",
+                  "new_line": 13,
+                  "old_line": 13,
+                  "text": "The sample literal is `[[comment-draft]]`."
+                },
+                {
+                  "kind": "ctx",
+                  "new_line": 14,
+                  "old_line": 14,
+                  "text": ""
+                },
+                {
+                  "kind": "del",
+                  "new_line": null,
+                  "old_line": 15,
+                  "text": "See [progress messages](build-messages.md)."
+                },
+                {
+                  "kind": "add",
+                  "new_line": 15,
+                  "old_line": null,
+                  "text": "See [progress messages](add-custom-command-3.28.0.md)."
+                }
+              ]
+            }
+          ],
+          "is_binary": false,
+          "new_binary_hash": null,
+          "new_content": "---\ntype: guide\ntitle: \"Build message navigation\"\nstatus: active\ntrust_tier: editorial\nverified: false\nscope: add_custom_command\nversion: \"3.28.0\"\n---\n\n# Build message navigation\n\nThe sample literal is `[[comment-draft]]`.\n\nSee [progress messages](add-custom-command-3.28.0.md).\n",
+          "old_binary_hash": null,
+          "old_content": "---\ntype: guide\ntitle: \"Build message navigation\"\nstatus: active\ntrust_tier: editorial\nverified: false\nscope: add_custom_command\nversion: \"3.28.0\"\n---\n\n# Build message navigation\n\nThe sample literal is `[[comment-draft]]`.\n\nSee [progress messages](build-messages.md).\n",
+          "path": "build-message-navigation.md"
+        },
+        "findingIds": [
+          "a8c0498b9ad6c3a337d49880d73bf3346ca694cef78d2424dc386dd45c302348"
+        ],
+        "id": "b3aaee32e046dd169e6a176bd76b56ff949aaafbd822702953843629bf1dac01",
+        "rationale": "Update links to their existing canonical destinations."
+      }
+    ],
+    "warnings": []
+  },
+  "staged": {
+    "createdAt": 1795532806,
+    "diffs": [
+      {
+        "additions": 1,
+        "deletions": 1,
+        "hunks": [
+          {
+            "header": "@@ -1,15 +1,15 @@",
+            "lines": [
+              {
+                "kind": "ctx",
+                "new_line": 1,
+                "old_line": 1,
+                "text": "---"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 2,
+                "old_line": 2,
+                "text": "type: guide"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 3,
+                "old_line": 3,
+                "text": "title: \"Build message navigation\""
+              },
+              {
+                "kind": "ctx",
+                "new_line": 4,
+                "old_line": 4,
+                "text": "status: active"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 5,
+                "old_line": 5,
+                "text": "trust_tier: editorial"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 6,
+                "old_line": 6,
+                "text": "verified: false"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 7,
+                "old_line": 7,
+                "text": "scope: add_custom_command"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 8,
+                "old_line": 8,
+                "text": "version: \"3.28.0\""
+              },
+              {
+                "kind": "ctx",
+                "new_line": 9,
+                "old_line": 9,
+                "text": "---"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 10,
+                "old_line": 10,
+                "text": ""
+              },
+              {
+                "kind": "ctx",
+                "new_line": 11,
+                "old_line": 11,
+                "text": "# Build message navigation"
+              },
+              {
+                "kind": "ctx",
+                "new_line": 12,
+                "old_line": 12,
+                "text": ""
+              },
+              {
+                "kind": "ctx",
+                "new_line": 13,
+                "old_line": 13,
+                "text": "The sample literal is `[[comment-draft]]`."
+              },
+              {
+                "kind": "ctx",
+                "new_line": 14,
+                "old_line": 14,
+                "text": ""
+              },
+              {
+                "kind": "del",
+                "new_line": null,
+                "old_line": 15,
+                "text": "See [progress messages](build-messages.md)."
+              },
+              {
+                "kind": "add",
+                "new_line": 15,
+                "old_line": null,
+                "text": "See [progress messages](add-custom-command-3.28.0.md)."
+              }
+            ]
+          }
+        ],
+        "is_binary": false,
+        "new_binary_hash": null,
+        "new_content": "---\ntype: guide\ntitle: \"Build message navigation\"\nstatus: active\ntrust_tier: editorial\nverified: false\nscope: add_custom_command\nversion: \"3.28.0\"\n---\n\n# Build message navigation\n\nThe sample literal is `[[comment-draft]]`.\n\nSee [progress messages](add-custom-command-3.28.0.md).\n",
+        "old_binary_hash": null,
+        "old_content": "---\ntype: guide\ntitle: \"Build message navigation\"\nstatus: active\ntrust_tier: editorial\nverified: false\nscope: add_custom_command\nversion: \"3.28.0\"\n---\n\n# Build message navigation\n\nThe sample literal is `[[comment-draft]]`.\n\nSee [progress messages](build-messages.md).\n",
+        "path": "build-message-navigation.md"
+      }
+    ],
+    "id": "627a8cc4-1fba-41c8-9e01-3526e0642e77",
+    "status": "open",
+    "title": "Governance repair",
+    "worktreePath": "fixture/worktree"
+  }
+}

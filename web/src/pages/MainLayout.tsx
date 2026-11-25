@@ -1851,8 +1851,10 @@ export function MainLayout() {
                   />
                 ) : (
                   <LocalReviewDetail
+                    key={reviewRoute('', activeView.workspaceSlug, activeView.target)}
                     workspaceSlug={activeView.workspaceSlug}
                     target={activeView.target}
+                    onOpenChange={(changeId) => openReviewDetail({ kind: 'local-agent', changeId })}
                     onBack={() => handleTabChange('reviews')}
                     onDraftChanged={() => {
                       if (!activeWorkspace || activeWorkspace.slug !== activeView.workspaceSlug) return;

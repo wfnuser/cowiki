@@ -14,10 +14,10 @@ mod web_source;
 pub use cowiki_knowledge::{embeddings, knowledge_index, okf};
 
 use local_engine::{
-    AgentChange, BrokenLink, Checkpoint, CommentMember, FileDiff, HybridSearchOptions,
-    HybridSearchResult, IngestFileOutcome, LocalEngine, OkfValidationReport, PageComment,
-    PageCommentsResponse, PageFull, PageMeta, SearchResponse, SourceContent, SourceItem, Space,
-    SpaceHistory, SubmitResult,
+    AgentChange, BrokenLink, Checkpoint, CommentMember, FileDiff, GovernanceReview,
+    HybridSearchOptions, HybridSearchResult, IngestFileOutcome, LocalEngine, OkfValidationReport,
+    PageComment, PageCommentsResponse, PageFull, PageMeta, SearchResponse, SourceContent,
+    SourceItem, Space, SpaceHistory, SubmitResult,
 };
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -503,6 +503,43 @@ fn local_list_agent_changes(
     engine.list_agent_changes(&space_slug)
 }
 
+#[tauri::command]
+async fn local_review_governance(
+    engine: State<'_, LocalEngine>,
+    space_slug: String,
+    change_id: Option<String>,
+) -> Result<GovernanceReview, String> {
+    let engine = engine.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.review_governance(&space_slug, change_id.as_deref(), &okf::utc_today_iso())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn stage_governance_as_new_change(
+    engine: State<'_, LocalEngine>,
+    gate: State<'_, agent_execution_gate::AgentExecutionGate>,
+    space_slug: String,
+    change_id: Option<String>,
+    as_of: String,
+    proposal_ids: Vec<String>,
+) -> Result<local_engine::GovernanceStage, String> {
+    let (engine, gate) = (engine.inner().clone(), gate.inner().clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.stage_governance_as_new_change(
+            &gate,
+            &space_slug,
+            change_id.as_deref(),
+            &as_of,
+            &proposal_ids,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[derive(Clone, Copy)]
 enum ChangeClose {
     Merge,
@@ -766,6 +803,8 @@ pub fn run() {
             local_set_auto_checkpoint,
             local_create_agent_change,
             local_list_agent_changes,
+            local_review_governance,
+            stage_governance_as_new_change,
             local_merge_agent_change,
             local_discard_agent_change,
             terminal::agent_probe,
@@ -1015,5 +1054,90 @@ mod tests {
         assert!(validate_external_url("http://localhost:8787/cloud").is_ok());
         assert!(validate_external_url("file:///tmp/private").is_err());
         assert!(validate_external_url("javascript:alert(1)").is_err());
+    }
+}
+
+#[cfg(test)]
+mod governance_ipc_tests {
+    use super::*;
+    use serde_json::{json, Value};
+    use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
+
+    #[test]
+    fn desktop_review_commands_accept_renderer_payloads_and_stage_in_a_new_worktree() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("space");
+        std::fs::create_dir(&root).unwrap();
+        let engine = LocalEngine::open(&temp.path().join("metadata")).unwrap();
+        let space = engine.add_space("Docs", "docs", &root).unwrap();
+        let text = "# Guide\nSee [[former]].\n";
+        std::fs::write(root.join("handbook.md"), text).unwrap();
+        std::fs::write(
+            root.join("former.md"),
+            "---\ntype: Redirect\ntitle: Former\nredirect_to: current.md\n---\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("current.md"), "# Current\n").unwrap();
+        let app = mock_builder()
+            .manage(engine)
+            .manage(agent_execution_gate::AgentExecutionGate::default())
+            .invoke_handler(tauri::generate_handler![
+                local_review_governance,
+                stage_governance_as_new_change
+            ])
+            .build(mock_context(noop_assets()))
+            .unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let invoke = |cmd: &str, body: Value| {
+            get_ipc_response(
+                &window,
+                tauri::webview::InvokeRequest {
+                    cmd: cmd.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: if cfg!(windows) {
+                        "http://tauri.localhost"
+                    } else {
+                        "tauri://localhost"
+                    }
+                    .parse()
+                    .unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(body),
+                    headers: Default::default(),
+                    invoke_key: INVOKE_KEY.into(),
+                },
+            )
+            .map(|body| body.deserialize::<Value>().unwrap())
+        };
+        let review = invoke(
+            "local_review_governance",
+            json!({"spaceSlug":space.slug, "changeId":null}),
+        )
+        .unwrap();
+        let proposal = review["proposals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["diff"]["path"] == "handbook.md")
+            .unwrap();
+        assert!(proposal.get("selection").is_none());
+        let stage = |ids: Value| {
+            invoke(
+                "stage_governance_as_new_change",
+                json!({
+                    "spaceSlug": space.slug, "changeId": null, "asOf": review["asOf"], "proposalIds": ids
+                }),
+            )
+        };
+        assert!(stage(json!(["unknown"])).is_err());
+        let result = stage(json!([proposal["id"]])).unwrap();
+        assert_eq!(result["diffs"][0], proposal["diff"]);
+        assert_eq!(result["status"], "open");
+        assert_eq!(
+            std::fs::read_to_string(root.join("handbook.md")).unwrap(),
+            text
+        );
     }
 }
