@@ -44,7 +44,7 @@ Foxtrot para right under a heading.
 > Xray inside
 
 \`\`\`js
-Quebec code
+const Quebec = 'code';
 \`\`\`
 
 Romeo after code.
@@ -118,8 +118,11 @@ test('clicking to edit leaves every line where it was', async ({ page }) => {
   await setup(page, BODY);
   await page.goto(origin + '/personal/Doc');
   await page.locator('article').getByText('Delta para').waitFor();
+  const readConst = page.locator('article pre code .tok-keyword').first();
+  await expect(readConst).toHaveText('const');
   const read = await positions(page, 'main');
   const readCalloutColor = await page.locator('article .callout-title').evaluate((element) => getComputedStyle(element).color);
+  const readKeywordColor = await readConst.evaluate((element) => getComputedStyle(element).color);
   const before = await page.getByText('Delta para').boundingBox();
   await page.getByText('Delta para').click({ position: { x: 10, y: 8 } });
   await expect(page.locator('.cm-content')).toBeVisible();
@@ -130,6 +133,13 @@ test('clicking to edit leaves every line where it was', async ({ page }) => {
     return getComputedStyle(text?.parentElement ?? element).color;
   });
   expect(editCalloutColor).toBe(readCalloutColor);
+  await expect.poll(() => page.locator('.cm-lp-code').filter({ hasText: 'const Quebec' }).evaluate((element) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.textContent?.trim() === 'const') return getComputedStyle(node.parentElement!).color;
+    }
+    return '';
+  })).toBe(readKeywordColor);
   for (const marker of MARKERS) {
     expect(edit[marker], marker).toBeTruthy();
     expect(Math.abs(edit[marker][0] - read[marker][0]), `${marker} moved sideways`).toBeLessThan(0.6);

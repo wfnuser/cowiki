@@ -14,6 +14,7 @@ import { CALLOUT_SEP, calloutOf } from '@/lib/callouts';
 import { C } from '@/lib/design';
 import { wikilinkFromHref } from '@/lib/obsidian-markdown';
 import { openExternalUrl } from '@/external-links';
+import { HighlightedCode } from './HighlightedCode';
 
 export interface ReaderCallbacks {
   /** Navigate to a wikilink target (raw `[[…]]` inner text). */
@@ -167,6 +168,7 @@ export function withObsidianReader(base: Components | undefined): Components {
   return {
     ...(base ?? {}),
     a: ReaderAnchor,
+    code: HighlightedCode,
     img: ReaderImage,
     input: ReaderInput,
     strong: ReaderStrong,
