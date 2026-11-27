@@ -1,0 +1,159 @@
+{
+  "benchmark": "ramdocs",
+  "source": "HanNight/RAMDocs (RAMDocs_test.jsonl)",
+  "seed": 42,
+  "population_size": 500,
+  "sample_size": 100,
+  "strata": {
+    "gold=1|misinfo=0|noise=0": {
+      "population": 9,
+      "sampled": 2
+    },
+    "gold=1|misinfo=0|noise=1": {
+      "population": 35,
+      "sampled": 7
+    },
+    "gold=1|misinfo=1|noise=0": {
+      "population": 20,
+      "sampled": 4
+    },
+    "gold=1|misinfo=1|noise=1": {
+      "population": 36,
+      "sampled": 7
+    },
+    "gold=2|misinfo=0|noise=0": {
+      "population": 45,
+      "sampled": 9
+    },
+    "gold=2|misinfo=0|noise=1": {
+      "population": 66,
+      "sampled": 13
+    },
+    "gold=2|misinfo=1|noise=0": {
+      "population": 26,
+      "sampled": 5
+    },
+    "gold=2|misinfo=1|noise=1": {
+      "population": 63,
+      "sampled": 12
+    },
+    "gold=3|misinfo=0|noise=0": {
+      "population": 34,
+      "sampled": 7
+    },
+    "gold=3|misinfo=0|noise=1": {
+      "population": 68,
+      "sampled": 14
+    },
+    "gold=3|misinfo=1|noise=0": {
+      "population": 29,
+      "sampled": 6
+    },
+    "gold=3|misinfo=1|noise=1": {
+      "population": 69,
+      "sampled": 14
+    }
+  },
+  "indices": [
+    1,
+    4,
+    5,
+    14,
+    22,
+    25,
+    28,
+    32,
+    37,
+    38,
+    43,
+    44,
+    48,
+    51,
+    56,
+    66,
+    75,
+    94,
+    95,
+    96,
+    118,
+    120,
+    129,
+    132,
+    144,
+    149,
+    151,
+    152,
+    155,
+    157,
+    166,
+    172,
+    176,
+    185,
+    186,
+    191,
+    196,
+    198,
+    199,
+    202,
+    208,
+    210,
+    212,
+    213,
+    221,
+    222,
+    223,
+    224,
+    228,
+    235,
+    236,
+    238,
+    244,
+    269,
+    272,
+    279,
+    282,
+    289,
+    295,
+    301,
+    304,
+    305,
+    309,
+    312,
+    313,
+    317,
+    324,
+    326,
+    327,
+    332,
+    340,
+    350,
+    356,
+    360,
+    362,
+    370,
+    373,
+    375,
+    384,
+    389,
+    397,
+    404,
+    406,
+    410,
+    411,
+    414,
+    419,
+    424,
+    426,
+    433,
+    438,
+    442,
+    458,
+    459,
+    463,
+    469,
+    481,
+    491,
+    493,
+    496
+  ]
+}
