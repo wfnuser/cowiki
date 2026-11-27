@@ -110,9 +110,23 @@ Notifications, Review details, Cloud pages) is built the same way, with
 - **Studying** is a centred focus column (`min(640px, 100%)`) with no colour.
   A session is its own Back/Forward step: Back leaves it, Forward studies
   that deck again, and finishing or ending steps back to where it started.
-  The top line has the deck and *New*/*Review n* in plain text on the left, "n left" and quiet
-  icon tools (open note, skip, suspend, reset, end) on the right, a 2px
-  neutral progress line, then one paper card (`.study-card`: 12px radius,
+  The session lives in the app's top bar, not a row of its own (user
+  decision 2026-11-27, over a Logseq-style dialog and tools on the card,
+  kept as closed PRs #178 and #179): after the arrows, the deck name opens
+  a menu of every deck with what each has due (a deck with nothing due is
+  greyed; picking one is a new Back/Forward step; past eight decks a search
+  box filters them by name or path, and arrows and Enter work either way),
+  then "n left"; on the
+  right, quiet icon tools before a short divider: open note, Undo (⌘Z,
+  Ctrl+Z elsewhere: the last answer, skip, suspend or reset, with the card
+  back as it was), More, end. More holds the rare actions written out in
+  full, each with a line saying what happens (skip for now, stop reviewing
+  this card, relearn as a new card), as Anki keeps them in its More menu;
+  icons alone read wrong (a pause icon looked like pausing the session). The bar's own bottom line fills up as the progress, so no
+  line is drawn above the card. Views fill the bar through
+  `TopBarStart`/`TopBarEnd` (`components/layout/TopBarSlots.tsx`). The
+  Draft menu is hidden on Flashcards, which read the working copy whatever
+  version is picked. Below sits one paper card (`.study-card`: 12px radius,
   `--shadow-card`). The question is content (serif 22px, centred); revealing
   adds a lower answer pane under a hairline without moving the frame
   (single-bullet answers centre cleanly without a lone dot). Below the card

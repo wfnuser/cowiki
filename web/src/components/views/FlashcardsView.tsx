@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowUpRight, ChevronRight, CirclePause, LoaderCircle, RefreshCw, RotateCcw, SkipForward, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowUpRight, Check, ChevronDown, ChevronRight, Ellipsis, EyeOff, Search, Undo2, LoaderCircle, RefreshCw, RotateCcw, SkipForward, SlidersHorizontal, X } from 'lucide-react';
 import { Popover as PopoverPrimitive } from 'radix-ui';
 
 import { withObsidianReader } from '@/components/ObsidianReader';
 import { NumberField } from '@/components/ui/number-field';
 import { ViewEmpty, ViewHeader, ViewIconButton } from '@/components/ui/view-header';
+import { TopBarEnd, TopBarStart } from '@/components/layout/TopBarSlots';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuShortcut, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { listCardSources, readCardReviews, writeCardReviews } from '@/local-api';
 import { dateKey } from '@/lib/journal';
 import { useI18n } from '@/lib/I18nContext';
@@ -39,6 +41,7 @@ import {
 } from '@/lib/flashcards';
 
 const MARKDOWN = withObsidianReader(undefined);
+const UNDO_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘Z' : 'Ctrl+Z';
 // Logseq's answers and shortcuts (f / t / r), with 1-3 as well.
 const SCORES: Array<{ score: Score; label: string; keys: string[] }> = [
   { score: 1, label: 'Forgotten', keys: ['f', '1'] },
@@ -108,6 +111,8 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
   /** How many cards the session started with, for its progress line. */
   const [sessionSize, setSessionSize] = useState(0);
   const [revealed, setRevealed] = useState(false);
+  // What each answer, skip, suspend or reset changed, newest last, for Undo.
+  const [undoSteps, setUndoSteps] = useState<Array<{ session: Flashcard[]; store: ReviewStore; revealed: boolean; reviewed: number }>>([]);
   const [now, setNow] = useState(() => new Date());
   const today = dateKey(now);
 
@@ -157,6 +162,7 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
   const tree = useMemo(() => deckTree(cards), [cards]);
   /** Start showing a session's cards (local state only). */
   function begin(list: Flashcard[], deck: string | null) {
+    setUndoSteps([]);
     setSession(list);
     setSessionSize(list.length);
     setSessionDeck(deck);
@@ -182,7 +188,7 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
       setRevealed(false);
       setNow(new Date());
     }
-    if (studyStep && !session && !loading) begin(queueOf(deckPath), deckPath);
+    if (studyStep && (!session || sessionDeck !== deckPath) && !loading) begin(queueOf(deckPath), deckPath);
   }
   const studyRef = useRef({ deck: deckPath, studying: studyStep });
   const sessionRef = useRef(session);
@@ -206,8 +212,31 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
     onLeaveStudy();
   };
 
+  /** Keep how things are now, so Undo can come back to it. */
+  const remember = () => {
+    if (session) setUndoSteps((steps) => [...steps.slice(-49), { session, store, revealed, reviewed }]);
+  };
+
+  /** Undo the last answer, skip, suspend or reset: that card comes back as it was. */
+  const undo = () => {
+    const last = undoSteps.at(-1);
+    if (!last) return;
+    setUndoSteps((steps) => steps.slice(0, -1));
+    if (last.store !== store) persist(last.store);
+    setSession(last.session);
+    setRevealed(last.revealed);
+    setReviewed(last.reviewed);
+  };
+
+  const skip = () => {
+    if (!current) return;
+    remember();
+    advance();
+  };
+
   const rate = (score: Score) => {
     if (!current) return;
+    remember();
     persist(answerCard(store, current, score, new Date(), dateKey(new Date())));
     setReviewed((count) => count + 1);
     advance();
@@ -215,12 +244,14 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
 
   const suspend = () => {
     if (!current) return;
+    remember();
     persist(setSuspended(store, current, true));
     advance();
   };
 
   const reset = () => {
     if (!current) return;
+    remember();
     persist(resetCard(store, current));
     advance();
   };
@@ -242,6 +273,13 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
     onStudyKey.current = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return;
+      // Keys in the deck menu or the More menu move through the menu, not the card.
+      if (event.defaultPrevented || target?.closest('.study-deck-menu, [role="menu"]')) return;
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        undo();
+        return;
+      }
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (!revealed && (event.key === ' ' || event.key === 'Enter' || event.key === 's')) {
         event.preventDefault();
@@ -250,7 +288,7 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
       }
       if (event.key === 'n') {
         event.preventDefault();
-        advance();
+        skip();
         return;
       }
       const choice = SCORES.find((item) => item.keys.includes(event.key));
@@ -269,34 +307,47 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
     return () => window.removeEventListener('keydown', onKey);
   }, [studying]);
 
+  // A study session's pieces; the layout below decides where each one sits.
+  let parts: { deck: string; left: string; done: number; size: number; tools: React.ReactNode; card: React.ReactNode; actions: React.ReactNode } | null = null;
   if (current) {
     const schedule = scheduleOf(store, current);
     const intervals = previewIntervals(schedule, store.ofMatrix);
     const fresh = isNew(store, current);
     const left = session?.length ?? 0;
-    const progress = sessionSize > 0 ? (sessionSize - left) / sessionSize : 0;
-    const tool = 'inline-flex size-8 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4';
-    return (
-      <section className="mx-auto flex min-h-[calc(100vh-150px)] flex-col justify-center pb-8" style={{ width: 'min(640px, 100%)' }}>
-        <div className="mb-2.5 flex h-8 items-center justify-between gap-3">
-          <span className="flex min-w-0 items-baseline gap-2.5 text-small">
-            <span className="truncate font-medium text-text-secondary">{sessionDeck ? sessionDeck.split('/').join(' / ') : t('All decks')}</span>
-            <span className="shrink-0 text-meta text-text-tertiary">{fresh ? t('New') : t('Review {count}', { count: schedule.repeats + 1 })}</span>
-          </span>
-          <div className="flex shrink-0 items-center gap-0.5">
-            <span className="mr-2 text-meta tabular-nums text-text-tertiary">{t('{count} left', { count: left })}</span>
-            <span aria-hidden className="mr-1.5 h-3.5 w-px bg-border-soft" />
-            <button type="button" onClick={() => onOpenSource(current.path)} className={tool} aria-label={t('Open note')} title={`${t('Open note')} · ${current.path}`}><ArrowUpRight /></button>
-            <button type="button" onClick={advance} className={tool} aria-label={t('Skip')} title={t('Skip (N)')}><SkipForward /></button>
-            <button type="button" onClick={suspend} className={tool} aria-label={t('Suspend')} title={t('Suspend: stop showing this card until you resume it')}><CirclePause /></button>
-            <button type="button" onClick={reset} disabled={fresh} className={tool} aria-label={t('Reset')} title={t('Reset: review this card again from the start')}><RotateCcw /></button>
-            <button type="button" onClick={endSession} className={tool} aria-label={t('End')} title={t('End session')}><X /></button>
-          </div>
-        </div>
-        <div className="study-progress" role="progressbar" aria-label={t('Session progress')} aria-valuemin={0} aria-valuemax={sessionSize} aria-valuenow={sessionSize - left}>
-          <div style={{ width: `${progress * 100}%` }} />
-        </div>
-        {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
+    const tool = 'inline-flex size-7 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4';
+    parts = {
+      deck: sessionDeck ? sessionDeck.split('/').join(' / ') : t('All decks'),
+      left: t('{count} left', { count: left }),
+      done: sessionSize - left,
+      size: sessionSize,
+      tools: (
+        <>
+          <button type="button" onClick={() => onOpenSource(current.path)} className={tool} aria-label={t('Open note')} title={`${t('Open note')} · ${current.path}`}><ArrowUpRight /></button>
+          <button type="button" onClick={undo} disabled={undoSteps.length === 0} className={tool} aria-label={t('Undo')} title={t('Undo the last step ({key})', { key: UNDO_KEY })}><Undo2 /></button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" className={tool} aria-label={t('More')} title={t('More')}><Ellipsis /></button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" sideOffset={6} className="w-64" onCloseAutoFocus={(event) => event.preventDefault()}>
+              <DropdownMenuItem onSelect={skip} className="items-start">
+                <SkipForward className="mt-0.5" />
+                <span className="min-w-0 flex-1">{t('Skip this card for now')}<span className="block text-meta text-text-tertiary">{t('It comes back next time you study.')}</span></span>
+                <DropdownMenuShortcut>N</DropdownMenuShortcut>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={suspend} className="items-start">
+                <EyeOff className="mt-0.5" />
+                <span className="min-w-0 flex-1">{t('Stop reviewing this card')}<span className="block text-meta text-text-tertiary">{t('You can resume it from its deck.')}</span></span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={reset} disabled={fresh} className="items-start">
+                <RotateCcw className="mt-0.5" />
+                <span className="min-w-0 flex-1">{t('Relearn as a new card')}<span className="block text-meta text-text-tertiary">{t('Clears its review history.')}</span></span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <button type="button" onClick={endSession} className={tool} aria-label={t('End')} title={t('End session')}><X /></button>
+        </>
+      ),
+      card: (
         <div className={cn('study-card', revealed && current.back && 'is-revealed')}>
           <div className="study-front">
             {changedSinceReview(store, current) && (
@@ -310,6 +361,8 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
             </div>
           )}
         </div>
+      ),
+      actions: (
         <div className="study-actions">
           {!revealed ? (
             <button type="button" onClick={() => setRevealed(true)} className="study-action">
@@ -339,7 +392,54 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
             </div>
           )}
         </div>
-      </section>
+      ),
+    };
+  }
+
+  // The decks the top bar's deck menu offers, in the order of the deck list.
+  const deckChoices: DeckChoice[] = [{ path: null, name: t('All decks'), depth: 0, due: queue.length }];
+  const addChoices = (nodes: DeckNode[], depth: number) => {
+    for (const node of nodes) {
+      deckChoices.push({ path: node.path, name: node.name, depth, due: buildQueue(node.cards, store, now, today).length });
+      addChoices(node.children, depth + 1);
+    }
+  };
+  if (parts) addChoices(tree, 0);
+
+  // The session lives in the top bar: deck and count on the left, its tools
+  // on the right, and the bar's own bottom line fills up as the progress. The
+  // card is all that sits below.
+  if (parts) {
+    return (
+      <>
+        <TopBarStart>
+          <DeckSwitch
+            label={parts.deck}
+            choices={deckChoices}
+            current={sessionDeck}
+            onPick={(path) => { if (path !== sessionDeck) study(queueOf(path), path); }}
+          />
+          <span className="shrink-0 tabular-nums text-text-tertiary">{parts.left}</span>
+          <span
+            className="study-topbar-progress"
+            role="progressbar"
+            aria-label={t('Session progress')}
+            aria-valuemin={0}
+            aria-valuemax={parts.size}
+            aria-valuenow={parts.done}
+            style={{ width: `${parts.size > 0 ? (parts.done / parts.size) * 100 : 0}%` }}
+          />
+        </TopBarStart>
+        <TopBarEnd>
+          {parts.tools}
+          <span aria-hidden className="mx-1.5 h-3.5 w-px bg-border-soft" />
+        </TopBarEnd>
+        <section className="mx-auto flex min-h-[calc(100vh-150px)] flex-col justify-center pb-8" style={{ width: 'min(640px, 100%)' }}>
+          {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
+          {parts.card}
+          {parts.actions}
+        </section>
+      </>
     );
   }
 
@@ -530,6 +630,128 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
         </>
       )}
     </section>
+  );
+}
+
+type DeckChoice = { path: string | null; name: string; depth: number; due: number };
+/** A long deck list gets a search box; a short one is easier to scan. */
+const SEARCH_FROM = 9;
+
+/**
+ * The deck name in the top bar while studying: it opens every deck with what
+ * each has due, and picks one to study instead. Past eight decks a search box
+ * filters them by name or path; arrows and Enter work with or without it.
+ */
+function DeckSwitch({ label, choices, current, onPick }: {
+  label: string;
+  choices: DeckChoice[];
+  current: string | null;
+  onPick: (path: string | null) => void;
+}) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(-1);
+  const listRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const searchable = choices.length >= SEARCH_FROM;
+  const needle = query.trim().toLowerCase();
+  const shown = needle
+    ? choices.filter((choice) => (choice.path ?? choice.name).toLowerCase().includes(needle))
+    : choices;
+  const pickable = (index: number) => shown[index] !== undefined && shown[index].due > 0;
+  // Arrows start from the deck being studied; a search starts from its first match.
+  const currentIndex = needle ? -1 : shown.findIndex((choice) => choice.path === current);
+  const activeIndex = pickable(active) ? active : pickable(currentIndex) ? currentIndex : shown.findIndex((choice) => choice.due > 0);
+
+  const move = (step: 1 | -1) => {
+    for (let index = activeIndex + step; index >= 0 && index < shown.length; index += step) {
+      if (pickable(index)) { setActive(index); return; }
+    }
+  };
+  const pick = (choice: DeckChoice | undefined) => {
+    if (!choice || choice.due === 0) return;
+    setOpen(false);
+    onPick(choice.path);
+  };
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'ArrowDown') { event.preventDefault(); move(1); }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); move(-1); }
+    else if (event.key === 'Enter') { event.preventDefault(); pick(shown[activeIndex]); }
+  };
+  useEffect(() => {
+    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, open]);
+
+  return (
+    <PopoverPrimitive.Root
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        setQuery('');
+        setActive(-1);
+      }}
+    >
+      <PopoverPrimitive.Trigger asChild>
+        <button type="button" className="study-deck-switch" title={t('Switch deck')}>
+          <span className="truncate">{label}</span>
+          <ChevronDown aria-hidden className="size-3.5 shrink-0" />
+        </button>
+      </PopoverPrimitive.Trigger>
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Content
+          align="start"
+          sideOffset={6}
+          className="study-deck-menu"
+          onKeyDown={onKeyDown}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            (searchable ? searchRef.current : listRef.current)?.focus();
+          }}
+          // Back to the card, not the deck name, so Space shows the answer.
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
+          {searchable && (
+            <label className="study-deck-search">
+              <Search aria-hidden className="size-3.5 shrink-0" />
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(event) => { setQuery(event.target.value); setActive(-1); }}
+                placeholder={t('Find a deck…')}
+                aria-label={t('Find a deck…')}
+                aria-controls="study-deck-options"
+              />
+            </label>
+          )}
+          <div ref={listRef} id="study-deck-options" role="listbox" aria-label={t('Decks')} tabIndex={-1} className="study-deck-options">
+            {shown.length === 0 && <p className="px-2 py-1.5 text-small text-text-tertiary">{t('No matching decks')}</p>}
+            {shown.map((choice, index) => (
+              <div
+                key={choice.path ?? ''}
+                role="option"
+                aria-selected={choice.path === current}
+                aria-disabled={choice.due === 0 || undefined}
+                data-active={index === activeIndex}
+                className={cn('study-deck-option', !needle && index === 1 && 'is-first-deck')}
+                onPointerMove={() => { if (choice.due > 0) setActive(index); }}
+                onClick={() => pick(choice)}
+              >
+                <span className="flex size-4 shrink-0 items-center justify-center">
+                  {choice.path === current && <Check className="size-3.5 text-text-secondary" />}
+                </span>
+                <span className="min-w-0 flex-1 truncate" style={{ paddingLeft: needle ? 0 : choice.depth * 14 }}>
+                  {needle && choice.path ? choice.path.split('/').join(' / ') : choice.name}
+                </span>
+                <span className="shrink-0 text-meta tabular-nums text-text-tertiary">
+                  {choice.due > 0 ? t('{count} to review', { count: choice.due }) : t('Done')}
+                </span>
+              </div>
+            ))}
+          </div>
+        </PopoverPrimitive.Content>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
   );
 }
 

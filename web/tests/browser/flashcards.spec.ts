@@ -15,7 +15,7 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await server.close(); });
 
-async function setup(page: Page, body: string, more: Array<[string, string]> = []) {
+async function setup(page: Page, body: string, more: Array<[string, string]> = [], moreCards: Array<{ path: string; content: string }> = []) {
   const space = { name: 'Personal', slug: 'personal', id: 'personal', visibility: 'private', role: 'owner', localPath: '/fixture/personal' };
   const files = new Map([['Doc', body], ...more]);
   let reviews: unknown = null;
@@ -33,6 +33,7 @@ async function setup(page: Page, body: string, more: Array<[string, string]> = [
         { path: 'Languages/Japanese.md', content: '- 食べる #card #Japanese/N2\n  - to eat\n- 飲む #card #Japanese/N2\n  - to drink\n- こんにちは #card #Japanese/N5\n  - hello\n' },
         { path: 'Biology/Cells.md', content: '---\ntags: [Biology]\n---\n- What is a ribosome? #card\n  - It makes proteins\n- What does the {{cloze mitochondria}} do? #card\n' },
         { path: 'Inbox.md', content: '- Year Rome fell? #card\n  - 476\n' },
+        ...moreCards,
       ];
       case 'local_read_card_reviews': return reviews;
       case 'local_write_card_reviews': reviews = (args as unknown as { state: unknown }).state; return null;
@@ -71,7 +72,8 @@ test('one line says what is due today; a deck lists its cards and how well each 
 
   await page.getByRole('button', { name: 'Start', exact: true }).click();
   await expect(page.getByText('3 left')).toBeVisible();
-  await expect(page.locator('section').getByText('Japanese', { exact: true })).toBeVisible();
+  // The session sits in the top bar: the deck and its count, then the card below.
+  await expect(page.locator('.app-breadcrumb').getByText('Japanese', { exact: true })).toBeVisible();
   await expect(page.getByRole('progressbar', { name: 'Session progress' })).toHaveAttribute('aria-valuenow', '0');
   for (let index = 0; index < 3; index += 1) {
     await page.keyboard.press('Space');
@@ -99,7 +101,7 @@ test('one line says what is due today; a deck lists its cards and how well each 
   expect(Math.abs((before!.x + before!.width) - (after!.x + after!.width))).toBeLessThan(10);
   await start.click();
   await expect(page.getByText('2 left')).toBeVisible();
-  await expect(page.locator('section').getByText('Biology', { exact: true })).toBeVisible();
+  await expect(page.locator('.app-breadcrumb').getByText('Biology', { exact: true })).toBeVisible();
   // Back leaves the session too.
   await back.click();
   await expect(page.getByText('6 cards to review today.')).toHaveCount(0);
@@ -107,6 +109,69 @@ test('one line says what is due today; a deck lists its cards and how well each 
   // Forward returns to studying that deck.
   await page.getByRole('button', { name: 'Forward', exact: true }).click();
   await expect(page.getByText('2 left')).toBeVisible();
+
+  // The deck name in the top bar switches decks; Back returns to the last one.
+  await page.locator('.app-breadcrumb').getByRole('button', { name: 'Biology' }).click();
+  await expect(page.getByRole('option', { name: /^Japanese/ })).toHaveAttribute('aria-disabled', 'true');
+  // A short list has no search box; arrows and Enter still pick a deck.
+  await expect(page.getByRole('textbox', { name: 'Find a deck…' })).toHaveCount(0);
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('option', { name: /^Unsorted/ })).toHaveAttribute('data-active', 'true');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('1 left')).toBeVisible();
+  await expect(page.locator('.app-breadcrumb').getByText('Unsorted', { exact: true })).toBeVisible();
+  // Enter in the menu picked a deck; it did not also show the new card's answer.
+  await expect(page.getByRole('button', { name: /^Show answer/ })).toBeVisible();
+  await back.click();
+  await expect(page.getByText('2 left')).toBeVisible();
+  await expect(page.locator('.app-breadcrumb').getByText('Biology', { exact: true })).toBeVisible();
+});
+
+test('with many decks, the top bar deck menu has a search box', async ({ page }) => {
+  const subjects = ['Art', 'Chemistry', 'History', 'Physics'];
+  await setup(page, '# Doc\n', [], [{ path: 'More.md', content: subjects.map((subject) => `- ${subject} question #card #${subject}\n  - answer\n`).join('') }]);
+  await page.goto(origin);
+  await page.getByRole('button', { name: 'Flashcards', exact: true }).click();
+  await page.getByRole('button', { name: 'Start', exact: true }).click();
+  await page.locator('.app-breadcrumb').getByRole('button', { name: 'All decks' }).click();
+  const search = page.getByRole('textbox', { name: 'Find a deck…' });
+  await expect(search).toBeFocused();
+  await expect(page.getByRole('option')).toHaveCount(10);
+  // Matching the path finds a sub-deck, shown with its parent.
+  await search.fill('n2');
+  await expect(page.getByRole('option')).toHaveText(['Japanese / N22 to review']);
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.app-breadcrumb').getByText('Japanese / N2', { exact: true })).toBeVisible();
+  await expect(page.getByText('2 left')).toBeVisible();
+  await page.locator('.app-breadcrumb').getByRole('button', { name: 'Japanese / N2' }).click();
+  await page.getByRole('textbox', { name: 'Find a deck…' }).fill('zzz');
+  await expect(page.getByText('No matching decks')).toBeVisible();
+});
+
+test('Undo brings the last card back as it was', async ({ page }) => {
+  await setup(page, '# Doc\n');
+  await page.goto(origin);
+  await page.getByRole('button', { name: 'Flashcards', exact: true }).click();
+  await page.getByRole('button', { name: 'Start', exact: true }).click();
+  const undo = page.getByRole('button', { name: 'Undo', exact: true });
+  await expect(page.getByText('6 left')).toBeVisible();
+  await expect(undo).toBeDisabled();
+  await page.keyboard.press('Space');
+  await page.keyboard.press('r');
+  await expect(page.getByText('5 left')).toBeVisible();
+  // ⌘Z (Ctrl+Z elsewhere) undoes the answer: the same card, its answer still showing.
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.getByText('6 left')).toBeVisible();
+  await expect(page.locator('.study-ratings button')).toHaveCount(3);
+  // Skipping from More is undone the same way, with the button.
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Skip this card for now/ }).click();
+  await expect(page.getByText('5 left')).toBeVisible();
+  await undo.click();
+  await expect(page.getByText('6 left')).toBeVisible();
+  await expect(undo).toBeDisabled();
 });
 
 test('a suspended card can be resumed from its deck', async ({ page }) => {
@@ -115,7 +180,9 @@ test('a suspended card can be resumed from its deck', async ({ page }) => {
   await page.getByRole('button', { name: 'Flashcards', exact: true }).click();
   await page.getByRole('button', { name: /^Unsorted/ }).click();
   await page.getByRole('button', { name: 'Start', exact: true }).click();
-  await page.getByRole('button', { name: 'Suspend', exact: true }).click();
+  // Rare actions sit in More, written out in full.
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Stop reviewing this card/ }).click();
   // The only card is suspended: the session ends back on the deck.
   const cards = page.getByRole('list', { name: 'Cards' });
   await expect(page.getByText('1 card: 0 new, 0 learning, 0 mastered. 1 suspended.')).toBeVisible();

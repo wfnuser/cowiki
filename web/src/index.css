@@ -439,6 +439,22 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 
 /* Studying a card: a quiet progress line, one paper card, and text-only
    answers underneath. No colour: the card is the only thing to look at. */
+/* Studying lives in the top bar: the deck name opens a menu of decks, and
+   the bar's bottom line doubles as the session's progress. */
+.study-deck-switch { display: inline-flex; min-width: 0; height: 28px; align-items: center; gap: 4px; margin-left: -6px; padding: 0 6px; border-radius: 6px; color: var(--color-text); }
+.study-deck-switch svg { color: var(--color-text-faint); }
+.study-deck-switch:hover, .study-deck-switch[data-state='open'] { background: var(--color-bg-hover); }
+.study-deck-menu { z-index: 200; width: 272px; padding: 4px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-panel); box-shadow: var(--shadow-popover); }
+.study-deck-search { display: flex; align-items: center; gap: 8px; height: 34px; margin: -4px -4px 4px; padding: 0 12px; border-bottom: 1px solid var(--color-border-soft); color: var(--color-text-faint); }
+.study-deck-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--color-text); font-size: var(--text-small); }
+.study-deck-search input::placeholder { color: var(--color-text-faint); }
+.study-deck-options { max-height: 320px; overflow-y: auto; outline: none; }
+.study-deck-option { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font-size: var(--text-small); color: var(--color-text); cursor: default; user-select: none; }
+.study-deck-option[data-active='true'] { background: var(--color-bg-hover); }
+.study-deck-option[aria-disabled='true'] { opacity: 0.5; }
+.study-deck-option.is-first-deck { margin-top: 9px; position: relative; }
+.study-deck-option.is-first-deck::before { content: ''; position: absolute; left: -4px; right: -4px; top: -5px; border-top: 1px solid var(--color-border-soft); }
+.study-topbar-progress { position: absolute; left: 0; bottom: -1px; height: 1px; background: var(--color-text-tertiary); transition: width 300ms ease; pointer-events: none; }
 .study-progress { height: 2px; margin-bottom: 24px; overflow: hidden; border-radius: 1px; background: var(--color-border-soft); }
 .study-progress > div { height: 100%; background: var(--color-text-tertiary); transition: width 300ms ease; }
 .study-card {

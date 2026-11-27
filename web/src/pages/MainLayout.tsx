@@ -37,6 +37,7 @@ import {
   ContentHeaderActions,
 } from '../components/layout/ContentHeader';
 import { SpaceStatusMenu, type VersionSelection } from '../components/layout/SpaceStatusMenu';
+import { TopBarSlots } from '../components/layout/TopBarSlots';
 type CreateSpaceMode = 'choose' | 'local' | 'import';
 import { ReviewList } from '../components/review/ReviewList';
 import { ReviewDetail } from '../components/review/ReviewDetail';
@@ -1704,6 +1705,9 @@ export function MainLayout() {
   // The top bar names only what the view below does not: a page's name (its
   // first heading may differ) and Journals (below are only dates). Views with
   // their own title, and the Space (the sidebar names it), add nothing here.
+  const [topBarStart, setTopBarStart] = useState<HTMLElement | null>(null);
+  const [topBarEnd, setTopBarEnd] = useState<HTMLElement | null>(null);
+  const topBarSlots = useMemo(() => ({ start: topBarStart, end: topBarEnd }), [topBarStart, topBarEnd]);
   const crumb = showJournals
     ? t('Journals')
     : activeView?.kind === 'page' && activeView.content ? activeView.content.title : null;
@@ -1976,12 +1980,15 @@ export function MainLayout() {
                 {crumb && (
                   <span style={{ color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{crumb}</span>
                 )}
+                <span ref={setTopBarStart} style={{ display: 'contents' }} />
               </ContentBreadcrumb>
 
               {/* Right: actions */}
               {/* Version and Cloud state, comments, then the Agent toggle facing its sidebar. */}
               <ContentHeaderActions>
-                {desktop && activeWorkspace?.localPath && (
+                <span ref={setTopBarEnd} style={{ display: 'contents' }} />
+                {/* Flashcards read the working copy whatever version is picked. */}
+                {desktop && activeWorkspace?.localPath && activeView?.kind !== 'flashcards' && (
                   <SpaceStatusMenu
                     context={workspaceContext}
                     agentChanges={openAgentChanges}
@@ -2172,6 +2179,7 @@ export function MainLayout() {
               ) : activeView?.kind === 'flashcards' && activeWorkspace ? (
                 <div className="scroll-pane" style={{ position: 'absolute', inset: 0, padding: '36px 56px 56px' }}>
                   <ObsidianReaderContext.Provider value={readerCallbacks}>
+                    <TopBarSlots.Provider value={topBarSlots}>
                     <FlashcardsView
                       key={activeWorkspace.slug}
                       workspaceSlug={activeWorkspace.slug}
@@ -2186,6 +2194,7 @@ export function MainLayout() {
                       }}
                       onOpenSource={(path) => { void selectPage(activeWorkspace, conceptIdFromPath(path), path); }}
                     />
+                    </TopBarSlots.Provider>
                   </ObsidianReaderContext.Provider>
                 </div>
               ) : activeView?.kind === 'links' && activeWorkspace ? (
