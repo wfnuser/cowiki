@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import sys
@@ -21,7 +22,12 @@ from cowiki_bench.metrics import evaluate_multihop_retrieval
 from cowiki_bench.multihop_index import MultiHopHybridIndex
 
 
-ONLINE_METHODS = {"hybrid_dense_ppr", "hybrid_dense_ppr_rerank"}
+ONLINE_METHODS = {
+    "hybrid_dense_ppr",
+    "hybrid_dense_ppr_rerank",
+    "hybrid_multihop_decomposed_rerank",
+    "hybrid_dual_rerank_fusion",
+}
 
 
 def main() -> None:
@@ -44,6 +50,8 @@ def main() -> None:
     parser.add_argument("--embed-model", default=os.environ.get("COWIKI_BENCH_EMBED_MODEL", "text-embedding-v4"))
     parser.add_argument("--embed-dim", type=int, default=512)
     parser.add_argument("--rerank-model", default=os.environ.get("COWIKI_BENCH_RERANK_MODEL", "gte-rerank-v2"))
+    parser.add_argument("--decompose-model", default=os.environ.get("COWIKI_BENCH_DECOMPOSE_MODEL", "qwen-flash"))
+    parser.add_argument("--workers", type=int, default=6, help="Parallel worker threads for online methods.")
     parser.add_argument("--env-file", type=Path, default=None, help="Optional .env file for API key lookup.")
     parser.add_argument("--out", type=Path, default=None, help="Output summary JSON path.")
     args = parser.parse_args()
@@ -69,7 +77,7 @@ def main() -> None:
     cache: Optional[PersistentApiCache] = None
     if needs_online:
         api_key = load_secret_from_env_or_file(
-            ["COWIKI_BENCH_API_KEY", "DASHSCOPE_API_KEY", "OPENAI_API_KEY"],
+            ["COWIKI_BENCH_API_KEY", "DASHSCOPE_API_KEY", "OPENAI_API_KEY", "LLM_API_KEY"],
             env_file=args.env_file,
         )
         if not api_key:
@@ -105,9 +113,8 @@ def main() -> None:
     results_by_method: Dict[str, Any] = {}
     for method in methods:
         t0 = time.perf_counter()
-        records: List[Dict[str, Any]] = []
-        latencies_ms: List[float] = []
-        for q in eval_queries:
+
+        def _eval_one(q: Dict[str, Any]) -> Dict[str, Any]:
             qt0 = time.perf_counter()
             retrieved = index.retrieve(
                 query=q["query"],
@@ -116,18 +123,26 @@ def main() -> None:
                 client=client,
                 embed_model=args.embed_model if method in ONLINE_METHODS else None,
                 embed_dim=args.embed_dim if method in ONLINE_METHODS else None,
-                rerank_model=args.rerank_model if method == "hybrid_dense_ppr_rerank" else None,
+                rerank_model=args.rerank_model if method in ("hybrid_dense_ppr_rerank", "hybrid_multihop_decomposed_rerank", "hybrid_dual_rerank_fusion") else None,
+                decompose_model=args.decompose_model,
             )
-            latencies_ms.append((time.perf_counter() - qt0) * 1000.0)
-            records.append(
-                {
-                    "idx": q["_idx"],
-                    "query": q["query"],
-                    "question_type": q["question_type"],
-                    "retrieval_list": retrieved,
-                    "gold_list": q.get("evidence_list", []),
-                }
-            )
+            lat_ms = (time.perf_counter() - qt0) * 1000.0
+            return {
+                "idx": q["_idx"],
+                "query": q["query"],
+                "question_type": q["question_type"],
+                "retrieval_list": retrieved,
+                "gold_list": q.get("evidence_list", []),
+                "latency_ms": lat_ms,
+            }
+
+        records: List[Dict[str, Any]] = []
+        if method in ONLINE_METHODS and args.workers > 1:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
+                records = list(pool.map(_eval_one, eval_queries))
+        else:
+            records = [_eval_one(q) for q in eval_queries]
+        latencies_ms = [r["latency_ms"] for r in records]
         wall_sec = time.perf_counter() - t0
         metrics = evaluate_multihop_retrieval(records)
         metrics["avg_query_latency_ms"] = round(sum(latencies_ms) / max(1, len(latencies_ms)), 2)

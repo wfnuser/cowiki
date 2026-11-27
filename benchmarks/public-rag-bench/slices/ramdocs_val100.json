@@ -1,0 +1,160 @@
+{
+  "benchmark": "ramdocs",
+  "source": "HanNight/RAMDocs (RAMDocs_test.jsonl)",
+  "seed": 1337,
+  "population_size": 400,
+  "sample_size": 100,
+  "strata": {
+    "gold=1|misinfo=0|noise=0": {
+      "population": 7,
+      "sampled": 2
+    },
+    "gold=1|misinfo=0|noise=1": {
+      "population": 28,
+      "sampled": 7
+    },
+    "gold=1|misinfo=1|noise=0": {
+      "population": 16,
+      "sampled": 4
+    },
+    "gold=1|misinfo=1|noise=1": {
+      "population": 29,
+      "sampled": 7
+    },
+    "gold=2|misinfo=0|noise=0": {
+      "population": 36,
+      "sampled": 9
+    },
+    "gold=2|misinfo=0|noise=1": {
+      "population": 53,
+      "sampled": 13
+    },
+    "gold=2|misinfo=1|noise=0": {
+      "population": 21,
+      "sampled": 5
+    },
+    "gold=2|misinfo=1|noise=1": {
+      "population": 51,
+      "sampled": 13
+    },
+    "gold=3|misinfo=0|noise=0": {
+      "population": 27,
+      "sampled": 7
+    },
+    "gold=3|misinfo=0|noise=1": {
+      "population": 54,
+      "sampled": 13
+    },
+    "gold=3|misinfo=1|noise=0": {
+      "population": 23,
+      "sampled": 6
+    },
+    "gold=3|misinfo=1|noise=1": {
+      "population": 55,
+      "sampled": 14
+    }
+  },
+  "indices": [
+    11,
+    15,
+    24,
+    29,
+    31,
+    36,
+    49,
+    55,
+    57,
+    58,
+    59,
+    60,
+    63,
+    69,
+    70,
+    71,
+    72,
+    77,
+    87,
+    98,
+    108,
+    109,
+    113,
+    115,
+    123,
+    126,
+    133,
+    135,
+    138,
+    140,
+    146,
+    163,
+    178,
+    179,
+    181,
+    194,
+    200,
+    201,
+    207,
+    211,
+    219,
+    220,
+    225,
+    226,
+    230,
+    231,
+    242,
+    243,
+    246,
+    251,
+    252,
+    261,
+    281,
+    284,
+    285,
+    288,
+    290,
+    291,
+    293,
+    296,
+    314,
+    315,
+    320,
+    329,
+    339,
+    342,
+    345,
+    346,
+    352,
+    354,
+    359,
+    361,
+    365,
+    368,
+    369,
+    377,
+    379,
+    383,
+    385,
+    392,
+    399,
+    402,
+    409,
+    416,
+    420,
+    430,
+    432,
+    439,
+    443,
+    461,
+    465,
+    467,
+    470,
+    473,
+    476,
+    478,
+    482,
+    492,
+    497,
+    498
+  ],
+  "disjoint_from": "slices/ramdocs_dev100.json"
+}

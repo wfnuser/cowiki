@@ -22,6 +22,9 @@ from cowiki_bench.metrics import aggregate_ramdocs_scores, score_ramdocs_instanc
 from cowiki_bench.ramdocs_engine import (
     cluster_near_duplicate_docs,
     solve_ramdocs_cowiki_arbiter,
+    solve_ramdocs_cowiki_arbiter_v2,
+    solve_ramdocs_cowiki_arbiter_v3,
+    solve_ramdocs_cowiki_arbiter_v4,
     solve_ramdocs_standard_rag,
 )
 
@@ -79,7 +82,7 @@ def main() -> None:
         return
 
     api_key = load_secret_from_env_or_file(
-        ["COWIKI_BENCH_API_KEY", "DASHSCOPE_API_KEY", "OPENAI_API_KEY"],
+        ["COWIKI_BENCH_API_KEY", "DASHSCOPE_API_KEY", "OPENAI_API_KEY", "LLM_API_KEY"],
         env_file=args.env_file,
     )
     if not api_key:
@@ -94,6 +97,9 @@ def main() -> None:
     solvers = {
         "baseline_standard_rag": solve_ramdocs_standard_rag,
         "cowiki_compiled_arbiter": solve_ramdocs_cowiki_arbiter,
+        "cowiki_compiled_arbiter_v2": solve_ramdocs_cowiki_arbiter_v2,
+        "cowiki_compiled_arbiter_v3": solve_ramdocs_cowiki_arbiter_v3,
+        "cowiki_compiled_arbiter_v4": solve_ramdocs_cowiki_arbiter_v4,
     }
 
     summary_methods: Dict[str, Any] = {}
@@ -105,7 +111,17 @@ def main() -> None:
 
         def _run_one(row: Dict[str, Any]) -> Dict[str, Any]:
             docs = [d["text"] for d in row["documents"]]
-            out = solver(row["question"], docs, client, args.model)
+            err_msg = None
+            try:
+                out = solver(row["question"], docs, client, args.model)
+            except Exception as exc:
+                err_msg = str(exc)[:300]
+                out = {
+                    "answers": [],
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "llm_calls": 1,
+                }
             sc = score_ramdocs_instance(
                 predicted_answers=out["answers"],
                 gold_answers=row.get("gold_answers", []),
@@ -120,6 +136,7 @@ def main() -> None:
                 "prompt_tokens": out["prompt_tokens"],
                 "completion_tokens": out["completion_tokens"],
                 "llm_calls": out["llm_calls"],
+                "error": err_msg,
                 "score": sc,
             }
 
@@ -135,6 +152,7 @@ def main() -> None:
         agg["avg_prompt_tokens"] = round(sum(r["prompt_tokens"] for r in per_row) / len(per_row), 1)
         agg["avg_completion_tokens"] = round(sum(r["completion_tokens"] for r in per_row) / len(per_row), 1)
         agg["avg_llm_calls"] = round(sum(r["llm_calls"] for r in per_row) / len(per_row), 2)
+        agg["api_errors"] = sum(1 for r in per_row if r.get("error"))
         agg["wall_time_sec"] = round(wall_sec, 2)
         summary_methods[method] = agg
 

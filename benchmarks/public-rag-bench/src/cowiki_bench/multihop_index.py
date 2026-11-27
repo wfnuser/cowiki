@@ -13,9 +13,12 @@ Key design invariants:
 
 from __future__ import annotations
 
+import json
 import math
+import operator
 import re
 import sqlite3
+import threading
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -296,17 +299,25 @@ def build_fts_or_query(text: str, max_terms: int = 28) -> str:
     return " OR ".join(cleaned)
 
 
+def l2_normalize(vec: Sequence[float]) -> List[float]:
+    norm = math.sqrt(sum(map(operator.mul, vec, vec)))
+    if norm <= 0.0:
+        return list(vec)
+    inv = 1.0 / norm
+    return [x * inv for x in vec]
+
+
 def cosine_sim(a: Sequence[float], b: Sequence[float]) -> float:
-    dot = 0.0
-    na = 0.0
-    nb = 0.0
-    for x, y in zip(a, b):
-        dot += x * y
-        na += x * x
-        nb += y * y
+    dot = sum(map(operator.mul, a, b))
+    na = sum(map(operator.mul, a, a))
+    nb = sum(map(operator.mul, b, b))
     if na <= 0.0 or nb <= 0.0:
         return 0.0
     return dot / math.sqrt(na * nb)
+
+
+def dot_product(a: Sequence[float], b: Sequence[float]) -> float:
+    return sum(map(operator.mul, a, b))
 
 
 class MultiHopHybridIndex:
@@ -382,7 +393,8 @@ class MultiHopHybridIndex:
         self.known_sources = sorted(source_set, key=len, reverse=True)
 
         # Build SQLite FTS5 tables (raw body AND metadata-augmented)
-        self._conn = sqlite3.connect(":memory:")
+        self._fts_lock = threading.Lock()
+        self._conn = sqlite3.connect(":memory:", check_same_thread=False)
         self._conn.execute(
             "CREATE VIRTUAL TABLE chunks_raw_fts USING fts5(chunk_id UNINDEXED, body, tokenize='unicode61 remove_diacritics 2')"
         )
@@ -448,12 +460,14 @@ class MultiHopHybridIndex:
     ) -> float:
         t0 = time.perf_counter()
         texts = [c.contextual_text for c in self.chunks]
-        self.chunk_vectors = client.embed_batch(
+        raw_vecs = client.embed_batch(
             model=embed_model,
             texts=texts,
             dimensions=dimensions,
             batch_size=batch_size,
         )
+        # Pre-L2-normalize once so every query dot product runs in fast C `map(operator.mul)`
+        self.chunk_vectors = [l2_normalize(v) for v in raw_vecs]
         return (time.perf_counter() - t0) * 1000.0
 
     # ------------------------------------------------------------------
@@ -464,21 +478,23 @@ class MultiHopHybridIndex:
         fts_q = build_fts_or_query(query)
         if not fts_q:
             return []
-        rows = self._conn.execute(
-            "SELECT chunk_id, bm25(chunks_raw_fts) AS score FROM chunks_raw_fts WHERE chunks_raw_fts MATCH ? ORDER BY score LIMIT ?",
-            (fts_q, top_k),
-        ).fetchall()
+        with self._fts_lock:
+            rows = self._conn.execute(
+                "SELECT chunk_id, bm25(chunks_raw_fts) AS score FROM chunks_raw_fts WHERE chunks_raw_fts MATCH ? ORDER BY score LIMIT ?",
+                (fts_q, top_k),
+            ).fetchall()
         return [(int(r[0]), -float(r[1])) for r in rows]
 
     def search_fts_meta(self, query: str, top_k: int = 40) -> List[Tuple[int, float]]:
         fts_q = build_fts_or_query(query)
         if not fts_q:
             return []
-        # Weight meta column slightly higher than raw body so source+date+title act as strong anchors
-        rows = self._conn.execute(
-            "SELECT chunk_id, bm25(chunks_meta_fts, 1.35, 1.0) AS score FROM chunks_meta_fts WHERE chunks_meta_fts MATCH ? ORDER BY score LIMIT ?",
-            (fts_q, top_k),
-        ).fetchall()
+        with self._fts_lock:
+            # Weight meta column slightly higher than raw body so source+date+title act as strong anchors
+            rows = self._conn.execute(
+                "SELECT chunk_id, bm25(chunks_meta_fts, 1.35, 1.0) AS score FROM chunks_meta_fts WHERE chunks_meta_fts MATCH ? ORDER BY score LIMIT ?",
+                (fts_q, top_k),
+            ).fetchall()
         return [(int(r[0]), -float(r[1])) for r in rows]
 
     def search_dense(
@@ -488,8 +504,12 @@ class MultiHopHybridIndex:
     ) -> List[Tuple[int, float]]:
         if not self.chunk_vectors or not query_vec:
             return []
+        qn = l2_normalize(query_vec)
+        _mul = operator.mul
+        _sum = sum
+        _map = map
         scored = [
-            (cid, cosine_sim(query_vec, vec))
+            (cid, _sum(_map(_mul, qn, vec)))
             for cid, vec in enumerate(self.chunk_vectors)
         ]
         scored.sort(key=lambda x: x[1], reverse=True)
@@ -692,6 +712,301 @@ class MultiHopHybridIndex:
 
         return slots
 
+    def decompose_query_with_llm(
+        self,
+        query: str,
+        client: OpenAICompatibleClient,
+        decompose_model: str = "qwen-flash",
+    ) -> List[Dict[str, Any]]:
+        """Decompose a multi-hop query into 2-4 atomic search sub-queries with optional source/date/time constraints."""
+        prompt = (
+            "Decompose this multi-hop question into 2 to 4 concise atomic search sub-queries so a retriever can find "
+            "each separate piece of evidence across different articles.\n"
+            "Rules:\n"
+            "1. Each sub-query targets ONE specific fact, event, claim, or article mentioned in the question.\n"
+            "2. If the question describes an unnamed person/company/event via clues, keep the descriptive clues AND include obvious direct synonyms/canonical terms that would appear in news text.\n"
+            "3. Extract explicit `source` (exact publication name if stated for this hop, else null), `date` (`YYYY-MM-DD` if stated, else null), and `time` (`HH:MM:SS` if stated, else null).\n"
+            "Return strict JSON: {\"subqueries\": [{\"query\": \"...\", \"source\": null, \"date\": null, \"time\": null}]}\n\n"
+            f"Question: {query}"
+        )
+        try:
+            res = client.chat(
+                model=decompose_model,
+                messages=[
+                    {"role": "system", "content": "You are a search query planner for multi-hop news retrieval. Output valid JSON only."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.0,
+                max_tokens=450,
+                json_mode=True,
+            )
+            raw = (res.content or "").strip()
+            if raw.startswith("```"):
+                raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
+            obj = json.loads(raw)
+            subs = obj.get("subqueries", [])
+            cleaned: List[Dict[str, Any]] = []
+            for item in subs[:4]:
+                if not isinstance(item, dict):
+                    continue
+                q_str = str(item.get("query") or "").strip()
+                if not q_str:
+                    continue
+                src_raw = item.get("source")
+                src_norm = None
+                if isinstance(src_raw, str) and src_raw.strip():
+                    # Match against corpus known sources if possible
+                    sl = src_raw.strip().lower()
+                    matched = next((ks.lower() for ks in self.known_sources if ks.lower() == sl or sl in ks.lower() or ks.lower() in sl), sl)
+                    src_norm = matched
+                date_raw = item.get("date")
+                date_norm = str(date_raw).strip()[:10] if isinstance(date_raw, str) and re.match(r"20\d{2}-\d{2}-\d{2}", str(date_raw).strip()) else None
+                time_raw = item.get("time")
+                time_norm = str(time_raw).strip() if isinstance(time_raw, str) and re.match(r"\d{2}:\d{2}:\d{2}", str(time_raw).strip()) else None
+                cleaned.append({"query": q_str, "source": src_norm, "date": date_norm, "time": time_norm})
+            if cleaned:
+                return cleaned
+        except Exception:
+            pass
+        return self.decompose_query_slots(query)
+
+    def retrieve_multihop_decomposed(
+        self,
+        query: str,
+        top_k: int,
+        client: OpenAICompatibleClient,
+        embed_model: str,
+        embed_dim: Optional[int],
+        rerank_model: str,
+        decompose_model: str = "qwen-flash",
+    ) -> List[Dict[str, Any]]:
+        """CoWiki Multi-Hop Decomposed Dense + BM25 + PPR + Per-Subquery Cross-Encoder Rerank."""
+        # Step 1: Atomic sub-query decomposition (LLM + deterministic metadata safety check)
+        subqueries = self.decompose_query_with_llm(query, client, decompose_model=decompose_model)
+        if not subqueries:
+            subqueries = [{"query": query, "source": None, "date": None, "time": None}]
+
+        # Step 2: Batch-embed full query + all subqueries in a SINGLE API call
+        all_q_texts = [query] + [sq["query"] for sq in subqueries]
+        all_vecs = client.embed_batch(model=embed_model, texts=all_q_texts, dimensions=embed_dim, batch_size=10)
+        full_vec = all_vecs[0]
+        sub_vecs = all_vecs[1:]
+
+        # Step 3: Per-subquery Hybrid Retrieval (Dense + Meta-BM25 + Metadata Boost) + Per-Subquery Rerank!
+        per_sub_reranked: List[List[Tuple[int, float]]] = []
+        global_rerank_best: Dict[int, float] = {}
+        global_rrf: Dict[int, float] = defaultdict(float)
+
+        for sq, svec in zip(subqueries, sub_vecs):
+            sq_text = sq["query"]
+            s_src = sq.get("source")
+            s_date = sq.get("date")
+            s_time = sq.get("time")
+
+            local_scores: Dict[int, float] = defaultdict(float)
+            d_hits = self.search_dense(svec, top_k=45)
+            m_hits = self.search_fts_meta(f"{sq_text} {s_src or ''} {s_date or ''} {s_time or ''}".strip(), top_k=45)
+
+            for rank, (cid, _) in enumerate(d_hits, start=1):
+                local_scores[cid] += 1.5 / (30.0 + rank)
+            for rank, (cid, _) in enumerate(m_hits, start=1):
+                local_scores[cid] += 1.2 / (30.0 + rank)
+
+            # Apply strong soft metadata alignment for this hop's source/date/time
+            boosted: List[Tuple[int, float]] = []
+            for cid, sc in local_scores.items():
+                c = self.chunks[cid]
+                mult = 1.0
+                if s_src:
+                    if c.source.lower() == s_src:
+                        mult *= 1.75
+                    else:
+                        mult *= 0.40
+                if s_date:
+                    if c.published_iso == s_date:
+                        mult *= 1.65
+                if s_time:
+                    if s_time in c.published_natural:
+                        mult *= 2.0
+                boosted.append((cid, sc * mult))
+            boosted.sort(key=lambda x: x[1], reverse=True)
+
+            # Rerank top-16 candidates specifically for THIS atomic sub-query
+            top_cands = [cid for cid, _ in boosted[:16]]
+            if top_cands:
+                cand_texts = [self.chunks[cid].contextual_text for cid in top_cands]
+                rr_query = f"{sq_text}"
+                if s_src:
+                    rr_query = f"[{s_src}] {rr_query}"
+                if s_date:
+                    rr_query = f"[{s_date}] {rr_query}"
+                reranked = client.rerank(model=rerank_model, query=rr_query, documents=cand_texts, top_n=min(10, len(top_cands)))
+                sub_ranked: List[Tuple[int, float]] = []
+                for local_i, rscore in reranked:
+                    cid = top_cands[local_i]
+                    c = self.chunks[cid]
+                    # Keep gentle metadata bonus so exact source/date matches stay on top of ties
+                    adj = float(rscore)
+                    if s_src and c.source.lower() == s_src:
+                        adj += 0.06
+                    if s_date and c.published_iso == s_date:
+                        adj += 0.05
+                    if s_time and s_time in c.published_natural:
+                        adj += 0.10
+                    sub_ranked.append((cid, adj))
+                    if adj > global_rerank_best.get(cid, -1e9):
+                        global_rerank_best[cid] = adj
+                sub_ranked.sort(key=lambda x: x[1], reverse=True)
+                per_sub_reranked.append(sub_ranked)
+                for rank, (cid, _) in enumerate(sub_ranked, start=1):
+                    global_rrf[cid] += 1.4 / (15.0 + rank)
+
+        # Step 4: Full-Query + HippoRAG 2 PPR Bridge Discovery (catches unnamed bridge entities!)
+        # Seed PPR with top reranked winners from every sub-query + full-query Dense/BM25 top hits
+        ppr_seeds: Dict[int, float] = {}
+        for sub_list in per_sub_reranked:
+            for cid, rscore in sub_list[:3]:
+                ppr_seeds[cid] = max(ppr_seeds.get(cid, 0.0), max(0.05, rscore))
+        full_dense = self.search_dense(full_vec, top_k=25)
+        full_bm25 = self.search_fts_meta(query, top_k=25)
+        for rank, (cid, _) in enumerate(full_dense[:10], start=1):
+            ppr_seeds[cid] = ppr_seeds.get(cid, 0.0) + 0.5 / (10.0 + rank)
+        for rank, (cid, _) in enumerate(full_bm25[:10], start=1):
+            ppr_seeds[cid] = ppr_seeds.get(cid, 0.0) + 0.4 / (10.0 + rank)
+
+        ppr_hits = self.run_passage_entity_ppr(ppr_seeds, extract_entities(query), alpha=0.55, iterations=4, top_k=30)
+        for rank, (cid, _) in enumerate(ppr_hits, start=1):
+            global_rrf[cid] += 0.65 / (25.0 + rank)
+
+        # Rerank any high-PPR / full-query bridge candidates not yet scored by sub-query rerankers
+        unscored_bridge = [
+            cid for cid, _ in sorted(global_rrf.items(), key=lambda x: x[1], reverse=True)
+            if cid not in global_rerank_best
+        ][:14]
+        if unscored_bridge:
+            b_texts = [self.chunks[cid].contextual_text for cid in unscored_bridge]
+            b_rr = client.rerank(model=rerank_model, query=query, documents=b_texts, top_n=min(10, len(unscored_bridge)))
+            for local_i, rscore in b_rr:
+                cid = unscored_bridge[local_i]
+                global_rerank_best[cid] = max(global_rerank_best.get(cid, -1e9), float(rscore) * 0.92)
+
+        # Step 5: Multi-Hop Round-Robin Selection across Sub-Queries (guarantees every hop enters Top-10!)
+        selected: List[Tuple[int, float]] = []
+        selected_ids: Set[int] = set()
+        doc_counts: Counter = Counter()
+
+        # Round-robin top-1, then top-2, then top-3 from each sub-query (capping <=2 chunks per article)
+        max_rounds = 4
+        for rd in range(max_rounds):
+            # Order subqueries by their best remaining score in this round so highest-confidence hop gets rank 1
+            round_picks: List[Tuple[int, float]] = []
+            for sub_list in per_sub_reranked:
+                picked = None
+                for cid, sc in sub_list:
+                    doc_id = self.chunks[cid].doc_id
+                    if cid not in selected_ids and doc_counts[doc_id] < 2:
+                        picked = (cid, sc)
+                        break
+                if picked is not None:
+                    round_picks.append(picked)
+            round_picks.sort(key=lambda x: x[1], reverse=True)
+            for cid, sc in round_picks:
+                if len(selected) >= top_k:
+                    break
+                if cid in selected_ids:
+                    continue
+                doc_id = self.chunks[cid].doc_id
+                if doc_counts[doc_id] >= 2:
+                    continue
+                selected.append((cid, global_rerank_best.get(cid, sc)))
+                selected_ids.add(cid)
+                doc_counts[doc_id] += 1
+            if len(selected) >= top_k:
+                break
+
+        # Fill any remaining slots from global rerank + PPR pool
+        remaining_pool = sorted(global_rerank_best.items(), key=lambda x: x[1], reverse=True)
+        for max_per_doc in (2, 4, top_k):
+            for cid, sc in remaining_pool:
+                if len(selected) >= top_k:
+                    break
+                if cid in selected_ids:
+                    continue
+                doc_id = self.chunks[cid].doc_id
+                if doc_counts[doc_id] >= max_per_doc:
+                    continue
+                selected.append((cid, sc))
+                selected_ids.add(cid)
+                doc_counts[doc_id] += 1
+            if len(selected) >= top_k:
+                break
+
+        # Final ordering by cross-encoder relevance score maximizes MRR@10 & MAP@10 while preserving all hops in top-10!
+        selected.sort(key=lambda x: x[1], reverse=True)
+        return self._format_results(selected[:top_k])
+
+    def retrieve_dual_rerank_fusion(
+        self,
+        query: str,
+        top_k: int,
+        client: OpenAICompatibleClient,
+        embed_model: str,
+        embed_dim: Optional[int],
+        rerank_model: str,
+        decompose_model: str = "qwen-flash",
+    ) -> List[Dict[str, Any]]:
+        """Dual-Granularity Fusion combining Full-Query Cross-Encoder Rerank + Decomposed Sub-Query Rerank + PPR.
+
+        Preserves the full-query reranker's global precision (`MRR@10` & `Hits@4`) while
+        retaining per-hop coverage (`Hits@10`, `AllGold@10`, `EvidenceRecall@10`).
+        """
+        full_hits = self.retrieve(
+            query=query,
+            method="hybrid_dense_ppr_rerank",
+            top_k=12,
+            client=client,
+            embed_model=embed_model,
+            embed_dim=embed_dim,
+            rerank_model=rerank_model,
+        )
+        decomp_hits = self.retrieve_multihop_decomposed(
+            query=query,
+            top_k=12,
+            client=client,
+            embed_model=embed_model,
+            embed_dim=embed_dim,
+            rerank_model=rerank_model,
+            decompose_model=decompose_model,
+        )
+
+        # Reciprocal Rank Fusion weighted slightly toward full-query for rank-1 precision + decomposed for hop breadth
+        rrf: Dict[int, float] = defaultdict(float)
+        for rank, item in enumerate(full_hits, start=1):
+            rrf[int(item["chunk_id"])] += 1.15 / (8.0 + rank)
+        for rank, item in enumerate(decomp_hits, start=1):
+            rrf[int(item["chunk_id"])] += 1.00 / (8.0 + rank)
+
+        ranked = sorted(rrf.items(), key=lambda x: x[1], reverse=True)
+        # Soft per-article cap <=2 chunks first so top-10 spans multiple articles cleanly
+        selected: List[Tuple[int, float]] = []
+        seen: Set[int] = set()
+        doc_counts: Counter = Counter()
+        for max_per_doc in (2, 4, top_k):
+            for cid, sc in ranked:
+                if len(selected) >= top_k:
+                    break
+                if cid in seen:
+                    continue
+                did = self.chunks[cid].doc_id
+                if doc_counts[did] >= max_per_doc:
+                    continue
+                selected.append((cid, sc))
+                seen.add(cid)
+                doc_counts[did] += 1
+            if len(selected) >= top_k:
+                break
+        return self._format_results(selected[:top_k])
+
     # ------------------------------------------------------------------
     # Unified Retrieve API (supports clean ablations)
     # ------------------------------------------------------------------
@@ -705,9 +1020,36 @@ class MultiHopHybridIndex:
         embed_model: Optional[str] = None,
         embed_dim: Optional[int] = None,
         rerank_model: Optional[str] = None,
+        decompose_model: str = "qwen-flash",
         extra_subqueries: Optional[Sequence[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Retrieve top_k fair <=256-token chunks under the requested ablation method."""
+        if method == "hybrid_dual_rerank_fusion":
+            if not (client and embed_model and rerank_model and self.chunk_vectors):
+                raise ValueError("hybrid_dual_rerank_fusion requires dense index, client, embed_model, and rerank_model")
+            return self.retrieve_dual_rerank_fusion(
+                query=query,
+                top_k=top_k,
+                client=client,
+                embed_model=embed_model,
+                embed_dim=embed_dim,
+                rerank_model=rerank_model,
+                decompose_model=decompose_model,
+            )
+
+        if method == "hybrid_multihop_decomposed_rerank":
+            if not (client and embed_model and rerank_model and self.chunk_vectors):
+                raise ValueError("hybrid_multihop_decomposed_rerank requires dense index, client, embed_model, and rerank_model")
+            return self.retrieve_multihop_decomposed(
+                query=query,
+                top_k=top_k,
+                client=client,
+                embed_model=embed_model,
+                embed_dim=embed_dim,
+                rerank_model=rerank_model,
+                decompose_model=decompose_model,
+            )
+
         if method == "bm25_raw":
             hits = self.search_fts_raw(query, top_k=top_k)
             return self._format_results(hits)

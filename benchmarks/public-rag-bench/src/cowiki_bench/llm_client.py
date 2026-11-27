@@ -6,6 +6,7 @@ NEVER prints, logs, or persists API keys.
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -58,8 +59,9 @@ class PersistentApiCache:
         self.db_path = db_path
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        self._conn = sqlite3.connect(str(db_path), timeout=30.0, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL;")
+        self._conn.execute("PRAGMA busy_timeout=30000;")
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS kv_cache (
@@ -104,7 +106,7 @@ class OpenAICompatibleClient:
         base_url: str,
         cache: Optional[PersistentApiCache] = None,
         timeout_sec: float = 90.0,
-        max_retries: int = 3,
+        max_retries: int = 5,
     ):
         self._api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -210,6 +212,7 @@ class OpenAICompatibleClient:
         texts: Sequence[str],
         dimensions: Optional[int] = None,
         batch_size: int = 10,
+        max_workers: int = 6,
     ) -> List[List[float]]:
         results: List[Optional[List[float]]] = [None] * len(texts)
         missing_indices: List[int] = []
@@ -227,22 +230,41 @@ class OpenAICompatibleClient:
                 missing_indices.append(idx)
                 missing_keys.append(key)
 
+        batches: List[Tuple[List[int], List[str], List[str]]] = []
         for start in range(0, len(missing_indices), batch_size):
-            batch_idx = missing_indices[start : start + batch_size]
-            batch_keys = missing_keys[start : start + batch_size]
-            batch_texts = [texts[i] for i in batch_idx]
-            body: Dict[str, Any] = {"model": model, "input": batch_texts}
+            b_idx = missing_indices[start : start + batch_size]
+            b_keys = missing_keys[start : start + batch_size]
+            b_texts = [texts[i] for i in b_idx]
+            batches.append((b_idx, b_keys, b_texts))
+
+        def _fetch_batch(batch: Tuple[List[int], List[str], List[str]]) -> List[Tuple[int, str, List[float]]]:
+            b_idx, b_keys, b_texts = batch
+            body: Dict[str, Any] = {"model": model, "input": b_texts}
             if dimensions is not None:
                 body["dimensions"] = dimensions
             resp = self._post_json(f"{self.base_url}/embeddings", body)
             with self._stats_lock:
                 self.stats["api_calls"] += 1
             data_rows = sorted(resp["data"], key=lambda x: x["index"])
-            for i, k, row in zip(batch_idx, batch_keys, data_rows):
+            out_rows: List[Tuple[int, str, List[float]]] = []
+            for i, k, row in zip(b_idx, b_keys, data_rows):
                 vec = [float(v) for v in row["embedding"]]
-                results[i] = vec
-                if self.cache is not None:
-                    self.cache.put(k, "embed", vec)
+                out_rows.append((i, k, vec))
+            return out_rows
+
+        if len(batches) <= 1 or max_workers <= 1:
+            for b in batches:
+                for i, k, vec in _fetch_batch(b):
+                    results[i] = vec
+                    if self.cache is not None:
+                        self.cache.put(k, "embed", vec)
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+                for batch_res in pool.map(_fetch_batch, batches):
+                    for i, k, vec in batch_res:
+                        results[i] = vec
+                        if self.cache is not None:
+                            self.cache.put(k, "embed", vec)
 
         return [r if r is not None else [] for r in results]
 

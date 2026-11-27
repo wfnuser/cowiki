@@ -145,7 +145,8 @@ def build_multihop_stratified_slice(
         stratum_stats[key] = {"population": len(pool), "sampled": take}
 
     selected.sort()
-    type_counts = Counter(queries[i]["question_type"] for i in selected)
+    by_idx = {int(q["_idx"]): q for q in queries}
+    type_counts = Counter(by_idx[i]["question_type"] for i in selected)
     return {
         "benchmark": "multihop_rag",
         "source": "yixuantt/MultiHopRAG (MultiHopRAG.json + corpus.json)",

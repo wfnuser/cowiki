@@ -16,8 +16,8 @@ from cowiki_bench.metrics import (
     evaluate_multihop_retrieval,
     score_ramdocs_instance,
 )
-from cowiki_bench.multihop_index import MultiHopHybridIndex, chunk_document_body, extract_dates_from_text
-from cowiki_bench.ramdocs_engine import cluster_near_duplicate_docs
+from cowiki_bench.multihop_index import MultiHopHybridIndex, chunk_document_body, extract_dates_from_text, l2_normalize
+from cowiki_bench.ramdocs_engine import cluster_near_duplicate_docs, compute_strict_fork_diffs, is_corrupted_binary_doc
 
 
 class TestBenchHarness(unittest.TestCase):
@@ -130,6 +130,25 @@ class TestBenchHarness(unittest.TestCase):
         mh_sl = build_multihop_stratified_slice(mh_rows, n=20, seed=42)
         self.assertEqual(mh_sl["sample_size"], 20)
         self.assertEqual(mh_sl["non_null_sample_size"], 15)
+
+    def test_binary_filter_and_strict_fork_diff(self) -> None:
+        self.assertTrue(is_corrupted_binary_doc("abc \ufffd\ufffd\ufffd\ufffd endstream endobj 123 0 obj"))
+        self.assertFalse(is_corrupted_binary_doc("Airways International was an airline based in Miami, Florida."))
+
+        docs = [
+            "Airways International was an airline based in Miami, Florida. It operated flights within southern Florida and to the Bahamas from 1984 to 1999.",
+            "Airways International was an airline based in Anchorage, Alaska. It operated flights within southern Florida and to the Bahamas from 1984 to 1999.",
+            "Unrelated document about completely different aviation museums in Europe and Asia with many exhibits.",
+        ]
+        diffs = compute_strict_fork_diffs(docs, min_ratio=0.55)
+        self.assertEqual(len(diffs), 1)
+        self.assertIn("Miami, Florida", diffs[0])
+        self.assertIn("Anchorage, Alaska", diffs[0])
+
+    def test_l2_normalize_unit_norm(self) -> None:
+        v = l2_normalize([3.0, 4.0])
+        self.assertAlmostEqual(v[0], 0.6, places=6)
+        self.assertAlmostEqual(v[1], 0.8, places=6)
 
 
 if __name__ == "__main__":
