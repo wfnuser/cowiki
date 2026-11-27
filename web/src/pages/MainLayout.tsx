@@ -1981,7 +1981,8 @@ export function MainLayout() {
               {/* Right: actions */}
               {/* Version and Cloud state, comments, then the Agent toggle facing its sidebar. */}
               <ContentHeaderActions>
-                {desktop && activeWorkspace?.localPath && (
+                {/* Flashcards read the working copy whatever version is picked. */}
+                {desktop && activeWorkspace?.localPath && activeView?.kind !== 'flashcards' && (
                   <SpaceStatusMenu
                     context={workspaceContext}
                     agentChanges={openAgentChanges}

@@ -269,34 +269,29 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
     return () => window.removeEventListener('keydown', onKey);
   }, [studying]);
 
+  // A study session's pieces; the layout below decides where each one sits.
+  let parts: { deck: string; left: string; done: number; size: number; tools: React.ReactNode; card: React.ReactNode; actions: React.ReactNode } | null = null;
   if (current) {
     const schedule = scheduleOf(store, current);
     const intervals = previewIntervals(schedule, store.ofMatrix);
     const fresh = isNew(store, current);
     const left = session?.length ?? 0;
-    const progress = sessionSize > 0 ? (sessionSize - left) / sessionSize : 0;
-    const tool = 'inline-flex size-8 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4';
-    return (
-      <section className="mx-auto flex min-h-[calc(100vh-150px)] flex-col justify-center pb-8" style={{ width: 'min(640px, 100%)' }}>
-        <div className="mb-2.5 flex h-8 items-center justify-between gap-3">
-          <span className="flex min-w-0 items-baseline gap-2.5 text-small">
-            <span className="truncate font-medium text-text-secondary">{sessionDeck ? sessionDeck.split('/').join(' / ') : t('All decks')}</span>
-            <span className="shrink-0 text-meta text-text-tertiary">{fresh ? t('New') : t('Review {count}', { count: schedule.repeats + 1 })}</span>
-          </span>
-          <div className="flex shrink-0 items-center gap-0.5">
-            <span className="mr-2 text-meta tabular-nums text-text-tertiary">{t('{count} left', { count: left })}</span>
-            <span aria-hidden className="mr-1.5 h-3.5 w-px bg-border-soft" />
-            <button type="button" onClick={() => onOpenSource(current.path)} className={tool} aria-label={t('Open note')} title={`${t('Open note')} · ${current.path}`}><ArrowUpRight /></button>
-            <button type="button" onClick={advance} className={tool} aria-label={t('Skip')} title={t('Skip (N)')}><SkipForward /></button>
-            <button type="button" onClick={suspend} className={tool} aria-label={t('Suspend')} title={t('Suspend: stop showing this card until you resume it')}><CirclePause /></button>
-            <button type="button" onClick={reset} disabled={fresh} className={tool} aria-label={t('Reset')} title={t('Reset: review this card again from the start')}><RotateCcw /></button>
-            <button type="button" onClick={endSession} className={tool} aria-label={t('End')} title={t('End session')}><X /></button>
-          </div>
-        </div>
-        <div className="study-progress" role="progressbar" aria-label={t('Session progress')} aria-valuemin={0} aria-valuemax={sessionSize} aria-valuenow={sessionSize - left}>
-          <div style={{ width: `${progress * 100}%` }} />
-        </div>
-        {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
+    const tool = 'inline-flex size-7 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4';
+    parts = {
+      deck: sessionDeck ? sessionDeck.split('/').join(' / ') : t('All decks'),
+      left: t('{count} left', { count: left }),
+      done: sessionSize - left,
+      size: sessionSize,
+      tools: (
+        <>
+          <button type="button" onClick={() => onOpenSource(current.path)} className={tool} aria-label={t('Open note')} title={`${t('Open note')} · ${current.path}`}><ArrowUpRight /></button>
+          <button type="button" onClick={advance} className={tool} aria-label={t('Skip')} title={t('Skip (N)')}><SkipForward /></button>
+          <button type="button" onClick={suspend} className={tool} aria-label={t('Suspend')} title={t('Suspend: stop showing this card until you resume it')}><CirclePause /></button>
+          <button type="button" onClick={reset} disabled={fresh} className={tool} aria-label={t('Reset')} title={t('Reset: review this card again from the start')}><RotateCcw /></button>
+          <button type="button" onClick={endSession} className={tool} aria-label={t('End')} title={t('End session')}><X /></button>
+        </>
+      ),
+      card: (
         <div className={cn('study-card', revealed && current.back && 'is-revealed')}>
           <div className="study-front">
             {changedSinceReview(store, current) && (
@@ -310,6 +305,8 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
             </div>
           )}
         </div>
+      ),
+      actions: (
         <div className="study-actions">
           {!revealed ? (
             <button type="button" onClick={() => setRevealed(true)} className="study-action">
@@ -339,6 +336,26 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
             </div>
           )}
         </div>
+      ),
+    };
+  }
+
+  if (parts) {
+    return (
+      <section className="mx-auto flex min-h-[calc(100vh-150px)] flex-col justify-center pb-8" style={{ width: 'min(640px, 100%)' }}>
+        <div className="mb-2.5 flex h-8 items-center justify-between gap-3">
+          <span className="truncate text-small font-medium text-text-secondary">{parts.deck}</span>
+          <div className="flex shrink-0 items-center gap-0.5">
+            <span className="mr-2 text-meta tabular-nums text-text-tertiary">{parts.left}</span>
+            {parts.tools}
+          </div>
+        </div>
+        <div className="study-progress" role="progressbar" aria-label={t('Session progress')} aria-valuemin={0} aria-valuemax={parts.size} aria-valuenow={parts.done}>
+          <div style={{ width: `${parts.size > 0 ? (parts.done / parts.size) * 100 : 0}%` }} />
+        </div>
+        {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
+        {parts.card}
+        {parts.actions}
       </section>
     );
   }
