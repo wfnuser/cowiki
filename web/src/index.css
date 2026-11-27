@@ -439,6 +439,20 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 
 /* Studying a card: a quiet progress line, one paper card, and text-only
    answers underneath. No colour: the card is the only thing to look at. */
+/* Option B: the session is a dialog over the page, as in Logseq. The dialog
+   is the card's frame, so the card inside drops its own border. */
+.study-modal {
+  position: fixed; top: 50%; left: 50%; z-index: 100;
+  display: flex; flex-direction: column;
+  width: min(720px, calc(100% - 64px)); max-height: calc(100vh - 64px);
+  transform: translate(-50%, -50%);
+  padding: 14px 16px 20px;
+  border: 1px solid var(--color-border); border-radius: 14px;
+  background: var(--color-panel); box-shadow: var(--shadow-dialog);
+  outline: none; overflow-y: auto;
+}
+.study-modal-head { display: flex; align-items: center; gap: 10px; height: 28px; padding-left: 4px; font-size: var(--text-small); }
+.study-modal-card .study-card { border: 0; box-shadow: none; background: transparent; }
 .study-progress { height: 2px; margin-bottom: 24px; overflow: hidden; border-radius: 1px; background: var(--color-border-soft); }
 .study-progress > div { height: 100%; background: var(--color-text-tertiary); transition: width 300ms ease; }
 .study-card {

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowUpRight, ChevronRight, CirclePause, LoaderCircle, RefreshCw, RotateCcw, SkipForward, SlidersHorizontal, X } from 'lucide-react';
-import { Popover as PopoverPrimitive } from 'radix-ui';
+import { Dialog as DialogPrimitive, Popover as PopoverPrimitive } from 'radix-ui';
 
 import { withObsidianReader } from '@/components/ObsidianReader';
 import { NumberField } from '@/components/ui/number-field';
@@ -340,25 +340,31 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
     };
   }
 
-  if (parts) {
-    return (
-      <section className="mx-auto flex min-h-[calc(100vh-150px)] flex-col justify-center pb-8" style={{ width: 'min(640px, 100%)' }}>
-        <div className="mb-2.5 flex h-8 items-center justify-between gap-3">
-          <span className="truncate text-small font-medium text-text-secondary">{parts.deck}</span>
-          <div className="flex shrink-0 items-center gap-0.5">
-            <span className="mr-2 text-meta tabular-nums text-text-tertiary">{parts.left}</span>
+  // The session floats over the page in a dialog, as in Logseq: Esc or the
+  // close button ends it, and the page behind stays where it was.
+  const studyModal = parts ? (
+    <DialogPrimitive.Root open onOpenChange={(open) => { if (!open) endSession(); }}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-[100] bg-dialog-scrim backdrop-blur-[2px]" />
+        <DialogPrimitive.Content
+          aria-describedby={undefined}
+          className="study-modal"
+          onOpenAutoFocus={(event) => { event.preventDefault(); (event.currentTarget as HTMLElement | null)?.focus(); }}
+        >
+          <DialogPrimitive.Title className="sr-only">{parts.deck}</DialogPrimitive.Title>
+          <div className="study-modal-head">
+            <span className="min-w-0 truncate font-medium text-text">{parts.deck}</span>
+            <span className="shrink-0 tabular-nums text-text-tertiary">{parts.left}</span>
+            <span className="flex-1" />
             {parts.tools}
           </div>
-        </div>
-        <div className="study-progress" role="progressbar" aria-label={t('Session progress')} aria-valuemin={0} aria-valuemax={parts.size} aria-valuenow={parts.done}>
-          <div style={{ width: `${parts.size > 0 ? (parts.done / parts.size) * 100 : 0}%` }} />
-        </div>
-        {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
-        {parts.card}
-        {parts.actions}
-      </section>
-    );
-  }
+          {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
+          <div className="study-modal-card">{parts.card}</div>
+          {parts.actions}
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  ) : null;
 
   const limits = (
     <PopoverPrimitive.Root>
@@ -467,6 +473,7 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
             );
           })}
         </ul>
+        {studyModal}
       </section>
     );
   }
@@ -546,6 +553,7 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
           )}
         </>
       )}
+      {studyModal}
     </section>
   );
 }
