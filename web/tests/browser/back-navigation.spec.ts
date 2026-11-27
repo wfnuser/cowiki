@@ -55,10 +55,14 @@ test('back and forward step through pages, views and shortcuts', async ({ page }
 
   await page.getByText('Welcome', { exact: true }).first().click();
   await expect(crumb).toContainText('Welcome');
+  // Where you are, not which Space: the sidebar already names it.
+  await expect(crumb).not.toContainText('My Space');
   await page.locator('.prose').getByText('Rust ownership').click();
   await expect(crumb).toContainText('Rust ownership');
   await page.getByRole('button', { name: /^Tasks\s*\d*$/ }).first().click();
-  await expect(crumb).toContainText('Tasks');
+  // Tasks titles itself, so the top bar stays empty.
+  await expect(page.getByRole('heading', { level: 1, name: 'Tasks', exact: true })).toBeVisible();
+  await expect(crumb).toHaveText('');
 
   await back.click();
   await expect(crumb).toContainText('Rust ownership');
@@ -166,7 +170,7 @@ test('slow page responses never overwrite a newer navigation and Reviews waits f
   await expect(page.locator('.cm-content')).toBeVisible();
   await page.keyboard.type(' flushed before review');
   await page.getByRole('button', { name: /^Reviews\s*\d*$/ }).first().click();
-  await expect(page.locator('.app-breadcrumb')).toContainText('Reviews');
+  await expect(page.getByRole('heading', { level: 1, name: 'Reviews', exact: true })).toBeVisible();
   expect(writes.some((text) => text.includes('flushed before review'))).toBe(true);
   expect(diffSeenAfterWrite).toBe(true);
 
@@ -246,7 +250,7 @@ test('merged and discarded Agent Changes are dropped from Back/Forward history',
 
   // Stepping Back lands on Reviews and drops the merged change so Forward is disabled.
   await back.click();
-  await expect(crumb).toContainText('Reviews');
+  await expect(page.getByRole('heading', { level: 1, name: 'Reviews', exact: true })).toBeVisible();
   await expect(forward).toBeDisabled();
 
   // Open second Agent Change -> Discard -> navigate to Welcome -> Back skips the discarded change.
@@ -258,6 +262,6 @@ test('merged and discarded Agent Changes are dropped from Back/Forward history',
   await page.getByText('Welcome', { exact: true }).first().click();
   await expect(crumb).toContainText('Welcome');
   await back.click();
-  await expect(crumb).toContainText('Reviews');
+  await expect(page.getByRole('heading', { level: 1, name: 'Reviews', exact: true })).toBeVisible();
   await expect(page.getByText('Agent discard draft')).toBeVisible();
 });

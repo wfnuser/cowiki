@@ -184,7 +184,11 @@ Notifications, Review details, Cloud pages) is built the same way, with
   block; tables stay rendered until the caret enters them. A single newline
   is a line break in both, as in Obsidian.
 - **Top bar, left:** back and forward arrows (desktop), as in Notion, then
-  the breadcrumb. Every page, journal, tool view and Space you open is one
+  a name only where the view below does not show one: a page's name (its
+  first heading may differ) and Journals (below are only dates). Views that
+  title themselves (Tasks, Flashcards, Reviews, History…) and the Space,
+  which the sidebar's top names, add nothing (user decision 2026-11-27).
+  Every page, journal, tool view and Space you open is one
   step (`lib/view-history.ts`); a renamed page keeps its steps and a deleted
   one leaves them. ⌘[ and ⌘] outside text (the editor uses them to indent),
   ⌘⌥← and ⌘⌥→ everywhere (Obsidian), and the mouse's side buttons. An arrow

@@ -1701,6 +1701,12 @@ export function MainLayout() {
     || (!!activeCloudState && activeCloudState !== 'unlinked' && activeCloudState !== 'unavailable');
   const onStartPage = activeView === null || activeView.kind === 'home';
   const showJournals = !!activeWorkspace && activeView?.kind === 'journals' && journalsAvailable;
+  // The top bar names only what the view below does not: a page's name (its
+  // first heading may differ) and Journals (below are only dates). Views with
+  // their own title, and the Space (the sidebar names it), add nothing here.
+  const crumb = showJournals
+    ? t('Journals')
+    : activeView?.kind === 'page' && activeView.content ? activeView.content.title : null;
   const showOverview = !!activeWorkspace && onStartPage;
   const mainScrolls = !!activeView && ['review-list', 'review-detail', 'members', 'history', 'links', 'notifications'].includes(activeView.kind);
   const journalPaths = useMemo(() => activeFlatPages.map((page) => page.path), [activeFlatPages]);
@@ -1967,89 +1973,8 @@ export function MainLayout() {
                     onForward={() => goThroughHistory(1)}
                   />
                 )}
-                {activeWorkspace && (
-                  <span style={{ color: C.ink2 }}>{activeWorkspace.name}</span>
-                )}
-                {showJournals && (
-                  <>
-                    <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>{t('Journals')}</span>
-                  </>
-                )}
-                {activeView?.kind === 'page' && activeView.content && (
-                  <>
-                    <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeView.content.title}</span>
-                  </>
-                )}
-                {activeView?.kind === 'source' && (
-                  <>
-                    <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.faint }}>sources</span>
-                    <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {activeView.content?.title || activeView.filename}
-                    </span>
-                  </>
-                )}
-                {activeView?.kind === 'review-list' && (
-                  <>
-                    <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>{t('Reviews')}</span>
-                  </>
-                )}
-                {activeView?.kind === 'review-detail' && (
-                  <>
-                    <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>{t('Reviews')}</span>
-                    <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>
-                      {activeView.target.kind === 'local-draft'
-                        ? t('Current Draft')
-                        : activeView.target.kind === 'local-agent'
-                          ? `${t('Agent')} #${activeView.target.changeId.slice(0, 6)}`
-                          : `#${activeView.target.submissionId.slice(0, 6)}`}
-                    </span>
-                  </>
-                )}
-                {activeView?.kind === 'members' && (
-                  <>
-                    <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>{t('Members')}</span>
-                  </>
-                )}
-                {activeView?.kind === 'history' && (
-                  <>
-                    <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>{t('History')}</span>
-                  </>
-                )}
-                {activeView?.kind === 'links' && (
-                  <>
-                    <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>{t('Broken links')}</span>
-                  </>
-                )}
-                {activeView?.kind === 'tasks' && (
-                  <>
-                    <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>{t('Tasks')}</span>
-                  </>
-                )}
-                {activeView?.kind === 'flashcards' && (
-                  <>
-                    <span style={{ color: C.faint }}>/</span>
-                    <span style={{ color: C.ink }}>{t('Flashcards')}</span>
-                    {activeView.deck && (
-                      <>
-                        <span style={{ color: C.faint }}>/</span>
-                        <span style={{ color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeView.deck.split('/').join(' / ')}</span>
-                      </>
-                    )}
-                  </>
-                )}
-                {activeView?.kind === 'notifications' && (
-                  <span style={{ color: C.ink }}>{t('Notifications')}</span>
+                {crumb && (
+                  <span style={{ color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{crumb}</span>
                 )}
               </ContentBreadcrumb>
 
