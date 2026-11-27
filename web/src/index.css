@@ -439,6 +439,14 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 
 /* Studying a card: a quiet progress line, one paper card, and text-only
    answers underneath. No colour: the card is the only thing to look at. */
+/* Option D: the card's top edge holds the deck, the count and the tools;
+   the tools stay faint until the pointer is over the card. */
+.study-incard { position: relative; }
+.study-incard-head { position: absolute; top: 10px; left: 18px; right: 10px; display: flex; align-items: center; gap: 10px; height: 28px; font-size: var(--text-meta); }
+.study-incard-tools { display: flex; align-items: center; gap: 2px; opacity: 0.55; transition: opacity 120ms ease; }
+.study-incard:hover .study-incard-tools, .study-incard-tools:focus-within { opacity: 1; }
+.study-incard .study-front { padding-top: 60px; }
+.study-incard .study-card.is-revealed .study-front { padding-top: 52px; }
 .study-progress { height: 2px; margin-bottom: 24px; overflow: hidden; border-radius: 1px; background: var(--color-border-soft); }
 .study-progress > div { height: 100%; background: var(--color-text-tertiary); transition: width 300ms ease; }
 .study-card {

@@ -340,21 +340,21 @@ export function FlashcardsView({ workspaceSlug, deck: deckPath, studying: studyS
     };
   }
 
+  // Nothing outside the card: its top edge carries the deck and count on the
+  // left and the tools on the right, so there is no row or line above it.
   if (parts) {
     return (
       <section className="mx-auto flex min-h-[calc(100vh-150px)] flex-col justify-center pb-8" style={{ width: 'min(640px, 100%)' }}>
-        <div className="mb-2.5 flex h-8 items-center justify-between gap-3">
-          <span className="truncate text-small font-medium text-text-secondary">{parts.deck}</span>
-          <div className="flex shrink-0 items-center gap-0.5">
-            <span className="mr-2 text-meta tabular-nums text-text-tertiary">{parts.left}</span>
-            {parts.tools}
+        {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
+        <div className="study-incard">
+          {parts.card}
+          <div className="study-incard-head">
+            <span className="min-w-0 truncate text-text-secondary">{parts.deck}</span>
+            <span className="shrink-0 tabular-nums text-text-tertiary">{parts.left}</span>
+            <span className="flex-1" />
+            <span className="study-incard-tools">{parts.tools}</span>
           </div>
         </div>
-        <div className="study-progress" role="progressbar" aria-label={t('Session progress')} aria-valuemin={0} aria-valuemax={parts.size} aria-valuenow={parts.done}>
-          <div style={{ width: `${parts.size > 0 ? (parts.done / parts.size) * 100 : 0}%` }} />
-        </div>
-        {error && <div role="alert" className="mb-3 text-small text-red">{error}</div>}
-        {parts.card}
         {parts.actions}
       </section>
     );
