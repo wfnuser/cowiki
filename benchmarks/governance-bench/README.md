@@ -101,7 +101,7 @@ The desktop suite exercises staging, stale previews, trust demotion, discard and
 
 ## Held-out evaluation
 
-All five methods received the same 160 CPython edits. The model-assisted methods were evaluated with an OpenAI-compatible verifier model. Detection uses exact issue codes and both cited spans across 95 labeled findings. Repair success uses the 83 faulty edits, false alarms use the 77 valid edits, and unintended changes use all 160 edits.
+All five methods received the same 160 CPython edits. The model-assisted methods used `gpt-6.2-sol` at medium reasoning effort through an OpenAI-compatible endpoint. Each method had one logical model call per case, a 4,096-token content admission cap including the 768-token output allowance, and a 16,384-token total ceiling including provider overhead. The generation deadline was 120 seconds and the HTTP timeout was 140 seconds. Detection uses exact issue codes and both cited spans across 95 labeled findings. Repair success uses the 83 faulty edits, false alarms use the 77 valid edits, and unintended changes use all 160 edits.
 
 Values are percentages with 95% percentile intervals from 10,000 bootstrap samples of the 16 source families. Each sampled family retains all its edits.
 
