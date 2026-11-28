@@ -6650,7 +6650,7 @@ mod tests {
         );
 
         let stats = engine.index_stats(&space.slug).unwrap();
-        assert_eq!(stats.schema_version, 4);
+        assert_eq!(stats.schema_version, 5);
         assert!(stats.indexed_pages >= 3);
         assert!(stats.knowledge_units >= 3);
         assert!(stats.cached_embeddings >= 3);

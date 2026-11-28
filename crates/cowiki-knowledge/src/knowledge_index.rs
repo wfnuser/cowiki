@@ -3,8 +3,10 @@
 //! Markdown files remain the source of truth. Every row in these tables is
 //! derived data and may be dropped and rebuilt without losing user content.
 
+use crate::citations::{self, CitationAnchor};
 use crate::embeddings::{self, EmbeddingProvider};
 use crate::okf;
+use crate::scorer::{CandidatePassage, EvidenceScorer, ScoringContext};
 use percent_encoding::percent_decode_str;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use rusqlite::{params, Connection};
@@ -15,11 +17,12 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 const CREATE_SCHEMA: &str = "CREATE TABLE knowledge_index_metadata (
         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-        schema_version INTEGER NOT NULL
+        schema_version INTEGER NOT NULL,
+        index_generation INTEGER NOT NULL DEFAULT 1
     );
     CREATE TABLE indexed_pages (
         id INTEGER PRIMARY KEY,
@@ -28,6 +31,7 @@ const CREATE_SCHEMA: &str = "CREATE TABLE knowledge_index_metadata (
         title TEXT NOT NULL,
         body TEXT NOT NULL,
         modified_ns INTEGER NOT NULL DEFAULT 0,
+        file_sha256 TEXT NOT NULL DEFAULT '',
         doc_type TEXT NOT NULL DEFAULT 'Note',
         status TEXT NOT NULL DEFAULT 'active',
         trust_tier TEXT NOT NULL DEFAULT 'unverified',
@@ -80,9 +84,12 @@ const CREATE_SCHEMA: &str = "CREATE TABLE knowledge_index_metadata (
         heading_path TEXT NOT NULL,
         line_start INTEGER NOT NULL,
         line_end INTEGER NOT NULL,
+        byte_start INTEGER NOT NULL DEFAULT 0,
+        byte_end INTEGER NOT NULL DEFAULT 0,
         body TEXT NOT NULL,
         token_count INTEGER NOT NULL,
         content_sha256 TEXT NOT NULL,
+        file_sha256 TEXT NOT NULL DEFAULT '',
         aliases_text TEXT NOT NULL DEFAULT '',
         sources_json TEXT NOT NULL DEFAULT '[]',
         doc_type TEXT NOT NULL DEFAULT 'Note',
@@ -161,6 +168,7 @@ pub struct BrokenLink {
 #[serde(rename_all = "camelCase")]
 pub struct IndexStats {
     pub schema_version: i64,
+    pub index_generation: i64,
     pub indexed_pages: usize,
     pub knowledge_units: usize,
     pub page_links: usize,
@@ -182,6 +190,10 @@ pub struct HybridSearchOptions {
     pub use_lexical: Option<bool>,
     pub use_vector: Option<bool>,
     pub use_graph_expansion: Option<bool>,
+    pub use_lexical_bridge: Option<bool>,
+    pub max_bridge_hops: Option<usize>,
+    pub bridge_term_limit: Option<usize>,
+    pub verify_freshness: Option<bool>,
     pub scope_filter: Option<String>,
     pub as_of_date: Option<String>,
 }
@@ -199,6 +211,10 @@ impl Default for HybridSearchOptions {
             use_lexical: Some(true),
             use_vector: Some(true),
             use_graph_expansion: Some(true),
+            use_lexical_bridge: Some(true),
+            max_bridge_hops: Some(1),
+            bridge_term_limit: Some(10),
+            verify_freshness: Some(false),
             scope_filter: None,
             as_of_date: None,
         }
@@ -215,11 +231,19 @@ pub struct HybridEvidenceItem {
     pub section_heading: String,
     pub heading_path: String,
     pub citation: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub byte_start: usize,
+    pub byte_end: usize,
+    pub file_sha256: String,
+    pub snippet_sha256: String,
     pub text: String,
     pub token_count: usize,
     pub score: f64,
     pub retrieval_channel: String,
     pub via_link_from: Option<String>,
+    pub via_bridge_term: Option<String>,
+    pub freshness_stale: bool,
     pub doc_type: String,
     pub status: String,
     pub trust_tier: String,
@@ -231,12 +255,37 @@ pub struct HybridEvidenceItem {
     pub sources: Vec<String>,
 }
 
+impl HybridEvidenceItem {
+    /// Convert this retrieved evidence item into a portable verifiable citation anchor.
+    pub fn to_citation_anchor(&self) -> CitationAnchor {
+        CitationAnchor {
+            page_path: self.page_path.clone(),
+            file_sha256: self.file_sha256.clone(),
+            snippet_sha256: self.snippet_sha256.clone(),
+            start_line: self.start_line,
+            end_line: self.end_line,
+            byte_start: self.byte_start,
+            byte_end: self.byte_end,
+            excerpt: self.text.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ExploredEdge {
     pub from_page: String,
     pub to_page: String,
     pub direction: String,
+    pub hop: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExploredBridge {
+    pub from_page: String,
+    pub to_page: String,
+    pub bridge_term: String,
     pub hop: usize,
 }
 
@@ -256,9 +305,12 @@ pub struct HybridSearchResult {
     pub status: String,
     pub latency_ms: f64,
     pub embedding_model: String,
+    pub index_generation: i64,
+    pub stale_detected: bool,
     pub filtered_retired_count: usize,
     pub followed_redirects: Vec<FollowedRedirect>,
     pub explored_edges: Vec<ExploredEdge>,
+    pub explored_bridges: Vec<ExploredBridge>,
     pub evidence: Vec<HybridEvidenceItem>,
 }
 
@@ -317,22 +369,27 @@ fn schema_is_structurally_healthy(connection: &Connection) -> bool {
     }
     if connection
         .prepare(
-            "SELECT id, space_id, path, title, body, modified_ns, doc_type, status,
-                    trust_tier, verified, generated, stale_after, redirect_to,
-                    sources_json, aliases_json, updated_at
-             FROM indexed_pages LIMIT 0",
+            "SELECT schema_version, index_generation FROM knowledge_index_metadata LIMIT 0",
         )
         .is_err()
+        || connection
+            .prepare(
+                "SELECT id, space_id, path, title, body, modified_ns, file_sha256, doc_type, status,
+                        trust_tier, verified, generated, stale_after, redirect_to,
+                        sources_json, aliases_json, updated_at
+                 FROM indexed_pages LIMIT 0",
+            )
+            .is_err()
         || connection
             .prepare("SELECT space_id, source_path, target, kind FROM page_links LIMIT 0")
             .is_err()
         || connection
             .prepare(
                 "SELECT id, space_id, unit_id, page_path, page_title, section_heading,
-                        heading_path, line_start, line_end, body, token_count, content_sha256,
-                        aliases_text, sources_json, doc_type, status, trust_tier,
-                        verified, generated, stale_after, redirect_to, scope,
-                        embedding_model, embedding_blob
+                        heading_path, line_start, line_end, byte_start, byte_end, body,
+                        token_count, content_sha256, file_sha256, aliases_text, sources_json,
+                        doc_type, status, trust_tier, verified, generated, stale_after,
+                        redirect_to, scope, embedding_model, embedding_blob
                  FROM knowledge_units LIMIT 0",
             )
             .is_err()
@@ -349,6 +406,29 @@ fn schema_is_structurally_healthy(connection: &Connection) -> bool {
         return false;
     }
     true
+}
+
+/// Read the monotonically incrementing index generation counter.
+pub fn current_generation(connection: &Connection) -> i64 {
+    connection
+        .query_row(
+            "SELECT index_generation FROM knowledge_index_metadata WHERE singleton = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(1)
+}
+
+fn bump_generation(connection: &Connection) -> Result<(), String> {
+    connection
+        .execute(
+            "UPDATE knowledge_index_metadata
+             SET index_generation = index_generation + 1
+             WHERE singleton = 1",
+            [],
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 /// FTS5's external-content integrity check is proportional to indexed content,
@@ -401,7 +481,8 @@ fn reset_schema(connection: &mut Connection) -> Result<(), String> {
         .map_err(|error| format!("cannot reset the disposable local search index: {error}"))?;
     transaction
         .execute(
-            "INSERT INTO knowledge_index_metadata (singleton, schema_version) VALUES (1, ?1)",
+            "INSERT INTO knowledge_index_metadata (singleton, schema_version, index_generation)
+             VALUES (1, ?1, 1)",
             [SCHEMA_VERSION],
         )
         .map_err(|error| format!("cannot version the local search index: {error}"))?;
@@ -456,6 +537,7 @@ pub fn rebuild_space_with_embedder(
             index_file_in(&transaction, space_id, root, path, embedder)?;
         }
     }
+    bump_generation(&transaction)?;
     transaction.commit().map_err(|e| e.to_string())
 }
 
@@ -495,6 +577,7 @@ pub fn refresh_space_with_embedder(
             .map_err(|e| e.to_string())?
     };
     let mut seen = HashSet::new();
+    let mut mutated = false;
     for entry in walkdir::WalkDir::new(root)
         .follow_links(false)
         .into_iter()
@@ -510,10 +593,15 @@ pub fn refresh_space_with_embedder(
         seen.insert(relative.clone());
         if existing.get(&relative).copied() != Some(modified_ns) {
             index_file_in(&transaction, space_id, root, path, embedder)?;
+            mutated = true;
         }
     }
     for deleted in existing.keys().filter(|path| !seen.contains(*path)) {
         delete_page_rows(&transaction, space_id, deleted)?;
+        mutated = true;
+    }
+    if mutated {
+        bump_generation(&transaction)?;
     }
     transaction.commit().map_err(|e| e.to_string())
 }
@@ -543,6 +631,7 @@ pub fn index_paths_with_embedder(
         return Ok(());
     }
     let transaction = connection.transaction().map_err(|e| e.to_string())?;
+    let mut mutated = false;
     for relative in paths {
         let path = root.join(relative);
         if !is_markdown(&path) || !should_walk(&path, root) {
@@ -553,10 +642,15 @@ pub fn index_paths_with_embedder(
             .unwrap_or(false);
         if is_regular_file {
             index_file_in(&transaction, space_id, root, &path, embedder)?;
+            mutated = true;
         } else {
             let relative = normalize_path(relative);
             delete_page_rows(&transaction, space_id, &relative)?;
+            mutated = true;
         }
+    }
+    if mutated {
+        bump_generation(&transaction)?;
     }
     transaction.commit().map_err(|e| e.to_string())
 }
@@ -646,6 +740,7 @@ pub fn index_stats(connection: &Connection, space_id: &str) -> Result<IndexStats
         .unwrap_or_else(|_| embeddings::default_embedder().model_name().to_string());
     Ok(IndexStats {
         schema_version: SCHEMA_VERSION,
+        index_generation: current_generation(connection),
         indexed_pages: count_for(
             "SELECT COUNT(*) FROM indexed_pages WHERE space_id = ?1",
             true,
@@ -696,19 +791,21 @@ fn index_file_in(
     let aliases_json = serde_json::to_string(&meta.aliases).unwrap_or_else(|_| "[]".to_string());
     let aliases_text = meta.aliases.join(" ");
     let modified_ns = file_modified_ns(path);
+    let file_sha256 = citations::sha256_hex(body.as_bytes());
 
     connection
         .execute(
             "INSERT INTO indexed_pages (
-                space_id, path, title, body, modified_ns, doc_type, status,
+                space_id, path, title, body, modified_ns, file_sha256, doc_type, status,
                 trust_tier, verified, generated, stale_after, redirect_to,
                 sources_json, aliases_json, updated_at
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
              ON CONFLICT(space_id, path) DO UPDATE SET
                title = excluded.title,
                body = excluded.body,
                modified_ns = excluded.modified_ns,
+               file_sha256 = excluded.file_sha256,
                doc_type = excluded.doc_type,
                status = excluded.status,
                trust_tier = excluded.trust_tier,
@@ -725,6 +822,7 @@ fn index_file_in(
                 title,
                 body,
                 modified_ns,
+                file_sha256,
                 meta.doc_type,
                 meta.status,
                 meta.trust_tier,
@@ -811,16 +909,18 @@ fn index_file_in(
 
             for (idx, chunk) in chunks.into_iter().enumerate() {
                 let blob = blobs[idx].take().unwrap_or_default();
+                let (byte_start, byte_end) =
+                    citations::line_span_to_byte_range(&body, chunk.line_start, chunk.line_end);
                 connection
                     .execute(
                         "INSERT INTO knowledge_units (
                             space_id, unit_id, page_path, page_title, section_heading,
-                            heading_path, line_start, line_end, body, token_count,
-                            content_sha256, aliases_text, sources_json, doc_type, status,
-                            trust_tier, verified, generated, stale_after, redirect_to,
-                            scope, embedding_model, embedding_blob
+                            heading_path, line_start, line_end, byte_start, byte_end,
+                            body, token_count, content_sha256, file_sha256, aliases_text,
+                            sources_json, doc_type, status, trust_tier, verified, generated,
+                            stale_after, redirect_to, scope, embedding_model, embedding_blob
                          )
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
                         params![
                             space_id,
                             chunk.unit_id,
@@ -830,9 +930,12 @@ fn index_file_in(
                             chunk.heading_path,
                             chunk.line_start as i64,
                             chunk.line_end as i64,
+                            byte_start as i64,
+                            byte_end as i64,
                             chunk.body,
                             chunk.token_count as i64,
                             chunk.content_sha256,
+                            file_sha256,
                             aliases_text,
                             sources_json,
                             meta.doc_type,
@@ -1152,7 +1255,21 @@ pub fn hybrid_search_with_embedder(
     options: &HybridSearchOptions,
     embedder: &dyn EmbeddingProvider,
 ) -> Result<HybridSearchResult, String> {
+    hybrid_search_with_scorer(connection, space_id, root, query, options, embedder, None)
+}
+
+/// Hybrid retrieval with optional pluggable post-retrieval `EvidenceScorer`.
+pub fn hybrid_search_with_scorer(
+    connection: &Connection,
+    space_id: &str,
+    root: &Path,
+    query: &str,
+    options: &HybridSearchOptions,
+    embedder: &dyn EmbeddingProvider,
+    scorer: Option<&dyn EvidenceScorer>,
+) -> Result<HybridSearchResult, String> {
     let started = Instant::now();
+    let gen_before = current_generation(connection);
     let token_budget = options.token_budget.unwrap_or(1200).clamp(64, 16_000);
     let max_hops = options.max_hops.unwrap_or(2).min(2);
     let seed_top_k = options.seed_top_k.unwrap_or(6).clamp(1, 20);
@@ -1163,6 +1280,10 @@ pub fn hybrid_search_with_embedder(
     let use_lexical = options.use_lexical.unwrap_or(true);
     let use_vector = options.use_vector.unwrap_or(true);
     let use_graph_expansion = options.use_graph_expansion.unwrap_or(true);
+    let use_lexical_bridge = options.use_lexical_bridge.unwrap_or(true);
+    let max_bridge_hops = options.max_bridge_hops.unwrap_or(1).min(2);
+    let bridge_term_limit = options.bridge_term_limit.unwrap_or(10).clamp(1, 24);
+    let verify_freshness = options.verify_freshness.unwrap_or(false);
     let scope_filter = options
         .scope_filter
         .as_deref()
@@ -1185,9 +1306,12 @@ pub fn hybrid_search_with_embedder(
             status: "empty".to_string(),
             latency_ms: round_ms(started.elapsed().as_secs_f64() * 1000.0),
             embedding_model: model_name,
+            index_generation: gen_before,
+            stale_detected: false,
             filtered_retired_count: 0,
             followed_redirects: Vec::new(),
             explored_edges: Vec::new(),
+            explored_bridges: Vec::new(),
             evidence: Vec::new(),
         });
     }
@@ -1661,12 +1785,165 @@ pub fn hybrid_search_with_embedder(
         }
     }
 
-    // 5. Budgeted diversity-aware context packing.
+    // 4b. Query-time lexical bridge expansion (discovers unlinked multi-hop evidence
+    // via salient bridge terms extracted from top seed passages, strictly preserving
+    // direct seed rankings).
+    let mut explored_bridges: Vec<ExploredBridge> = Vec::new();
+    // unit_id -> (score, channel, via_label, bridge_term)
+    let mut bridge_candidates: HashMap<String, (f64, String, String, String)> = HashMap::new();
+    if use_lexical_bridge && use_lexical && max_bridge_hops > 0 && !seed_list.is_empty() {
+        let mut seen_unit_ids: HashSet<String> =
+            seed_list.iter().map(|(_, uid, _, _)| uid.clone()).collect();
+        for uid in graph_candidates.keys() {
+            seen_unit_ids.insert(uid.clone());
+        }
+        let mut seen_bridge_keys: HashSet<(String, String, String)> = HashSet::new();
+        let mut hop_seeds: Vec<(String, f64)> = seed_list
+            .iter()
+            .take(seed_top_k)
+            .map(|(sc, uid, _, _)| (uid.clone(), *sc))
+            .collect();
+
+        // Compute lightweight corpus term DF across indexed units once for IDF weighting.
+        let (total_units, term_df) = load_space_term_df(connection, space_id)?;
+        let query_term_set: HashSet<String> = query_terms.iter().cloned().collect();
+
+        for bridge_hop in 1..=max_bridge_hops {
+            let seed_uids: Vec<String> = hop_seeds.iter().map(|(u, _)| u.clone()).collect();
+            let seed_units = load_units_by_ids(connection, space_id, &seed_uids)?;
+            let bridge_terms = extract_salient_bridge_terms(
+                &hop_seeds,
+                &seed_units,
+                &query_term_set,
+                &term_df,
+                total_units,
+                bridge_term_limit,
+            );
+            if bridge_terms.is_empty() {
+                break;
+            }
+
+            let hop_decay = if bridge_hop == 1 { 0.62 } else { 0.42 };
+            let mut next_hop_seeds: Vec<(String, f64)> = Vec::new();
+
+            for term_info in bridge_terms {
+                let fts_expr = bridge_fts_expression(&term_info.term);
+                if fts_expr.is_empty() {
+                    continue;
+                }
+                let matched_uids = query_fts_units(connection, space_id, &fts_expr, 8)?;
+                if matched_uids.is_empty() {
+                    continue;
+                }
+                let matched_units = load_units_by_ids(connection, space_id, &matched_uids)?;
+                let origin_page = seed_units
+                    .get(&term_info.origin_unit_id)
+                    .map(|u| u.page_path.clone())
+                    .unwrap_or_default();
+
+                for (rank_idx, uid) in matched_uids.into_iter().enumerate() {
+                    if seen_unit_ids.contains(&uid) {
+                        continue;
+                    }
+                    let Some(unit) = matched_units.get(&uid) else {
+                        continue;
+                    };
+                    if is_reserved_nav_doc(&unit.page_path) {
+                        continue;
+                    }
+                    // Prefer cross-page hops; skip identical-page echoes of the seed.
+                    if unit.page_path == origin_page {
+                        continue;
+                    }
+                    if let Some(scope) = scope_filter {
+                        if unit.scope != scope && unit.scope != "default" {
+                            continue;
+                        }
+                    }
+                    let haystack =
+                        format!("{} {} {}", unit.page_title, unit.section_heading, unit.body)
+                            .to_lowercase();
+                    let lex_overlap = query_term_coverage(&query_terms, &haystack);
+                    let dense_sim = vector_sims
+                        .get(&unit.unit_id)
+                        .copied()
+                        .unwrap_or(0.0)
+                        .max(0.0);
+                    let rank_factor = 1.0 / (1.0 + 0.18 * rank_idx as f64);
+                    let idf_norm =
+                        (term_info.idf / ((total_units.max(2) as f64).ln() + 1.0)).clamp(0.35, 1.0);
+                    let mut cand_score =
+                        term_info.parent_score * hop_decay * rank_factor * (0.60 + 0.40 * idf_norm)
+                            + 0.12 * dense_sim
+                            + 0.08 * lex_overlap;
+
+                    if use_governance {
+                        let (mult, _) = okf_governance_multiplier(
+                            &unit.status,
+                            &unit.trust_tier,
+                            unit.verified,
+                            unit.stale_after.as_deref(),
+                            &reference_date,
+                            exclude_retired,
+                        );
+                        if mult <= 0.0 {
+                            continue;
+                        }
+                        cand_score *= mult;
+                    }
+
+                    let channel = if bridge_hop == 1 {
+                        "lexical_bridge_hop_1".to_string()
+                    } else {
+                        "lexical_bridge_hop_2".to_string()
+                    };
+                    let via_label = format!(
+                        "{} -> {} (bridge: {})",
+                        origin_page, unit.page_path, term_info.term
+                    );
+                    if seen_bridge_keys.insert((
+                        origin_page.clone(),
+                        unit.page_path.clone(),
+                        term_info.term.clone(),
+                    )) {
+                        explored_bridges.push(ExploredBridge {
+                            from_page: origin_page.clone(),
+                            to_page: unit.page_path.clone(),
+                            bridge_term: term_info.term.clone(),
+                            hop: bridge_hop,
+                        });
+                    }
+                    let update = bridge_candidates
+                        .get(&unit.unit_id)
+                        .is_none_or(|prev| cand_score > prev.0);
+                    if update {
+                        bridge_candidates.insert(
+                            unit.unit_id.clone(),
+                            (cand_score, channel, via_label, term_info.term.clone()),
+                        );
+                    }
+                    next_hop_seeds.push((unit.unit_id.clone(), cand_score));
+                }
+            }
+
+            if next_hop_seeds.is_empty() {
+                break;
+            }
+            next_hop_seeds.sort_by(|left, right| right.1.total_cmp(&left.1));
+            for (uid, _) in &next_hop_seeds {
+                seen_unit_ids.insert(uid.clone());
+            }
+            hop_seeds = next_hop_seeds.into_iter().take(4).collect();
+        }
+    }
+
+    // 5. Budgeted diversity-aware context packing (with optional pluggable EvidenceScorer).
     struct PoolCandidate {
         score: f64,
         unit_id: String,
         channel: String,
         via: Option<String>,
+        via_bridge_term: Option<String>,
         redirected_from: Option<String>,
     }
 
@@ -1677,6 +1954,7 @@ pub fn hybrid_search_with_embedder(
             unit_id,
             channel,
             via: None,
+            via_bridge_term: None,
             redirected_from,
         });
     }
@@ -1686,7 +1964,18 @@ pub fn hybrid_search_with_embedder(
             unit_id,
             channel,
             via: Some(via),
+            via_bridge_term: None,
             redirected_from,
+        });
+    }
+    for (unit_id, (score, channel, via, term)) in bridge_candidates {
+        unified_pool.push(PoolCandidate {
+            score,
+            unit_id,
+            channel,
+            via: Some(via),
+            via_bridge_term: Some(term),
+            redirected_from: None,
         });
     }
     unified_pool.sort_by(|left, right| {
@@ -1703,6 +1992,58 @@ pub fn hybrid_search_with_embedder(
         .collect();
     let units_by_id = load_units_by_ids(connection, space_id, &candidate_uids)?;
 
+    // Optional pluggable EvidenceScorer re-scoring conditioned on top direct seeds.
+    if let Some(evidence_scorer) = scorer {
+        let shared_evidence: Vec<String> = unified_pool
+            .iter()
+            .filter(|c| c.via.is_none())
+            .take(3)
+            .filter_map(|c| units_by_id.get(&c.unit_id).map(|u| u.body.clone()))
+            .collect();
+        let passages: Vec<CandidatePassage<'_>> = unified_pool
+            .iter()
+            .filter_map(|c| {
+                units_by_id.get(&c.unit_id).map(|u| CandidatePassage {
+                    unit_id: u.unit_id.as_str(),
+                    page_title: u.page_title.as_str(),
+                    section_heading: u.section_heading.as_str(),
+                    body: u.body.as_str(),
+                })
+            })
+            .collect();
+        if !passages.is_empty() {
+            let ctx = ScoringContext {
+                query,
+                shared_evidence: &shared_evidence,
+            };
+            let ext_scores = evidence_scorer.score_candidates(&ctx, &passages)?;
+            if ext_scores.len() == passages.len() {
+                let score_map: HashMap<&str, f64> = passages
+                    .iter()
+                    .zip(ext_scores)
+                    .map(|(p, s)| (p.unit_id, s.clamp(0.0, 1.0)))
+                    .collect();
+                let max_prior = unified_pool
+                    .first()
+                    .map(|c| c.score)
+                    .unwrap_or(1.0)
+                    .max(1e-6);
+                for cand in &mut unified_pool {
+                    if let Some(&ext_s) = score_map.get(cand.unit_id.as_str()) {
+                        let norm_prior = (cand.score / max_prior).clamp(0.0, 1.0);
+                        cand.score = max_prior * (0.65 * norm_prior + 0.35 * ext_s);
+                    }
+                }
+                unified_pool.sort_by(|left, right| {
+                    right
+                        .score
+                        .total_cmp(&left.score)
+                        .then_with(|| left.unit_id.cmp(&right.unit_id))
+                });
+            }
+        }
+    }
+
     let top_ref_score = unified_pool.first().map(|item| item.score).unwrap_or(0.0);
     let min_marginal_cutoff = top_ref_score * 0.20;
     let mut remaining = unified_pool;
@@ -1710,6 +2051,8 @@ pub fn hybrid_search_with_embedder(
     let mut seen_hashes: HashSet<String> = HashSet::new();
     let mut page_counts: HashMap<String, usize> = HashMap::new();
     let mut tokens_used = 0usize;
+    let mut any_disk_stale = false;
+    let mut disk_hash_cache: HashMap<String, Option<String>> = HashMap::new();
 
     while !remaining.is_empty() && tokens_used < token_budget {
         let mut best_idx: Option<usize> = None;
@@ -1762,11 +2105,32 @@ pub fn hybrid_search_with_embedder(
             .stale_after
             .as_deref()
             .is_some_and(|date| okf::is_iso_date_expired(date, Some(&reference_date)));
+        let freshness_stale = if verify_freshness {
+            let live_hash = disk_hash_cache
+                .entry(unit.page_path.clone())
+                .or_insert_with(|| live_file_sha256(root, &unit.page_path));
+            let drifted = match live_hash {
+                Some(disk_sha) => !unit.file_sha256.is_empty() && disk_sha != &unit.file_sha256,
+                None => true,
+            };
+            if drifted {
+                any_disk_stale = true;
+            }
+            drifted
+        } else {
+            false
+        };
         let sources: Vec<String> = serde_json::from_str(&unit.sources_json).unwrap_or_default();
         packed.push(HybridEvidenceItem {
             unit_id: unit.unit_id.clone(),
             slug: slug_for_path(&unit.page_path),
             citation: format!("{}#L{}-L{}", unit.page_path, unit.line_start, unit.line_end),
+            start_line: unit.line_start,
+            end_line: unit.line_end,
+            byte_start: unit.byte_start,
+            byte_end: unit.byte_end,
+            file_sha256: unit.file_sha256.clone(),
+            snippet_sha256: unit.content_sha256.clone(),
             page_path: unit.page_path.clone(),
             page_title: unit.page_title.clone(),
             section_heading: unit.section_heading.clone(),
@@ -1776,6 +2140,8 @@ pub fn hybrid_search_with_embedder(
             score: (chosen.score * 100_000.0).round() / 100_000.0,
             retrieval_channel: chosen.channel,
             via_link_from: chosen.via,
+            via_bridge_term: chosen.via_bridge_term,
+            freshness_stale,
             doc_type: unit.doc_type.clone(),
             status: unit.status.clone(),
             trust_tier: unit.trust_tier.clone(),
@@ -1788,6 +2154,9 @@ pub fn hybrid_search_with_embedder(
         });
     }
 
+    let gen_after = current_generation(connection);
+    let stale_detected = (gen_before != gen_after) || any_disk_stale;
+
     Ok(HybridSearchResult {
         query: query.to_string(),
         token_budget,
@@ -1799,11 +2168,270 @@ pub fn hybrid_search_with_embedder(
         },
         latency_ms: round_ms(started.elapsed().as_secs_f64() * 1000.0),
         embedding_model: model_name,
+        index_generation: gen_after,
+        stale_detected,
         filtered_retired_count,
         followed_redirects,
         explored_edges,
+        explored_bridges,
         evidence: packed,
     })
+}
+
+#[derive(Debug, Clone)]
+struct SalientBridgeTerm {
+    term: String,
+    idf: f64,
+    parent_score: f64,
+    origin_unit_id: String,
+    rank_score: f64,
+}
+
+fn load_space_term_df(
+    connection: &Connection,
+    space_id: &str,
+) -> Result<(usize, HashMap<String, usize>), String> {
+    let mut stmt = connection
+        .prepare(
+            "SELECT page_title, section_heading, body FROM knowledge_units WHERE space_id = ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([space_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+    let mut total_units = 0usize;
+    let mut df: HashMap<String, usize> = HashMap::new();
+    for row in rows {
+        let (title, heading, body) = row.map_err(|e| e.to_string())?;
+        total_units += 1;
+        let combined = format!("{title} {heading} {body}");
+        let mut uniq: HashSet<String> = HashSet::new();
+        for tok in bridge_tokens(&combined) {
+            uniq.insert(tok);
+        }
+        for tok in uniq {
+            *df.entry(tok).or_insert(0) += 1;
+        }
+    }
+    Ok((total_units, df))
+}
+
+fn bridge_tokens(text: &str) -> Vec<String> {
+    const BRIDGE_STOPS: &[&str] = &[
+        "the", "and", "for", "with", "that", "this", "from", "are", "was", "were", "have", "has",
+        "had", "not", "but", "how", "what", "who", "when", "where", "which", "does", "did", "can",
+        "will", "into", "about", "after", "before", "under", "over", "between", "through",
+        "during", "their", "they", "them", "there", "these", "those", "also", "more", "most",
+        "some", "such", "only", "same", "than", "very", "each", "other", "all", "any", "both",
+        "one", "two", "three", "must", "should", "could", "would", "being", "been", "using",
+        "used", "uses", "within", "every", "section", "overview", "summary", "notes", "page",
+    ];
+    text.split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
+        .filter_map(|raw| {
+            let trimmed = raw.trim_matches(|c: char| c == '-' || c == '_');
+            let low = trimmed.to_ascii_lowercase();
+            if low.len() >= 3 && !BRIDGE_STOPS.contains(&low.as_str()) {
+                Some(low)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn extract_capitalized_phrases(sentence: &str) -> Vec<String> {
+    let words: Vec<&str> = sentence.split_whitespace().collect();
+    let mut phrases = Vec::new();
+    let mut cur: Vec<String> = Vec::new();
+    for (idx, word) in words.iter().enumerate() {
+        let cleaned = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '-');
+        if cleaned.len() >= 2
+            && cleaned
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_uppercase())
+            && !(idx == 0
+                && cur.is_empty()
+                && cleaned.chars().skip(1).all(|c| c.is_ascii_lowercase())
+                && cleaned.len() <= 4)
+        {
+            cur.push(cleaned.to_ascii_lowercase());
+            if cur.len() >= 2 && cur.len() <= 3 {
+                phrases.push(cur.join(" "));
+            }
+        } else {
+            cur.clear();
+        }
+    }
+    phrases
+}
+
+fn extract_salient_bridge_terms(
+    seeds: &[(String, f64)],
+    seed_units: &HashMap<String, StoredUnit>,
+    query_terms: &HashSet<String>,
+    term_df: &HashMap<String, usize>,
+    total_units: usize,
+    term_limit: usize,
+) -> Vec<SalientBridgeTerm> {
+    if total_units < 2 {
+        return Vec::new();
+    }
+    let max_df = ((total_units as f64) * 0.35).ceil().max(3.0) as usize;
+    let total_f = total_units as f64;
+    let mut best_by_term: HashMap<String, SalientBridgeTerm> = HashMap::new();
+
+    for (rank_idx, (uid, seed_score)) in seeds.iter().enumerate() {
+        let Some(unit) = seed_units.get(uid) else {
+            continue;
+        };
+        let seed_w = seed_score / (1.0 + 0.15 * rank_idx as f64);
+        let full = format!("{}. {}", unit.page_title, unit.body);
+        for sentence in full.split(['.', '!', '?', '\n']) {
+            let trimmed = sentence.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let toks = bridge_tokens(trimmed);
+            if toks.is_empty() {
+                continue;
+            }
+            let cooccurs_with_query = toks.iter().any(|t| query_terms.contains(t));
+            let cooccur_boost = if cooccurs_with_query { 1.65 } else { 1.0 };
+
+            let mut local_tf: HashMap<String, usize> = HashMap::new();
+            for tok in &toks {
+                *local_tf.entry(tok.clone()).or_insert(0) += 1;
+            }
+
+            // 1. Single distinctive terms with corpus df in [2, max_df]
+            for (term, tf) in local_tf {
+                if query_terms.contains(&term) {
+                    continue;
+                }
+                let df = term_df.get(&term).copied().unwrap_or(0);
+                if df < 2 || df > max_df {
+                    continue;
+                }
+                let idf = ((total_f + 1.0) / (df as f64 + 1.0)).ln() + 1.0;
+                let score = (1.0 + (tf as f64).ln()) * idf * cooccur_boost * seed_w;
+                let entry = best_by_term
+                    .entry(term.clone())
+                    .or_insert_with(|| SalientBridgeTerm {
+                        term: term.clone(),
+                        idf,
+                        parent_score: *seed_score,
+                        origin_unit_id: uid.clone(),
+                        rank_score: 0.0,
+                    });
+                entry.rank_score += score;
+                if *seed_score > entry.parent_score {
+                    entry.parent_score = *seed_score;
+                    entry.origin_unit_id = uid.clone();
+                }
+            }
+
+            // 2. Capitalized multi-word entity phrases whose component tokens exist in the corpus
+            for phrase in extract_capitalized_phrases(trimmed) {
+                let parts: Vec<&str> = phrase.split_whitespace().collect();
+                if parts.iter().all(|p| query_terms.contains(*p)) {
+                    continue;
+                }
+                let min_df = parts
+                    .iter()
+                    .filter_map(|p| term_df.get(*p).copied())
+                    .min()
+                    .unwrap_or(0);
+                if min_df < 2 || min_df > max_df {
+                    continue;
+                }
+                let idf = ((total_f + 1.0) / (min_df as f64 + 1.0)).ln() + 1.0;
+                let score = 1.45 * idf * cooccur_boost * seed_w;
+                let entry =
+                    best_by_term
+                        .entry(phrase.clone())
+                        .or_insert_with(|| SalientBridgeTerm {
+                            term: phrase.clone(),
+                            idf,
+                            parent_score: *seed_score,
+                            origin_unit_id: uid.clone(),
+                            rank_score: 0.0,
+                        });
+                entry.rank_score += score;
+                if *seed_score > entry.parent_score {
+                    entry.parent_score = *seed_score;
+                    entry.origin_unit_id = uid.clone();
+                }
+            }
+        }
+    }
+
+    let mut ranked: Vec<SalientBridgeTerm> = best_by_term.into_values().collect();
+    ranked.sort_by(|left, right| {
+        right
+            .rank_score
+            .total_cmp(&left.rank_score)
+            .then_with(|| left.term.cmp(&right.term))
+    });
+    ranked.truncate(term_limit);
+    ranked
+}
+
+fn bridge_fts_expression(term: &str) -> String {
+    let parts: Vec<String> = term
+        .split_whitespace()
+        .filter_map(|part| {
+            let safe: String = part
+                .chars()
+                .filter(|c| c.is_alphanumeric())
+                .collect::<String>()
+                .to_ascii_lowercase();
+            if safe.len() >= 2 {
+                Some(format!("\"{safe}\""))
+            } else {
+                None
+            }
+        })
+        .collect();
+    parts.join(" AND ")
+}
+
+fn query_fts_units(
+    connection: &Connection,
+    space_id: &str,
+    fts_expr: &str,
+    limit: usize,
+) -> Result<Vec<String>, String> {
+    let mut stmt = connection
+        .prepare(
+            "SELECT u.unit_id,
+                    bm25(knowledge_units_fts, 3.0, 2.2, 2.5, 1.0) AS rank_score
+             FROM knowledge_units_fts
+             JOIN knowledge_units AS u ON u.id = knowledge_units_fts.rowid
+             WHERE knowledge_units_fts MATCH ?1 AND u.space_id = ?2
+             ORDER BY rank_score ASC, u.unit_id ASC
+             LIMIT ?3",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![fts_expr, space_id, limit as i64], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+fn live_file_sha256(space_root: &Path, page_path: &str) -> Option<String> {
+    let (_, resolved) = okf::safe_resolve_under_space(space_root, page_path).ok()?;
+    let bytes = std::fs::read(resolved).ok()?;
+    Some(citations::sha256_hex(&bytes))
 }
 
 fn round_ms(ms: f64) -> f64 {
@@ -1837,9 +2465,12 @@ struct StoredUnit {
     heading_path: String,
     line_start: usize,
     line_end: usize,
+    byte_start: usize,
+    byte_end: usize,
     body: String,
     token_count: usize,
     content_sha256: String,
+    file_sha256: String,
     sources_json: String,
     doc_type: String,
     status: String,
@@ -1858,9 +2489,9 @@ fn load_units_for_page(
     let mut stmt = connection
         .prepare(
             "SELECT unit_id, page_path, page_title, section_heading, heading_path,
-                    line_start, line_end, body, token_count, content_sha256,
-                    sources_json, doc_type, status, trust_tier, verified,
-                    stale_after, redirect_to, scope
+                    line_start, line_end, byte_start, byte_end, body, token_count,
+                    content_sha256, file_sha256, sources_json, doc_type, status,
+                    trust_tier, verified, stale_after, redirect_to, scope
              FROM knowledge_units
              WHERE space_id = ?1 AND page_path = ?2
              ORDER BY line_start ASC",
@@ -1885,9 +2516,9 @@ fn load_units_by_ids(
     let mut stmt = connection
         .prepare(
             "SELECT unit_id, page_path, page_title, section_heading, heading_path,
-                    line_start, line_end, body, token_count, content_sha256,
-                    sources_json, doc_type, status, trust_tier, verified,
-                    stale_after, redirect_to, scope
+                    line_start, line_end, byte_start, byte_end, body, token_count,
+                    content_sha256, file_sha256, sources_json, doc_type, status,
+                    trust_tier, verified, stale_after, redirect_to, scope
              FROM knowledge_units
              WHERE space_id = ?1 AND unit_id = ?2",
         )
@@ -1909,17 +2540,20 @@ fn map_stored_unit(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredUnit> {
         heading_path: row.get(4)?,
         line_start: row.get::<_, i64>(5)?.max(1) as usize,
         line_end: row.get::<_, i64>(6)?.max(1) as usize,
-        body: row.get(7)?,
-        token_count: row.get::<_, i64>(8)?.max(1) as usize,
-        content_sha256: row.get(9)?,
-        sources_json: row.get(10)?,
-        doc_type: row.get(11)?,
-        status: row.get(12)?,
-        trust_tier: row.get(13)?,
-        verified: row.get::<_, i64>(14)? != 0,
-        stale_after: row.get(15)?,
-        redirect_to: row.get(16)?,
-        scope: row.get(17)?,
+        byte_start: row.get::<_, i64>(7)?.max(0) as usize,
+        byte_end: row.get::<_, i64>(8)?.max(0) as usize,
+        body: row.get(9)?,
+        token_count: row.get::<_, i64>(10)?.max(1) as usize,
+        content_sha256: row.get(11)?,
+        file_sha256: row.get(12)?,
+        sources_json: row.get(13)?,
+        doc_type: row.get(14)?,
+        status: row.get(15)?,
+        trust_tier: row.get(16)?,
+        verified: row.get::<_, i64>(17)? != 0,
+        stale_after: row.get(18)?,
+        redirect_to: row.get(19)?,
+        scope: row.get(20)?,
     })
 }
 
@@ -3271,5 +3905,292 @@ mod tests {
             .evidence
             .iter()
             .any(|item| item.page_path == "beta.md" && item.section_heading == "Rotation Cadence"));
+    }
+
+    #[test]
+    fn query_time_lexical_bridge_discovers_unlinked_second_hop_pages() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("edge-ingress.md"),
+            "---\ntype: Architecture\ntitle: Edge Ingress Router\nstatus: active\nverified: true\n---\n\n# Edge Ingress Router\n\n## Request Routing\n\nIncoming mobile requests terminate at Edge Ingress Router and forward signing checks to QuasarVerifier subsystem.\n",
+        )
+        .unwrap();
+        // Deliberately NO Markdown link or wikilink AND zero query-term overlap with
+        // quasar-policy.md; the only bridge is the high-IDF identifier `QuasarVerifier`.
+        std::fs::write(
+            root.join("quasar-policy.md"),
+            "---\ntype: Policy\ntitle: Hardware Enclave Schedule\nstatus: active\nverified: true\n---\n\n# Hardware Enclave Schedule\n\n## Cadence\n\nQuasarVerifier rotates ephemeral hardware attestation tokens every 12 hours.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("distractor.md"),
+            "---\ntype: Note\ntitle: Office Inventory\nstatus: active\n---\n\n# Office Inventory\n\nMonitor stands and keyboards in storage room B.\n",
+        )
+        .unwrap();
+
+        let mut db = open_memory_db();
+        rebuild_space(&mut db, "space-bridge", root).unwrap();
+
+        // Without lexical bridge expansion, explicit graph cannot reach the unlinked policy page.
+        let without_bridge = hybrid_search(
+            &db,
+            "space-bridge",
+            root,
+            "Edge Ingress Router mobile signing",
+            &HybridSearchOptions {
+                token_budget: Some(600),
+                use_vector: Some(false),
+                use_graph_expansion: Some(true),
+                use_lexical_bridge: Some(false),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            without_bridge
+                .evidence
+                .iter()
+                .any(|item| item.page_path == "edge-ingress.md"),
+            "seed page should be retrieved"
+        );
+        assert!(
+            !without_bridge
+                .evidence
+                .iter()
+                .any(|item| item.page_path == "quasar-policy.md"),
+            "unlinked hop-2 page should not be reachable when lexical bridge is disabled"
+        );
+
+        // With lexical bridge expansion enabled, QuasarVerifier acts as a high-IDF bridge term.
+        let with_bridge = hybrid_search(
+            &db,
+            "space-bridge",
+            root,
+            "Edge Ingress Router mobile signing",
+            &HybridSearchOptions {
+                token_budget: Some(600),
+                use_vector: Some(false),
+                use_graph_expansion: Some(true),
+                use_lexical_bridge: Some(true),
+                max_bridge_hops: Some(1),
+                bridge_term_limit: Some(4),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(!with_bridge.explored_bridges.is_empty());
+        assert_eq!(with_bridge.evidence[0].page_path, "edge-ingress.md");
+        let bridged = with_bridge
+            .evidence
+            .iter()
+            .find(|item| item.page_path == "quasar-policy.md")
+            .expect("lexical bridge should retrieve unlinked quasar-policy.md");
+        assert_eq!(bridged.retrieval_channel, "lexical_bridge_hop_1");
+        assert!(bridged
+            .via_link_from
+            .as_deref()
+            .unwrap_or_default()
+            .contains("edge-ingress.md"));
+        assert!(bridged
+            .via_bridge_term
+            .as_deref()
+            .unwrap_or_default()
+            .eq_ignore_ascii_case("quasarverifier"));
+    }
+
+    #[test]
+    fn index_generation_increments_monotonically_and_detects_live_disk_drift() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("alpha.md"),
+            "---\ntype: Guide\ntitle: Alpha Runbook\nstatus: active\n---\n\n# Alpha Runbook\n\nPrimary failover sequence uses quorum mode.\n",
+        )
+        .unwrap();
+
+        let mut db = open_memory_db();
+        let g0 = current_generation(&db);
+        assert_eq!(g0, 1);
+
+        rebuild_space(&mut db, "space-gen", root).unwrap();
+        let g1 = current_generation(&db);
+        assert!(g1 > g0);
+
+        // Warm no-op refresh must NOT spuriously bump the generation counter.
+        refresh_space(&mut db, "space-gen", root).unwrap();
+        let g2 = current_generation(&db);
+        assert_eq!(g2, g1);
+
+        // Fresh query with verify_freshness = true reports no drift.
+        let clean = hybrid_search(
+            &db,
+            "space-gen",
+            root,
+            "Alpha Runbook quorum mode",
+            &HybridSearchOptions {
+                verify_freshness: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(clean.index_generation, g1);
+        assert!(!clean.stale_detected);
+        assert!(!clean.evidence.is_empty());
+        assert!(clean.evidence.iter().all(|item| !item.freshness_stale));
+        assert!(clean
+            .evidence
+            .iter()
+            .all(|item| item.file_sha256.len() == 64 && item.byte_end > item.byte_start));
+
+        // Mutate the file on disk WITHOUT re-indexing; verify_freshness catches the drift.
+        std::fs::write(
+            root.join("alpha.md"),
+            "---\ntype: Guide\ntitle: Alpha Runbook\nstatus: active\n---\n\n# Alpha Runbook\n\nPrimary failover sequence now uses Raft witness mode.\n",
+        )
+        .unwrap();
+        let drifted = hybrid_search(
+            &db,
+            "space-gen",
+            root,
+            "Alpha Runbook quorum mode",
+            &HybridSearchOptions {
+                verify_freshness: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(drifted.stale_detected);
+        assert!(drifted
+            .evidence
+            .iter()
+            .any(|item| item.page_path == "alpha.md" && item.freshness_stale));
+
+        // Re-indexing bumps generation and restores clean freshness.
+        index_paths(&mut db, "space-gen", root, &[PathBuf::from("alpha.md")]).unwrap();
+        let g3 = current_generation(&db);
+        assert!(g3 > g1);
+        let refreshed = hybrid_search(
+            &db,
+            "space-gen",
+            root,
+            "Alpha Runbook witness mode",
+            &HybridSearchOptions {
+                verify_freshness: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(refreshed.index_generation, g3);
+        assert!(!refreshed.stale_detected);
+    }
+
+    #[test]
+    fn evidence_items_produce_verifiable_citations_across_file_lifecycle() {
+        use crate::citations::{verify_citation, CitationStatus};
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let original = "---\ntype: Policy\ntitle: Retention Rules\nstatus: active\n---\n\n# Retention Rules\n\n## Financial Logs\n\nAudit journals remain immutable for seven years.\n";
+        std::fs::write(root.join("retention.md"), original).unwrap();
+
+        let mut db = open_memory_db();
+        rebuild_space(&mut db, "space-cit", root).unwrap();
+
+        let res = hybrid_search(
+            &db,
+            "space-cit",
+            root,
+            "immutable seven years audit journals",
+            &HybridSearchOptions::default(),
+        )
+        .unwrap();
+        let item = res
+            .evidence
+            .iter()
+            .find(|e| e.page_path == "retention.md")
+            .expect("retention.md should be returned");
+        let anchor = item.to_citation_anchor();
+        assert_eq!(anchor.file_sha256.len(), 64);
+        assert_eq!(anchor.snippet_sha256.len(), 64);
+
+        // 1. Intact
+        let v_intact = verify_citation(root, &anchor);
+        assert_eq!(v_intact.status, CitationStatus::Intact);
+
+        // 2. Moved (prepend new section above the cited lines)
+        let moved = "---\ntype: Policy\ntitle: Retention Rules\nstatus: active\n---\n\n# Retention Rules\n\n## Change Log\n\nAdded summary note.\n\n## Financial Logs\n\nAudit journals remain immutable for seven years.\n";
+        std::fs::write(root.join("retention.md"), moved).unwrap();
+        let v_moved = verify_citation(root, &anchor);
+        match v_moved.status {
+            CitationStatus::Moved { new_start_line, .. } => {
+                assert!(new_start_line > anchor.start_line);
+            }
+            other => panic!("expected CitationStatus::Moved, got {other:?}"),
+        }
+
+        // 3. Changed (mutate the cited claim itself)
+        let changed = "---\ntype: Policy\ntitle: Retention Rules\nstatus: active\n---\n\n# Retention Rules\n\n## Financial Logs\n\nAudit journals remain immutable for ten years.\n";
+        std::fs::write(root.join("retention.md"), changed).unwrap();
+        let v_changed = verify_citation(root, &anchor);
+        assert!(
+            matches!(v_changed.status, CitationStatus::Changed { .. }),
+            "expected CitationStatus::Changed, got {:?}",
+            v_changed.status
+        );
+
+        // 4. Missing (file removed)
+        std::fs::remove_file(root.join("retention.md")).unwrap();
+        let v_missing = verify_citation(root, &anchor);
+        assert!(
+            matches!(v_missing.status, CitationStatus::Missing { .. }),
+            "expected CitationStatus::Missing, got {:?}",
+            v_missing.status
+        );
+    }
+
+    #[test]
+    fn pluggable_marginal_novelty_scorer_reweights_candidates() {
+        use crate::scorer::MarginalNoveltyScorer;
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("service-a.md"),
+            "---\ntype: Architecture\ntitle: Payment Gateway\nstatus: active\n---\n\n# Payment Gateway\n\n## Settlement\n\nPayment Gateway forwards clearing batches to [Ledger Archive](archive.md).\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("service-a-dup.md"),
+            "---\ntype: Note\ntitle: Payment Gateway Mirror\nstatus: active\n---\n\n# Payment Gateway Mirror\n\nPayment Gateway forwards clearing batches.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("archive.md"),
+            "---\ntype: Policy\ntitle: Ledger Archive\nstatus: active\n---\n\n# Ledger Archive\n\n## Storage\n\nClearing batches are sealed in immutable vaults.\n",
+        )
+        .unwrap();
+
+        let mut db = open_memory_db();
+        rebuild_space(&mut db, "space-scorer", root).unwrap();
+
+        let embedder = embeddings::LocalHashProjectionEmbedder::default();
+        let scorer = MarginalNoveltyScorer;
+        let res = hybrid_search_with_scorer(
+            &db,
+            "space-scorer",
+            root,
+            "Payment Gateway immutable vaults clearing",
+            &HybridSearchOptions {
+                token_budget: Some(500),
+                ..Default::default()
+            },
+            &embedder,
+            Some(&scorer),
+        )
+        .unwrap();
+        assert_eq!(res.status, "ok");
+        assert!(res.evidence.iter().any(|e| e.page_path == "archive.md"));
+        assert!(res.evidence.iter().any(|e| e.page_path == "service-a.md"));
     }
 }

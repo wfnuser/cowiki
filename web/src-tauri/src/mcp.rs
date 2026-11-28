@@ -152,6 +152,24 @@ fn handle_tool_call(
                     .get("use_graph_expansion")
                     .or_else(|| arguments.get("useGraphExpansion"))
                     .and_then(Value::as_bool),
+                use_lexical_bridge: arguments
+                    .get("use_lexical_bridge")
+                    .or_else(|| arguments.get("useLexicalBridge"))
+                    .and_then(Value::as_bool),
+                max_bridge_hops: arguments
+                    .get("max_bridge_hops")
+                    .or_else(|| arguments.get("maxBridgeHops"))
+                    .and_then(Value::as_u64)
+                    .map(|value| value as usize),
+                bridge_term_limit: arguments
+                    .get("bridge_term_limit")
+                    .or_else(|| arguments.get("bridgeTermLimit"))
+                    .and_then(Value::as_u64)
+                    .map(|value| value as usize),
+                verify_freshness: arguments
+                    .get("verify_freshness")
+                    .or_else(|| arguments.get("verifyFreshness"))
+                    .and_then(Value::as_bool),
                 scope_filter: arguments
                     .get("scope_filter")
                     .or_else(|| arguments.get("scopeFilter"))
@@ -162,6 +180,7 @@ fn handle_tool_call(
                     .or_else(|| arguments.get("asOfDate"))
                     .and_then(Value::as_str)
                     .map(str::to_string),
+                ..Default::default()
             };
             engine
                 .hybrid_search(space_slug, query, &options)
@@ -288,7 +307,7 @@ fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "hybrid_search",
-            "description": "Run budgeted section-level BM25 + dense semantic vector RRF retrieval with hub-dampened 1-hop/2-hop link-graph expansion (including #anchor section links), OKF v0.3 governance filtering, redirect resolution, and line-range citations.",
+            "description": "Run budgeted section-level BM25 + dense semantic vector RRF retrieval with hub-dampened 1-hop/2-hop link-graph expansion (including #anchor section links), optional query-time lexical bridge expansion for unlinked multi-hop pages, OKF v0.3 governance filtering, redirect resolution, freshness checks, and verifiable line/byte-span hash citations.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -303,6 +322,10 @@ fn tool_definitions() -> Vec<Value> {
                     "use_lexical": {"type": "boolean", "default": true},
                     "use_vector": {"type": "boolean", "default": true},
                     "use_graph_expansion": {"type": "boolean", "default": true},
+                    "use_lexical_bridge": {"type": "boolean", "default": false},
+                    "max_bridge_hops": {"type": "integer", "minimum": 1, "maximum": 2, "default": 1},
+                    "bridge_term_limit": {"type": "integer", "minimum": 1, "maximum": 12, "default": 4},
+                    "verify_freshness": {"type": "boolean", "default": false},
                     "scope_filter": {"type": "string"},
                     "as_of_date": {"type": "string"}
                 },
@@ -488,6 +511,63 @@ mod tests {
             .collect();
         assert!(paths.contains(&"local-first.md"));
         assert!(paths.contains(&"sync.md"));
+        assert!(
+            hybrid["result"]["structuredContent"]["indexGeneration"]
+                .as_i64()
+                .unwrap_or(0)
+                >= 1
+        );
+        assert!(evidence
+            .iter()
+            .all(|item| item["fileSha256"].as_str().unwrap_or("").len() == 64
+                && item["byteEnd"].as_u64().unwrap_or(0)
+                    > item["byteStart"].as_u64().unwrap_or(0)));
+
+        // Unlinked lexical bridge expansion via MCP hybrid_search arguments
+        std::fs::write(
+            root.join("ingress.md"),
+            "---\ntype: Architecture\ntitle: Ingress Node\nstatus: active\n---\n\n# Ingress Node\n\nMobile traffic routes through Ingress Node to NebulaAuth subsystem.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("nebula-rules.md"),
+            "---\ntype: Policy\ntitle: Enclave Rotation\nstatus: active\n---\n\n# Enclave Rotation\n\nNebulaAuth rotates signing tokens every 6 hours.\n",
+        )
+        .unwrap();
+        engine.rebuild_search_index(&slug).unwrap();
+
+        let bridged = super::handle_request(
+            &engine,
+            &slug,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 12,
+                "method": "tools/call",
+                "params": {
+                    "name": "hybrid_search",
+                    "arguments": {
+                        "query": "Ingress Node mobile traffic",
+                        "token_budget": 600,
+                        "use_vector": false,
+                        "use_lexical_bridge": true,
+                        "max_bridge_hops": 1,
+                        "verify_freshness": true
+                    }
+                }
+            }),
+        );
+        assert_eq!(bridged["result"]["isError"], false, "{bridged}");
+        let bridged_sc = &bridged["result"]["structuredContent"];
+        assert_eq!(bridged_sc["staleDetected"], false);
+        assert!(!bridged_sc["exploredBridges"].as_array().unwrap().is_empty());
+        let bridged_paths: Vec<&str> = bridged_sc["evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|item| item["pagePath"].as_str())
+            .collect();
+        assert!(bridged_paths.contains(&"ingress.md"));
+        assert!(bridged_paths.contains(&"nebula-rules.md"));
 
         let audit = super::handle_request(
             &engine,
