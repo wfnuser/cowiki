@@ -338,10 +338,11 @@ class MultiHopHybridIndex:
         self.source_to_chunks: Dict[str, Set[int]] = defaultdict(set)
         self.date_to_chunks: Dict[str, Set[int]] = defaultdict(set)
 
-        # Graph structures (Passage-Entity Bipartite + Intra-Article Adjacency)
+        # Graph structures (Passage-Entity Bipartite + Intra-Article Adjacency + Corpus Term IDF)
         self.chunk_entities: List[List[Tuple[str, float]]] = []
         self.entity_to_chunks: Dict[str, List[Tuple[int, float]]] = defaultdict(list)
         self.entity_idf: Dict[str, float] = {}
+        self.term_idf: Dict[str, float] = {}
         self.chunk_vectors: Optional[List[List[float]]] = None
 
         source_set: Set[str] = set()
@@ -450,6 +451,21 @@ class MultiHopHybridIndex:
             tot = sum(w for _, w in postings)
             if tot > 0:
                 self.entity_to_chunks[e] = [(cid, w / tot) for cid, w in postings]
+
+        # Build lightweight corpus term IDF for query-time lexical bridge expansion
+        term_df: Counter = Counter()
+        for c in self.chunks:
+            uniq = {
+                re.sub(r"[^a-z0-9]", "", w.lower())
+                for w in WORD_RE.findall(c.body)
+            }
+            for t in uniq:
+                if len(t) >= 3 and t not in STOPWORDS:
+                    term_df[t] += 1
+        max_term_df = max(10, int(n_chunks * 0.15))
+        for t, df in term_df.items():
+            if 2 <= df <= max_term_df:
+                self.term_idf[t] = math.log((n_chunks + 1.0) / (df + 1.0)) + 1.0
 
     def build_dense_index(
         self,
@@ -945,6 +961,370 @@ class MultiHopHybridIndex:
         selected.sort(key=lambda x: x[1], reverse=True)
         return self._format_results(selected[:top_k])
 
+    # ------------------------------------------------------------------
+    # Query-Time Lexical Bridge Expansion (Pure CPU: Seed -> Bridge Terms -> Hop 2)
+    # ------------------------------------------------------------------
+
+    def extract_salient_bridge_terms(
+        self,
+        query: str,
+        seed_hits: Sequence[Tuple[int, float]],
+        term_limit: int = 12,
+    ) -> List[Tuple[str, float, int]]:
+        """Extract salient bridge terms & phrases from top seed passages not already in the query.
+
+        Scores each term by `local_tf * corpus_idf * query_sentence_cooccurrence * seed_weight`.
+        Returns list of `(term_or_phrase, score, origin_chunk_id)`.
+        """
+        q_tokens = {
+            re.sub(r"[^a-z0-9]", "", w.lower())
+            for w in WORD_RE.findall(query)
+            if len(w) >= 2
+        }
+        q_tokens -= STOPWORDS
+        if not seed_hits:
+            return []
+
+        term_scores: Dict[str, float] = defaultdict(float)
+        term_origin: Dict[str, int] = {}
+
+        max_seed = max((abs(s) for _, s in seed_hits), default=1.0) or 1.0
+        for rank, (cid, raw_sc) in enumerate(seed_hits[:8], start=1):
+            c = self.chunks[cid]
+            seed_w = max(0.25, (raw_sc / max_seed)) * (1.0 / (1.0 + 0.15 * (rank - 1)))
+            sents = [s.strip() for s in SENTENCE_SPLIT_RE.split(f"{c.title}. {c.body}") if s.strip()]
+            for sent in sents:
+                s_words = [re.sub(r"[^a-z0-9]", "", w.lower()) for w in WORD_RE.findall(sent)]
+                s_set = {w for w in s_words if len(w) >= 3 and w not in STOPWORDS}
+                # Sentences sharing query anchors are far more likely to contain the true bridge entity
+                cooccur = 1.75 if (s_set & q_tokens) else 1.0
+
+                # 1. Distinctive single terms weighted by TF * IDF
+                local_tf = Counter(w for w in s_words if w in self.term_idf and w not in q_tokens)
+                for term, tf in local_tf.items():
+                    sc = (1.0 + math.log(tf)) * self.term_idf[term] * cooccur * seed_w
+                    if sc > term_scores[term]:
+                        term_origin[term] = cid
+                    term_scores[term] += sc
+
+                # 2. Capitalized multi-word entity phrases from the same sentence
+                for ent in extract_entities(sent):
+                    if ent in self.entity_idf:
+                        ent_parts = {re.sub(r"[^a-z0-9]", "", p) for p in ent.split()}
+                        if ent_parts and ent_parts.issubset(q_tokens):
+                            continue
+                        sc = 1.45 * self.entity_idf[ent] * cooccur * seed_w
+                        if sc > term_scores[ent]:
+                            term_origin[ent] = cid
+                        term_scores[ent] += sc
+
+        ranked = sorted(term_scores.items(), key=lambda x: x[1], reverse=True)
+        out: List[Tuple[str, float, int]] = []
+        seen_norm: Set[str] = set()
+        for term, sc in ranked:
+            norm = re.sub(r"[^a-z0-9 ]", "", term.lower()).strip()
+            if not norm or norm in seen_norm:
+                continue
+            seen_norm.add(norm)
+            out.append((term, sc, term_origin[term]))
+            if len(out) >= term_limit:
+                break
+        return out
+
+    def expand_lexical_bridge(
+        self,
+        query: str,
+        seed_hits: Sequence[Tuple[int, float]],
+        term_limit: int = 12,
+        per_term_k: int = 8,
+    ) -> List[Tuple[int, float]]:
+        """Run bounded second-hop FTS5 retrieval keyed by salient bridge terms extracted from seed chunks."""
+        bridge_terms = self.extract_salient_bridge_terms(query, seed_hits, term_limit=term_limit)
+        if not bridge_terms:
+            return []
+
+        seen_seeds = {cid for cid, _ in seed_hits[:10]}
+        # Keep top distinctive original query anchors for mixed scoring
+        q_anchors = [
+            re.sub(r"[^a-z0-9]", "", w.lower())
+            for w in WORD_RE.findall(query)
+        ]
+        q_anchors = [w for w in q_anchors if len(w) >= 3 and w not in STOPWORDS][:10]
+
+        scores: Dict[int, float] = defaultdict(float)
+        for t_rank, (term, _t_score, origin_cid) in enumerate(bridge_terms, start=1):
+            parts = [re.sub(r"[^a-z0-9]", "", p.lower()) for p in term.split()]
+            parts = [p for p in parts if len(p) >= 2]
+            if not parts:
+                continue
+            # Require the bridge term (AND phrase tokens) while optionally boosting original query anchors
+            req_clause = " AND ".join(f'"{p}"' for p in parts[:3])
+            if q_anchors:
+                opt_clause = " OR ".join(f'"{a}"' for a in q_anchors[:6])
+                fts_expr = f"({req_clause}) AND ({opt_clause})"
+            else:
+                fts_expr = req_clause
+
+            with self._fts_lock:
+                rows = self._conn.execute(
+                    "SELECT chunk_id, bm25(chunks_meta_fts, 1.35, 1.0) AS score "
+                    "FROM chunks_meta_fts WHERE chunks_meta_fts MATCH ? ORDER BY score LIMIT ?",
+                    (fts_expr, per_term_k),
+                ).fetchall()
+                non_seed_rows = [r for r in rows if int(r[0]) not in seen_seeds]
+                if not non_seed_rows and q_anchors:
+                    # Fallback to bridge term alone when combined AND only matched the seed itself
+                    rows = self._conn.execute(
+                        "SELECT chunk_id, bm25(chunks_meta_fts, 1.35, 1.0) AS score "
+                        "FROM chunks_meta_fts WHERE chunks_meta_fts MATCH ? ORDER BY score LIMIT ?",
+                        (req_clause, per_term_k),
+                    ).fetchall()
+
+            origin_doc = self.chunks[origin_cid].doc_id
+            for rank, (cid, _bm) in enumerate(rows, start=1):
+                cid = int(cid)
+                if cid in seen_seeds:
+                    continue
+                # Slight bonus for cross-document hops (true multi-hop bridge!)
+                cross_bonus = 1.25 if self.chunks[cid].doc_id != origin_doc else 0.85
+                scores[cid] += (cross_bonus / (12.0 + t_rank)) * (1.0 / (10.0 + rank))
+
+        ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        return ranked[:35]
+
+    def decompose_query_with_seed_context(
+        self,
+        query: str,
+        seed_hits: Sequence[Dict[str, Any]],
+        client: OpenAICompatibleClient,
+        decompose_model: str = "qwen-flash",
+    ) -> List[Dict[str, Any]]:
+        """Seed-grounded Iterative Bridge-Entity Decomposition (IRCoT / DeFT-RAG style).
+
+        Inspects Hop-1 seed passages first so any hidden/unnamed entity (person, company,
+        event) revealed in Hop-1 is explicitly injected into every Hop-2 atomic sub-query!
+        """
+        seed_lines = []
+        for i, h in enumerate(seed_hits[:4], start=1):
+            seed_lines.append(
+                f"[Seed {i} | {h['source']} | {h['published_at']} | {h['title']}]\n{h['text'][:260]}"
+            )
+        seed_block = "\n\n".join(seed_lines)
+        prompt = (
+            "You are a multi-hop retrieval planner executing Hop 2 after an initial search.\n"
+            "Given the user question and the top Hop-1 retrieved snippets:\n"
+            "1. Identify any key **bridge entity** (person, company, organization, product, or event) revealed by the Hop-1 snippets "
+            "that was unnamed or only implicitly described in the question.\n"
+            "2. Produce 2 to 4 concise atomic search sub-queries covering EVERY separate fact/article needed to answer the question.\n"
+            "3. Explicitly include the revealed bridge entity name inside each sub-query where relevant, PLUS extract any explicit "
+            "`source` (publication name), `date` (`YYYY-MM-DD`), and `time` (`HH:MM:SS`) required for that hop.\n"
+            "Return strict JSON: {\"bridge_entities\": [...], \"subqueries\": [{\"query\": \"...\", \"source\": null, \"date\": null, \"time\": null}]}\n\n"
+            f"Question: {query}\n\nHop-1 Retrieved Snippets:\n{seed_block}"
+        )
+        try:
+            res = client.chat(
+                model=decompose_model,
+                messages=[
+                    {"role": "system", "content": "You are an iterative multi-hop query planner. Output valid JSON only."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.0,
+                max_tokens=500,
+                json_mode=True,
+            )
+            raw = (res.content or "").strip()
+            if raw.startswith("```"):
+                raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
+            obj = json.loads(raw)
+            subs = obj.get("subqueries", [])
+            cleaned: List[Dict[str, Any]] = []
+            for item in subs[:4]:
+                if not isinstance(item, dict):
+                    continue
+                q_str = str(item.get("query") or "").strip()
+                if not q_str:
+                    continue
+                src_raw = item.get("source")
+                src_norm = None
+                if isinstance(src_raw, str) and src_raw.strip():
+                    sl = src_raw.strip().lower()
+                    src_norm = next((ks.lower() for ks in self.known_sources if ks.lower() == sl or sl in ks.lower() or ks.lower() in sl), sl)
+                date_raw = item.get("date")
+                date_norm = str(date_raw).strip()[:10] if isinstance(date_raw, str) and re.match(r"20\d{2}-\d{2}-\d{2}", str(date_raw).strip()) else None
+                time_raw = item.get("time")
+                time_norm = str(time_raw).strip() if isinstance(time_raw, str) and re.match(r"\d{2}:\d{2}:\d{2}", str(time_raw).strip()) else None
+                cleaned.append({"query": q_str, "source": src_norm, "date": date_norm, "time": time_norm})
+            if cleaned:
+                return cleaned
+        except Exception:
+            pass
+        return self.decompose_query_with_llm(query, client, decompose_model=decompose_model)
+
+    def retrieve_iterative_bridge_fusion(
+        self,
+        query: str,
+        top_k: int,
+        client: OpenAICompatibleClient,
+        embed_model: str,
+        embed_dim: Optional[int],
+        rerank_model: str,
+        decompose_model: str = "qwen-flash",
+    ) -> List[Dict[str, Any]]:
+        """CoWiki Iterative Bridge-Entity + Query-Time Lexical Bridge + Dual-Granularity Rerank Fusion.
+
+        - Hop 1: Fast full-query `hybrid_dense_ppr_rerank` produces high-precision seeds.
+        - Hop 2A (CPU): Query-time lexical bridge (`seed -> salient IDF bridge terms -> FTS5`)
+          harvests unlinked cross-document hops at ~10 ms / $0.
+        - Hop 2B (Planner): Seed-grounded bridge-entity decomposition injects newly discovered
+          unnamed entities into atomic per-hop sub-queries.
+        - Hop 3: Per-hop Dense + Meta-BM25 + Lexical-Bridge + Cross-Encoder Rerank fused cleanly
+          with Hop-1 global rerank winners via Reciprocal Rank + Guaranteed Per-Hop Diversity.
+        """
+        # Hop 1: High-precision full-query seeds
+        hop1_hits = self.retrieve(
+            query=query,
+            method="hybrid_dense_ppr_rerank",
+            top_k=12,
+            client=client,
+            embed_model=embed_model,
+            embed_dim=embed_dim,
+            rerank_model=rerank_model,
+        )
+        hop1_pairs = [(int(h["chunk_id"]), float(h["score"])) for h in hop1_hits]
+
+        # Hop 2A: Pure-CPU Query-Time Lexical Bridge Expansion from top Hop-1 seeds
+        lex_bridge_hits = self.expand_lexical_bridge(query, hop1_pairs[:6], term_limit=12, per_term_k=8)
+
+        # Hop 2B: Seed-Grounded Iterative Bridge-Entity Decomposition
+        subqueries = self.decompose_query_with_seed_context(
+            query=query,
+            seed_hits=hop1_hits[:4],
+            client=client,
+            decompose_model=decompose_model,
+        )
+        sub_texts = [sq["query"] for sq in subqueries]
+        sub_vecs = client.embed_batch(model=embed_model, texts=sub_texts, dimensions=embed_dim, batch_size=10) if sub_texts else []
+
+        # Hop 3: Per-Hop Retrieval + Per-Hop Cross-Encoder Rerank
+        per_sub_reranked: List[List[Tuple[int, float]]] = []
+        best_sub_score: Dict[int, float] = {}
+        lex_bridge_rank = {cid: rank for rank, (cid, _) in enumerate(lex_bridge_hits, start=1)}
+
+        for sq, svec in zip(subqueries, sub_vecs):
+            sq_text = sq["query"]
+            s_src = sq.get("source")
+            s_date = sq.get("date")
+            s_time = sq.get("time")
+
+            local_scores: Dict[int, float] = defaultdict(float)
+            for rank, (cid, _) in enumerate(self.search_dense(svec, top_k=45), start=1):
+                local_scores[cid] += 1.5 / (30.0 + rank)
+            for rank, (cid, _) in enumerate(self.search_fts_meta(f"{sq_text} {s_src or ''} {s_date or ''} {s_time or ''}".strip(), top_k=45), start=1):
+                local_scores[cid] += 1.2 / (30.0 + rank)
+            # Inject lexical bridge candidates matching this hop's metadata/entities
+            for cid, lrank in lex_bridge_rank.items():
+                local_scores[cid] += 0.55 / (20.0 + lrank)
+
+            boosted: List[Tuple[int, float]] = []
+            for cid, sc in local_scores.items():
+                c = self.chunks[cid]
+                mult = 1.0
+                if s_src:
+                    mult *= 1.80 if c.source.lower() == s_src else 0.38
+                if s_date and c.published_iso == s_date:
+                    mult *= 1.70
+                if s_time and s_time in c.published_natural:
+                    mult *= 2.0
+                boosted.append((cid, sc * mult))
+            boosted.sort(key=lambda x: x[1], reverse=True)
+
+            top_cands = [cid for cid, _ in boosted[:16]]
+            if top_cands:
+                cand_texts = [self.chunks[cid].contextual_text for cid in top_cands]
+                rr_query = sq_text
+                if s_src:
+                    rr_query = f"[{s_src}] {rr_query}"
+                if s_date:
+                    rr_query = f"[{s_date}] {rr_query}"
+                reranked = client.rerank(model=rerank_model, query=rr_query, documents=cand_texts, top_n=min(8, len(top_cands)))
+                sub_ranked: List[Tuple[int, float]] = []
+                for local_i, rscore in reranked:
+                    cid = top_cands[local_i]
+                    c = self.chunks[cid]
+                    adj = float(rscore)
+                    if s_src and c.source.lower() == s_src:
+                        adj += 0.06
+                    if s_date and c.published_iso == s_date:
+                        adj += 0.05
+                    if s_time and s_time in c.published_natural:
+                        adj += 0.10
+                    sub_ranked.append((cid, adj))
+                    if adj > best_sub_score.get(cid, -1e9):
+                        best_sub_score[cid] = adj
+                sub_ranked.sort(key=lambda x: x[1], reverse=True)
+                per_sub_reranked.append(sub_ranked)
+
+        # Dual-Granularity Fusion: RRF of Hop-1 Full-Query Rerank + Per-Hop Rerank + Lexical Bridge
+        fused: Dict[int, float] = defaultdict(float)
+        for rank, (cid, _) in enumerate(hop1_pairs, start=1):
+            fused[cid] += 1.20 / (8.0 + rank)
+        for sub_list in per_sub_reranked:
+            w_sub = 1.65 / max(1, len(per_sub_reranked))
+            for rank, (cid, _) in enumerate(sub_list, start=1):
+                fused[cid] += w_sub / (6.0 + rank)
+        for rank, (cid, _) in enumerate(lex_bridge_hits[:15], start=1):
+            fused[cid] += 0.30 / (18.0 + rank)
+
+        # Guaranteed Multi-Hop Selection:
+        # 1) Lock in top-1 reranked winner of EVERY sub-query (maximizes AllGold@10 & EvRec@10!)
+        # 2) Lock in Hop-1 #1 winner (protects MRR@10 & Hits@4!)
+        # 3) Fill remaining slots by fused score with soft <=2 chunks/article cap
+        selected: List[Tuple[int, float]] = []
+        seen: Set[int] = set()
+        doc_counts: Counter = Counter()
+
+        if hop1_pairs:
+            cid0 = hop1_pairs[0][0]
+            selected.append((cid0, fused[cid0] + 0.02))
+            seen.add(cid0)
+            doc_counts[self.chunks[cid0].doc_id] += 1
+
+        # Pick top-1 (then top-2 if <=3 subqueries) from each sub-query
+        for pick_round in (0, 1):
+            if pick_round == 1 and len(per_sub_reranked) > 3:
+                break
+            for sub_list in per_sub_reranked:
+                if len(selected) >= top_k:
+                    break
+                for cid, sc in sub_list:
+                    if sc < 0.25 and pick_round == 1:
+                        break
+                    did = self.chunks[cid].doc_id
+                    if cid not in seen and doc_counts[did] < 2:
+                        selected.append((cid, fused[cid]))
+                        seen.add(cid)
+                        doc_counts[did] += 1
+                        break
+
+        ranked_all = sorted(fused.items(), key=lambda x: x[1], reverse=True)
+        for max_per_doc in (2, 4, top_k):
+            for cid, sc in ranked_all:
+                if len(selected) >= top_k:
+                    break
+                if cid in seen:
+                    continue
+                did = self.chunks[cid].doc_id
+                if doc_counts[did] >= max_per_doc:
+                    continue
+                selected.append((cid, sc))
+                seen.add(cid)
+                doc_counts[did] += 1
+            if len(selected) >= top_k:
+                break
+
+        selected.sort(key=lambda x: x[1], reverse=True)
+        return self._format_results(selected[:top_k])
+
     def retrieve_dual_rerank_fusion(
         self,
         query: str,
@@ -1024,6 +1404,56 @@ class MultiHopHybridIndex:
         extra_subqueries: Optional[Sequence[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Retrieve top_k fair <=256-token chunks under the requested ablation method."""
+        if method == "hybrid_iterative_bridge_fusion":
+            if not (client and embed_model and rerank_model and self.chunk_vectors):
+                raise ValueError("hybrid_iterative_bridge_fusion requires dense index, client, embed_model, and rerank_model")
+            return self.retrieve_iterative_bridge_fusion(
+                query=query,
+                top_k=top_k,
+                client=client,
+                embed_model=embed_model,
+                embed_dim=embed_dim,
+                rerank_model=rerank_model,
+                decompose_model=decompose_model,
+            )
+
+        if method == "bm25_okf_lexical_bridge":
+            meta_hits = self.search_fts_meta(query, top_k=25)
+            seed_ids = {cid for cid, _ in meta_hits[:6]}
+            bridge_hits = self.expand_lexical_bridge(query, meta_hits[:6], term_limit=10, per_term_k=8)
+            rrf: Dict[int, float] = defaultdict(float)
+            for rank, (cid, _) in enumerate(meta_hits, start=1):
+                rrf[cid] += 1.60 / (12.0 + rank)
+            for rank, (cid, _) in enumerate(bridge_hits, start=1):
+                # Subordinate bridge weight ensures unreranked 2nd-hop hits complement
+                # rather than evict high-precision direct seeds.
+                rrf[cid] += 0.42 / (28.0 + rank)
+            # Protect top-2 direct seeds in-order, then fill remaining slots with soft
+            # per-article diversity (<=2 chunks/article) to maximize multi-hop coverage.
+            selected: List[Tuple[int, float]] = []
+            seen: Set[int] = set()
+            doc_counts: Counter = Counter()
+            for cid, _ in meta_hits[:2]:
+                selected.append((cid, rrf[cid]))
+                seen.add(cid)
+                doc_counts[self.chunks[cid].doc_id] += 1
+            ranked = sorted(rrf.items(), key=lambda x: x[1], reverse=True)
+            for max_per_doc in (2, top_k):
+                for cid, sc in ranked:
+                    if len(selected) >= top_k:
+                        break
+                    if cid in seen:
+                        continue
+                    did = self.chunks[cid].doc_id
+                    if doc_counts[did] >= max_per_doc:
+                        continue
+                    selected.append((cid, sc))
+                    seen.add(cid)
+                    doc_counts[did] += 1
+                if len(selected) >= top_k:
+                    break
+            return self._format_results(selected[:top_k])
+
         if method == "hybrid_dual_rerank_fusion":
             if not (client and embed_model and rerank_model and self.chunk_vectors):
                 raise ValueError("hybrid_dual_rerank_fusion requires dense index, client, embed_model, and rerank_model")

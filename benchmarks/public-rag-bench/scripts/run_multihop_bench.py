@@ -27,6 +27,7 @@ ONLINE_METHODS = {
     "hybrid_dense_ppr_rerank",
     "hybrid_multihop_decomposed_rerank",
     "hybrid_dual_rerank_fusion",
+    "hybrid_iterative_bridge_fusion",
 }
 
 
@@ -123,7 +124,7 @@ def main() -> None:
                 client=client,
                 embed_model=args.embed_model if method in ONLINE_METHODS else None,
                 embed_dim=args.embed_dim if method in ONLINE_METHODS else None,
-                rerank_model=args.rerank_model if method in ("hybrid_dense_ppr_rerank", "hybrid_multihop_decomposed_rerank", "hybrid_dual_rerank_fusion") else None,
+                rerank_model=args.rerank_model if method in ("hybrid_dense_ppr_rerank", "hybrid_multihop_decomposed_rerank", "hybrid_dual_rerank_fusion", "hybrid_iterative_bridge_fusion") else None,
                 decompose_model=args.decompose_model,
             )
             lat_ms = (time.perf_counter() - qt0) * 1000.0

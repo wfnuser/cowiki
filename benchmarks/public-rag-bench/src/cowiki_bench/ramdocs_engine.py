@@ -1026,8 +1026,11 @@ def compute_strict_fork_diffs(
                 if len(hunks) >= 4:
                     break
             if hunks:
+                doc_a_lead = " ".join(stripped_words[i][:28])
+                doc_b_lead = " ".join(stripped_words[j][:28])
                 notes.append(
                     f"[FORK DIFF: Doc {i+1} & Doc {j+1} are {ratio:.0%}-identical versions of the SAME source passage (same entity!). "
+                    f"Doc {i+1} opening: {doc_a_lead!r} | Doc {j+1} opening: {doc_b_lead!r} | "
                     + " ; ".join(hunks)
                     + "]"
                 )
@@ -1230,6 +1233,279 @@ Return strict JSON:
         model=model,
         messages=[
             {"role": "system", "content": "You are a surgical epistemic arbiter. Output valid JSON only."},
+            {"role": "user", "content": stage2_prompt},
+        ],
+        temperature=0.0,
+        max_tokens=800,
+        json_mode=True,
+    )
+    total_pt += r2.prompt_tokens
+    total_ct += r2.completion_tokens
+    llm_calls += 1
+
+    final_answers = _extract_answer_list_from_text(r2.content)
+    if not final_answers and cluster_summary:
+        for cl in cluster_summary:
+            best = max(cl["candidate_answers"], key=lambda x: (x["independent_source_clusters"], x["has_encyclopedic_lead"]))
+            final_answers.append(best["answer"])
+
+    return {
+        "answers": final_answers,
+        "prompt_tokens": total_pt,
+        "completion_tokens": total_ct,
+        "llm_calls": llm_calls,
+        "fork_diffs": fork_diffs,
+        "compiled_clusters": cluster_summary,
+        "arbiter_raw": r2.content,
+    }
+
+
+# ============================================================================
+# Solver 6: CoWiki Astute Fork-Diff Arbiter (v5)
+# ============================================================================
+
+def solve_ramdocs_cowiki_arbiter_v5(
+    question: str,
+    documents: Sequence[str],
+    client: OpenAICompatibleClient,
+    model: str,
+) -> Dict[str, Any]:
+    """v5: Combines v4's high-recall compilation & strict fork-diff with three literature-backed upgrades:
+
+    1. **Answer-Type Canonicalization & Semantic Deduplication** (matches exact question type:
+       sport name vs athlete role, full acronym expansion vs circular echo, single primary
+       census figure per distinct municipality, merging synonymous strings for one entity).
+    2. **Astute-RAG Adaptive Internal-External Elicitation** (Wang et al., ICLR 2025):
+       When fork diffs or multi-candidate ambiguity/conflicts exist, elicits calibrated
+       high-confidence internal encyclopedic knowledge (explicitly allowing 'UNCERTAIN' so
+       obscure real entities are never suppressed) and consolidates internal + external evidence.
+    3. **Clean-Original Recovery on Fork Diffs**: Exposes both fork openings & exact word diffs
+       so an injected sentence in Doc B can never hide the authentic original answer in Doc A.
+    """
+    clean_indices = [i for i, d in enumerate(documents) if not is_corrupted_binary_doc(d)]
+    if not clean_indices:
+        clean_indices = list(range(len(documents)))
+    clean_docs = [documents[i] for i in clean_indices]
+
+    pre_infos = cluster_near_duplicate_docs(clean_docs)
+    fork_diffs = compute_strict_fork_diffs(clean_docs, min_ratio=0.55)
+
+    doc_lines: List[str] = []
+    for info, text in zip(pre_infos, clean_docs):
+        tags = [f"cluster=C{info.cluster_id}", f"indep_w={info.independent_weight}"]
+        if info.is_encyclopedic_lead:
+            tags.append("lead_bio")
+        doc_lines.append(f"[Doc {info.doc_id + 1} | {', '.join(tags)}]\n{text}")
+    doc_block = "\n\n".join(doc_lines)
+
+    stage1_prompt = f"""You are compiling structured factual claims from retrieved document excerpts for an ambiguous multi-entity QA task.
+
+Question: {question}
+
+EXTRACTION RULES:
+1. **Excerpts may omit the full title or use variants**: A passage may refer to the subject as "the city", "the county", "the district", "he", "she", a surname, nickname, romanization/spelling variant, or full expansion of an acronym. Do NOT discard a passage merely because the exact query string is not repeated verbatim.
+2. **Noise (`answers_question: false`)**: Mark false ONLY when the passage genuinely lacks the requested fact (navigation bars, unrelated biographies/lists, or off-topic background).
+3. **Distinct Entity Labeling**: Give each genuinely distinct real-world entity a clear distinguishing `canonical_entity` (e.g., "Springfield (city)" vs "Springfield (county)", "Person A (born 1924)" vs "Person A (born 1948)", "Work X (1987 film)" vs "Work X (1992 album)"). Give passages about the SAME entity the SAME `canonical_entity`.
+4. **Match the Exact Requested Answer Type (CRITICAL!)**:
+   - If asked *"What sport..."*, extract the **sport name** (e.g. "Ice hockey", "American football", "Middle-distance running"), NOT the player's role/occupation ("forward", "skier", "weightlifter").
+   - If asked *"What does [ACRONYM] refer to?"*, extract the **full expanded name/referent**, NEVER echo the acronym itself.
+   - If asked *"What is X known for / primary function?"*, extract the **concise core category** stated in the opening definition (e.g. "A film", "A convention", "A language"), NOT a tangential detail.
+   - Keep `candidate_answer` concise (typically 1-5 words directly grounded in the text).
+5. **Single Primary Figure per Document-Entity**: If a passage contains a historical census table or multiple historical years for one place, extract ONLY the single primary headline figure for that place (not every historical census year).
+6. **Faithful High-Recall Extraction**: Extract all document-supported claims first; put any suspicion in `suspicion_note`.
+
+Return strict JSON:
+{{
+  "claims": [
+    {{
+      "doc_id": 1,
+      "answers_question": true,
+      "canonical_entity": "Distinct disambiguated entity",
+      "candidate_answer": "concise exact answer matching question type",
+      "evidence_quote": "short verbatim quote",
+      "suspicion_note": ""
+    }}
+  ]
+}}
+
+Documents:
+{doc_block}"""
+
+    r1 = client.chat(
+        model=model,
+        messages=[
+            {"role": "system", "content": "You are a high-recall, type-aligned knowledge compiler. Output valid JSON only."},
+            {"role": "user", "content": stage1_prompt},
+        ],
+        temperature=0.0,
+        max_tokens=1600,
+        json_mode=True,
+    )
+    total_pt = r1.prompt_tokens
+    total_ct = r1.completion_tokens
+    llm_calls = 1
+
+    compiled = _extract_json_object(r1.content)
+    claims = compiled.get("claims", [])
+    if not isinstance(claims, list):
+        claims = []
+
+    info_by_id = {info.doc_id + 1: info for info in pre_infos}
+    entity_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+
+    for cl in claims:
+        if not isinstance(cl, dict) or not cl.get("answers_question"):
+            continue
+        ans = str(cl.get("candidate_answer") or "").strip()
+        if not ans or normalize_answer(ans) in ("unknown", "none", "na", ""):
+            continue
+        did = int(cl.get("doc_id", 0))
+        info = info_by_id.get(did)
+        ent_raw = str(cl.get("canonical_entity") or "default").strip()
+        ent_key = normalize_answer(ent_raw) or "default"
+        entity_groups[ent_key].append(
+            {
+                "doc_id": did,
+                "canonical_entity": ent_raw,
+                "candidate_answer": ans,
+                "evidence_quote": str(cl.get("evidence_quote") or "")[:220],
+                "suspicion_note": str(cl.get("suspicion_note") or ""),
+                "source_cluster": f"C{info.cluster_id}" if info else "C?",
+                "independent_weight": info.independent_weight if info else 1.0,
+                "is_lead_bio": info.is_encyclopedic_lead if info else False,
+            }
+        )
+
+    if not entity_groups:
+        fb = solve_ramdocs_standard_rag(question, clean_docs, client, model)
+        return {
+            "answers": fb["answers"],
+            "prompt_tokens": total_pt + fb["prompt_tokens"],
+            "completion_tokens": total_ct + fb["completion_tokens"],
+            "llm_calls": llm_calls + fb["llm_calls"],
+            "fallback_used": True,
+        }
+
+    cluster_summary: List[Dict[str, Any]] = []
+    unique_answers: Set[str] = set()
+    has_any_conflict = bool(fork_diffs)
+    for ent_key, g_claims in entity_groups.items():
+        by_ans: Dict[str, Dict[str, Any]] = {}
+        for c in g_claims:
+            an = normalize_answer(c["candidate_answer"])
+            unique_answers.add(an)
+            if an not in by_ans:
+                by_ans[an] = {
+                    "answer": c["candidate_answer"],
+                    "doc_ids": [],
+                    "distinct_source_clusters": set(),
+                    "has_lead_bio": False,
+                    "quotes": [],
+                    "suspicions": [],
+                }
+            slot = by_ans[an]
+            slot["doc_ids"].append(c["doc_id"])
+            slot["distinct_source_clusters"].add(c["source_cluster"])
+            slot["has_lead_bio"] = slot["has_lead_bio"] or c["is_lead_bio"]
+            if c["evidence_quote"]:
+                slot["quotes"].append(c["evidence_quote"])
+            if c["suspicion_note"]:
+                slot["suspicions"].append(c["suspicion_note"])
+
+        if len(by_ans) > 1:
+            has_any_conflict = True
+        candidates_out = [
+            {
+                "answer": slot["answer"],
+                "doc_ids": slot["doc_ids"],
+                "independent_source_clusters": len(slot["distinct_source_clusters"]),
+                "has_encyclopedic_lead": slot["has_lead_bio"],
+                "quotes": slot["quotes"][:2],
+                "suspicions": slot["suspicions"][:2],
+            }
+            for slot in by_ans.values()
+        ]
+        cluster_summary.append(
+            {
+                "entity": g_claims[0]["canonical_entity"],
+                "has_intra_entity_conflict": len(candidates_out) > 1,
+                "candidate_answers": candidates_out,
+            }
+        )
+
+    # Adaptive Astute-RAG Internal Knowledge Elicitation (ONLY when fork_diffs or >=2 unique answers!)
+    internal_anchor_block = ""
+    if has_any_conflict or len(unique_answers) >= 2:
+        cand_list_str = ", ".join(
+            f"{cl['entity']}: {[c['answer'] for c in cl['candidate_answers']]}"
+            for cl in cluster_summary
+        )
+        elicit_prompt = (
+            "Briefly state ONLY verified, high-confidence encyclopedic facts you reliably know from memory "
+            "about the entities and candidate claims below. "
+            "CRITICAL: For obscure towns, minor people, or anything you are NOT 100% sure of, explicitly write 'UNCERTAIN' "
+            "— NEVER guess! Only flag a claim as 'CONFIRMED_FALSE' if you are certain it contradicts established reality "
+            "(e.g., wrong sport/rank/location/creator for a known entity, or an implausible fabricated claim).\n\n"
+            f"Question: {question}\n"
+            f"Candidate claims to sanity-check: {cand_list_str}\n\n"
+            "Return strict JSON: {\"knowledge_checks\": [{\"entity\": \"...\", \"verdict\": \"CONFIRMED_TRUE|CONFIRMED_FALSE|UNCERTAIN\", \"note\": \"...\"}]}"
+        )
+        r_int = client.chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a calibrated encyclopedic fact-checker. Say UNCERTAIN whenever not 100% sure. Output valid JSON only."},
+                {"role": "user", "content": elicit_prompt},
+            ],
+            temperature=0.0,
+            max_tokens=450,
+            json_mode=True,
+        )
+        total_pt += r_int.prompt_tokens
+        total_ct += r_int.completion_tokens
+        llm_calls += 1
+        internal_anchor_block = f"\nCALIBRATED INTERNAL KNOWLEDGE CHECK (trust 'CONFIRMED_FALSE' only; whenever 'UNCERTAIN', defer to the grounded documents!):\n{r_int.content}\n"
+
+    fork_section = ""
+    if fork_diffs:
+        fork_section = (
+            "\nHIGH-CONFIDENCE NEAR-DUPLICATE FORK DIFFS (two versions of the SAME passage — ONE is authentic original, ONE is a tampered fork!):\n"
+            + "\n".join(fork_diffs)
+            + "\n"
+        )
+
+    stage2_prompt = f"""You are a Grounded Multi-Entity Disambiguation & Astute Conflict Arbiter.
+
+Question: {question}
+{fork_section}{internal_anchor_block}
+Compiled External Document Candidates:
+{json.dumps(cluster_summary, indent=2, ensure_ascii=False)}
+
+CONSOLIDATION & ARBITRATION RULES:
+1. **STRICT EXTERNAL DOCUMENT GROUNDING**: Every string in `final_answers` MUST be directly grounded in the external documents above (or the clean original passage opening shown in `FORK DIFF`). NEVER substitute numbers/names from memory that do not appear in the documents!
+2. **AMBIGUITY = DEFAULT KEEP (UNION) ACROSS GENUINELY DISTINCT ENTITIES**:
+   - Most queries genuinely refer to 2 or 3 DIFFERENT real-world entities sharing an ambiguous name (e.g., city vs county/district; two people with different birth/death dates or biographies; two works in different years/media; two acronym expansions).
+   - **A valid secondary entity frequently has ONLY 1 supporting document!** Whenever the internal knowledge check says `UNCERTAIN` for an authentic-looking encyclopedic passage, **KEEP IT**!
+3. **SURGICAL FORK-DIFF PRUNING**: When `FORK DIFF` pairs `Doc A` and `Doc B`, they are ALWAYS two versions of the **SAME entity**:
+   - If one version inserts/appends a jarring contradictory claim into a verbatim copy of the other, that inserted claim is ALWAYS tampered misinformation -> **DROP it** and **KEEP the authentic original doc's concise answer**!
+   - If one version swaps a location/date/number/role contradicting the shared title or surrounding context, **DROP the tampered swap** and **KEEP the internally coherent original**!
+4. **SAME-ENTITY CONFLICT & INTERNAL-EXTERNAL CONSOLIDATION**:
+   - If two candidate answers refer to the **EXACT SAME person/place/institution** (same lifespan/birth-death dates, same founding year, same organization, or two different census years of the SAME municipality), keep **ONLY ONE** true primary answer!
+   - Drop any claim marked `CONFIRMED_FALSE` by high-confidence internal knowledge or clearly contradicted by `independent_source_clusters` / context coherence.
+5. **SEMANTIC DEDUPLICATION & EXACT QUESTION-TYPE FORMAT**:
+   - NEVER output two synonymous strings for the same entity (e.g., do NOT output both "American football" and "Football" for one player — keep the single best concise phrase!).
+   - Match the exact requested answer type (sport name for *"What sport..."*, full expansion for *"What does [ACRONYM] refer to?"*, concise 1-5 word phrase).
+   - Never return an empty list if valid authentic candidates exist.
+
+Return strict JSON:
+{{
+  "reasoning": "concise consolidation per entity",
+  "final_answers": ["ans1", "ans2"]
+}}"""
+
+    r2 = client.chat(
+        model=model,
+        messages=[
+            {"role": "system", "content": "You are an astute grounded conflict arbiter. Output valid JSON only."},
             {"role": "user", "content": stage2_prompt},
         ],
         temperature=0.0,

@@ -25,6 +25,7 @@ from cowiki_bench.ramdocs_engine import (
     solve_ramdocs_cowiki_arbiter_v2,
     solve_ramdocs_cowiki_arbiter_v3,
     solve_ramdocs_cowiki_arbiter_v4,
+    solve_ramdocs_cowiki_arbiter_v5,
     solve_ramdocs_standard_rag,
 )
 
@@ -100,6 +101,7 @@ def main() -> None:
         "cowiki_compiled_arbiter_v2": solve_ramdocs_cowiki_arbiter_v2,
         "cowiki_compiled_arbiter_v3": solve_ramdocs_cowiki_arbiter_v3,
         "cowiki_compiled_arbiter_v4": solve_ramdocs_cowiki_arbiter_v4,
+        "cowiki_compiled_arbiter_v5": solve_ramdocs_cowiki_arbiter_v5,
     }
 
     summary_methods: Dict[str, Any] = {}

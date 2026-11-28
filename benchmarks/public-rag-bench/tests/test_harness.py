@@ -150,6 +150,59 @@ class TestBenchHarness(unittest.TestCase):
         self.assertAlmostEqual(v[0], 0.6, places=6)
         self.assertAlmostEqual(v[1], 0.8, places=6)
 
+    def test_lexical_bridge_unlinked_second_hop(self) -> None:
+        corpus = [
+            {
+                "title": "Edge Ingress Router Overview",
+                "source": "EngBlog",
+                "published_at": "2023-10-01T00:00:00+00:00",
+                "author": "A",
+                "category": "tech",
+                "url": "https://eng.example/ingress",
+                "body": "Mobile clients terminate at Edge Ingress Router and delegate signing proofs to QuasarVerifier.",
+            },
+            {
+                "title": "Hardware Enclave Cadence",
+                "source": "SecDocs",
+                "published_at": "2023-10-05T00:00:00+00:00",
+                "author": "B",
+                "category": "tech",
+                "url": "https://sec.example/enclave",
+                "body": "QuasarVerifier rotates ephemeral hardware attestation tokens every twelve hours.",
+            },
+            {
+                "title": "Office Supplies",
+                "source": "Notes",
+                "published_at": "2023-10-09T00:00:00+00:00",
+                "author": "C",
+                "category": "misc",
+                "url": "https://notes.example/office",
+                "body": "Whiteboard markers and power adapters are stocked in room four.",
+            },
+        ] + [
+            {
+                "title": f"General Note {i}",
+                "source": "Notes",
+                "published_at": "2023-10-10T00:00:00+00:00",
+                "author": "D",
+                "category": "misc",
+                "url": f"https://notes.example/misc-{i}",
+                "body": f"Routine operational memo {i} about lunch schedules and conference rooms.",
+            }
+            for i in range(8)
+        ]
+        idx = MultiHopHybridIndex(corpus, max_chunk_tokens=256)
+        q = "Edge Ingress Router mobile signing proofs"
+        meta_hits = idx.retrieve(q, method="bm25_okf_meta", top_k=5)
+        bridge_hits = idx.retrieve(q, method="bm25_okf_lexical_bridge", top_k=5)
+        meta_urls = {h["url"] for h in meta_hits}
+        bridge_urls = {h["url"] for h in bridge_hits}
+        self.assertIn("https://eng.example/ingress", meta_urls)
+        self.assertNotIn("https://sec.example/enclave", meta_urls)
+        self.assertIn("https://eng.example/ingress", bridge_urls)
+        self.assertIn("https://sec.example/enclave", bridge_urls)
+        self.assertEqual(bridge_hits[0]["url"], "https://eng.example/ingress")
+
 
 if __name__ == "__main__":
     unittest.main()
