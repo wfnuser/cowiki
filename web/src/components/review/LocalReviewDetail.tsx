@@ -12,7 +12,9 @@ import {
 import { Button } from '@/components/ui/button';
 import { InlineFeedback } from '@/components/ui/inline-feedback';
 import { ViewEmpty, ViewHeader } from '@/components/ui/view-header';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useI18n } from '@/lib/I18nContext';
+import { GovernanceReviewPanel } from './GovernanceReviewPanel';
 import { DiffView } from './DiffView';
 import { agentMergeResult, type LocalReviewSelection } from './local-review-model';
 
@@ -23,15 +25,20 @@ export function LocalReviewDetail({
   onReviewsChanged,
   onAgentChangeClosed,
   onContinueAgent,
+  onOpenChange,
 }: {
   workspaceSlug: string;
   target: LocalReviewSelection;
+  onOpenChange: (id: string) => void;
   onDraftChanged?: () => void;
   onReviewsChanged?: () => void;
   onAgentChangeClosed?: (changeId: string) => void;
   onContinueAgent?: (change: AgentChange) => void;
 }) {
   const { t, tl } = useI18n();
+  const reviewKey = `${workspaceSlug}:${target.kind === 'local-agent' ? target.changeId : 'draft'}`;
+  const [tab, setTab] = useState('changes');
+  const [retainedReview, setRetainedReview] = useState<string | null>(null);
   const [draftDiffs, setDraftDiffs] = useState<FileDiff[] | null>(null);
   const [change, setChange] = useState<AgentChange | null>(null);
   const [loading, setLoading] = useState(true);
@@ -150,7 +157,7 @@ export function LocalReviewDetail({
       <ViewHeader
         className="mb-5"
         title={title}
-        actions={actions}
+        actions={tab === 'changes' ? actions : undefined}
         description={(
           <span className="flex items-center gap-2">
             {target.kind === 'local-draft' ? t('Compared with the last commit') : `${t('Agent change')} · ${target.changeId.slice(0, 8)}`}
@@ -163,13 +170,33 @@ export function LocalReviewDetail({
 
       {error && <InlineFeedback className="mb-4" title={t('Could not update this Review')} description={error} />}
       {notice && <InlineFeedback className="mb-4" tone="neutral" compact title={notice} />}
-      {loading || diffs == null ? (
-        <ViewEmpty>{t('Loading changes…')}</ViewEmpty>
-      ) : diffs.length ? (
-        <DiffView diffs={diffs} />
-      ) : (
-        <ViewEmpty>{t('No file changes.')}</ViewEmpty>
-      )}
+      <Tabs value={tab} onValueChange={(next) => {
+        if (tab === 'governance') setRetainedReview(reviewKey);
+        setTab(next);
+      }}>
+        <TabsList aria-label="Local review">
+          <TabsTrigger value="changes">{t('File changes')}</TabsTrigger>
+          <TabsTrigger value="governance">{t('Governance')}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="changes">
+          {loading || diffs == null ? (
+            <ViewEmpty>{t('Loading changes…')}</ViewEmpty>
+          ) : diffs.length ? (
+            <DiffView diffs={diffs} />
+          ) : (
+            <ViewEmpty>{t('No file changes.')}</ViewEmpty>
+          )}
+        </TabsContent>
+        <TabsContent value="governance" forceMount={retainedReview === reviewKey || undefined} hidden={tab !== 'governance'}>
+          <GovernanceReviewPanel
+            key={reviewKey}
+            spaceSlug={workspaceSlug}
+            changeId={target.kind === 'local-agent' ? target.changeId : null}
+            onStaged={onReviewsChanged}
+            onOpenChange={onOpenChange}
+          />
+        </TabsContent>
+      </Tabs>
     </section>
   );
 }

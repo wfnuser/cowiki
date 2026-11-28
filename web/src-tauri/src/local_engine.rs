@@ -23,7 +23,7 @@ mod agent_changes;
 mod comments;
 pub use crate::knowledge_index::{BrokenLink, HybridSearchOptions, HybridSearchResult, IndexStats};
 pub use crate::okf::OkfValidationReport;
-pub use agent_changes::AgentChange;
+pub use agent_changes::{AgentChange, GovernanceReview, GovernanceStage};
 pub use comments::{CommentMember, PageComment, PageCommentsResponse};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

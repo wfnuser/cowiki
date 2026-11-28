@@ -2112,8 +2112,10 @@ export function MainLayout() {
                   />
                 ) : (
                   <LocalReviewDetail
+                    key={reviewRoute('', activeView.workspaceSlug, activeView.target)}
                     workspaceSlug={activeView.workspaceSlug}
                     target={activeView.target}
+                    onOpenChange={(changeId) => openReviewDetail({ kind: 'local-agent', changeId })}
                     onDraftChanged={() => {
                       if (!activeWorkspace || activeWorkspace.slug !== activeView.workspaceSlug) return;
                       void loadSpacePages(activeWorkspace);

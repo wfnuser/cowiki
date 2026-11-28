@@ -29,7 +29,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: web/src-tauri -> target
@@ -45,6 +45,8 @@ jobs:
         run: npm run build
       - name: Check Rust formatting
         run: cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Lint Tauri shell
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --all-features -- -D warnings
       - name: Test Tauri shell
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
@@ -94,3 +96,35 @@ jobs:
         run: cargo test --manifest-path benchmarks/retrieval-bench/Cargo.toml --locked
       - name: Run standalone retrieval & governance benchmark gate
         run: cargo run --manifest-path benchmarks/retrieval-bench/Cargo.toml --release --locked -- --scale-pages 100,500 --queries-per-thread 20 --out /tmp/cowiki-retrieval-bench.json
+
+  governance-bench:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_NET_OFFLINE: "true"
+    defaults:
+      run:
+        working-directory: benchmarks/governance-bench
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: benchmarks/governance-bench -> target
+      - name: Populate the locked dependency cache
+        env:
+          CARGO_NET_OFFLINE: "false"
+        run: cargo fetch --locked
+      - name: Check formatting, lints and tests offline
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --offline --locked --all-targets --all-features -- -D warnings
+          cargo test --offline --locked --all-features
+      - name: Reproduce both CMake development baselines
+        run: |
+          for method in none rules; do
+            cargo run --offline --locked --release -- --split dev --verifier "$method" --baseline --out "$RUNNER_TEMP/dev-$method.json"
+            cmp "$RUNNER_TEMP/dev-$method.json" "results/dev-$method.json"
+          done
