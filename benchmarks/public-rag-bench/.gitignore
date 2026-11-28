@@ -1,0 +1,16 @@
+# Downloaded raw public datasets (re-fetch via scripts/fetch_datasets.py)
+data/
+
+# Local SQLite embedding / LLM response caches and temporary index DBs
+.cache/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Per-run verbose prediction dumps
+results/runs/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+.venv/

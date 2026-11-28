@@ -1,0 +1,72 @@
+{
+  "benchmark": "MultiHop-RAG End-to-End QA",
+  "generated_at_utc": "2026-11-27T14:00:41.869725+00:00",
+  "slice": "multihop_dev100",
+  "reader_model": "qwen-plus",
+  "methods": {
+    "bm25_raw": {
+      "n": 100,
+      "official_accuracy": 0.68,
+      "strict_em": 0.68,
+      "null_query_abstention_acc": 0.9167,
+      "avg_context_tokens": 2333.6,
+      "avg_prompt_tokens": 3082.4,
+      "api_errors": 1,
+      "wall_time_sec": 34.31,
+      "by_question_type": {
+        "comparison_query": {
+          "official_accuracy": 0.5588,
+          "strict_em": 0.5588,
+          "n": 34
+        },
+        "inference_query": {
+          "official_accuracy": 0.9688,
+          "strict_em": 0.9688,
+          "n": 32
+        },
+        "null_query": {
+          "official_accuracy": 0.9167,
+          "strict_em": 0.9167,
+          "n": 12
+        },
+        "temporal_query": {
+          "official_accuracy": 0.3182,
+          "strict_em": 0.3182,
+          "n": 22
+        }
+      }
+    },
+    "hybrid_multihop_decomposed_rerank": {
+      "n": 100,
+      "official_accuracy": 0.77,
+      "strict_em": 0.77,
+      "null_query_abstention_acc": 0.9167,
+      "avg_context_tokens": 2275.1,
+      "avg_prompt_tokens": 3006.3,
+      "api_errors": 1,
+      "wall_time_sec": 62.55,
+      "by_question_type": {
+        "comparison_query": {
+          "official_accuracy": 0.6176,
+          "strict_em": 0.6176,
+          "n": 34
+        },
+        "inference_query": {
+          "official_accuracy": 0.9688,
+          "strict_em": 0.9688,
+          "n": 32
+        },
+        "null_query": {
+          "official_accuracy": 0.9167,
+          "strict_em": 0.9167,
+          "n": 12
+        },
+        "temporal_query": {
+          "official_accuracy": 0.6364,
+          "strict_em": 0.6364,
+          "n": 22
+        }
+      }
+    }
+  }
+}
