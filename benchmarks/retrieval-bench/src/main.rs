@@ -1,5 +1,6 @@
 mod corpus;
 
+use cowiki_knowledge::citations::{self, CitationStatus};
 use cowiki_knowledge::embeddings::{
     EmbeddingProvider, LocalHashProjectionEmbedder, OpenAiCompatibleEmbedder,
 };
@@ -142,6 +143,8 @@ struct BenchmarkReport {
     embedding_model: String,
     embedding_dim: usize,
     retrieval_ablations: Vec<AblationBudgetReport>,
+    unlinked_lexical_bridge: UnlinkedBridgeReport,
+    citation_verification: CitationVerificationReport,
     governance_correctness: GovernanceReport,
     scaling_and_incremental: Vec<ScalePointReport>,
     concurrent_reads: Vec<ConcurrencyPointReport>,
@@ -177,6 +180,25 @@ struct AblationConfigMetrics {
     p50_latency_ms: f64,
     p95_latency_ms: f64,
     by_category: BTreeMap<String, CategoryMetrics>,
+}
+
+#[derive(Debug, Serialize)]
+struct UnlinkedBridgeReport {
+    token_budget: usize,
+    query_count: usize,
+    explicit_graph_only: AblationConfigMetrics,
+    with_lexical_bridge: AblationConfigMetrics,
+}
+
+#[derive(Debug, Serialize)]
+struct CitationVerificationReport {
+    anchors_tested: usize,
+    intact_pass_rate: f64,
+    moved_relocation_rate: f64,
+    changed_detection_rate: f64,
+    missing_detection_rate: f64,
+    live_freshness_drift_detected: bool,
+    avg_verify_us: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -294,8 +316,10 @@ fn build_ablation_configs(budget: usize) -> Vec<(&'static str, HybridSearchOptio
                 use_lexical: Some(true),
                 use_vector: Some(false),
                 use_graph_expansion: Some(false),
+                use_lexical_bridge: Some(false),
                 scope_filter: None,
                 as_of_date: Some(BENCH_AS_OF_DATE.to_string()),
+                ..Default::default()
             },
         ),
         (
@@ -311,8 +335,31 @@ fn build_ablation_configs(budget: usize) -> Vec<(&'static str, HybridSearchOptio
                 use_lexical: Some(true),
                 use_vector: Some(true),
                 use_graph_expansion: Some(true),
+                use_lexical_bridge: Some(false),
                 scope_filter: None,
                 as_of_date: Some(BENCH_AS_OF_DATE.to_string()),
+                ..Default::default()
+            },
+        ),
+        (
+            "hybrid_with_lexical_bridge",
+            HybridSearchOptions {
+                token_budget: Some(budget),
+                max_hops: Some(2),
+                seed_top_k: Some(6),
+                include_backlinks: Some(true),
+                exclude_retired: Some(true),
+                follow_redirects: Some(true),
+                use_okf_governance: Some(true),
+                use_lexical: Some(true),
+                use_vector: Some(true),
+                use_graph_expansion: Some(true),
+                use_lexical_bridge: Some(true),
+                max_bridge_hops: Some(1),
+                bridge_term_limit: Some(4),
+                scope_filter: None,
+                as_of_date: Some(BENCH_AS_OF_DATE.to_string()),
+                ..Default::default()
             },
         ),
         (
@@ -328,8 +375,10 @@ fn build_ablation_configs(budget: usize) -> Vec<(&'static str, HybridSearchOptio
                 use_lexical: Some(true),
                 use_vector: Some(true),
                 use_graph_expansion: Some(false),
+                use_lexical_bridge: Some(false),
                 scope_filter: None,
                 as_of_date: Some(BENCH_AS_OF_DATE.to_string()),
+                ..Default::default()
             },
         ),
         (
@@ -345,8 +394,10 @@ fn build_ablation_configs(budget: usize) -> Vec<(&'static str, HybridSearchOptio
                 use_lexical: Some(true),
                 use_vector: Some(false),
                 use_graph_expansion: Some(true),
+                use_lexical_bridge: Some(false),
                 scope_filter: None,
                 as_of_date: Some(BENCH_AS_OF_DATE.to_string()),
+                ..Default::default()
             },
         ),
         (
@@ -362,8 +413,10 @@ fn build_ablation_configs(budget: usize) -> Vec<(&'static str, HybridSearchOptio
                 use_lexical: Some(false),
                 use_vector: Some(true),
                 use_graph_expansion: Some(true),
+                use_lexical_bridge: Some(false),
                 scope_filter: None,
                 as_of_date: Some(BENCH_AS_OF_DATE.to_string()),
+                ..Default::default()
             },
         ),
     ]
@@ -492,6 +545,321 @@ fn run_retrieval_ablations(
     }
 
     Ok(budget_reports)
+}
+
+fn evaluate_query_set(
+    conn: &Connection,
+    space_id: &str,
+    space_root: &Path,
+    queries: &[corpus::EvalQuery],
+    config_name: &str,
+    opts: &HybridSearchOptions,
+    embedder: &dyn EmbeddingProvider,
+) -> Result<AblationConfigMetrics, String> {
+    let budget = opts.token_budget.unwrap_or(usize::MAX);
+    let mut recalls = Vec::new();
+    let mut full_hits = 0usize;
+    let mut mrrs = Vec::new();
+    let mut tokens_total = 0usize;
+    let mut budget_violations = 0usize;
+    let mut latencies_ms = Vec::new();
+    let mut per_cat: BTreeMap<String, (Vec<f64>, usize, Vec<f64>)> = BTreeMap::new();
+
+    for eval_q in queries {
+        let start = Instant::now();
+        let res = knowledge_index::hybrid_search_with_embedder(
+            conn,
+            space_id,
+            space_root,
+            eval_q.query,
+            opts,
+            embedder,
+        )?;
+        latencies_ms.push(start.elapsed().as_secs_f64() * 1000.0);
+        tokens_total += res.tokens_used;
+        if res.tokens_used > budget {
+            budget_violations += 1;
+        }
+        let retrieved_ordered: Vec<&str> = res
+            .evidence
+            .iter()
+            .map(|item| item.page_path.as_str())
+            .collect();
+        let retrieved_set: HashSet<&str> = retrieved_ordered.iter().copied().collect();
+        let gold_set: HashSet<&str> = eval_q.supporting_pages.iter().copied().collect();
+
+        let matched = gold_set
+            .iter()
+            .filter(|page| retrieved_set.contains(*page))
+            .count();
+        let recall = if gold_set.is_empty() {
+            1.0
+        } else {
+            matched as f64 / gold_set.len() as f64
+        };
+        let full_hit = matched == gold_set.len();
+        let rr = retrieved_ordered
+            .iter()
+            .enumerate()
+            .find(|(_, page)| gold_set.contains(**page))
+            .map(|(idx, _)| 1.0 / (idx as f64 + 1.0))
+            .unwrap_or(0.0);
+
+        recalls.push(recall);
+        if full_hit {
+            full_hits += 1;
+        }
+        mrrs.push(rr);
+        let entry = per_cat
+            .entry(eval_q.category.to_string())
+            .or_insert_with(|| (Vec::new(), 0, Vec::new()));
+        entry.0.push(recall);
+        if full_hit {
+            entry.1 += 1;
+        }
+        entry.2.push(rr);
+    }
+
+    latencies_ms.sort_by(|a, b| a.total_cmp(b));
+    let n = queries.len().max(1) as f64;
+    let by_category = per_cat
+        .into_iter()
+        .map(|(cat, (cat_recalls, cat_full, cat_mrrs))| {
+            let cn = cat_recalls.len().max(1) as f64;
+            (
+                cat,
+                CategoryMetrics {
+                    query_count: cat_recalls.len(),
+                    page_recall: round4(cat_recalls.iter().sum::<f64>() / cn),
+                    full_multihop_coverage: round4(cat_full as f64 / cn),
+                    mrr: round4(cat_mrrs.iter().sum::<f64>() / cn),
+                },
+            )
+        })
+        .collect();
+
+    Ok(AblationConfigMetrics {
+        config: config_name.to_string(),
+        page_recall: round4(recalls.iter().sum::<f64>() / n),
+        full_multihop_coverage: round4(full_hits as f64 / n),
+        mrr: round4(mrrs.iter().sum::<f64>() / n),
+        avg_tokens_used: round2(tokens_total as f64 / n),
+        budget_violations,
+        p50_latency_ms: round2(percentile(&latencies_ms, 50.0)),
+        p95_latency_ms: round2(percentile(&latencies_ms, 95.0)),
+        by_category,
+    })
+}
+
+fn run_unlinked_bridge_benchmark(
+    embedder: &dyn EmbeddingProvider,
+) -> Result<UnlinkedBridgeReport, String> {
+    let temp = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let space_root = temp.path().join("unlinked-space");
+    let db_path = temp.path().join("unlinked.sqlite");
+    fs::create_dir_all(&space_root).map_err(|e| e.to_string())?;
+    corpus::write_unlinked_bridge_corpus(&space_root)?;
+
+    let mut conn = open_wal_db(&db_path)?;
+    knowledge_index::rebuild_space_with_embedder(&mut conn, "unlinked", &space_root, embedder)?;
+    knowledge_index::rebuild_links(&mut conn, "unlinked")?;
+
+    let budget = 600usize;
+    let explicit_opts = HybridSearchOptions {
+        token_budget: Some(budget),
+        max_hops: Some(2),
+        seed_top_k: Some(6),
+        use_lexical: Some(true),
+        use_vector: Some(false),
+        use_graph_expansion: Some(true),
+        use_lexical_bridge: Some(false),
+        as_of_date: Some(BENCH_AS_OF_DATE.to_string()),
+        ..Default::default()
+    };
+    let bridge_opts = HybridSearchOptions {
+        use_lexical_bridge: Some(true),
+        max_bridge_hops: Some(1),
+        bridge_term_limit: Some(4),
+        ..explicit_opts.clone()
+    };
+
+    let explicit_graph_only = evaluate_query_set(
+        &conn,
+        "unlinked",
+        &space_root,
+        corpus::UNLINKED_BRIDGE_QUERIES,
+        "explicit_graph_only",
+        &explicit_opts,
+        embedder,
+    )?;
+    let with_lexical_bridge = evaluate_query_set(
+        &conn,
+        "unlinked",
+        &space_root,
+        corpus::UNLINKED_BRIDGE_QUERIES,
+        "with_lexical_bridge",
+        &bridge_opts,
+        embedder,
+    )?;
+
+    Ok(UnlinkedBridgeReport {
+        token_budget: budget,
+        query_count: corpus::UNLINKED_BRIDGE_QUERIES.len(),
+        explicit_graph_only,
+        with_lexical_bridge,
+    })
+}
+
+fn run_citation_verification_benchmark(
+    embedder: &dyn EmbeddingProvider,
+) -> Result<CitationVerificationReport, String> {
+    let temp = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let space_root = temp.path().join("cit-space");
+    let db_path = temp.path().join("cit.sqlite");
+    fs::create_dir_all(&space_root).map_err(|e| e.to_string())?;
+    corpus::write_eval_corpus(&space_root)?;
+
+    let mut conn = open_wal_db(&db_path)?;
+    knowledge_index::rebuild_space_with_embedder(&mut conn, "cit", &space_root, embedder)?;
+    knowledge_index::rebuild_links(&mut conn, "cit")?;
+
+    let probe_queries = [
+        "Billing Service metered usage charges settlement",
+        "Token Vault AES-256-GCM envelope encryption",
+        "Retention Policy WORM object storage seven years",
+        "KMS Key Rotation hardware security module 90 days",
+        "Storage Quotas derived SQLite index 512 MB",
+    ];
+    let mut anchors = Vec::new();
+    let mut seen_pages = HashSet::new();
+    let opts = HybridSearchOptions {
+        token_budget: Some(500),
+        verify_freshness: Some(true),
+        as_of_date: Some(BENCH_AS_OF_DATE.to_string()),
+        ..Default::default()
+    };
+    for q in &probe_queries {
+        let res = knowledge_index::hybrid_search_with_embedder(
+            &conn,
+            "cit",
+            &space_root,
+            q,
+            &opts,
+            embedder,
+        )?;
+        if let Some(first) = res.evidence.first() {
+            if seen_pages.insert(first.page_path.clone()) {
+                anchors.push(first.to_citation_anchor());
+            }
+        }
+    }
+
+    let n = anchors.len().max(1);
+    let mut intact_ok = 0usize;
+    let mut moved_ok = 0usize;
+    let mut changed_ok = 0usize;
+    let mut missing_ok = 0usize;
+    let mut verify_us_total = 0.0f64;
+    let mut verify_calls = 0usize;
+
+    // 1. Intact
+    for anchor in &anchors {
+        let t0 = Instant::now();
+        let v = citations::verify_citation(&space_root, anchor);
+        verify_us_total += t0.elapsed().as_secs_f64() * 1_000_000.0;
+        verify_calls += 1;
+        if v.status == CitationStatus::Intact {
+            intact_ok += 1;
+        }
+    }
+
+    // 2. Moved (insert a revision banner after frontmatter / top of file)
+    let mut originals = Vec::with_capacity(anchors.len());
+    for anchor in &anchors {
+        let full = space_root.join(&anchor.page_path);
+        let orig = fs::read_to_string(&full).map_err(|e| e.to_string())?;
+        originals.push((full.clone(), orig.clone()));
+        let shifted = format!("\n\n<!-- revision banner -->\n\n{orig}");
+        fs::write(&full, shifted).map_err(|e| e.to_string())?;
+        let t0 = Instant::now();
+        let v = citations::verify_citation(&space_root, anchor);
+        verify_us_total += t0.elapsed().as_secs_f64() * 1_000_000.0;
+        verify_calls += 1;
+        if matches!(v.status, CitationStatus::Moved { new_start_line, .. } if new_start_line > anchor.start_line)
+        {
+            moved_ok += 1;
+        }
+    }
+
+    // Check live freshness drift before restoring
+    let drift_probe = knowledge_index::hybrid_search_with_embedder(
+        &conn,
+        "cit",
+        &space_root,
+        probe_queries[0],
+        &opts,
+        embedder,
+    )?;
+    let live_freshness_drift_detected = drift_probe.stale_detected;
+
+    // 3. Changed (mutate cited excerpt)
+    for (anchor, (full, orig)) in anchors.iter().zip(originals.iter()) {
+        let mutated = orig
+            .replace("seven years", "fifteen years")
+            .replace("90 days", "180 days")
+            .replace("512 MB", "2048 MB")
+            .replace("AES-256-GCM", "ChaCha20-Poly1305")
+            .replace("settlement", "clearinghouse-override");
+        let final_body = if mutated == *orig {
+            format!("{orig}\nMUTATED_CITATION_PAYLOAD\n")
+        } else {
+            mutated
+        };
+        // If replacement didn't touch the cited span, overwrite the cited byte range cleanly.
+        let cited_mutated = if final_body.len() >= anchor.byte_end
+            && final_body[anchor.byte_start..anchor.byte_end]
+                == orig[anchor.byte_start..anchor.byte_end]
+        {
+            let mut s = orig.clone();
+            s.replace_range(
+                anchor.byte_start..anchor.byte_end,
+                "Modified policy text replacing the originally cited claim.",
+            );
+            s
+        } else {
+            final_body
+        };
+        fs::write(full, cited_mutated).map_err(|e| e.to_string())?;
+        let t0 = Instant::now();
+        let v = citations::verify_citation(&space_root, anchor);
+        verify_us_total += t0.elapsed().as_secs_f64() * 1_000_000.0;
+        verify_calls += 1;
+        if matches!(v.status, CitationStatus::Changed { .. }) {
+            changed_ok += 1;
+        }
+    }
+
+    // 4. Missing (remove cited file)
+    for (anchor, (full, _)) in anchors.iter().zip(originals.iter()) {
+        fs::remove_file(full).map_err(|e| e.to_string())?;
+        let t0 = Instant::now();
+        let v = citations::verify_citation(&space_root, anchor);
+        verify_us_total += t0.elapsed().as_secs_f64() * 1_000_000.0;
+        verify_calls += 1;
+        if matches!(v.status, CitationStatus::Missing { .. }) {
+            missing_ok += 1;
+        }
+    }
+
+    Ok(CitationVerificationReport {
+        anchors_tested: anchors.len(),
+        intact_pass_rate: round4(intact_ok as f64 / n as f64),
+        moved_relocation_rate: round4(moved_ok as f64 / n as f64),
+        changed_detection_rate: round4(changed_ok as f64 / n as f64),
+        missing_detection_rate: round4(missing_ok as f64 / n as f64),
+        live_freshness_drift_detected,
+        avg_verify_us: round2(verify_us_total / verify_calls.max(1) as f64),
+    })
 }
 
 fn run_governance_correctness(
@@ -624,6 +992,7 @@ fn run_governance_correctness(
         use_graph_expansion: Some(true),
         scope_filter: None,
         as_of_date: Some(BENCH_AS_OF_DATE.to_string()),
+        ..Default::default()
     };
 
     // Check retired leakage across both hybrid_search and lexical search
@@ -825,6 +1194,7 @@ fn run_scaling_and_incremental(
         use_graph_expansion: Some(true),
         scope_filter: None,
         as_of_date: Some(BENCH_AS_OF_DATE.to_string()),
+        ..Default::default()
     };
 
     for &page_count in scale_pages {
@@ -1064,6 +1434,7 @@ fn run_concurrent_reads(
                     use_graph_expansion: Some(true),
                     scope_filter: None,
                     as_of_date: Some(BENCH_AS_OF_DATE.to_string()),
+                    ..Default::default()
                 };
                 let mut lats = Vec::with_capacity(queries_per_thread);
                 let mut errs = 0usize;
@@ -1354,6 +1725,47 @@ fn check_invariants(report: &BenchmarkReport) -> Vec<String> {
         }
     }
 
+    let ub = &report.unlinked_lexical_bridge;
+    if ub.with_lexical_bridge.budget_violations > 0 {
+        failures.push(format!(
+            "unlinked_lexical_bridge budget violation: {}",
+            ub.with_lexical_bridge.budget_violations
+        ));
+    }
+    if ub.with_lexical_bridge.page_recall <= ub.explicit_graph_only.page_recall {
+        failures.push(format!(
+            "with_lexical_bridge page_recall ({}) did not exceed explicit_graph_only ({})",
+            ub.with_lexical_bridge.page_recall, ub.explicit_graph_only.page_recall
+        ));
+    }
+    if ub.with_lexical_bridge.full_multihop_coverage
+        <= ub.explicit_graph_only.full_multihop_coverage
+    {
+        failures.push(format!(
+            "with_lexical_bridge full_multihop_coverage ({}) did not exceed explicit_graph_only ({})",
+            ub.with_lexical_bridge.full_multihop_coverage,
+            ub.explicit_graph_only.full_multihop_coverage
+        ));
+    }
+
+    let cv = &report.citation_verification;
+    if cv.anchors_tested == 0
+        || cv.intact_pass_rate < 1.0
+        || cv.moved_relocation_rate < 1.0
+        || cv.changed_detection_rate < 1.0
+        || cv.missing_detection_rate < 1.0
+        || !cv.live_freshness_drift_detected
+    {
+        failures.push(format!(
+            "citation_verification failed: intact={}, moved={}, changed={}, missing={}, drift={}",
+            cv.intact_pass_rate,
+            cv.moved_relocation_rate,
+            cv.changed_detection_rate,
+            cv.missing_detection_rate,
+            cv.live_freshness_drift_detected
+        ));
+    }
+
     let gov = &report.governance_correctness;
     if gov.retired_leakage_rate > 0.0 {
         failures.push(format!(
@@ -1443,6 +1855,61 @@ fn print_summary(report: &BenchmarkReport) {
         }
         println!();
     }
+
+    let ub = &report.unlinked_lexical_bridge;
+    println!(
+        "### 1b. Unlinked Multi-Hop Lexical Bridge Expansion (Budget = {} tokens, N = {})\n",
+        ub.token_budget, ub.query_count
+    );
+    println!(
+        "| Config | Page Recall | Full Multi-Hop | MRR | Avg Tokens | Violations | P50 (ms) |"
+    );
+    println!("|---|---:|---:|---:|---:|---:|---:|");
+    for cfg in [&ub.explicit_graph_only, &ub.with_lexical_bridge] {
+        println!(
+            "| `{}` | {:.2}% | {:.2}% | {:.4} | {:.1} | {} | {:.2} |",
+            cfg.config,
+            cfg.page_recall * 100.0,
+            cfg.full_multihop_coverage * 100.0,
+            cfg.mrr,
+            cfg.avg_tokens_used,
+            cfg.budget_violations,
+            cfg.p50_latency_ms
+        );
+    }
+    println!();
+
+    let cv = &report.citation_verification;
+    println!(
+        "### 1c. Verifiable Citation Relocation & Live Freshness ({} anchors, avg {:.1} us/check)\n",
+        cv.anchors_tested, cv.avg_verify_us
+    );
+    println!("| Lifecycle Check | Pass Rate |");
+    println!("|---|---:|");
+    println!(
+        "| Intact byte/hash match | {:.2}% |",
+        cv.intact_pass_rate * 100.0
+    );
+    println!(
+        "| Moved span relocation | {:.2}% |",
+        cv.moved_relocation_rate * 100.0
+    );
+    println!(
+        "| Changed content detection | {:.2}% |",
+        cv.changed_detection_rate * 100.0
+    );
+    println!(
+        "| Missing file detection | {:.2}% |",
+        cv.missing_detection_rate * 100.0
+    );
+    println!(
+        "| Live disk drift guard (`verify_freshness`) | {} |\n",
+        if cv.live_freshness_drift_detected {
+            "PASS"
+        } else {
+            "FAIL"
+        }
+    );
 
     let g = &report.governance_correctness;
     println!("### 2. OKF v0.3 Governance Correctness\n");
@@ -1583,6 +2050,22 @@ fn main() {
         }
     };
 
+    let unlinked_lexical_bridge = match run_unlinked_bridge_benchmark(embedder.as_ref()) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("unlinked lexical bridge suite failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let citation_verification = match run_citation_verification_benchmark(embedder.as_ref()) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("citation verification suite failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
     let governance_correctness = match run_governance_correctness(embedder.as_ref()) {
         Ok(v) => v,
         Err(e) => {
@@ -1624,14 +2107,16 @@ fn main() {
     };
 
     let mut report = BenchmarkReport {
-        benchmark_version: "1.0.0".to_string(),
+        benchmark_version: "1.1.0".to_string(),
         generated_at_utc: okf::utc_today_iso(),
         okf_version: okf::OKF_VERSION.to_string(),
-        index_schema_version: 4,
+        index_schema_version: 5,
         embedder_mode: args.embedder_mode,
         embedding_model: embedder.model_name().to_string(),
         embedding_dim: embedder.dimension(),
         retrieval_ablations,
+        unlinked_lexical_bridge,
+        citation_verification,
         governance_correctness,
         scaling_and_incremental,
         concurrent_reads,

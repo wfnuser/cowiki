@@ -2,17 +2,20 @@
 
 Standalone, zero-GUI benchmark suite for CoWiki's production Rust knowledge engine ([`crates/cowiki-knowledge`](../../crates/cowiki-knowledge)).
 
-It executes directly against the same `cowiki_knowledge::{okf, embeddings, knowledge_index}` library compiled into CoWiki Desktop and CoWiki's embedded MCP server — never a mock or duplicate implementation — and serves as an automated CI regression gate.
+It executes directly against the same `cowiki_knowledge::{okf, embeddings, citations, scorer, knowledge_index}` library compiled into CoWiki Desktop and CoWiki's embedded MCP server — never a mock or duplicate implementation — and serves as an automated CI regression gate.
 
 ## What It Measures
 
 1. **Multi-Hop, Anchor, & Paraphrase Retrieval Ablations** (`N = 24`, strict `400` and `800` token budgets)
-   - Evaluates 5 real engine configurations over a 40+ page OKF v0.3 engineering corpus with 2-hop Markdown/wikilink chains, `#section-anchor` deep links, a high-degree hub page (testing hub-degree dampening), morphological paraphrases, and retired/deprecated/redirected competitors:
+   - Evaluates 6 real engine configurations over a 40+ page OKF v0.3 engineering corpus with 2-hop Markdown/wikilink chains, `#section-anchor` deep links, a high-degree hub page (testing hub-degree dampening), morphological paraphrases, and retired/deprecated/redirected competitors:
      - `baseline_fts5`: lexical BM25 only (`max_hops=0`, no dense vectors, no OKF governance)
      - `hybrid_full`: BM25 + dense vector RRF + 2-hop anchor-aware link graph + OKF v0.3 governance
+     - `hybrid_with_lexical_bridge`: `hybrid_full` plus query-time salient-term lexical bridge expansion
      - `ablation_no_graph`: BM25 + dense vector + governance, link expansion disabled
      - `ablation_no_vector`: BM25 + 2-hop link graph + governance, dense vectors disabled
      - `ablation_no_bm25`: dense vector + 2-hop link graph + governance, lexical BM25 disabled
+   - **1b. Unlinked Multi-Hop Lexical Bridge Expansion** (`N = 5`, budget `600` tokens): 2-hop document pairs with **zero** Markdown links or wikilinks between hop-1 and hop-2, verifying query-time salient-term bridging lifts full multi-hop coverage from `0%` to `100%` without evicting direct top seeds.
+   - **1c. Verifiable Citation Relocation & Live Freshness** (`5` anchored claims): zero-LLM SHA-256 + byte-span verification across `Intact` → `Moved` (relocation after edits above the span) → `Changed` (claim mutation detection) → `Missing` (file deletion), plus live disk drift detection (`verify_freshness: true`).
 2. **OKF v0.3 Governance Correctness**
    - Retired leakage rate (`0%` invariant across both lexical and hybrid search)
    - 1-hop, 2-hop, and frontmatter-only stub `redirect_to` resolution (`100%` invariant)
@@ -28,19 +31,37 @@ It executes directly against the same `cowiki_knowledge::{okf, embeddings, knowl
 
 ## Baseline Results
 
-Recorded from [`results/baseline_results.json`](results/baseline_results.json) (OKF v0.3, Schema v4, deterministic offline `local-hash-proj-v1` 128-dim embedder, Apple Silicon release build):
+Recorded from [`results/baseline_results.json`](results/baseline_results.json) (OKF v0.3, Schema v5, deterministic offline `local-hash-proj-v1` 128-dim embedder, Apple Silicon release build):
 
 ### 1. Retrieval Ablations (Budget = 800 tokens, N = 24)
 
 | Config | Page Recall | Full Multi-Hop | MRR | 2-Hop Full | Paraphrase Recall | Gov MRR | Avg Tokens | Violations | P50 (ms) | P95 (ms) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `baseline_fts5` | 68.75% | 45.83% | 0.8125 | 0.00% | 33.33% | 0.8750 | 111.2 | 0 | 0.12 | 0.17 |
-| `ablation_no_graph` | 80.56% | 54.17% | 0.9688 | 12.50% | 100.00% | 1.0000 | 121.7 | 0 | 0.18 | 0.22 |
-| `ablation_no_vector` | 83.33% | 83.33% | 0.7917 | 100.00% | 33.33% | 0.8750 | 352.8 | 0 | 0.58 | 0.66 |
-| `ablation_no_bm25` | 100.00% | 100.00% | 0.8889 | 100.00% | 100.00% | 0.8333 | 509.7 | 0 | 0.61 | 0.71 |
-| **`hybrid_full`** | **100.00%** | **100.00%** | **0.9167** | **100.00%** | **100.00%** | **1.0000** | **505.8** | **0** | **0.70** | **0.78** |
+| `baseline_fts5` | 68.75% | 45.83% | 0.8125 | 0.00% | 33.33% | 0.8750 | 111.2 | 0 | 0.14 | 0.19 |
+| `ablation_no_graph` | 80.56% | 54.17% | 0.9688 | 12.50% | 100.00% | 1.0000 | 121.7 | 0 | 0.53 | 0.87 |
+| `ablation_no_vector` | 83.33% | 83.33% | 0.7917 | 100.00% | 33.33% | 0.8750 | 352.8 | 0 | 0.77 | 13.12 |
+| `ablation_no_bm25` | 100.00% | 100.00% | 0.8889 | 100.00% | 100.00% | 0.8333 | 509.7 | 0 | 0.83 | 21.84 |
+| **`hybrid_full`** | **100.00%** | **100.00%** | **0.9167** | **100.00%** | **100.00%** | **1.0000** | **505.8** | **0** | **1.25** | **3.83** |
+| **`hybrid_with_lexical_bridge`** | **100.00%** | **100.00%** | **0.9167** | **100.00%** | **100.00%** | **1.0000** | **526.7** | **0** | **2.52** | **6.53** |
 
-> At a tighter `400`-token budget, `hybrid_full` preserves **100.00%** page recall, **100.00%** full multi-hop coverage, **0.9167** MRR, and **0** budget violations (`346.5` avg tokens).
+> At a tighter `400`-token budget, both `hybrid_full` and `hybrid_with_lexical_bridge` preserve **100.00%** page recall, **100.00%** full multi-hop coverage, **0.9167** MRR, and **0** budget violations.
+
+### 1b. Unlinked Multi-Hop Lexical Bridge Expansion (Budget = 600 tokens, N = 5)
+
+| Config | Page Recall | Full Multi-Hop | MRR | Avg Tokens | Violations | P50 (ms) |
+|---|---:|---:|---:|---:|---:|---:|
+| `explicit_graph_only` | 50.00% | 0.00% | 1.0000 | 31.0 | 0 | 0.19 |
+| **`with_lexical_bridge`** | **100.00%** | **100.00%** | **1.0000** | **57.6** | **0** | **0.34** |
+
+### 1c. Verifiable Citation Relocation & Live Freshness (5 anchors, avg ~55 us/check)
+
+| Lifecycle Check | Pass Rate |
+|---|---:|
+| Intact byte/hash match | **100.00%** |
+| Moved span relocation | **100.00%** |
+| Changed content detection | **100.00%** |
+| Missing file detection | **100.00%** |
+| Live disk drift guard (`verify_freshness`) | **PASS** |
 
 ### 2. OKF v0.3 Governance Correctness
 

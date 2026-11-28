@@ -467,3 +467,119 @@ pub fn write_synthetic_space(root: &Path, page_count: usize) -> Result<Vec<Strin
     }
     Ok(paths)
 }
+
+/// Unlinked multi-hop fixture pages: each 2-hop pair shares ONLY a salient
+/// subsystem identifier (zero Markdown links or wikilinks), directly testing
+/// query-time lexical bridge expansion when explicit links are absent.
+const UNLINKED_BRIDGE_PAGES: &[FixturePage] = &[
+    FixturePage {
+        path: "index.md",
+        body: "---\nokf_version: \"0.3\"\n---\n\n# Unlinked Knowledge Space\n\nEngineering notes captured before cross-linking.\n",
+    },
+    // Pair 1: Edge Ingress -> QuasarVerifier -> Hardware Enclave Cadence
+    FixturePage {
+        path: "notes/edge-ingress.md",
+        body: "---\ntype: Architecture\ntitle: Edge Ingress Router\nstatus: active\nverified: true\n---\n\n# Edge Ingress Router\n\n## Mobile Traffic\n\nIncoming handheld traffic terminates at Edge Ingress Router and delegates proof validation to QuasarVerifier.\n",
+    },
+    FixturePage {
+        path: "policies/quasar-enclave.md",
+        body: "---\ntype: Policy\ntitle: Hardware Enclave Cadence\nstatus: active\nverified: true\n---\n\n# Hardware Enclave Cadence\n\n## Rotation Interval\n\nQuasarVerifier rotates ephemeral hardware attestation tokens every 12 hours.\n",
+    },
+    // Pair 2: Media Pipeline -> HyperionCodec -> Archival Bitrate
+    FixturePage {
+        path: "notes/media-pipeline.md",
+        body: "---\ntype: Architecture\ntitle: Media Ingestion Pipeline\nstatus: active\nverified: true\n---\n\n# Media Ingestion Pipeline\n\n## Transcoding\n\nUploaded screen recordings pass through Media Ingestion Pipeline and invoke HyperionCodec for lossless frame packing.\n",
+    },
+    FixturePage {
+        path: "policies/hyperion-spec.md",
+        body: "---\ntype: Policy\ntitle: Lossless Storage Spec\nstatus: active\nverified: true\n---\n\n# Lossless Storage Spec\n\n## Cold Tiering\n\nHyperionCodec archives stay in warm SSD pools for 30 days before migrating to glacier tape.\n",
+    },
+    // Pair 3: Order Matcher -> HeliosBroker -> Settlement Window
+    FixturePage {
+        path: "notes/order-matcher.md",
+        body: "---\ntype: Architecture\ntitle: Order Matching Engine\nstatus: active\nverified: true\n---\n\n# Order Matching Engine\n\n## Dispatch Queue\n\nConfirmed fills leave Order Matching Engine and publish sequenced events through HeliosBroker.\n",
+    },
+    FixturePage {
+        path: "policies/helios-clearing.md",
+        body: "---\ntype: Policy\ntitle: Clearing Window Rule\nstatus: active\nverified: true\n---\n\n# Clearing Window Rule\n\n## Cutoff Timing\n\nHeliosBroker batches reconcile at 17:00 UTC daily with dual-custody signoff.\n",
+    },
+    // Pair 4: Mobile Journal -> ZephyrCompactor -> Battery Floor
+    FixturePage {
+        path: "notes/mobile-journal.md",
+        body: "---\ntype: Architecture\ntitle: Offline Mobile Journal\nstatus: active\nverified: true\n---\n\n# Offline Mobile Journal\n\n## Background Squash\n\nUncommitted mobile edits queue inside Offline Mobile Journal and trigger ZephyrCompactor during idle windows.\n",
+    },
+    FixturePage {
+        path: "policies/zephyr-power.md",
+        body: "---\ntype: Policy\ntitle: Power Envelope Cap\nstatus: active\nverified: true\n---\n\n# Power Envelope Cap\n\n## Charging Threshold\n\nZephyrCompactor pauses automatically whenever battery charge drops below 25 percent.\n",
+    },
+    // Pair 5: Plugin Installer -> BorealSigner -> Key Revocation
+    FixturePage {
+        path: "notes/plugin-installer.md",
+        body: "---\ntype: Architecture\ntitle: Extension Installer\nstatus: active\nverified: true\n---\n\n# Extension Installer\n\n## Package Unpack\n\nThird-party bundles enter Extension Installer and undergo manifest checks by BorealSigner.\n",
+    },
+    FixturePage {
+        path: "policies/boreal-revocation.md",
+        body: "---\ntype: Policy\ntitle: Publisher Revocation List\nstatus: active\nverified: true\n---\n\n# Publisher Revocation List\n\n## Emergency Ban\n\nBorealSigner rejects compromised publisher keys within 60 seconds using signed CRL deltas.\n",
+    },
+    // Distractors to keep IDF meaningful
+    FixturePage {
+        path: "notes/office-supplies.md",
+        body: "---\ntype: Note\ntitle: Office Supplies\nstatus: active\n---\n\n# Office Supplies\n\nWhiteboard markers and adapters are kept in cabinet four.\n",
+    },
+    FixturePage {
+        path: "notes/coffee-roasters.md",
+        body: "---\ntype: Note\ntitle: Kitchen Espresso Notes\nstatus: active\n---\n\n# Kitchen Espresso Notes\n\nGrinder calibration and weekly descaling instructions.\n",
+    },
+    FixturePage {
+        path: "notes/onboarding-checklist.md",
+        body: "---\ntype: Note\ntitle: New Hire Checklist\nstatus: active\n---\n\n# New Hire Checklist\n\nLaptop setup, badge activation, and payroll enrollment.\n",
+    },
+    FixturePage {
+        path: "notes/travel-reimbursement.md",
+        body: "---\ntype: Note\ntitle: Travel Expenses\nstatus: active\n---\n\n# Travel Expenses\n\nSubmit itemized conference receipts within 14 business days.\n",
+    },
+];
+
+pub const UNLINKED_BRIDGE_QUERIES: &[EvalQuery] = &[
+    EvalQuery {
+        id: "ub_edge_quasar",
+        category: "unlinked_2hop",
+        query: "Edge Ingress Router handheld proof validation",
+        supporting_pages: &["notes/edge-ingress.md", "policies/quasar-enclave.md"],
+    },
+    EvalQuery {
+        id: "ub_media_hyperion",
+        category: "unlinked_2hop",
+        query: "Media Ingestion Pipeline screen recordings transcoding",
+        supporting_pages: &["notes/media-pipeline.md", "policies/hyperion-spec.md"],
+    },
+    EvalQuery {
+        id: "ub_order_helios",
+        category: "unlinked_2hop",
+        query: "Order Matching Engine confirmed fills dispatch queue",
+        supporting_pages: &["notes/order-matcher.md", "policies/helios-clearing.md"],
+    },
+    EvalQuery {
+        id: "ub_journal_zephyr",
+        category: "unlinked_2hop",
+        query: "Offline Mobile Journal uncommitted edits idle squash",
+        supporting_pages: &["notes/mobile-journal.md", "policies/zephyr-power.md"],
+    },
+    EvalQuery {
+        id: "ub_plugin_boreal",
+        category: "unlinked_2hop",
+        query: "Extension Installer third-party bundles package unpack",
+        supporting_pages: &["notes/plugin-installer.md", "policies/boreal-revocation.md"],
+    },
+];
+
+pub fn write_unlinked_bridge_corpus(root: &Path) -> Result<(), String> {
+    for page in UNLINKED_BRIDGE_PAGES {
+        let target = root.join(page.path);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        fs::write(&target, page.body).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
