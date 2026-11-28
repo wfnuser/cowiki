@@ -8,6 +8,7 @@ import {
   saveLocale,
   translate,
   translateLabel,
+  translateGovernanceDiagnostic,
   ZH_CN,
 } from '../src/lib/i18n.ts';
 
@@ -46,4 +47,12 @@ test('translations support interpolation, fallback labels, and non-empty Chinese
   for (const [key, value] of Object.entries(ZH_CN)) {
     assert.ok(value.trim().length > 0, `Empty zh-CN translation for "${key}"`);
   }
+});
+
+test('native governance diagnostics preserve source values and unknown errors', () => {
+  const raw = "Invalid trust_tier 'external-{tier}'; MUST be one of: human_verified, agent_draft.";
+  assert.equal(translateGovernanceDiagnostic('en', raw), raw);
+  assert.equal(translateGovernanceDiagnostic('zh-CN', raw),
+    'trust_tier 值“external-{tier}”无效，可用值为 human_verified, agent_draft。');
+  assert.equal(translateGovernanceDiagnostic('zh-CN', 'Unknown native error (42)'), 'Unknown native error (42)');
 });
