@@ -162,3 +162,23 @@ test('a rolled-back repair shows its reason and keeps the selection available', 
   await expect(page.getByRole('checkbox', { name: 'Select repair' })).toBeChecked();
   await expect(page.getByRole('button', { name: 'Open change' })).toHaveCount(0);
 });
+
+test('Chinese review translates findings and controls while keeping citations verbatim', async ({ page }) => {
+  await desktop(page);
+  await page.addInitScript(() => localStorage.setItem('cowiki.locale', 'zh-CN'));
+  await page.goto(origin + '/user/handbook/reviews/draft');
+  await page.getByRole('tab', { name: '治理检查' }).click();
+  const panel = page.getByRole('region', { name: '治理审查' });
+  await expect(panel.getByRole('list', { name: '审查发现' })).toBeVisible();
+  await expect(panel).toContainText('4 项发现 · 1 项修复建议');
+  await expect(panel.getByText(/trust_tier 值“editorial”无效/).first()).toBeVisible();
+  await panel.getByRole('button', { name: /contradicts_verified/ }).click();
+  await expect(panel.getByText('离线规则 · 矛盾')).toBeVisible();
+  await expect(panel.getByText('[file-3.28.0.md:L17-L17]', { exact: false })).toBeVisible();
+  await panel.getByRole('button', { name: '留待人工评审' }).click();
+  await panel.getByRole('button', { name: /inbound_redirect/ }).click();
+  await expect(panel.getByText('链接指向重定向页 build-messages.md。')).toBeVisible();
+  await panel.getByRole('checkbox', { name: '选择修复' }).check();
+  await panel.getByRole('button', { name: '将 1 项修复暂存为新改动' }).click();
+  await expect(panel.getByRole('status')).toContainText('修复已暂存到新的智能体改动');
+});

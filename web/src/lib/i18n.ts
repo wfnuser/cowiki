@@ -52,6 +52,28 @@ export function setLocalePreference(locale: Locale): void {
   applyLocale(locale);
 }
 
+// The native review contract carries some OKF diagnostics as formatted text.
+const governanceTemplates = {
+  'Link points to redirect stub {target}.': '链接指向重定向页 {target}。',
+  'Unresolved internal link to {target}.': '无法解析指向 {target} 的内部链接。',
+  "Invalid status '{value}'; MUST be one of: {allowed}.": 'status 值“{value}”无效，可用值为 {allowed}。',
+  "Invalid trust_tier '{value}'; MUST be one of: {allowed}.": 'trust_tier 值“{value}”无效，可用值为 {allowed}。',
+  'Document expired on {date} (as of {asOf}).': '文档已于 {date} 到期（审查日期为 {asOf}）。',
+  "'stale_after' value '{value}' MUST be a valid ISO date YYYY-MM-DD.": 'stale_after 值“{value}”必须是 YYYY-MM-DD 格式的有效 ISO 日期。',
+  "'redirect_to' target '{target}' does not resolve to an existing document.": 'redirect_to 目标“{target}”无法解析到现有文档。',
+  "Redirect chain from '{source}' forms a cycle involving '{target}'.": '从“{source}”开始的重定向链在“{target}”形成循环。',
+  "Declared okf_version '{version}' is newer than supported versions ({versions}).": '声明的 okf_version“{version}”高于支持的版本（{versions}）。',
+  "Cannot inspect root 'index.md': {reason}": '无法检查根目录下的 index.md：{reason}',
+  "Root 'index.md' has malformed frontmatter: {reason}": '根目录下的 index.md 元数据格式有误：{reason}',
+  "Root 'index.md' has invalid YAML frontmatter: {reason}": '根目录下的 index.md 的 YAML 元数据无效：{reason}',
+  'Malformed YAML frontmatter: {reason}': 'YAML 元数据格式有误：{reason}',
+  'Invalid YAML frontmatter: {reason}': 'YAML 元数据无效：{reason}',
+  'Could not verify {path}: {reason}': '无法核验 {path}：{reason}',
+  'Repair for {path} needs human review: {reason}': '对 {path} 的修复需要人工评审：{reason}',
+  'Selected paths differ only by case: {path}.': '所选路径仅大小写不同：{path}。',
+  'Selected repairs overlap in {path}. Select one of the alternatives.': '所选修复在 {path} 中重叠，请选择其中一项。',
+} as const;
+
 export const ZH_CN = {
   // Navigation & shell
   'Home': '首页',
@@ -449,6 +471,83 @@ export const ZH_CN = {
   'Auto checkpoint': '自动快照',
   'File changes': '文件改动',
   'Governance': '治理检查',
+
+  // Governance Review
+  'Governance audit': '治理审查',
+  'critical': '严重',
+  'warning': '警告',
+  'info': '提示',
+  'contradiction': '矛盾',
+  'entailment': '蕴含',
+  'neutral': '无关',
+  'scope difference': '适用范围不同',
+  'insufficient': '证据不足',
+  'Offline rules · {relation}': '离线规则 · {relation}',
+  '{count} finding': '{count} 项发现',
+  '{count} findings': '{count} 项发现',
+  '{count} proposed repair': '{count} 项修复建议',
+  '{count} proposed repairs': '{count} 项修复建议',
+  '{findings} · {repairs} · {date}': '{findings} · {repairs} · {date}',
+  'Refresh audit': '刷新审查',
+  'Governance review could not complete': '未能完成治理审查',
+  'Some checks need human review': '部分检查需要人工评审',
+  'Repairs were not staged': '修复未暂存',
+  'Repairs staged in a new Agent Change': '修复已暂存到新的智能体改动',
+  '{title} · {id} · Ready for review': '{title} · {id} · 待评审',
+  'Governance repair': '治理修复',
+  'Open change': '打开改动',
+  'Reading the local snapshot…': '正在读取本地快照…',
+  'Findings': '审查发现',
+  'Selected': '已选',
+  'Staged': '已暂存',
+  'Repair available': '有修复建议',
+  'No findings in this snapshot.': '此快照没有审查发现。',
+  'All findings': '全部发现',
+  'Candidate': '候选内容',
+  'Evidence': '证据',
+  'No separate source citation': '无独立来源引文',
+  'Verifier': '核验方式',
+  'Structural audit': '结构检查',
+  'This finding needs human review.': '这项发现需要人工评审。',
+  'Proposed repair for {path}': '针对 {path} 的修复建议',
+  'Proposed repair': '修复建议',
+  'Select repair': '选择修复',
+  'Leave for human review': '留待人工评审',
+  'Staging…': '正在暂存…',
+  'Stage {count} repair as new change': '将 {count} 项修复暂存为新改动',
+  'Stage {count} repairs as new change': '将 {count} 项修复暂存为新改动',
+  'Conflicts with an active human-verified claim.': '与一条仍然有效且已经人工核实的陈述矛盾。',
+  'Repeats a withdrawn claim as current policy.': '将已撤回的陈述重新作为现行规则。',
+  'Restores a claim replaced by a source-backed correction.': '恢复了已根据来源纠正的旧陈述。',
+  'Consider consolidating overlapping pages.': '可考虑合并内容重叠的页面。',
+  'Awaiting human review.': '等待人工评审。',
+  'Generated page has no cited source.': '生成的页面没有引用来源。',
+  'Update links to their existing canonical destinations.': '将链接更新为现有的最终目标。',
+  'Restore the conflicting claim from the cited human-verified evidence.': '依据引用的人工核实资料纠正冲突的陈述。',
+  "Space root MUST contain an 'index.md' entry document.": '空间根目录必须包含入口文档 index.md。',
+  "Root 'index.md' MUST be a regular file, not a symbolic link.": '根目录下的 index.md 必须是常规文件，不能是符号链接。',
+  "Space root 'index.md' MUST be a regular Markdown file.": '根目录下的 index.md 必须是常规 Markdown 文件。',
+  "Root 'index.md' MUST be valid UTF-8.": '根目录下的 index.md 必须采用有效的 UTF-8 编码。',
+  "Root 'index.md' MUST declare 'okf_version' in YAML frontmatter.": '根目录下的 index.md 必须在 YAML 元数据中声明 okf_version。',
+  "Root 'index.md' frontmatter MUST include non-empty 'okf_version'.": '根目录下的 index.md 元数据必须包含非空的 okf_version。',
+  'Index document MUST include an H1 heading.': '索引文档必须包含一级标题。',
+  'Nested index document MUST include an H1 heading.': '子目录索引文档必须包含一级标题。',
+  'Index document has opening generated-index marker without closing marker.': '索引文档中的自动生成区段缺少结束标记。',
+  'Nested index has unclosed generated-index marker.': '子目录索引中的自动生成区段缺少结束标记。',
+  'Markdown document MUST be valid UTF-8.': 'Markdown 文档必须采用有效的 UTF-8 编码。',
+  'Log document SHOULD follow descending ISO date heading format without frontmatter.': '日志应以倒序排列的 ISO 日期为标题，并省略文档头部元数据。',
+  'Concept document MUST begin with YAML frontmatter.': '概念文档必须以 YAML 元数据开头。',
+  "Concept frontmatter MUST declare a non-empty 'type' field.": '概念文档的元数据必须包含非空的 type 字段。',
+  "Concept document MUST declare 'title' in frontmatter or an H1 heading.": '概念文档必须包含 title 元数据字段或一级标题。',
+  "Agent-generated or agent_draft document MUST NOT carry 'verified: true'.": '智能体生成的文档或 agent_draft 草稿不能标记为 verified: true。',
+  'Select at least one repair.': '请至少选择一项修复。',
+  'This Agent Change is closed.': '此智能体改动已关闭。',
+  'Repair preview changed or selection is invalid. Refresh the audit.': '修复预览已变更或选择无效，请刷新审查。',
+  'Review source changed. Refresh the audit.': '审查来源已变更，请刷新审查。',
+  'proposal target changed after preview': '修复目标在预览后已变更',
+  'proposal target no longer exists': '修复目标已不存在',
+  'Agent Change base differs from governance preview': '智能体改动的基准与治理预览不一致',
+  ...governanceTemplates,
 } as const;
 
 export type TranslationKey = keyof typeof ZH_CN;
@@ -472,6 +571,25 @@ export function translateLabel(locale: Locale, raw: string): string {
   return Object.prototype.hasOwnProperty.call(ZH_CN, raw)
     ? ZH_CN[raw as TranslationKey]
     : raw;
+}
+
+// Only match native diagnostic templates. Paths, evidence excerpts and user titles
+// are never inputs to this matcher. Preserve unfamiliar native errors verbatim.
+const diagnosticPatterns = Object.entries(governanceTemplates).map(([key, translation]) => {
+  const parts = key.split(/\{(\w+)\}/);
+  const source = parts.map((part, i) => i % 2
+    ? `(?<${part}>[\\s\\S]+?)`
+    : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('');
+  return { pattern: new RegExp(`^${source}$`), translation };
+});
+
+export function translateGovernanceDiagnostic(locale: Locale, raw: string): string {
+  if (locale === 'en') return raw;
+  for (const { pattern, translation } of diagnosticPatterns) {
+    const vars = pattern.exec(raw)?.groups;
+    if (vars) return interpolate(translation, vars);
+  }
+  return translateLabel(locale, raw);
 }
 
 /** Browser Intl locale tag for date/time formatting. */
